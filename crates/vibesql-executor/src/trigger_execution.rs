@@ -811,10 +811,18 @@ impl TriggerFirer {
         //     `main` table silently wins and the write lands in the wrong database (#6477).
         // Nested trigger bodies restore the prior value, so a trigger fired
         // from within another trigger's body regains its own schema's view.
+        // The qualifier is canonicalized here because it is used downstream as
+        // a storage lookup *key* (`"<schema>.<table>"` in `Database::tables`),
+        // not just as a comparison operand: the parser stores a trigger's
+        // schema qualifier verbatim as written (`MAIN.tr`, `AUX.tr`) on the
+        // premise that schema comparisons are case-insensitive everywhere
+        // downstream, so a raw `format!("{schema}.{name}")` key would miss the
+        // canonically-named entry and break the trigger on every firing.
+        // `canonical_schema_name` also maps `temp` to the session's temp
+        // schema name.
         let is_temp_trigger = trigger.is_temp();
         let owning_schema = match trigger.schema.as_deref() {
-            Some(s) if s.eq_ignore_ascii_case("temp") => db.catalog.temp_schema_name().to_string(),
-            Some(s) => s.to_string(),
+            Some(s) => db.catalog.canonical_schema_name(s),
             None => vibesql_catalog::DEFAULT_SCHEMA.to_string(),
         };
         let restriction = if is_temp_trigger { None } else { Some(owning_schema.clone()) };

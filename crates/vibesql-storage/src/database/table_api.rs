@@ -239,8 +239,12 @@ impl Database {
             // writes to the same table its body's name resolution found,
             // instead of falling back to `main`/temp/other attachments below.
             if let Some(restrict_schema) = self.catalog.unqualified_resolution_restricted_to() {
-                let restricted_qualified = format!("{}.{}", restrict_schema, lowercase_name);
-                return self.tables.get(&restricted_qualified);
+                return super::operations::find_restricted_table_key(
+                    &self.tables,
+                    restrict_schema,
+                    &lowercase_name,
+                )
+                .and_then(|key| self.tables.get(&key));
             }
 
             // Check session's temp schema first
@@ -336,8 +340,12 @@ impl Database {
             if let Some(restrict_schema) =
                 self.catalog.unqualified_resolution_restricted_to().map(|s| s.to_string())
             {
-                let restricted_qualified = format!("{}.{}", restrict_schema, lowercase_name);
-                return self.tables.get_mut(&restricted_qualified);
+                let restricted_key = super::operations::find_restricted_table_key(
+                    &self.tables,
+                    &restrict_schema,
+                    &lowercase_name,
+                )?;
+                return self.tables.get_mut(&restricted_key);
             }
 
             // Check session's temp schema first

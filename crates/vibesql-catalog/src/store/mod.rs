@@ -346,6 +346,39 @@ impl Catalog {
         self.restrict_unqualified_resolution_to_schema.as_deref()
     }
 
+    /// Resolve a schema name written by the user to the **canonical** internal
+    /// schema name it refers to.
+    ///
+    /// Schema qualifiers are kept verbatim as written (e.g. the parser stores
+    /// `CREATE TRIGGER MAIN.tr`'s qualifier as `"MAIN"`) precisely because
+    /// schema comparisons downstream are case-insensitive. Anything that uses
+    /// a schema name as a **lookup key** rather than a comparison operand must
+    /// canonicalize it first — notably the storage layer, whose `tables` map is
+    /// keyed by `"<canonical schema>.<table>"` (see #6477's storage mirror).
+    ///
+    /// `"temp"` (in any case) resolves to this session's temp schema name;
+    /// every other name is matched case-insensitively against the known
+    /// schemas unless case-sensitive identifiers are enabled. A name matching
+    /// no known schema is returned unchanged (after temp resolution) so the
+    /// caller still reports the user's own spelling.
+    pub fn canonical_schema_name(&self, schema_name: &str) -> String {
+        let effective_schema_name = if schema_name.eq_ignore_ascii_case(crate::TEMP_SCHEMA) {
+            self.temp_schema_name.clone()
+        } else {
+            schema_name.to_string()
+        };
+
+        if self.case_sensitive_identifiers {
+            return effective_schema_name;
+        }
+
+        self.schemas
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(&effective_schema_name))
+            .cloned()
+            .unwrap_or(effective_schema_name)
+    }
+
     /// Normalize an identifier for lookup (applies case folding if case-insensitive mode)
     fn normalize_identifier(&self, identifier: &str) -> String {
         if self.case_sensitive_identifiers {

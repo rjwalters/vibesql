@@ -2325,6 +2325,90 @@ fn test_attach_trigger_body_binds_to_attachment_on_name_collision_single_session
 }
 
 #[test]
+fn test_trigger_body_resolves_with_case_mismatched_main_schema_qualifier() {
+    // Regression test for the case-sensitivity gap in #6477's trigger-body
+    // resolution restriction: the parser stores a `CREATE TRIGGER` schema
+    // qualifier verbatim as written (`MAIN`) because schema comparisons are
+    // case-insensitive everywhere downstream, but the storage-layer mirror of
+    // the restriction used it as a raw `"<schema>.<table>"` HashMap key, so
+    // any case-varied qualifier turned a previously-working trigger into a
+    // hard `Table 'MAIN.log' not found` error on every firing. Every spelling
+    // of `main.` must fire and write into `main`.
+    for qualifier in ["main", "MAIN", "MaIn"] {
+        let mut ex = SqlExecutor::new(None).unwrap();
+        ex.execute("CREATE TABLE t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE log(msg TEXT)").unwrap();
+        ex.execute(&format!(
+            "CREATE TRIGGER {}.tr AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('fired'); END",
+            qualifier
+        ))
+        .unwrap();
+
+        ex.execute("INSERT INTO t VALUES (1)").unwrap_or_else(|e| {
+            panic!(
+                "firing a trigger created as `{}.tr` must not error (case-varied schema \
+                 qualifiers are valid, previously-working SQL): {}",
+                qualifier, e
+            )
+        });
+
+        assert_eq!(
+            ex.execute("SELECT msg FROM main.log").unwrap().rows,
+            vec![vec![Some("fired".to_string())]],
+            "a trigger created as `{}.tr` must write into main.log when it fires",
+            qualifier
+        );
+    }
+}
+
+#[test]
+fn test_trigger_body_binds_to_attachment_with_case_mismatched_schema_qualifier() {
+    // Companion to the `MAIN.` case above, for an ATTACHed schema: attachment
+    // names are canonically lowercased (`store/attachments.rs`), so
+    // `CREATE TRIGGER AUX.tr1 ...` against a database attached as `aux` must
+    // still resolve — and, per #6477, must still bind the body's unqualified
+    // `log` inside `aux`, never the same-named table in `main`.
+    for qualifier in ["aux", "AUX"] {
+        let dir = tempfile::tempdir().unwrap();
+        let aux_path = dir.path().join("aux_trigger_qualifier_case.vbsql");
+        let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+        let mut ex = SqlExecutor::new(None).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE log(msg TEXT)").unwrap();
+        ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+        ex.execute(&format!(
+            "CREATE TRIGGER {}.tr1 AFTER INSERT ON t \
+             BEGIN INSERT INTO log VALUES ('fired'); END",
+            qualifier
+        ))
+        .unwrap();
+
+        ex.execute("INSERT INTO aux.t VALUES (5)").unwrap_or_else(|e| {
+            panic!(
+                "firing a trigger created as `{}.tr1` must not error (the attachment is known \
+                 as `aux` regardless of the qualifier's case): {}",
+                qualifier, e
+            )
+        });
+
+        assert!(
+            ex.execute("SELECT msg FROM main.log").unwrap().rows.is_empty(),
+            "#6477: main.log must stay empty for a trigger created as `{}.tr1`",
+            qualifier
+        );
+        assert_eq!(
+            ex.execute("SELECT msg FROM aux.log").unwrap().rows,
+            vec![vec![Some("fired".to_string())]],
+            "#6477: aux.log must receive the row for a trigger created as `{}.tr1`",
+            qualifier
+        );
+    }
+}
+
+#[test]
 fn test_attach_reattach_view_body_may_qualify_columns_with_the_bare_table_name() {
     // Regression guard for the re-qualification itself: a body written
     // `SELECT t.x FROM t` names its columns after the table's *unqualified*

@@ -46,6 +46,40 @@ fn make_spatial_index_key(schema: &str, index_name: &str) -> String {
     }
 }
 
+/// Find the `tables` key for `normalized_name` when unqualified resolution is
+/// restricted to a single schema (trigger-body execution, #6477).
+///
+/// The map is keyed by `"<schema>.<table>"`, but the restricting schema name
+/// can arrive in any case — a trigger's schema qualifier is stored verbatim as
+/// the user wrote it (`CREATE TRIGGER MAIN.tr` / `AUX.tr`) because schema
+/// comparisons are case-insensitive everywhere else. So an exact `HashMap`
+/// hit is tried first and, failing that, the schema component is matched
+/// case-insensitively — mirroring the catalog layer's
+/// `get_schema_case_insensitive` and the case-insensitive temp/attached
+/// fallbacks in the callers. The table component is compared exactly: it has
+/// already been normalized by the caller according to the catalog's
+/// case-sensitivity setting.
+pub(crate) fn find_restricted_table_key(
+    tables: &HashMap<String, Table>,
+    restrict_schema: &str,
+    normalized_name: &str,
+) -> Option<String> {
+    let restricted_qualified = format!("{}.{}", restrict_schema, normalized_name);
+    if tables.contains_key(&restricted_qualified) {
+        return Some(restricted_qualified);
+    }
+
+    tables
+        .keys()
+        .find(|key| match key.split_once('.') {
+            Some((schema_part, table_part)) => {
+                table_part == normalized_name && schema_part.eq_ignore_ascii_case(restrict_schema)
+            }
+            None => false,
+        })
+        .cloned()
+}
+
 /// Manages table and index operations
 #[derive(Debug, Clone)]
 pub struct Operations {
@@ -153,10 +187,14 @@ impl Operations {
             // `Catalog::get_table`'s restriction so a trigger's DML physically
             // writes to the same table its body's name resolution found,
             // instead of falling back to `main`/temp/other attachments below.
-            if let Some(restrict_schema) = catalog.unqualified_resolution_restricted_to() {
-                let restricted_qualified = format!("{}.{}", restrict_schema, normalized_name);
+            if let Some(restrict_schema) =
+                catalog.unqualified_resolution_restricted_to().map(|s| s.to_string())
+            {
+                let restricted_key =
+                    find_restricted_table_key(tables, &restrict_schema, &normalized_name)
+                        .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
                 return tables
-                    .get_mut(&restricted_qualified)
+                    .get_mut(&restricted_key)
                     .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()));
             }
 
