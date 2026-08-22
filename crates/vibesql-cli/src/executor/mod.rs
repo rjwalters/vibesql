@@ -2821,16 +2821,29 @@ impl SqlExecutor {
         // structures (#6407). `IndexColumn`/`where_clause` are shared AST
         // types between the catalog and executor crates, so the loaded
         // metadata plugs directly into a synthetic `CreateIndexStmt`.
-        for index_name in loaded.list_indexes() {
-            let lower_name = index_name.to_lowercase();
+        //
+        // The auto-generated-index filter below deliberately tests
+        // `storage_meta.index_name` (the bare name) rather than the value
+        // yielded by `list_indexes()`, which is the storage *map key*.
+        // `loaded` is a standalone database whose objects all live in the
+        // default schema, so its keys happen to be bare today and testing
+        // either would work — but `make_index_key` prefixes any non-`main`
+        // schema, so a key-based test silently stops excluding auto-indexes
+        // the moment this loop is pointed at a schema-bearing database. That
+        // is exactly the defect that shipped on the writer side in
+        // `save_attached_schema_sql_dump`; filtering on the metadata name
+        // costs nothing and removes the latent trap.
+        for index_key in loaded.list_indexes() {
+            let Some(storage_meta) = loaded.get_index(&index_key) else { continue };
+            let lower_name = storage_meta.index_name.to_lowercase();
             if lower_name.starts_with("pk_")
                 || lower_name.starts_with("sqlite_autoindex_")
                 || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
             {
                 continue;
             }
-            let Some(storage_meta) = loaded.get_index(&index_name) else { continue };
-            let Some(catalog_meta) = loaded.catalog.find_index_by_name(&index_name) else {
+            let Some(catalog_meta) = loaded.catalog.find_index_by_name(&storage_meta.index_name)
+            else {
                 continue;
             };
 

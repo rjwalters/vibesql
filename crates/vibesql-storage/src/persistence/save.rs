@@ -744,16 +744,38 @@ impl Database {
         // schema-relative and need no qualifier stripping.
         writeln!(writer, "-- Indexes")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-        for index_name in self.list_indexes() {
-            let lower_name = index_name.to_lowercase();
+        for index_key in self.list_indexes() {
+            // Resolve the metadata FIRST and filter on `metadata.index_name`,
+            // never on the iterated value. `IndexManager::list_indexes()`
+            // yields storage *map keys*, and `make_index_key` prefixes every
+            // non-`main` schema onto the key — an attached schema's
+            // auto-generated index is keyed `aux.sqlite_autoindex_t_1`, so a
+            // `starts_with("sqlite_autoindex_")` test against the key is
+            // always false for exactly the indexes this filter exists to
+            // exclude. The main dump's loop (`write_sql_dump_to_file`) gets
+            // away with testing the key because main-schema keys are bare;
+            // that stops holding the moment the same loop is pointed at a
+            // non-`main` schema. Emitting an auto-index here is not cosmetic:
+            // `CREATE TABLE` already recreates it on reload, and the reserved
+            // `sqlite_autoindex_*` / WITHOUT ROWID PK name makes the replayed
+            // statement a hard error ("object name reserved for internal
+            // use"), so the attachment persists fine and can then never be
+            // re-ATTACHed.
+            let Some(metadata) = self.get_index(&index_key) else { continue };
+            if !metadata.schema.eq_ignore_ascii_case(schema_name) {
+                continue;
+            }
+            // Skip auto-generated indexes - these are automatically created by constraints:
+            // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
+            // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE
+            //   constraints (follows SQLite naming convention for implicit indexes)
+            // - the WITHOUT ROWID PK internal index (issue #5882) is regenerated from the CREATE
+            //   TABLE DDL on reload, so it must not be dumped as a CREATE INDEX
+            let lower_name = metadata.index_name.to_lowercase();
             if lower_name.starts_with("pk_")
                 || lower_name.starts_with("sqlite_autoindex_")
                 || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
             {
-                continue;
-            }
-            let Some(metadata) = self.get_index(&index_name) else { continue };
-            if !metadata.schema.eq_ignore_ascii_case(schema_name) {
                 continue;
             }
 

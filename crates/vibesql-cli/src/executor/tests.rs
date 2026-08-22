@@ -2527,3 +2527,140 @@ fn test_attach_round_trips_view_and_trigger_under_a_different_alias() {
         );
     }
 }
+
+// ----------------------------------------------------------------------------
+// Auto-generated indexes must never reach an attached schema's dump (#6476
+// review). `IndexManager::list_indexes()` yields storage *map keys*, and
+// `make_index_key` prefixes every non-`main` schema onto the key — so an
+// attached table's implicit index is keyed `aux.sqlite_autoindex_t_1` /
+// `aux._withoutrowidinternalpk_t`, and a `starts_with(...)` test against the
+// key silently fails to exclude exactly the indexes the filter exists for.
+// `CREATE TABLE` recreates those indexes on reload anyway, and their names are
+// reserved, so emitting them turns the attachment into a write-then-cannot-
+// reopen file:
+//
+//     object name reserved for internal use: sqlite_autoindex_t_1
+//
+// Every other round-trip test above uses a bare `x INTEGER` column — and an
+// `INTEGER PRIMARY KEY` is a rowid alias that gets no implicit index — which is
+// why the whole suite stayed green while a `TEXT PRIMARY KEY`, a `UNIQUE`
+// constraint, or `WITHOUT ROWID` broke. The two tests below are that missing
+// axis; they must filter on the metadata's own bare `index_name`, never the
+// map key, to pass.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_attach_reattach_round_trips_a_non_rowid_primary_key_and_unique_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_pk.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // `x TEXT PRIMARY KEY` is NOT a rowid alias, so it gets an implicit
+        // `sqlite_autoindex_t_1`; the `UNIQUE` column adds `..._t_2`.
+        ex.execute("CREATE TABLE aux.t(x TEXT PRIMARY KEY, y INTEGER UNIQUE, z INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('a', 1, 10)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('b', 2, 20)").unwrap();
+        // A genuine user index alongside them: the fix must exclude only the
+        // auto-generated ones, not stop emitting indexes altogether.
+        ex.execute("CREATE INDEX aux_user_idx ON t(z)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        // The primary regression: the persisted file must still be openable.
+        // Before the fix this fails here with
+        // `object name reserved for internal use: sqlite_autoindex_t_1`.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT x, y, z FROM aux.t ORDER BY x").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("a".to_string()), Some("1".to_string()), Some("10".to_string())],
+                vec![Some("b".to_string()), Some("2".to_string()), Some("20".to_string())],
+            ]
+        );
+        // The constraints themselves survived (they came back via CREATE
+        // TABLE, which is why re-emitting their indexes was redundant).
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('a', 3, 30)").is_err(),
+            "the PRIMARY KEY constraint must still be enforced after re-attach"
+        );
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('c', 1, 30)").is_err(),
+            "the UNIQUE constraint must still be enforced after re-attach"
+        );
+    }
+
+    // …and the dump is clean at the source, so the re-attach above is not
+    // merely surviving a tolerated duplicate.
+    let dump = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(
+        !dump.to_lowercase().contains("sqlite_autoindex_"),
+        "the attached dump must not emit constraint-generated indexes \
+         (CREATE TABLE recreates them, and the name is reserved); got:\n{dump}"
+    );
+    assert!(
+        dump.contains("aux_user_idx"),
+        "the user-defined index must still be emitted; got:\n{dump}"
+    );
+}
+
+#[test]
+fn test_attach_reattach_round_trips_a_without_rowid_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_wor.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        // A WITHOUT ROWID table's PK index is keyed
+        // `aux._withoutrowidinternalpk_t` (#5882) and slips the same filter.
+        ex.execute("CREATE TABLE aux.t(k TEXT PRIMARY KEY, v INTEGER) WITHOUT ROWID").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('k1', 1)").unwrap();
+        ex.execute("INSERT INTO aux.t VALUES ('k2', 2)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        // Same primary regression as above, via the `_withoutrowidinternalpk_`
+        // prefix rather than `sqlite_autoindex_`.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        let result = ex.execute("SELECT k, v FROM aux.t ORDER BY k").unwrap();
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Some("k1".to_string()), Some("1".to_string())],
+                vec![Some("k2".to_string()), Some("2".to_string())],
+            ]
+        );
+        assert!(
+            ex.execute("INSERT INTO aux.t VALUES ('k1', 9)").is_err(),
+            "the WITHOUT ROWID PRIMARY KEY must still be enforced after re-attach"
+        );
+    }
+
+    let dump = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(
+        !dump.to_lowercase().contains(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX),
+        "the attached dump must not emit the WITHOUT ROWID internal PK index \
+         (it is regenerated from the CREATE TABLE DDL); got:\n{dump}"
+    );
+    assert!(
+        !dump.to_lowercase().contains("sqlite_autoindex_"),
+        "the attached dump must not emit constraint-generated indexes; got:\n{dump}"
+    );
+    assert!(
+        dump.to_uppercase().contains("WITHOUT ROWID"),
+        "the WITHOUT ROWID clause itself must survive; got:\n{dump}"
+    );
+}
