@@ -407,21 +407,16 @@ fn test_create_view_values_without_column_list() {
 // executed once at create time, so SQLite allows binds there and this suite
 // verifies VibeSQL does not overreach into CTAS.
 //
-// No `@name` case is included below: unlike `?`, `?NNN`, `:name`, and
-// `$name`, VibeSQL's expression grammar does not accept `@name` as a general
-// expression atom anywhere outside the MySQL-style `SELECT ... INTO @var`
-// procedural clause (`Token::UserVariable` is only consumed in
-// `parse_select_statement_after_with`/`select/statement.rs`'s `INTO` handling
-// -- see `grep -rn "Token::UserVariable" crates/vibesql-parser/src/parser`).
-// So `WHERE a = @x` is already rejected today, but with a generic
-// `near "@x": syntax error` from expression parsing itself -- the parse never
-// reaches this file's placeholder scan (unlike CREATE TRIGGER's check, which
-// lexes the raw body text and so never depends on the expression grammar
-// accepting the token). Making VibeSQL's expression grammar treat `@name` as
-// a bind parameter atom is a separate, pre-existing, unrelated gap (no
-// existing test anywhere, including the passing CREATE TRIGGER suite,
-// exercises `@name` in an ordinary expression position); fixing it is out of
-// scope for this issue.
+// A `@name` case IS included below (issue #6172): VibeSQL's expression
+// grammar now accepts `@name` as a general bind-parameter expression atom
+// (SQLite: `@AAAA` works exactly like `:AAAA`, R-49783-61279), not just
+// inside the MySQL-style `SELECT ... INTO @var` procedural clause. This
+// view's own rejection check is unaffected either way: it scans the raw
+// token stream (`token_is_variable`, shared with `CREATE TRIGGER`'s check)
+// rather than the parsed AST, so `@name` was already rejected before this
+// fix and stays rejected now -- the test below now exercises a genuinely
+// parseable expression atom instead of one that merely fails to lex into
+// anything meaningful.
 // ---------------------------------------------------------------------------
 
 /// SQLite verbatim wording (see with4.test `set msg`).
@@ -457,6 +452,14 @@ fn test_create_view_rejects_named_colon_placeholder() {
 #[test]
 fn test_create_view_rejects_named_dollar_placeholder() {
     assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 WHERE a = $x;");
+}
+
+#[test]
+fn test_create_view_rejects_named_at_placeholder() {
+    // Issue #6172: `@name` is now a general expression-grammar bind
+    // parameter (see `parse_primary_expression`'s `Token::UserVariable`
+    // case), same class as `:x` and `$x` above.
+    assert_view_rejected_as_variable("CREATE VIEW v AS SELECT * FROM t1 WHERE a = @x;");
 }
 
 #[test]
