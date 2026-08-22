@@ -7,6 +7,7 @@ use vibesql_types::SqlValue;
 // Submodules
 mod copy_handler;
 pub mod display;
+mod schema_qualify;
 pub mod validation;
 pub mod wal;
 
@@ -2773,6 +2774,14 @@ impl SqlExecutor {
     /// schema qualifier before persisting), so they are re-qualified here
     /// with `schema_name` — the alias *this* session attached the file
     /// under, which need not match the alias used when it was saved.
+    ///
+    /// Re-qualification covers the view's *body* as well as its name
+    /// ([`schema_qualify::qualify_unqualified_tables`]): an unqualified table
+    /// reference left in the body would otherwise late-bind through
+    /// `Catalog::get_table`'s temp → main → attached search order and
+    /// silently read `main`'s same-named table. Trigger bodies are the one
+    /// documented gap — see the `KNOWN LIMITATION (#6477)` note at the
+    /// trigger loop below.
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
@@ -2844,16 +2853,31 @@ impl SqlExecutor {
         // definition with the live session's attachment alias. Views have no
         // separate `schema` AST field — the qualifier lives directly in the
         // name (`ViewDefinition::name`), matching how the writer strips it.
+        //
+        // The view's *body* must be re-bound too, not just its name (#6476
+        // review). An unqualified table reference inside the body is
+        // late-bound through `Catalog::get_table`'s temp → main → attached
+        // search order, so a body persisted as `SELECT x FROM t` would
+        // silently read `main.t` whenever `main` happens to hold a same-named
+        // table — returning another database's rows rather than erroring.
+        // `qualify_unqualified_tables` applies SQLite's rule (an unqualified
+        // name in a view body resolves within the schema containing the view)
+        // by rewriting every bare base-table reference to
+        // `<this session's alias>.<table>`; explicitly-qualified references
+        // (`main.mt`, `other.u`) — which the writer never stripped — are left
+        // alone.
         for view_name in loaded.catalog.list_views() {
             let Some(view_def) = loaded.catalog.get_view(&view_name) else { continue };
             if view_def.is_temp() {
                 continue;
             }
             let qualified_name = format!("{}.{}", schema_name, view_def.name);
+            let mut query = view_def.query.clone();
+            schema_qualify::qualify_unqualified_tables(&mut query, schema_name);
             let create_stmt = vibesql_ast::CreateViewStmt {
                 view_name: qualified_name,
                 columns: view_def.columns.clone(),
-                query: Box::new(view_def.query.clone()),
+                query: Box::new(query),
                 with_check_option: view_def.with_check_option,
                 or_replace: false,
                 if_not_exists: false,
@@ -2870,6 +2894,22 @@ impl SqlExecutor {
         // `TriggerDefinition` into a synthetic `CreateTriggerStmt`, replayed
         // through `TriggerExecutor` so target-table/schema validation runs
         // exactly as it would for a live `CREATE TRIGGER`.
+        //
+        // KNOWN LIMITATION (#6477): the trigger's *body* is NOT re-bound to
+        // `schema_name` the way the view body above is. A trigger body is
+        // stored as `TriggerAction::RawSql` and re-parsed when the trigger
+        // fires, and the parser rejects a qualified table name inside a
+        // trigger body outright ("qualified table names are not allowed on
+        // INSERT, UPDATE, and DELETE statements within triggers", matching
+        // SQLite) — so there is no AST to rewrite and no parseable text form
+        // that would express the binding. Its unqualified names therefore
+        // still resolve through `Catalog::get_table`'s temp → main →
+        // attached search order, so a same-named table in `main` wins. That
+        // late binding is pre-existing and reproduces with no save/reload at
+        // all; fixing it means teaching trigger execution to resolve a
+        // body's names in the trigger's own schema, which is #6477's job.
+        // `test_attach_reattach_trigger_body_binds_to_main_on_name_collision`
+        // pins the actual behavior so it cannot change unnoticed.
         for trigger_def in loaded.catalog.iter_triggers() {
             if trigger_def.is_temp() {
                 continue;

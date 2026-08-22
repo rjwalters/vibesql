@@ -997,10 +997,19 @@ fn write_table_data<W: Write>(
 /// a whole identifier (anchored on a word boundary) immediately followed by
 /// `.`; comparison is ASCII case-insensitive, matching SQL identifier
 /// semantics.
-/// Known limitation: a schema name written pre-quoted (e.g. `"aux".v1`) is
-/// not recognized — attachment schema names are ordinary identifiers and are
-/// never written quoted by this engine's own DDL reconstruction, so this
-/// does not affect any path this function is used from.
+/// Known limitations, none of which affect any path this function is used
+/// from (all three need SQL text this engine's own DDL reconstruction never
+/// produces):
+///   * A schema name written pre-quoted (e.g. `"aux".v1`) is not recognized — attachment schema
+///     names are ordinary identifiers and are never written quoted here.
+///   * `--` and `/* */` comments are not treated as spans, so a qualifier mentioned *inside a
+///     comment* in the captured SQL is rewritten like any other occurrence. Cosmetic only: the
+///     comment text changes, the statement's meaning does not.
+///   * A **table alias** that happens to equal the schema name is stripped along with real
+///     qualifiers: `SELECT aux.x FROM t AS aux` becomes `SELECT x FROM t AS aux`. Harmless for a
+///     single-table query (the column still resolves), but it can make a join's column reference
+///     ambiguous. Pinned by `strip_schema_qualifier_also_strips_an_alias_matching_the_schema_name`
+///     so the behavior is at least known rather than accidental.
 fn strip_schema_qualifier(sql: &str, schema_name: &str) -> String {
     // Byte-oriented scan, but every byte that is *emitted* is emitted as part
     // of a `&str` slice of the original input — never as `byte as char`, which
@@ -1472,5 +1481,36 @@ mod tests {
     fn test_strip_schema_qualifier_no_op_when_schema_absent() {
         let sql = "CREATE VIEW v1 AS SELECT x FROM t WHERE x > 0";
         assert_eq!(strip(sql, "aux"), sql);
+    }
+
+    #[test]
+    fn strip_schema_qualifier_also_strips_an_alias_matching_the_schema_name() {
+        // Documented limitation, pinned so it is known rather than accidental
+        // (#6476 review note 1): the scan is lexical, so a *table alias* that
+        // happens to equal the schema name is indistinguishable from a real
+        // schema qualifier and is stripped too.
+        assert_eq!(strip("SELECT aux.x FROM t AS aux", "aux"), "SELECT x FROM t AS aux");
+        // The alias in the FROM clause itself is left intact — only the
+        // `alias.` *prefix* on a column reference is removed.
+        assert_eq!(
+            strip("SELECT aux.x, b.y FROM t AS aux JOIN u AS b ON aux.x = b.x", "aux"),
+            "SELECT x, b.y FROM t AS aux JOIN u AS b ON x = b.x"
+        );
+    }
+
+    #[test]
+    fn strip_schema_qualifier_rewrites_inside_comments() {
+        // Documented limitation, pinned (#6476 review note 2): `--` and
+        // `/* */` are not treated as spans, so a qualifier inside a comment
+        // is rewritten like any other occurrence. Cosmetic — the comment text
+        // changes, the statement's meaning does not.
+        assert_eq!(
+            strip("-- reads aux.t\nSELECT x FROM aux.t", "aux"),
+            "-- reads t\nSELECT x FROM t"
+        );
+        assert_eq!(
+            strip("SELECT x /* from aux.t */ FROM aux.t", "aux"),
+            "SELECT x /* from t */ FROM t"
+        );
     }
 }
