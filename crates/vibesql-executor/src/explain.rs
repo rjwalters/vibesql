@@ -1875,7 +1875,7 @@ impl ExplainExecutor {
         ctes: &HashSet<String>,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
-            vibesql_ast::FromClause::Table { name, alias, .. } => {
+            vibesql_ast::FromClause::Table { name, alias, index_hint, .. } => {
                 // Expand views in EQP output instead of showing an opaque
                 // `SCAN <view>`. CTE names shadow same-named views and are
                 // never expanded.
@@ -1940,6 +1940,7 @@ impl ExplainExecutor {
                     prefer_ordering_scan,
                     needed_columns,
                     database,
+                    index_hint.as_ref(),
                 )
             }
             vibesql_ast::FromClause::Join {
@@ -2237,6 +2238,9 @@ impl ExplainExecutor {
             false,
             &empty_cols,
             database,
+            // Synthetic outer-driver rendering for correlated-join MULTI-INDEX
+            // OR (#6405: INDEXED BY forcing is single-table-FROM scope only).
+            None,
         )?;
         join_node.add_child(outer_node);
 
@@ -2608,6 +2612,37 @@ impl ExplainExecutor {
         is_covering_index(index_name, &all_needed_columns, database)
     }
 
+    /// Build the `(index_name, sorted_columns)` pair `explain_table_scan` uses
+    /// to render an `INDEXED BY <index_name>`-forced index scan (issue #6405),
+    /// in the same shape `cost_based_index_selection` returns for a
+    /// cost-model-chosen index. Returns `None` if `index_name` does not
+    /// resolve to a real index (should not happen — the hint was already
+    /// validated), so the caller can fall back to normal selection.
+    ///
+    /// Expression indexes have no column name to report, so `sorted_columns`
+    /// is `None` for them — same as the runtime's `forced_index_scan_choice`
+    /// in `select/scan/index_scan/selection.rs`, which this mirrors.
+    fn forced_index_info(
+        index_name: &str,
+        database: &Database,
+    ) -> Option<(String, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> {
+        let index_metadata = database.get_index(index_name)?;
+        let sorted_columns = if index_metadata.columns.iter().any(|col| col.is_expression()) {
+            None
+        } else {
+            Some(
+                index_metadata
+                    .columns
+                    .iter()
+                    .filter_map(|col| {
+                        col.column_name().map(|name| (name.to_string(), col.direction()))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        Some((index_name.to_string(), sorted_columns))
+    }
+
     /// Generate plan node for table scan (sequential or index)
     fn explain_table_scan(
         table_name: &str,
@@ -2617,6 +2652,7 @@ impl ExplainExecutor {
         prefer_ordering_scan: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
+        index_hint: Option<&vibesql_ast::IndexHint>,
     ) -> Result<PlanNode, ExecutorError> {
         // MULTI-INDEX OR (epic #5668): the runtime may execute this WHERE as a
         // union of per-branch index lookups. EQP must render the same plan the
@@ -2626,9 +2662,13 @@ impl ExplainExecutor {
         // MULTI-INDEX OR, build SQLite's subtree and return early; otherwise fall
         // through to the existing single-scan rendering below (byte-identical).
         if order_by.is_none() {
-            if let Some(IndexScanChoice::MultiIndexOr { branches, .. }) =
-                select_index_scan_method(table_name, where_clause.as_ref(), None, database)
-            {
+            if let Some(IndexScanChoice::MultiIndexOr { branches, .. }) = select_index_scan_method(
+                table_name,
+                where_clause.as_ref(),
+                None,
+                database,
+                index_hint,
+            )? {
                 let mut node = PlanNode::new("Multi-Index Or").with_object(table_name);
                 for branch in &branches {
                     // Inner SEARCH line: `SEARCH <table> USING [COVERING ]INDEX
@@ -2664,13 +2704,45 @@ impl ExplainExecutor {
             }
         }
 
+        // SQLite `INDEXED BY <name>` (issue #6405): forces EQP to show the
+        // named index (`SEARCH`/`SCAN ... USING INDEX <name>`) instead of the
+        // cost model's normal pick, mirroring the runtime forcing in
+        // `select_index_scan_method`. Falls through to the normal cost-based
+        // pick if the hint doesn't resolve (defensive; should not happen —
+        // `validate_index_hints` runs before EXPLAIN reaches here).
+        let forced_index_info = match index_hint {
+            Some(vibesql_ast::IndexHint::IndexedBy(index_name)) => {
+                if let Some(info) = Self::forced_index_info(index_name, database) {
+                    // Same partial-index guard as the runtime forcing in
+                    // `select_index_scan_method` (issue #6405): a forced
+                    // partial index whose predicate the query WHERE doesn't
+                    // imply cannot be satisfied, and SQLite reports this as a
+                    // prepare-time error rather than rendering a (misleading)
+                    // plan for it.
+                    if !crate::optimizer::predicate_implication::partial_index_usable(
+                        database,
+                        index_name,
+                        where_clause.as_ref(),
+                    ) {
+                        return Err(ExecutorError::Other("no query solution".to_string()));
+                    }
+                    Some(info)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
         // First check for regular index scan
-        let index_info = cost_based_index_selection(
-            table_name,
-            where_clause.as_ref(),
-            order_by.as_ref().map(|v| v.as_slice()),
-            database,
-        );
+        let index_info = forced_index_info.or_else(|| {
+            cost_based_index_selection(
+                table_name,
+                where_clause.as_ref(),
+                order_by.as_ref().map(|v| v.as_slice()),
+                database,
+            )
+        });
 
         // If no regular index scan, check for skip-scan optimization
         let skip_scan_plan = if index_info.is_none() {

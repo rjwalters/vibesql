@@ -34,6 +34,49 @@ fn join_reorder_verbose() -> bool {
     std::env::var("JOIN_REORDER_VERBOSE").is_ok()
 }
 
+/// Whether this table reference carries an `INDEXED BY <name>` directive that
+/// forces a specific index (issue #6405).
+///
+/// `NOT INDEXED` is deliberately excluded: it remains a no-op everywhere in
+/// VibeSQL, so it must not disable scan-path optimizations either.
+fn forces_index(table_ref: &graph::TableRef) -> bool {
+    matches!(table_ref.index_hint, Some(vibesql_ast::IndexHint::IndexedBy(_)))
+}
+
+/// The `INDEXED BY` directive to forward to a scan that is deliberately given
+/// **no** WHERE predicates (the early-semi-join path filters after the join).
+///
+/// Forcing a **partial** index (`CREATE INDEX ... WHERE <predicate>`) is only
+/// legal when the scan's WHERE context implies the index predicate; otherwise
+/// `select_index_scan_method` raises SQLite's `no query solution` (see
+/// `indexedby-12.2`/`12.4`). These scans have no WHERE context at all, so
+/// forwarding a partial-index hint here would turn a query SQLite accepts into
+/// a hard error. Forward the hint for ordinary (non-partial) indexes — which is
+/// what `INDEXED BY` is used for in practice — and leave a forced partial index
+/// on this one path unforced rather than failing the query. Either way the scan
+/// returns correct rows; only the narrow "forced partial index inside an
+/// early-semi-join" case still falls back to cost-based selection.
+fn index_hint_for_unfiltered_scan<'a>(
+    table_ref: &'a graph::TableRef,
+    database: &vibesql_storage::Database,
+) -> Option<&'a vibesql_ast::IndexHint> {
+    match table_ref.index_hint.as_ref() {
+        Some(hint @ vibesql_ast::IndexHint::IndexedBy(index_name)) => {
+            // `partial_index_usable` returns `true` for every non-partial index,
+            // so a `None` WHERE context only rejects genuinely partial indexes.
+            if crate::optimizer::predicate_implication::partial_index_usable(
+                database, index_name, None,
+            ) {
+                Some(hint)
+            } else {
+                None
+            }
+        }
+        // `NOT INDEXED` is a no-op; nothing to forward.
+        _ => None,
+    }
+}
+
 /// Apply join reordering optimization to a multi-table join
 ///
 /// This function:
@@ -379,9 +422,15 @@ where
                     "Subquery reference missing query".to_string(),
                 ));
             }
-        } else if bloom_ctx.is_some() {
+        } else if bloom_ctx.is_some() && !forces_index(table_ref) {
             // Use Bloom filter-enabled scan for large tables with join pre-filtering
             // This is the key optimization for TPC-H Q5 and similar multi-way joins
+            //
+            // Skipped when this table carries an `INDEXED BY` hint (#6405):
+            // `execute_table_scan_with_bloom` has its own scan path that does not
+            // consult the index hint, so taking it would silently drop a directive
+            // the user asked for (and that EXPLAIN QUERY PLAN already reports).
+            // Correctness of an explicit hint outranks a scan-time optimization.
             execute_table_scan_with_bloom(
                 &table_ref.name,
                 table_ref.alias.as_ref(),
@@ -407,6 +456,13 @@ where
                 None,
                 outer_row,
                 outer_schema,
+                // #6405: honor `INDEXED BY` here too. Join reordering chooses the
+                // *join order*; the hint chooses the *index* used to scan one
+                // table, so the two are independent. `table_filter` (this table's
+                // local WHERE conjuncts) is exactly the predicate context the
+                // forced-partial-index usability guard needs, since a partial
+                // index on this table can only reference this table's columns.
+                table_ref.index_hint.as_ref(),
             )?
         };
         let scan_time = scan_start.elapsed();
@@ -1081,6 +1137,11 @@ where
         None,
         outer_row,
         outer_schema,
+        // #6405: honor `INDEXED BY` here too, so EXPLAIN QUERY PLAN (which walks
+        // the FROM clause directly) and execution never disagree about which
+        // index a hinted table is scanned with. See `index_hint_for_unfiltered_scan`
+        // for why a forced *partial* index is not forwarded on this path.
+        index_hint_for_unfiltered_scan(target_ref, database),
     )?;
     let target_scan_time = target_scan_start.elapsed();
 
@@ -1186,6 +1247,9 @@ where
             None,
             outer_row,
             outer_schema,
+            // #6405: honor `INDEXED BY` here too — same rationale as the target-table
+            // scan above; this scan is likewise given no WHERE predicates.
+            index_hint_for_unfiltered_scan(table_ref, database),
         )?;
         let table_scan_time = table_start.elapsed();
 

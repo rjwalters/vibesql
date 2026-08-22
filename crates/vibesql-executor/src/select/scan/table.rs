@@ -327,6 +327,8 @@ fn apply_implicit_scan_order(
 /// * `limit` - Optional LIMIT value for early termination optimization (#3253)
 /// * `outer_row` - Outer row for correlated subqueries
 /// * `outer_schema` - Outer schema for correlated subqueries
+/// * `index_hint` - Optional validated SQLite `INDEXED BY` / `NOT INDEXED` hint (issue #6405).
+///   `INDEXED BY` forces use of the named index; `NOT INDEXED` remains a no-op.
 pub(crate) fn execute_table_scan_with_identifier(
     identifier: &TableIdentifier,
     alias: Option<&String>,
@@ -338,6 +340,7 @@ pub(crate) fn execute_table_scan_with_identifier(
     limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    index_hint: Option<&vibesql_ast::IndexHint>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Use the canonical form for table lookup (lowercase for unquoted, exact for quoted)
     // CTE lookup in execute_table_scan is already case-insensitive
@@ -352,6 +355,7 @@ pub(crate) fn execute_table_scan_with_identifier(
         limit,
         outer_row,
         outer_schema,
+        index_hint,
     )
 }
 
@@ -368,6 +372,8 @@ pub(crate) fn execute_table_scan_with_identifier(
 /// * `limit` - Optional LIMIT value for early termination optimization (#3253)
 /// * `outer_row` - Outer row for correlated subqueries
 /// * `outer_schema` - Outer schema for correlated subqueries
+/// * `index_hint` - Optional validated SQLite `INDEXED BY` / `NOT INDEXED` hint (issue #6405).
+///   `INDEXED BY` forces use of the named index; `NOT INDEXED` remains a no-op.
 pub(crate) fn execute_table_scan(
     table_name: &str,
     alias: Option<&String>,
@@ -379,6 +385,7 @@ pub(crate) fn execute_table_scan(
     limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    index_hint: Option<&vibesql_ast::IndexHint>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Check if table is a CTE first (with case-insensitive lookup)
     let cte_result = cte_results.get(table_name).or_else(|| {
@@ -706,10 +713,18 @@ pub(crate) fn execute_table_scan(
     }
 
     // Check if we should use an index scan (with cost-based selection)
-    // This now includes skip-scan as a fallback option when regular index scan isn't available
-    if let Some(scan_choice) =
-        super::index_scan::select_index_scan_method(table_name, where_clause, order_by, database)
-    {
+    // This now includes skip-scan as a fallback option when regular index scan isn't available.
+    // `index_hint` carries a validated `INDEXED BY <name>` (issue #6405): when
+    // present, it forces use of the named index instead of letting the cost
+    // model choose, matching SQLite's INDEXED BY precedence. `NOT INDEXED`
+    // remains a no-op (unaffected — see index_hint's doc comment).
+    if let Some(scan_choice) = super::index_scan::select_index_scan_method(
+        table_name,
+        where_clause,
+        order_by,
+        database,
+        index_hint,
+    )? {
         match scan_choice {
             super::index_scan::IndexScanChoice::Regular { index_name, sorted_columns } => {
                 // Use regular index scan for potentially better performance

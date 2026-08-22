@@ -13,6 +13,7 @@ use vibesql_storage::{
 };
 
 use crate::{
+    errors::ExecutorError,
     evaluator::expression_hash::ExpressionHasher,
     optimizer::index_planner::{IndexPlanner, SkipScanInfo},
 };
@@ -2428,7 +2429,54 @@ pub(crate) fn select_index_scan_method(
     where_clause: Option<&Expression>,
     order_by: Option<&[vibesql_ast::OrderByItem]>,
     database: &Database,
-) -> Option<IndexScanChoice> {
+    index_hint: Option<&vibesql_ast::IndexHint>,
+) -> Result<Option<IndexScanChoice>, ExecutorError> {
+    // SQLite `INDEXED BY <name>` (issue #6405): forces use of the named index
+    // instead of letting the cost model choose, matching SQLite's precedence
+    // ("INDEXED BY forces use of the named index even if the cost model would
+    // prefer another"). This bypasses the OR-aware / cost-based / skip-scan
+    // selection below entirely — `execute_index_scan` still uses the WHERE
+    // clause (if any) to bound the scan against the *forced* index's columns,
+    // so a WHERE-clause-driven bounded scan on the hinted index still works;
+    // only the *choice of index* is forced, not whether WHERE bounds apply.
+    //
+    // `NOT INDEXED` intentionally remains a no-op here (falls through to the
+    // normal cost-based selection below) — VibeSQL does not yet enforce it.
+    if let Some(vibesql_ast::IndexHint::IndexedBy(index_name)) = index_hint {
+        if let Some(choice) = forced_index_scan_choice(index_name, database) {
+            // A partial index (`CREATE INDEX ... WHERE <predicate>`) only
+            // contains rows matching its predicate. Forcing one whose
+            // predicate the query WHERE clause does not imply would either
+            // silently drop rows outside the predicate (wrong results) or
+            // require a full-table-equivalent fallback that defeats the
+            // whole point of forcing a specific index — SQLite refuses this
+            // case outright rather than doing either
+            // (`indexedby-12.2`/`indexedby-12.4`: `SELECT * FROM o1 INDEXED
+            // BY p2 ...` where `p2` is `ON o1(y) WHERE z=1` and the query has
+            // no `z=1` conjunct raises `no query solution`). Non-partial
+            // indexes always pass this check (`partial_index_usable` returns
+            // `true` for them).
+            if !crate::optimizer::predicate_implication::partial_index_usable(
+                database,
+                index_name,
+                where_clause,
+            ) {
+                return Err(ExecutorError::Other("no query solution".to_string()));
+            }
+            if crate::profiling::is_scan_debug_enabled() {
+                eprintln!(
+                    "[SCAN_PATH] Forcing INDEXED BY index: table={}, index={}",
+                    table_name, index_name
+                );
+            }
+            return Ok(Some(choice));
+        }
+        // The named index was already validated to exist on this table
+        // (`validate_index_hints` runs before the scan is reached), so this
+        // should be unreachable in practice; fall through defensively rather
+        // than silently dropping the hint.
+    }
+
     // OR-AWARE COST MODEL (epic #5668, PR 3). When the WHERE clause contains a
     // genuine multi-index OR, cost the MULTI-INDEX OR union against the best
     // single index and the full table scan, and take the cheapest — replacing
@@ -2449,14 +2497,14 @@ pub(crate) fn select_index_scan_method(
                 );
             }
         }
-        return Some(choice);
+        return Ok(Some(choice));
     }
 
     // First, try regular cost-based index selection
     if let Some((index_name, sorted_columns)) =
         cost_based_index_selection(table_name, where_clause, order_by, database)
     {
-        return Some(IndexScanChoice::Regular { index_name, sorted_columns });
+        return Ok(Some(IndexScanChoice::Regular { index_name, sorted_columns }));
     }
 
     // If regular index selection failed and we have a WHERE clause,
@@ -2475,17 +2523,59 @@ pub(crate) fn select_index_scan_method(
                             skip_info.prefix_cardinality
                         );
                     }
-                    return Some(IndexScanChoice::SkipScan {
+                    return Ok(Some(IndexScanChoice::SkipScan {
                         index_name: plan.index_name,
                         skip_scan_info: skip_info,
-                    });
+                    }));
                 }
             }
         }
     }
 
     // No index or skip-scan option found
-    None
+    Ok(None)
+}
+
+/// Build the `IndexScanChoice::Regular` for an `INDEXED BY <index_name>`-forced
+/// index scan (issue #6405).
+///
+/// Returns `None` if `index_name` does not resolve to a real index (should not
+/// happen — the caller already validated the hint), letting the caller fall
+/// back to normal selection defensively rather than panic.
+///
+/// For a plain column index, `sorted_columns` is populated with every indexed
+/// column (in index order, with each column's declared direction). This is
+/// the same "pre-sorted" signal `cost_based_index_selection` sets when an
+/// index satisfies ORDER BY, and it matters here for a different reason:
+/// `execute_index_scan` re-sorts its row-index list back into physical/table
+/// order whenever `sorted_columns` is `None` (see the "ensure rows are in
+/// table order" step in `execution.rs`), which is exactly the insertion-order
+/// bug this issue reports. Passing the forced index's own natural key order
+/// as `sorted_columns` tells `execute_index_scan` to preserve index key order
+/// instead. It is otherwise inert: with no `ORDER BY` in the query nothing
+/// consumes it, and with an `ORDER BY` that doesn't match, `apply_order_by`
+/// still re-sorts normally (`check_if_already_sorted` requires an exact
+/// column/direction match).
+///
+/// Expression indexes have no column name to report in `sorted_columns`
+/// (`(String, OrderDirection)` requires one), so they fall back to `None` —
+/// unchanged, pre-fix behavior for that case; not in this issue's scope.
+fn forced_index_scan_choice(index_name: &str, database: &Database) -> Option<IndexScanChoice> {
+    let index_metadata = database.get_index(index_name)?;
+
+    let sorted_columns = if index_metadata.columns.iter().any(|col| col.is_expression()) {
+        None
+    } else {
+        Some(
+            index_metadata
+                .columns
+                .iter()
+                .filter_map(|col| col.column_name().map(|name| (name.to_string(), col.direction())))
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    Some(IndexScanChoice::Regular { index_name: index_name.to_string(), sorted_columns })
 }
 
 /// Whether the MULTI-INDEX OR optimization (epic #5668) is enabled.
@@ -3095,7 +3185,8 @@ mod tests {
 
         fn choose(db: &vibesql_storage::Database, sql: &str) -> Option<IndexScanChoice> {
             let where_expr = where_of(sql);
-            super::super::select_index_scan_method("t1", Some(&where_expr), None, db)
+            super::super::select_index_scan_method("t1", Some(&where_expr), None, db, None)
+                .expect("no INDEXED BY hint in these tests, so this cannot error")
         }
 
         #[test]
