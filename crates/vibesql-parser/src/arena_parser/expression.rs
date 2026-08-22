@@ -768,6 +768,18 @@ impl<'arena> ArenaParser<'arena> {
             return Ok(Expression::NamedPlaceholder(name));
         }
 
+        // "At" named placeholder (@name) -- SQLite: works exactly like :name
+        // (R-49783-61279). See the sibling fix in
+        // `crates/vibesql-parser/src/parser/expressions/mod.rs` for the full
+        // rationale; kept in sync here since this arena-based parser path is
+        // an independently-invoked entry point (`arena_parser::parse_select_to_owned`).
+        if let Token::UserVariable(name) = self.peek() {
+            let name = name.clone();
+            self.advance();
+            let name = self.intern(&name);
+            return Ok(Expression::NamedPlaceholder(name));
+        }
+
         // Session variable (@@...)
         if let Token::SessionVariable(name) = self.peek() {
             let name = name.clone();

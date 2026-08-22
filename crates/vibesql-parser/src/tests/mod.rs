@@ -5,6 +5,7 @@ mod alter_table;
 mod arena_alter_table;
 mod arena_parser;
 mod assertion;
+mod at_placeholder;
 mod attach;
 mod case_expression;
 mod cast;
