@@ -6922,6 +6922,7 @@ array set vibesql_attach_replay_files {
     e_createtable 1
     table 1
     autoinc 1
+    pragma4 1
 }
 
 # e_createtable.test's ATTACH usage (#6404) is a single unconditional
@@ -7035,6 +7036,9 @@ array set vibesql_attach_ok {
     autoinc-5.2 1
     autoinc-5.3 1
     autoinc-5.4 1
+    pragma4-4.1.1 1
+    pragma4-4.2.1 1
+    pragma4-4.3.1 1
 }
 
 # e_createtable-1.0 (`ATTACH 'test.db2' AS auxa; ATTACH 'test.db3' AS auxb;`)
@@ -7064,6 +7068,60 @@ array set vibesql_attach_ok {
 # unblocked — one new pass (table-14.3), the rest re-confirm pre-existing,
 # already-diagnosed shim/engine gaps rather than regressing anything that
 # previously passed.
+
+# pragma4.test's ATTACH usage (#6440) is confined to three near-identical
+# foundational setup blocks (4.1.1, 4.2.1, 4.3.1 — each `CREATE TABLE t1(...);
+# ATTACH 'test.db2' AS aux; CREATE TABLE aux.t2(...);`, sometimes with an
+# index too), the same "ATTACH/aux. text lives inside the do_test body" shape
+# as e_createtable-1.0/table-14.x/autoinc-5.x above — being in
+# vibesql_attach_replay_files alone is a no-op for these three without their
+# own vibesql_attach_ok entries. Before this fix, uses_sqlite_internals'
+# ATTACH-setup rescue (#6193) silently stripped the ATTACH/aux.t2 lines out of
+# all three blocks and ran only the main-schema CREATE TABLE t1 remainder —
+# so aux.t2 was NEVER actually created (explaining pragma4-4.1.3's empty
+# `PRAGMA table_info = t2` result). With replay enabled and these three
+# entries added, all three blocks now genuinely ATTACH and create aux.t2 (and
+# aux.i2 for 4.3.1), and `aux.sqlite_master` introspection (fixed by #6454,
+# landed concurrently) now succeeds instead of erroring — eliminating the
+# three `pragma4-filescope-err.*` cascade failures the bare
+# `execsql {SELECT * FROM main.sqlite_master, aux.sqlite_master}` calls used
+# to produce every time this ran against a non-existent aux database.
+#
+# Measured net effect: 8/17 -> 8/14 tests run passing (9 failures -> 6),
+# i.e. the three filescope-err cascades are eliminated with zero regressions
+# among previously-passing tests. None of the issue's five originally
+# targeted tests (4.1.3, 4.1.4, 4.2.4, 4.3.4, 4.4.3) flip to passing, though
+# — investigating why revealed they are blocked by TWO further, DEEPER gaps
+# that are out of scope for this shim-allow-list-only issue (each filed as
+# its own follow-up, per this family's #6363 -> #6436 -> #6459 pattern):
+#
+#  1. pragma4-4.1.3 (`PRAGMA table_info = t2`, ATTACHed schema): a genuine
+#     ENGINE bug, not a shim artifact (#6481). Reproduced with two bare
+#     unbroken CLI invocations, no shim involved: `CREATE TABLE aux.t2(d, e,
+#     f)` in process 1, then a FRESH process 2 that re-ATTACHes the same aux
+#     file and runs `PRAGMA table_info=t2` reports column type `BLOB` for
+#     every column instead of the empty declared-type string a same-process
+#     query (or the main schema's own `t1`) correctly reports. Attached-
+#     database schema reload appears to default undeclared column types to
+#     BLOB affinity where main-schema reload preserves the empty declared
+#     type.
+#  2. pragma4-4.1.4/4.2.4/4.3.4/4.4.3 (all fresh `sqlite3 db3 test.db; sqlite3
+#     db2 test.db2; execsql {DROP TABLE/INDEX ...} db3/db2`): a genuine SHIM
+#     bug in `proc sqlite3`'s "first time opening this file" check
+#     (~line 9344, #6482). `reset_db` (#6175) removes `$::db_file` from
+#     `::opened_dbs` so that a LATER explicit `sqlite3 db test.db` reopen is
+#     treated as fresh — but pragma4.test's sections never reopen "db"
+#     explicitly after `reset_db`; the next thing to call `sqlite3` for that
+#     same path is a SECONDARY connection (`db2`/`db3`). Since `$::db_file` is
+#     no longer in `::opened_dbs`, that secondary connection is (incorrectly)
+#     treated as a genuine first-open and force-deletes the file — wiping out
+#     everything the PRIMARY "db" connection wrote via `execsql` since the
+#     reset, including the very table/index the do_test's own `DROP
+#     TABLE`/`DROP INDEX` was about to target. Reproduced directly against
+#     the CLI with no ATTACH/aux involved at all (plain `CREATE TABLE`/`DROP
+#     TABLE` across independent process invocations of the same file persist
+#     correctly), confirming the bug is in this shim bookkeeping, not
+#     storage-layer persistence.
 
 # Check if a test should be skipped based on VibeSQL-specific exclusions
 # Returns a list: {should_skip reason} where should_skip is 0/1
