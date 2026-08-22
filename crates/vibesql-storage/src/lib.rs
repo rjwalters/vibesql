@@ -35,10 +35,7 @@ pub use backend::{NativeFile, NativeStorage};
 #[cfg(target_arch = "wasm32")]
 pub use backend::{OpfsFile, OpfsStorage};
 pub use backend::{StorageBackend, StorageFile};
-pub use blob::{
-    shared_metadata_db, BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService,
-    SharedMetadataDb,
-};
+pub use blob::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
 pub use buffer::{BufferPool, BufferPoolStats};
 pub use change_events::{
     channel as change_event_channel, ChangeEvent, ChangeEventPk, ChangeEventReceiver,
