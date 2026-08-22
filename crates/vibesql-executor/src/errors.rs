@@ -1493,9 +1493,23 @@ impl ExecutorError {
     /// qualifier (contain a `.`) and every other error variant are returned
     /// unchanged.
     pub fn with_main_schema_qualifier(self) -> ExecutorError {
+        self.with_schema_qualifier("main")
+    }
+
+    /// Qualify a `TableNotFound` for an unqualified table name with an
+    /// arbitrary schema prefix. Generalizes [`Self::with_main_schema_qualifier`]
+    /// to a trigger owned by a non-`main` schema: a trigger owned by an
+    /// ATTACHed schema `aux` reports a missing unqualified body reference as
+    /// `no such table: aux.<name>`, mirroring SQLite's `main.` qualification
+    /// for a `main` trigger (#6477).
+    ///
+    /// Only bare names are rewritten — names that already carry a schema
+    /// qualifier (contain a `.`) and every other error variant are returned
+    /// unchanged.
+    pub fn with_schema_qualifier(self, schema: &str) -> ExecutorError {
         match self {
             ExecutorError::TableNotFound(name) if !name.contains('.') => {
-                ExecutorError::TableNotFound(format!("main.{}", name))
+                ExecutorError::TableNotFound(format!("{}.{}", schema, name))
             }
             other => other,
         }

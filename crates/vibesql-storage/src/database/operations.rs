@@ -148,6 +148,18 @@ impl Operations {
 
         // Try with schema prefix if not already qualified
         if !table_name.contains('.') {
+            // If unqualified resolution is restricted to a single schema
+            // (trigger-body execution, #6477), look up ONLY there — mirrors
+            // `Catalog::get_table`'s restriction so a trigger's DML physically
+            // writes to the same table its body's name resolution found,
+            // instead of falling back to `main`/temp/other attachments below.
+            if let Some(restrict_schema) = catalog.unqualified_resolution_restricted_to() {
+                let restricted_qualified = format!("{}.{}", restrict_schema, normalized_name);
+                return tables
+                    .get_mut(&restricted_qualified)
+                    .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()));
+            }
+
             // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main
             // tables)
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);

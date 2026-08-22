@@ -2227,20 +2227,21 @@ fn test_attach_reattach_view_binds_a_joined_body_to_the_attached_schema() {
 }
 
 #[test]
-fn test_attach_reattach_trigger_body_binds_to_main_on_name_collision() {
-    // KNOWN LIMITATION, pinned deliberately — see #6477.
+fn test_attach_reattach_trigger_body_binds_to_attachment_on_name_collision() {
+    // Regression test for #6477: an unqualified table name inside a trigger
+    // body must resolve within the trigger's *own* schema, never through the
+    // connection-wide temp → main → attached search order.
     //
     // A trigger body is stored as `TriggerAction::RawSql` and re-parsed when
     // the trigger fires, and the parser rejects a qualified table name inside
     // a trigger body ("qualified table names are not allowed on INSERT,
     // UPDATE, and DELETE statements within triggers", matching SQLite). So
     // the view-body rewrite in `schema_qualify` has nothing to operate on
-    // here, and the body's unqualified names still resolve through the
-    // connection-wide temp → main → attached search order: a same-named
-    // `main.log` wins, and the attachment's own `log` never sees the row.
-    //
-    // This asserts the *actual* behavior, not the desired one. Fixing #6477
-    // must flip these two assertions.
+    // here — the fix instead scopes the executor's unqualified table-name
+    // resolution to the firing trigger's own schema
+    // (`Catalog::set_restrict_unqualified_resolution_to_schema`), so a
+    // trigger owned by an attached schema `aux` writes to `aux.log`, not a
+    // same-named `main.log`.
     let dir = tempfile::tempdir().unwrap();
     let main_path = dir.path().join("main.vbsql");
     let main_path_str = main_path.to_str().unwrap().to_string();
@@ -2269,16 +2270,58 @@ fn test_attach_reattach_trigger_body_binds_to_main_on_name_collision() {
         let main_log = ex.execute("SELECT msg FROM main.log").unwrap();
         let aux_log = ex.execute("SELECT msg FROM aux.log").unwrap();
 
-        assert_eq!(
-            main_log.rows,
-            vec![vec![Some("fired".to_string())]],
-            "#6477: the trigger body currently writes to main.log (wrong, but pinned)"
-        );
         assert!(
-            aux_log.rows.is_empty(),
-            "#6477: the attachment's own log currently stays empty (wrong, but pinned)"
+            main_log.rows.is_empty(),
+            "#6477: main.log must stay empty — the trigger body's unqualified `log` must not \
+             bind to a same-named table in main"
+        );
+        assert_eq!(
+            aux_log.rows,
+            vec![vec![Some("fired".to_string())]],
+            "#6477: the attachment's own log must receive the row — the trigger body's \
+             unqualified `log` must bind within its own (aux) schema"
         );
     }
+}
+
+#[test]
+fn test_attach_trigger_body_binds_to_attachment_on_name_collision_single_session() {
+    // Regression test for #6477: the defect is pre-existing and independent
+    // of persistence — it reproduces in a single live session with no
+    // save/reload at all, whenever `main` holds a table with the same name
+    // as one in the attached schema. This is the exact repro from the issue
+    // body's "Problem" section (single-session variant), kept separate from
+    // the save/exit/re-attach variant above so both code paths stay pinned.
+    let dir = tempfile::tempdir().unwrap();
+    let aux_path = dir.path().join("aux_trigger_collision_live.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    ex.execute("CREATE TABLE log(msg TEXT)").unwrap();
+    ex.execute("CREATE TABLE aux.t(x INTEGER)").unwrap();
+    ex.execute("CREATE TABLE aux.log(msg TEXT)").unwrap();
+    ex.execute(
+        "CREATE TRIGGER aux.tr1 AFTER INSERT ON t \
+         BEGIN INSERT INTO log VALUES ('fired'); END",
+    )
+    .unwrap();
+    ex.execute("INSERT INTO aux.t VALUES (5)").unwrap();
+
+    let main_log = ex.execute("SELECT msg FROM main.log").unwrap();
+    let aux_log = ex.execute("SELECT msg FROM aux.log").unwrap();
+
+    assert!(
+        main_log.rows.is_empty(),
+        "#6477: main.log must stay empty in a single live session (no save/reload) — the \
+         trigger body's unqualified `log` must not bind to a same-named table in main"
+    );
+    assert_eq!(
+        aux_log.rows,
+        vec![vec![Some("fired".to_string())]],
+        "#6477: the attachment's own log must receive the row in a single live session — the \
+         trigger body's unqualified `log` must bind within its own (aux) schema"
+    );
 }
 
 #[test]

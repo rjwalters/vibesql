@@ -233,6 +233,16 @@ impl Database {
         // For unqualified names, check session's temp schema first (SQLite semantics)
         // Temp tables shadow tables in the main schema
         if !name.contains('.') {
+            // If unqualified resolution is restricted to a single schema
+            // (trigger-body execution, #6477), look up ONLY there — mirrors
+            // `Catalog::get_table`'s restriction so a trigger's DML physically
+            // writes to the same table its body's name resolution found,
+            // instead of falling back to `main`/temp/other attachments below.
+            if let Some(restrict_schema) = self.catalog.unqualified_resolution_restricted_to() {
+                let restricted_qualified = format!("{}.{}", restrict_schema, lowercase_name);
+                return self.tables.get(&restricted_qualified);
+            }
+
             // Check session's temp schema first
             let temp_qualified = format!("{}.{}", self.catalog.temp_schema_name(), lowercase_name);
             if let Some(table) = self.tables.get(&temp_qualified) {
@@ -320,6 +330,16 @@ impl Database {
         // For unqualified names, check session's temp schema first (SQLite semantics)
         // Temp tables shadow tables in the main schema
         if !name.contains('.') {
+            // If unqualified resolution is restricted to a single schema
+            // (trigger-body execution, #6477), look up ONLY there — see the
+            // matching restriction in `Self::get_table`.
+            if let Some(restrict_schema) =
+                self.catalog.unqualified_resolution_restricted_to().map(|s| s.to_string())
+            {
+                let restricted_qualified = format!("{}.{}", restrict_schema, lowercase_name);
+                return self.tables.get_mut(&restricted_qualified);
+            }
+
             // Check session's temp schema first
             let temp_qualified = format!("{}.{}", self.catalog.temp_schema_name(), lowercase_name);
             if self.tables.contains_key(&temp_qualified) {
