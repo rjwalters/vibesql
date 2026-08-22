@@ -145,8 +145,9 @@ impl PredicatePattern {
 
             // Pattern: column op date_literal
             if let Expression::ColumnRef(col_id) = left.as_ref() {
-                // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
-                // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+                // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER
+                // JOINs, we must NOT use specialized evaluators because they bypass
+                // COALESCE semantics.
                 if col_id.table_canonical().is_none() {
                     if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
                         return None; // Fall back to general evaluator with COALESCE support
@@ -162,8 +163,9 @@ impl PredicatePattern {
             // Pattern: date_literal op column (need to reverse operator)
             if let Expression::Literal(SqlValue::Date(date)) = left.as_ref() {
                 if let Expression::ColumnRef(col_id) = right.as_ref() {
-                    // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER JOINs,
-                    // we must NOT use specialized evaluators because they bypass COALESCE semantics.
+                    // Issue #4890: For unqualified references to USING columns in FULL/RIGHT OUTER
+                    // JOINs, we must NOT use specialized evaluators because
+                    // they bypass COALESCE semantics.
                     if col_id.table_canonical().is_none() {
                         if schema.get_using_coalesce_pair(col_id.column_canonical()).is_some() {
                             return None; // Fall back to general evaluator with COALESCE support

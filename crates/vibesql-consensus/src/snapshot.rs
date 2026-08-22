@@ -5,14 +5,13 @@
 //! Three concerns live here, all consumed by the state machine in
 //! `openraft_backend.rs`:
 //!
-//! 1. **Payload codec** ([`encode_payload`] / [`decode_payload`]): the byte
-//!    encoding of the state machine's applied state inside a snapshot.
-//! 2. **Durable persistence** ([`SnapshotStore`]): snapshot blobs written to
-//!    the data directory with tmp/rename atomicity, recovered on restart,
-//!    and rejected **loudly** when corrupt.
-//! 3. **GC interlock** ([`SnapshotHorizonPin`]): the hook through which an
-//!    in-progress snapshot build pins the MVCC vacuum horizon, plus the
-//!    no-op implementation for the current echo state machine.
+//! 1. **Payload codec** ([`encode_payload`] / [`decode_payload`]): the byte encoding of the state
+//!    machine's applied state inside a snapshot.
+//! 2. **Durable persistence** ([`SnapshotStore`]): snapshot blobs written to the data directory
+//!    with tmp/rename atomicity, recovered on restart, and rejected **loudly** when corrupt.
+//! 3. **GC interlock** ([`SnapshotHorizonPin`]): the hook through which an in-progress snapshot
+//!    build pins the MVCC vacuum horizon, plus the no-op implementation for the current echo state
+//!    machine.
 //!
 //! ## File format
 //!
@@ -63,12 +62,16 @@
 //!
 //! [`OpenraftBackend`]: crate::OpenraftBackend
 
-use std::fmt::Debug;
-use std::fs::File;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::{
+    fmt::Debug,
+    fs::File,
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use openraft::{BasicNode, SnapshotMeta};
 
@@ -122,16 +125,13 @@ pub(crate) fn decode_payload(data: &[u8]) -> serde_json::Result<Vec<Vec<u8>>> {
 ///
 /// Two implementations exist:
 ///
-/// - [`NoopHorizonPin`] for the generic echo state machine (nothing to
-///   hold back: its state is an in-memory `Vec` read under the
-///   state-machine mutex).
-/// - `MvccHorizonPin` (`crate::state_machine`, Phase B1 of #5199): the
-///   real thing, registering the build alongside the active-transaction
-///   holdback in `vibesql-storage::database::transaction_api` via
-///   `Database::pin_gc_horizon` — while held, `compute_gc_horizon` (and
-///   therefore `vacuum_mvcc`) cannot advance past the build's view (see
-///   `vacuum_mvcc_held_back_by_gc_horizon_pin` in the storage crate's
-///   vacuum tests).
+/// - [`NoopHorizonPin`] for the generic echo state machine (nothing to hold back: its state is an
+///   in-memory `Vec` read under the state-machine mutex).
+/// - `MvccHorizonPin` (`crate::state_machine`, Phase B1 of #5199): the real thing, registering the
+///   build alongside the active-transaction holdback in
+///   `vibesql-storage::database::transaction_api` via `Database::pin_gc_horizon` — while held,
+///   `compute_gc_horizon` (and therefore `vacuum_mvcc`) cannot advance past the build's view (see
+///   `vacuum_mvcc_held_back_by_gc_horizon_pin` in the storage crate's vacuum tests).
 ///
 /// [`RaftSnapshotBuilder::build_snapshot`]: openraft::RaftSnapshotBuilder::build_snapshot
 pub(crate) trait SnapshotHorizonPin: Send + Sync + Debug {

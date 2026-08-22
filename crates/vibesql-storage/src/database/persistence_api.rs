@@ -6,8 +6,10 @@
 // Database struct. Enables durable storage through async persistence.
 
 use super::Database;
-use crate::wal::{PersistenceEngine, WalOp};
-use crate::StorageError;
+use crate::{
+    wal::{PersistenceEngine, WalOp},
+    StorageError,
+};
 
 impl Database {
     // ============================================================================

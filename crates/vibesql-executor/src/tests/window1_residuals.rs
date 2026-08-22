@@ -4,10 +4,9 @@
 //! - 61.1-A: `CAST(x AS )` (empty type name) gets NUMERIC affinity
 //! - 61.1-B: bitwise operators coerce text operands SQLite-style
 //! - 61.1-B: window sum/total/avg coerce text arguments instead of skipping
-//! - 61.1-B: nested correlated references bind to the nearest enclosing
-//!   scope (merged outer schema/row alignment)
-//! - 71.0: outer-correlated aggregate misuse detected in UNION arms of a
-//!   scalar subquery
+//! - 61.1-B: nested correlated references bind to the nearest enclosing scope (merged outer
+//!   schema/row alignment)
+//! - 71.0: outer-correlated aggregate misuse detected in UNION arms of a scalar subquery
 
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;

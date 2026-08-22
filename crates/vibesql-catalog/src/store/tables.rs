@@ -226,9 +226,10 @@ impl super::Catalog {
                 schema.get_table_by_identifier(&table_id)
             })
         } else {
-            // For unqualified identifiers, check session-specific temp schema first (SQLite semantics)
-            // Temp tables shadow tables in the main schema — unless shadowing is
-            // suppressed for a non-temp trigger body (see `suppress_temp_shadowing`).
+            // For unqualified identifiers, check session-specific temp schema first (SQLite
+            // semantics) Temp tables shadow tables in the main schema — unless
+            // shadowing is suppressed for a non-temp trigger body (see
+            // `suppress_temp_shadowing`).
             if !self.suppress_temp_shadowing {
                 if let Some(temp_schema) = self.schemas.get(&self.temp_schema_name) {
                     if let Some(table) = temp_schema.get_table_by_identifier(identifier) {

@@ -21,17 +21,14 @@
 //!
 //! ## Scope (conservative)
 //!
-//! - Only fires when the outer FROM clause is a single derived table or a
-//!   single view reference (no joins). With multiple FROM sources an
-//!   unqualified column reference might bind to a sibling table, so pushing
-//!   by name alone would be unsound. Multi-source push-down is follow-on
-//!   work.
-//! - The pushed conjuncts are *copied* into the inner WHERE clause; the
-//!   outer WHERE clause is left untouched. The outer evaluation is redundant
-//!   but harmless for the deterministic predicates this pass accepts, and it
-//!   keeps the transform trivially value-preserving.
-//! - The inner query must be a plain SELECT: no set operation, VALUES,
-//!   GROUP BY, HAVING, DISTINCT, LIMIT or OFFSET.
+//! - Only fires when the outer FROM clause is a single derived table or a single view reference (no
+//!   joins). With multiple FROM sources an unqualified column reference might bind to a sibling
+//!   table, so pushing by name alone would be unsound. Multi-source push-down is follow-on work.
+//! - The pushed conjuncts are *copied* into the inner WHERE clause; the outer WHERE clause is left
+//!   untouched. The outer evaluation is redundant but harmless for the deterministic predicates
+//!   this pass accepts, and it keeps the transform trivially value-preserving.
+//! - The inner query must be a plain SELECT: no set operation, VALUES, GROUP BY, HAVING, DISTINCT,
+//!   LIMIT or OFFSET.
 //!
 //! Note: EXPLAIN QUERY PLAN does not yet model this rewrite (views are
 //! rendered opaquely by `explain.rs`), so windowpushd.test EQP patterns

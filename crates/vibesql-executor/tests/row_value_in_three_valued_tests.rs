@@ -2,11 +2,11 @@
 //!
 //! Row-value IN/NOT IN must follow SQL three-valued logic:
 //!
-//! - Per candidate row, the element-wise comparison is TRUE only if all
-//!   pairs are non-NULL and equal; FALSE if ANY pair is non-NULL and
-//!   unequal (three-valued AND short-circuits on FALSE); UNKNOWN otherwise.
-//! - IN is then a three-valued OR over rows: TRUE if any row is TRUE;
-//!   UNKNOWN if no row is TRUE but some row is UNKNOWN; FALSE otherwise.
+//! - Per candidate row, the element-wise comparison is TRUE only if all pairs are non-NULL and
+//!   equal; FALSE if ANY pair is non-NULL and unequal (three-valued AND short-circuits on FALSE);
+//!   UNKNOWN otherwise.
+//! - IN is then a three-valued OR over rows: TRUE if any row is TRUE; UNKNOWN if no row is TRUE but
+//!   some row is UNKNOWN; FALSE otherwise.
 //!
 //! PR #5265 fixed this in the combined evaluator (table-backed queries),
 //! but FROM-less constant queries route through the simple

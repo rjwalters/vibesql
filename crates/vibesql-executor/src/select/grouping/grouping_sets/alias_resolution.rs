@@ -748,8 +748,9 @@ fn resolve_having_aliases_with_values_inner(
     }
 }
 
-/// Resolve outer alias and expression references in a subquery by replacing them with literal values.
-/// This enables correlated subqueries to access outer SELECT aliases and aggregate expressions.
+/// Resolve outer alias and expression references in a subquery by replacing them with literal
+/// values. This enables correlated subqueries to access outer SELECT aliases and aggregate
+/// expressions.
 fn resolve_outer_aliases_in_subquery(
     subquery: &vibesql_ast::SelectStmt,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
@@ -785,9 +786,9 @@ fn resolve_outer_aliases_in_subquery(
     }
 }
 
-/// Replace unqualified column references and aggregate expressions that match outer values with literals.
-/// This is the core transformation that makes outer SELECT aliases and aggregate expressions
-/// accessible in subqueries (issue #4676, #4731).
+/// Replace unqualified column references and aggregate expressions that match outer values with
+/// literals. This is the core transformation that makes outer SELECT aliases and aggregate
+/// expressions accessible in subqueries (issue #4676, #4731).
 fn resolve_outer_alias_refs_to_literals(
     expr: &Expression,
     alias_values: &std::collections::HashMap<String, vibesql_types::SqlValue>,
@@ -840,7 +841,8 @@ fn resolve_outer_alias_refs_to_literals(
         }
 
         // Check if this aggregate function matches an outer aggregate expression (issue #4731)
-        // This handles cases like: HAVING avg(a.y) > avg(b.y) where avg(a.y) refers to outer aggregate
+        // This handles cases like: HAVING avg(a.y) > avg(b.y) where avg(a.y) refers to outer
+        // aggregate
         Expression::AggregateFunction { name, distinct, args, order_by, filter } => {
             // First check if this entire aggregate matches an outer aggregate expression
             for (outer_expr, value) in expr_values {

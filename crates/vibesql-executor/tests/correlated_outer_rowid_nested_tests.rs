@@ -7,14 +7,14 @@
 //! the reference bound to NULL, so the whole query returned no rows.
 //!
 //! Two gaps were closed:
-//!   1. `resolve_outer_rowid` now walks the full `outer_schema` chain (not just
-//!      the immediate parent), reaching an ancestor scope several levels up.
-//!   2. `build_merged_outer_row` now preserves each enclosing scope's tracked
-//!      rowid in a table-keyed `row_ids` map (it previously dropped them via
-//!      `Row::new`), so `d1.rowid` resolves against the correct outer row.
-//!   3. The prepare-time validators (`validation/column_refs.rs` and
-//!      `nonagg/validation.rs`) walk the `outer_schema` chain so a qualified
-//!      `d1.rowid` several levels below `d1` is not rejected as unknown.
+//!   1. `resolve_outer_rowid` now walks the full `outer_schema` chain (not just the immediate
+//!      parent), reaching an ancestor scope several levels up.
+//!   2. `build_merged_outer_row` now preserves each enclosing scope's tracked rowid in a
+//!      table-keyed `row_ids` map (it previously dropped them via `Row::new`), so `d1.rowid`
+//!      resolves against the correct outer row.
+//!   3. The prepare-time validators (`validation/column_refs.rs` and `nonagg/validation.rs`) walk
+//!      the `outer_schema` chain so a qualified `d1.rowid` several levels below `d1` is not
+//!      rejected as unknown.
 //!
 //! Expected values verified against sqlite3 3.51.0.
 

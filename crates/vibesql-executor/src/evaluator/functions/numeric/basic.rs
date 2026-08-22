@@ -4,8 +4,7 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::coerce_to_number;
+use crate::{errors::ExecutorError, evaluator::functions::coercion::coerce_to_number};
 
 /// ABS(x) - Absolute value
 /// SQL:1999 Section 6.27: Numeric value functions

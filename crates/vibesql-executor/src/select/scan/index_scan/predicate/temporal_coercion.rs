@@ -7,26 +7,24 @@
 //! plain `TIMESTAMP` column index) and the WHERE clause supplies *string*
 //! bounds, raw probes are wrong in both directions:
 //!
-//! - equality / upper-bounded probes return 0 rows (silent row loss), because
-//!   every temporal key sorts *above* every string key;
-//! - lower-bounded probes return every temporal key (over-return), which
-//!   surfaces as wrong rows whenever the planner decides the WHERE clause is
-//!   fully satisfied by the index and skips the residual filter.
+//! - equality / upper-bounded probes return 0 rows (silent row loss), because every temporal key
+//!   sorts *above* every string key;
+//! - lower-bounded probes return every temporal key (over-return), which surfaces as wrong rows
+//!   whenever the planner decides the WHERE clause is fully satisfied by the index and skips the
+//!   residual filter.
 //!
 //! The fix is to coerce string probe bounds into the stored temporal key type
 //! *before* probing, mirroring the executor's comparison semantics exactly
 //! (see `crate::evaluator::operators::comparison`, established by #5329):
 //!
-//! - `Date` vs string: parse-first via `Date::from_str`; unparseable strings
-//!   raise a type mismatch in the executor, so we *decline* the probe and let
-//!   the fallback path surface the identical error.
-//! - `Timestamp` / `Time` vs string: the executor compares the TEXT
-//!   *renderings* lexicographically (SQLite's `datetime()` returns TEXT). For
-//!   strings that round-trip through parse → Display the coerced bound is
-//!   exactly equivalent. For date-only strings (`'2017-07-04'` against
-//!   `Timestamp` keys) the rendering of any timestamp on that date is a
-//!   longer string with the bound as prefix, so it compares strictly
-//!   *greater* than the bound. That makes the text-true set:
+//! - `Date` vs string: parse-first via `Date::from_str`; unparseable strings raise a type mismatch
+//!   in the executor, so we *decline* the probe and let the fallback path surface the identical
+//!   error.
+//! - `Timestamp` / `Time` vs string: the executor compares the TEXT *renderings* lexicographically
+//!   (SQLite's `datetime()` returns TEXT). For strings that round-trip through parse → Display the
+//!   coerced bound is exactly equivalent. For date-only strings (`'2017-07-04'` against `Timestamp`
+//!   keys) the rendering of any timestamp on that date is a longer string with the bound as prefix,
+//!   so it compares strictly *greater* than the bound. That makes the text-true set:
 //!   - `>= s` and `> s`  ⇔  `key >= parse(s)` (midnight included in both),
 //!   - `<= s` and `< s`  ⇔  `key <  parse(s)` (midnight excluded from both),
 //!   - `= s`             ⇔  empty (no rendering equals a date-only string),
@@ -165,14 +163,12 @@ fn coerce_string_bound(
 
 /// Shared TEXT-rendering coercion for `Timestamp` / `Time` keys.
 ///
-/// * exact round-trip (`render(parse(s)) == s`): the coerced bound is
-///   equivalent under all operators — keep the original inclusivity.
-/// * strict rendering prefix (`render(parse(s))` starts with `s`, e.g. a
-///   date-only string against `Timestamp` keys): every key `>= parse(s)`
-///   renders strictly greater than `s` and every key `< parse(s)` renders
-///   strictly less, with no key rendering equal — so lower bounds become
-///   inclusive and upper bounds exclusive regardless of the original
-///   operator's inclusivity.
+/// * exact round-trip (`render(parse(s)) == s`): the coerced bound is equivalent under all
+///   operators — keep the original inclusivity.
+/// * strict rendering prefix (`render(parse(s))` starts with `s`, e.g. a date-only string against
+///   `Timestamp` keys): every key `>= parse(s)` renders strictly greater than `s` and every key `<
+///   parse(s)` renders strictly less, with no key rendering equal — so lower bounds become
+///   inclusive and upper bounds exclusive regardless of the original operator's inclusivity.
 /// * anything else: no faithful interval exists — decline.
 fn coerce_rendered(
     rendered: String,
@@ -336,8 +332,7 @@ fn coerce_equality_key_for_sample_type(
 
 #[cfg(test)]
 mod tests {
-    use super::super::RangePredicate;
-    use super::*;
+    use super::{super::RangePredicate, *};
 
     fn varchar(s: &str) -> SqlValue {
         SqlValue::Varchar(arcstr::ArcStr::from(s))

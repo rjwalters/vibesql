@@ -92,11 +92,7 @@ fn before_insert_trigger_into_same_autoincrement_table_yields_unique_rowids() {
     // table ever held (not the stale pre-trigger value).
     let seq = query(&db, "SELECT seq FROM sqlite_sequence WHERE name='t'");
     let max_rowid = *rowids.iter().max().unwrap();
-    assert_eq!(
-        ints(&seq, 0),
-        vec![max_rowid],
-        "sqlite_sequence.seq must track the true max rowid"
-    );
+    assert_eq!(ints(&seq, 0), vec![max_rowid], "sqlite_sequence.seq must track the true max rowid");
 }
 
 /// The exact autoinc-3928.1/.2 shape: mutually-recursive BEFORE and AFTER

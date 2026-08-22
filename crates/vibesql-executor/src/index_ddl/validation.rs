@@ -30,17 +30,14 @@ pub struct ValidationResult {
 /// Resolve the schema a CREATE INDEX statement's new index (and its target
 /// table) belongs to, WITHOUT validating that the schema actually exists.
 ///
-/// - When `stmt.schema` is present (`CREATE INDEX schema.i1 ON t(x)`), SQLite
-///   qualifies the *index* name with the schema, not the table name — the
-///   target table is then resolved within that exact schema, with no
-///   temp-shadows-main search. `temp` maps to this session's temp schema
-///   (`CREATE INDEX temp.i1` behaves like `CREATE INDEX i1` on a table
-///   already known to live in temp). See issue #6366.
-/// - Otherwise, `stmt.table_name` may still itself carry a legacy embedded
-///   `schema.table` spelling from the pre-#6366 (non-parser) construction
-///   path some direct-executor tests use.
-/// - With neither, fall back to the pre-existing unqualified resolution
-///   (temp shadows main).
+/// - When `stmt.schema` is present (`CREATE INDEX schema.i1 ON t(x)`), SQLite qualifies the *index*
+///   name with the schema, not the table name — the target table is then resolved within that exact
+///   schema, with no temp-shadows-main search. `temp` maps to this session's temp schema (`CREATE
+///   INDEX temp.i1` behaves like `CREATE INDEX i1` on a table already known to live in temp). See
+///   issue #6366.
+/// - Otherwise, `stmt.table_name` may still itself carry a legacy embedded `schema.table` spelling
+///   from the pre-#6366 (non-parser) construction path some direct-executor tests use.
+/// - With neither, fall back to the pre-existing unqualified resolution (temp shadows main).
 ///
 /// Callers that must reject an unrecognized `stmt.schema` qualifier with
 /// SQLite's `unknown database <name>` wording do so themselves — this helper

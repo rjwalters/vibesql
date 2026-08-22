@@ -3,9 +3,8 @@
 //! SQLite has no boolean storage class, so a WHERE (or JOIN ON) predicate that
 //! evaluates to a non-boolean scalar is coerced to a truth value:
 //! - numbers: zero is falsy, non-zero is truthy
-//! - text/BLOB: the leading-numeric prefix is parsed (bytes read as text for
-//!   BLOBs); non-zero prefix is truthy, otherwise falsy. `'first'` → 0 (falsy),
-//!   `'1first'` → 1 (truthy).
+//! - text/BLOB: the leading-numeric prefix is parsed (bytes read as text for BLOBs); non-zero
+//!   prefix is truthy, otherwise falsy. `'first'` → 0 (falsy), `'1first'` → 1 (truthy).
 //!
 //! Before #5830, VibeSQL raised "Filter expression must evaluate to boolean"
 //! for string/blob WHERE values on the FROM-table paths, and the no-FROM path

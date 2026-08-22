@@ -4,8 +4,10 @@ use vibesql_catalog::{ColumnSchema, TableSchema};
 use vibesql_types::{DataType, SqlValue};
 
 use super::*;
-use crate::statistics::{ColumnStatistics, TableStatistics};
-use crate::Row;
+use crate::{
+    statistics::{ColumnStatistics, TableStatistics},
+    Row,
+};
 
 fn create_test_table_stats(row_count: usize) -> TableStatistics {
     let schema = TableSchema::new(

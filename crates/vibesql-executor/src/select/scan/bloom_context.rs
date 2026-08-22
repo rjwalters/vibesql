@@ -7,19 +7,21 @@
 //! # Architecture
 //!
 //! During multi-way join execution:
-//! 1. After each join completes, we extract the values of the join key column
-//!    that will be used to connect to the next table
+//! 1. After each join completes, we extract the values of the join key column that will be used to
+//!    connect to the next table
 //! 2. We build a Bloom filter from those values
-//! 3. When scanning the next table, we check each row against the Bloom filter
-//!    BEFORE including it in the result
+//! 3. When scanning the next table, we check each row against the Bloom filter BEFORE including it
+//!    in the result
 //!
 //! This is more efficient than post-scan filtering because:
 //! - We never allocate memory for rows that won't match
 //! - We avoid cloning rows that will be discarded
 //! - The Bloom filter check is O(1) per row with excellent cache behavior
 
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
 use vibesql_types::SqlValue;
 
@@ -172,8 +174,9 @@ fn extract_column_table_and_name(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_storage::Row;
+
+    use super::*;
 
     #[test]
     fn test_build_bloom_filter_from_rows() {

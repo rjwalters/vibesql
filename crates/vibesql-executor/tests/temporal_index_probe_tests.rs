@@ -8,9 +8,8 @@
 //! fix:
 //!
 //! - equality / BETWEEN / `<` / `<=` probes silently returned 0 rows, and
-//! - `>` / `>=` probes over-returned (every temporal key sorts above every
-//!   string), returning rows below the bound whenever the planner skipped the
-//!   residual WHERE filter.
+//! - `>` / `>=` probes over-returned (every temporal key sorts above every string), returning rows
+//!   below the bound whenever the planner skipped the residual WHERE filter.
 //!
 //! The fix coerces string probe bounds to the stored temporal key type at
 //! probe time, mirroring the executor comparison semantics from #5329:

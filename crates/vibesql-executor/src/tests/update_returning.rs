@@ -1,12 +1,12 @@
 //! Regression tests for issue #5233 (window1.test 73.2/73.4):
 //!
-//! - INSTEAD OF UPDATE view WHERE truthiness: comparison expressions return
-//!   SQLite-style `Integer(1)`, which previously failed the Boolean-only
-//!   match arm and fired the trigger 0 times.
-//! - UPDATE ... FROM on a view fires the INSTEAD OF trigger once per join
-//!   match (SQLite semantics) — the previous per-view-row dedup is gone.
-//! - UPDATE ... RETURNING returns the NEW rows (after SET assignments), for
-//!   base tables and for views routed through INSTEAD OF UPDATE triggers.
+//! - INSTEAD OF UPDATE view WHERE truthiness: comparison expressions return SQLite-style
+//!   `Integer(1)`, which previously failed the Boolean-only match arm and fired the trigger 0
+//!   times.
+//! - UPDATE ... FROM on a view fires the INSTEAD OF trigger once per join match (SQLite semantics)
+//!   — the previous per-view-row dedup is gone.
+//! - UPDATE ... RETURNING returns the NEW rows (after SET assignments), for base tables and for
+//!   views routed through INSTEAD OF UPDATE triggers.
 
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;

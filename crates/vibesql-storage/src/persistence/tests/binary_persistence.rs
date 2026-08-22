@@ -3,8 +3,8 @@
 // ============================================================================
 //
 // Tests for binary format serialization/deserialization, including:
-// - TableIdentifier quoted flag persistence (preserved for display/echo;
-//   canonical names are ASCII case-folded per SQLite — issue #5553)
+// - TableIdentifier quoted flag persistence (preserved for display/echo; canonical names are ASCII
+//   case-folded per SQLite — issue #5553)
 // - Backward compatibility with older format versions
 // - MVCC version field round-trip and v6 → v7 read compatibility (#5136 Phase 1a)
 
@@ -152,7 +152,9 @@ fn test_binary_roundtrip_preserves_creation_seq() {
     let objects = ["alpha", "beta", "idx_alpha", "gamma", "idx_beta"];
     let original: Vec<u64> = objects
         .iter()
-        .map(|n| db.catalog.creation_seq(main, n).expect("each object must record a creation ordinal"))
+        .map(|n| {
+            db.catalog.creation_seq(main, n).expect("each object must record a creation ordinal")
+        })
         .collect();
     assert!(
         original.windows(2).all(|w| w[0] < w[1]),
@@ -542,8 +544,8 @@ fn test_default_rows_carry_pre_mvcc_sentinel() {
 /// Constructs a synthetic v6-formatted byte sequence in memory by calling
 /// the current writers and then patching:
 ///   1. the header `VERSION` byte at offset 5 from `7` back to `6`, and
-///   2. stripping the per-row MVCC prefix (9 bytes: `xmin: u64` + `xmax_tag = 0`)
-///      from the data section.
+///   2. stripping the per-row MVCC prefix (9 bytes: `xmin: u64` + `xmax_tag = 0`) from the data
+///      section.
 ///
 /// We then feed the bytes through `Database::load_binary` (which compresses
 /// is bypassed because we use uncompressed `save_binary`). The expectation is
@@ -554,8 +556,8 @@ fn test_default_rows_carry_pre_mvcc_sentinel() {
 fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
     use crate::row::PRE_MVCC_TXN_ID;
 
-    // 1) Build a v7 database with default-sentinel rows. We pick rows whose
-    //    encoded-on-disk size is easy to predict so we can strip the prefix.
+    // 1) Build a v7 database with default-sentinel rows. We pick rows whose encoded-on-disk size is
+    //    easy to predict so we can strip the prefix.
     let mut db = Database::new();
     let schema = TableSchema::new(
         "v6compat".to_string(),
@@ -629,11 +631,10 @@ fn test_v6_to_v7_read_compatibility_via_synthesized_v6_file() {
         let _ = v7_bytes; // silence unused warning if logic above changes
     }
 
-    // 4) Decode the synthetic file directly, reading the catalog at the current
-    //    version (it was written by the latest writer) and the data section at
-    //    v6 (the layout we synthesized: no per-row MVCC prefix). This mirrors
-    //    what `Database::load_binary` does, except it lets us mix the catalog
-    //    and data versions — necessary because the single header version byte
+    // 4) Decode the synthetic file directly, reading the catalog at the current version (it was
+    //    written by the latest writer) and the data section at v6 (the layout we synthesized: no
+    //    per-row MVCC prefix). This mirrors what `Database::load_binary` does, except it lets us
+    //    mix the catalog and data versions — necessary because the single header version byte
     //    cannot express "latest catalog + v6 data".
     let mut reader = &v6_bytes[..];
     let header_version = crate::persistence::binary::read_header(&mut reader).unwrap();

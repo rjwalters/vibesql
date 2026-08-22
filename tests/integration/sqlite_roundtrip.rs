@@ -44,10 +44,8 @@ fn test_import_preserves_null() {
 
     let users = result.database.get_table("USERS").unwrap();
     let rows: Vec<vibesql_storage::Row> = users.scan_live().map(|(_, r)| r.clone()).collect();
-    let bob = rows
-        .iter()
-        .find(|r: &&vibesql_storage::Row| r.values[0] == SqlValue::Integer(2))
-        .unwrap();
+    let bob =
+        rows.iter().find(|r: &&vibesql_storage::Row| r.values[0] == SqlValue::Integer(2)).unwrap();
     assert_eq!(bob.values[2], SqlValue::Null);
 }
 
@@ -83,8 +81,7 @@ fn test_import_blob() {
     let conn = Connection::open(&path).unwrap();
     conn.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE bin (id INTEGER, data BLOB);")
         .unwrap();
-    conn.execute("INSERT INTO bin VALUES (1, X'DEADBEEF');", [])
-        .unwrap();
+    conn.execute("INSERT INTO bin VALUES (1, X'DEADBEEF');", []).unwrap();
     conn.close().unwrap();
 
     let result = vibesql_cli::sqlite_io::import_sqlite(&path).unwrap();
@@ -138,19 +135,15 @@ fn test_export_tables_and_data() {
     vibesql_cli::sqlite_io::export_sqlite(&import_result.database, &out_path).unwrap();
 
     let conn = Connection::open(&out_path).unwrap();
-    let user_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
-        .unwrap();
+    let user_count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap();
     assert_eq!(user_count, 3);
 
-    let alice_email: String = conn
-        .query_row("SELECT email FROM users WHERE id = 1", [], |r| r.get(0))
-        .unwrap();
+    let alice_email: String =
+        conn.query_row("SELECT email FROM users WHERE id = 1", [], |r| r.get(0)).unwrap();
     assert_eq!(alice_email, "alice@example.com");
 
-    let bob_email: Option<String> = conn
-        .query_row("SELECT email FROM users WHERE id = 2", [], |r| r.get(0))
-        .unwrap();
+    let bob_email: Option<String> =
+        conn.query_row("SELECT email FROM users WHERE id = 2", [], |r| r.get(0)).unwrap();
     assert_eq!(bob_email, None);
 }
 
@@ -164,9 +157,8 @@ fn test_export_preserves_floats() {
     vibesql_cli::sqlite_io::export_sqlite(&import_result.database, &out_path).unwrap();
 
     let conn = Connection::open(&out_path).unwrap();
-    let amount: f64 = conn
-        .query_row("SELECT amount FROM orders WHERE id = 1", [], |r| r.get(0))
-        .unwrap();
+    let amount: f64 =
+        conn.query_row("SELECT amount FROM orders WHERE id = 1", [], |r| r.get(0)).unwrap();
     assert!((amount - 99.99).abs() < f64::EPSILON);
 }
 
@@ -253,18 +245,15 @@ fn test_roundtrip_special_characters() {
     vibesql_cli::sqlite_io::export_sqlite(&import_result.database, &out_path).unwrap();
 
     let conn = Connection::open(&out_path).unwrap();
-    let val: String = conn
-        .query_row("SELECT val FROM strings WHERE id = 2", [], |r| r.get(0))
-        .unwrap();
+    let val: String =
+        conn.query_row("SELECT val FROM strings WHERE id = 2", [], |r| r.get(0)).unwrap();
     assert_eq!(val, "it's a test");
 
-    let empty: String = conn
-        .query_row("SELECT val FROM strings WHERE id = 3", [], |r| r.get(0))
-        .unwrap();
+    let empty: String =
+        conn.query_row("SELECT val FROM strings WHERE id = 3", [], |r| r.get(0)).unwrap();
     assert_eq!(empty, "");
 
-    let null: Option<String> = conn
-        .query_row("SELECT val FROM strings WHERE id = 4", [], |r| r.get(0))
-        .unwrap();
+    let null: Option<String> =
+        conn.query_row("SELECT val FROM strings WHERE id = 4", [], |r| r.get(0)).unwrap();
     assert_eq!(null, None);
 }

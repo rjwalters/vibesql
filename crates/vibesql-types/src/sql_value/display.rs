@@ -71,11 +71,10 @@ fn format_with_significant_digits(n: f64, sig_digits: usize) -> String {
 /// Format scientific notation like SQLite: 1.0e+15, 1.0e-05
 /// - Lowercase 'e'
 /// - Explicit + or - sign for exponent
-/// - Minimum two-digit exponent (padded with leading zero if needed; wider for
-///   large magnitudes, e.g. e+100, e+308)
-/// - Strip trailing zeros from the mantissa but ALWAYS keep at least one
-///   fractional digit, so a whole mantissa renders "1.0e+20" (not "1e+20"),
-///   matching sqlite3's %!.15g output.
+/// - Minimum two-digit exponent (padded with leading zero if needed; wider for large magnitudes,
+///   e.g. e+100, e+308)
+/// - Strip trailing zeros from the mantissa but ALWAYS keep at least one fractional digit, so a
+///   whole mantissa renders "1.0e+20" (not "1e+20"), matching sqlite3's %!.15g output.
 fn format_scientific_sqlite(s: &str) -> String {
     // Input format from Rust: "1.50000000000000e10" or "1.5e-5"
     // Output format for SQLite: "1.5e+10" or "1.5e-05"
@@ -263,7 +262,7 @@ mod tests {
         assert_eq!(format_f64(1e15), "1.0e+15"); // scientific
         assert_eq!(format_f64(0.0001), "0.0001"); // fixed
         assert_eq!(format_f64(0.00001), "1.0e-05"); // scientific
-        // Zero is never scientific.
+                                                    // Zero is never scientific.
         assert_eq!(format_f64(0.0), "0.0");
     }
 

@@ -37,8 +37,9 @@ pub use column_pruning::{
 pub use distinct_elimination::can_eliminate_distinct;
 pub use expressions::*;
 pub use predicate_plan::PredicatePlan;
-pub use subquery_rewrite::rewrite_subquery_optimizations;
-pub use subquery_rewrite::scalar_decorrelation::apply_scalar_decorrelation;
+pub use subquery_rewrite::{
+    rewrite_subquery_optimizations, scalar_decorrelation::apply_scalar_decorrelation,
+};
 pub use subquery_to_join::transform_subqueries_to_joins;
 pub use table_elimination::eliminate_unused_tables;
 pub use where_pushdown::combine_with_and;

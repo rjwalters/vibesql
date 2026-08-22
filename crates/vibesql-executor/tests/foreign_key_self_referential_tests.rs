@@ -6,17 +6,14 @@
 //! being deleted takes its own self-reference with it. Three behaviours
 //! follow, all previously wrong:
 //!
-//! 1. `UPDATE self SET a=?, b=?` that moves both the parent key and the
-//!    self-reference in lock-step must succeed (self-rescue).
-//! 2. `UPDATE self SET a=?` (or `SET b=?`) that breaks the self-reference
-//!    must fail — the stale OLD key still sitting in the table must not
-//!    rescue it (old-row exclusion).
+//! 1. `UPDATE self SET a=?, b=?` that moves both the parent key and the self-reference in lock-step
+//!    must succeed (self-rescue).
+//! 2. `UPDATE self SET a=?` (or `SET b=?`) that breaks the self-reference must fail — the stale OLD
+//!    key still sitting in the table must not rescue it (old-row exclusion).
 //! 3. `DELETE FROM self` of a row that references itself must succeed.
 
 use vibesql_ast::Statement;
-use vibesql_executor::{
-    CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor,
-};
+use vibesql_executor::{CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 

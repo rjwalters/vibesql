@@ -18,11 +18,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[allow(unused_imports)]
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
-#[cfg(target_arch = "wasm32")]
-use std::sync::RwLock;
 
 pub use super::operations::SpatialIndexMetadata as ExportedSpatialIndexMetadata;
 use super::{
@@ -42,16 +42,13 @@ use crate::{
 ///
 /// - **Transaction management**: `begin_transaction()`, `commit_transaction()`,
 ///   `rollback_transaction()`, `create_savepoint()`, `rollback_to_savepoint()`
-/// - **Table operations**: `create_table()`, `drop_table()`, `get_table()`,
-///   `insert_row()`, `insert_rows_batch()`, `update_row_by_pk()`
-/// - **Point lookups**: `get_row_by_pk()`, `get_column_by_pk()`,
-///   `get_row_by_composite_pk()`
-/// - **Change events**: `enable_change_events()`, `subscribe_changes()`,
-///   `notify_update()`, `notify_deletes()`
-/// - **Persistence**: `enable_persistence()`, `sync_persistence()`,
-///   `last_insert_rowid()`
-/// - **Caching**: `get_columnar()`, `invalidate_columnar_cache()`,
-///   `columnar_cache_stats()`
+/// - **Table operations**: `create_table()`, `drop_table()`, `get_table()`, `insert_row()`,
+///   `insert_rows_batch()`, `update_row_by_pk()`
+/// - **Point lookups**: `get_row_by_pk()`, `get_column_by_pk()`, `get_row_by_composite_pk()`
+/// - **Change events**: `enable_change_events()`, `subscribe_changes()`, `notify_update()`,
+///   `notify_deletes()`
+/// - **Persistence**: `enable_persistence()`, `sync_persistence()`, `last_insert_rowid()`
+/// - **Caching**: `get_columnar()`, `invalidate_columnar_cache()`, `columnar_cache_stats()`
 /// - **Session**: `set_sql_mode()`, `sql_mode()`, `get_session_variable()`,
 ///   `set_session_variable()`
 #[derive(Debug)]
@@ -102,8 +99,8 @@ pub struct Database {
     /// BEFORE DELETE triggers. Any INSERT within those triggers that tries
     /// to allocate the same rowid will fail with a UNIQUE constraint violation.
     /// Maps table name to (reserved_rowid, is_explicit).
-    /// - is_explicit: true if the rowid comes from an explicit INTEGER PRIMARY KEY value
-    ///   in the REPLACE statement, false if it's auto-allocated.
+    /// - is_explicit: true if the rowid comes from an explicit INTEGER PRIMARY KEY value in the
+    ///   REPLACE statement, false if it's auto-allocated.
     pub(super) reserved_rowids: HashMap<String, (u64, bool)>,
 }
 

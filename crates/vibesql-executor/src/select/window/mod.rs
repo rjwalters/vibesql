@@ -91,12 +91,12 @@ pub(super) fn evaluate_window_functions(
     // final relevant sort pass. Empirically that pass is the last *partitioned*
     // window when one exists, and otherwise the last plain ORDER-BY-only window:
     //
-    //   - window9.test 1.4: `dense_rank() OVER (ORDER BY name)` followed by
-    //     `dense_rank() OVER (PARTITION BY name ORDER BY color)` — output is in the
-    //     partitioned window's order (issue #5291).
-    //   - window1.test 52.2-52.4: several windows over `PARTITION BY <const> ORDER BY a`
-    //     followed by a trailing `count(a) OVER (ORDER BY b)` — output is in the
-    //     partitioned window's `a` order, NOT the trailing ORDER-BY-b window's order.
+    //   - window9.test 1.4: `dense_rank() OVER (ORDER BY name)` followed by `dense_rank() OVER
+    //     (PARTITION BY name ORDER BY color)` — output is in the partitioned window's order (issue
+    //     #5291).
+    //   - window1.test 52.2-52.4: several windows over `PARTITION BY <const> ORDER BY a` followed
+    //     by a trailing `count(a) OVER (ORDER BY b)` — output is in the partitioned window's `a`
+    //     order, NOT the trailing ORDER-BY-b window's order.
     //
     // So a partitioned window's order takes precedence: once we have captured a
     // partitioned window's order, a later ORDER-BY-only window must not override it.
@@ -144,8 +144,9 @@ pub(super) fn evaluate_window_functions(
         rows = reordered_rows;
 
         // Reorder window results to match the new row order
-        // partition_order[i] = original_idx means position i in partition order came from original_idx
-        // window_results are in original order, so we need: new[i] = old[partition_order[i]]
+        // partition_order[i] = original_idx means position i in partition order came from
+        // original_idx window_results are in original order, so we need: new[i] =
+        // old[partition_order[i]]
         for results in &mut window_results {
             let reordered: Vec<_> =
                 order.iter().map(|&orig_idx| results[orig_idx].clone()).collect();

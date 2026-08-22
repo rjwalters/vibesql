@@ -568,11 +568,11 @@ fn test_window_last_value() {
         // LAST_VALUE returns the current row's value (last in the frame so far)
         // Engineering: Alice (120000) then Bob (95000) in DESC order
         assert_eq!(result[0].values[3], SqlValue::Integer(120000)); // frame: [Alice] → 120000
-        assert_eq!(result[1].values[3], SqlValue::Integer(95000));  // frame: [Alice, Bob] → 95000
+        assert_eq!(result[1].values[3], SqlValue::Integer(95000)); // frame: [Alice, Bob] → 95000
 
         // Sales: Dave (90000) then Carol (85000) in DESC order
-        assert_eq!(result[2].values[3], SqlValue::Integer(90000));  // frame: [Dave] → 90000
-        assert_eq!(result[3].values[3], SqlValue::Integer(85000));  // frame: [Dave, Carol] → 85000
+        assert_eq!(result[2].values[3], SqlValue::Integer(90000)); // frame: [Dave] → 90000
+        assert_eq!(result[3].values[3], SqlValue::Integer(85000)); // frame: [Dave, Carol] → 85000
 
         println!("✅ LAST_VALUE test works!");
     } else {

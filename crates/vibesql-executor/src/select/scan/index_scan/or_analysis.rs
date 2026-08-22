@@ -16,14 +16,13 @@
 //!
 //! # Conformance traps (called out in #5668)
 //!
-//! 1. **Original branch ordinals.** SQLite labels OR branches `INDEX <n>` by the
-//!    branch's 1-based position in the *original* OR expression, NOT by a
-//!    renumbering over the chosen branches. where9-3.1 expects `INDEX 1` /
-//!    `INDEX 3`. [`OrBranch::ordinal`] therefore preserves the original term
-//!    position.
-//! 2. **`IS NULL` vs `=`.** `d IS NULL` is an index seek on the NULL key,
-//!    distinct from `d = ?`. The two route to different lookups in later PRs, so
-//!    they are classified distinctly here via [`OrBranchKind`].
+//! 1. **Original branch ordinals.** SQLite labels OR branches `INDEX <n>` by the branch's 1-based
+//!    position in the *original* OR expression, NOT by a renumbering over the chosen branches.
+//!    where9-3.1 expects `INDEX 1` / `INDEX 3`. [`OrBranch::ordinal`] therefore preserves the
+//!    original term position.
+//! 2. **`IS NULL` vs `=`.** `d IS NULL` is an index seek on the NULL key, distinct from `d = ?`.
+//!    The two route to different lookups in later PRs, so they are classified distinctly here via
+//!    [`OrBranchKind`].
 
 // PR 1 lands plan representation + analysis only; nothing in the selection or
 // execution path calls into this module yet (that is PR 2+). The items below
@@ -80,11 +79,10 @@ fn classify_branch(branch: &Expression) -> OrBranchKind {
 /// surrounding residual AND-conjuncts.
 ///
 /// Two accepted shapes:
-/// - The WHERE clause is itself a `Disjunction` (or 2-arg `OR` `BinaryOp`):
-///   the OR branches are returned with no residual.
-/// - The WHERE clause is a `Conjunction` (or `AND` `BinaryOp`) containing
-///   **exactly one** top-level OR term: that OR's branches are returned, with
-///   the remaining conjuncts as the residual.
+/// - The WHERE clause is itself a `Disjunction` (or 2-arg `OR` `BinaryOp`): the OR branches are
+///   returned with no residual.
+/// - The WHERE clause is a `Conjunction` (or `AND` `BinaryOp`) containing **exactly one** top-level
+///   OR term: that OR's branches are returned, with the remaining conjuncts as the residual.
 ///
 /// Returns `(or_branches, residual)` where `or_branches` is a borrowed slice of
 /// the original branch expressions and `residual` is the rebuilt non-OR part.

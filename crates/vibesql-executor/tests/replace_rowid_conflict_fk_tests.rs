@@ -76,5 +76,9 @@ fn explicit_rowid_replace_allows_pk_preserving_update() {
     assert_eq!(affected, 1);
 
     let pp = db.get_table("pp").unwrap();
-    assert_eq!(pp.row_count(), 1, "the REPLACE must overwrite the existing physical row, not add a second one");
+    assert_eq!(
+        pp.row_count(),
+        1,
+        "the REPLACE must overwrite the existing physical row, not add a second one"
+    );
 }

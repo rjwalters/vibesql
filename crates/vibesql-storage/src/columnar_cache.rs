@@ -372,9 +372,9 @@ impl ColumnarCache {
     ///
     /// # Returns
     /// * `true`  — a resident entry was maintained in place (no full rebuild).
-    /// * `false` — nothing resident to maintain (the next scan converts the
-    ///   already-updated table fresh), the cache is disabled, `rows` is empty,
-    ///   or the append failed and the entry was invalidated instead.
+    /// * `false` — nothing resident to maintain (the next scan converts the already-updated table
+    ///   fresh), the cache is disabled, `rows` is empty, or the append failed and the entry was
+    ///   invalidated instead.
     pub fn append_rows(&self, table_name: &str, rows: &[Row]) -> bool {
         // #6199 Phase 0: a disabled cache is never resident, so there is nothing
         // to maintain. Also short-circuit the trivial empty-append.

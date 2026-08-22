@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use vibesql_types::{SqlValue, TypeAffinity};
+
 use super::{combine_rows, hash_join::build_existence_hash_table_parallel, FromResult};
 use crate::{
     errors::ExecutorError,
@@ -13,7 +15,6 @@ use crate::{
     schema::CombinedSchema,
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
-use vibesql_types::{SqlValue, TypeAffinity};
 
 /// Get the TypeAffinity for a column at a given index in a CombinedSchema
 pub(super) fn get_column_affinity(schema: &CombinedSchema, col_idx: usize) -> Option<TypeAffinity> {

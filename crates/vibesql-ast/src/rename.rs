@@ -183,9 +183,10 @@ fn rename_walk(expr: &mut Expression, old: &str, new: &str, changed: &mut bool) 
 
 #[cfg(test)]
 mod tests {
+    use vibesql_types::SqlValue;
+
     use super::*;
     use crate::{pretty_print::ToSql, BinaryOperator};
-    use vibesql_types::SqlValue;
 
     fn col(name: &str) -> Expression {
         Expression::ColumnRef(ColumnIdentifier::simple(name, false))

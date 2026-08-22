@@ -123,8 +123,8 @@ fn arity_error(actual: usize) -> ExecutorError {
 /// value-producing position (a SELECT-list item or an UPDATE `SET` value).
 ///
 /// * A bare multi-column subquery is `sub-select returns N columns - expected 1`.
-/// * A multi-column subquery on the **left** of a comparison against a plain
-///   scalar is `row value misused`; on the **right** it is the arity error.
+/// * A multi-column subquery on the **left** of a comparison against a plain scalar is `row value
+///   misused`; on the **right** it is the arity error.
 pub fn validate_value_expr(
     expr: &Expression,
     database: &vibesql_storage::Database,

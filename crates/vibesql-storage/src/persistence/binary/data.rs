@@ -58,9 +58,7 @@ fn write_row_version_prefix<W: Write>(writer: &mut W, row: &Row) -> Result<(), S
 /// Read a single row's MVCC version prefix from v7 format.
 ///
 /// Returns `(xmin, xmax)`. Errors on an unknown xmax tag.
-fn read_row_version_prefix<R: Read>(
-    reader: &mut R,
-) -> Result<(u64, Option<u64>), StorageError> {
+fn read_row_version_prefix<R: Read>(reader: &mut R) -> Result<(u64, Option<u64>), StorageError> {
     let xmin = read_u64(reader)?;
     let tag = read_u8(reader)?;
     let xmax = match tag {
@@ -139,15 +137,14 @@ pub fn write_data<W: Write>(writer: &mut W, db: &Database) -> Result<(), Storage
 
 /// Read row data with version-aware MVCC prefix handling.
 ///
-/// - For `version <= 6` (legacy `.vbsql` files): no MVCC prefix on disk; rows
-///   are reconstructed with `xmin = PRE_MVCC_TXN_ID, xmax = None`. This is
-///   the "always committed, visible to all snapshots" sentinel.
-/// - For `version >= 7`: each row begins with the MVCC version prefix
-///   documented in the module-level doc comment.
-/// - For `version >= 13`: each row additionally carries its effective rowid
-///   (u64) between the MVCC prefix and the column values (issue #5835).
-///   Older files reconstruct rows with `row_id = None` (the pre-fix
-///   physical-position renumbering).
+/// - For `version <= 6` (legacy `.vbsql` files): no MVCC prefix on disk; rows are reconstructed
+///   with `xmin = PRE_MVCC_TXN_ID, xmax = None`. This is the "always committed, visible to all
+///   snapshots" sentinel.
+/// - For `version >= 7`: each row begins with the MVCC version prefix documented in the
+///   module-level doc comment.
+/// - For `version >= 13`: each row additionally carries its effective rowid (u64) between the MVCC
+///   prefix and the column values (issue #5835). Older files reconstruct rows with `row_id = None`
+///   (the pre-fix physical-position renumbering).
 pub fn read_data<R: Read>(
     reader: &mut R,
     db: &mut Database,

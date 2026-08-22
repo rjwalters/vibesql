@@ -396,7 +396,8 @@ impl SelectExecutor<'_> {
         }
         // SQLite compatibility: Do NOT apply implicit value-based sorting (issue #4537)
         // SQLite returns rows in storage order (insertion order / rowid order) when no ORDER BY
-        // is specified. Implicit sorting by value breaks this behavior and causes TCL test failures.
+        // is specified. Implicit sorting by value breaks this behavior and causes TCL test
+        // failures.
         //
         // Previously we sorted for "deterministic results", but SQLite's deterministic behavior
         // is based on physical storage order, not value-based sorting.

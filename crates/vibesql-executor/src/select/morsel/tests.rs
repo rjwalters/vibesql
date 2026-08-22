@@ -5,8 +5,8 @@ use std::cmp::Ordering as CmpOrdering;
 use vibesql_storage::Row;
 use vibesql_types::{DataType, SqlValue};
 
-use super::config::{DEFAULT_MORSEL_SIZE, MAX_MORSEL_SIZE, MIN_MORSEL_SIZE};
 use super::{
+    config::{DEFAULT_MORSEL_SIZE, MAX_MORSEL_SIZE, MIN_MORSEL_SIZE},
     create_morsels, global_config, morsel_filter, morsel_map, morsel_parallel_filter,
     morsel_parallel_group, morsel_parallel_map, morsel_parallel_reduce, morsel_parallel_sort,
     morsel_sort_by, Morsel, MorselConfig,

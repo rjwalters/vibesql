@@ -178,13 +178,12 @@ pub(crate) fn string_to_number(s: &str) -> (i64, f64, bool) {
 /// affinity). Non-numeric text yields INTEGER 0.
 ///
 /// Rules (SQLite datatype3 / e_expr-32 evidence):
-/// * Integer-form text (no '.' and no exponent) that fits in a signed 64-bit
-///   integer -> INTEGER; integer-form text describing a value outside the i64
-///   range -> REAL (R-50300-26941: "text input that describes a value outside
-///   the range of a 64-bit signed integer yields a REAL result").
-/// * Float-form text (has a '.' and/or an exponent) -> REAL, unless the value
-///   round-trips losslessly through a ~51-bit signed integer, in which case the
-///   result is INTEGER (R-47045-23194: no fractional part and -2^51 <= v < 2^51).
+/// * Integer-form text (no '.' and no exponent) that fits in a signed 64-bit integer -> INTEGER;
+///   integer-form text describing a value outside the i64 range -> REAL (R-50300-26941: "text input
+///   that describes a value outside the range of a 64-bit signed integer yields a REAL result").
+/// * Float-form text (has a '.' and/or an exponent) -> REAL, unless the value round-trips
+///   losslessly through a ~51-bit signed integer, in which case the result is INTEGER
+///   (R-47045-23194: no fractional part and -2^51 <= v < 2^51).
 ///
 /// This differs from the naive "integral && fits i64 -> INTEGER" rule in two
 /// SQLite-significant ways: an integer literal that overflows i64 is REAL (not a

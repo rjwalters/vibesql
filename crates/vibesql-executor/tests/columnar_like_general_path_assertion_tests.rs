@@ -6,12 +6,11 @@
 //!
 //! Per the acceptance criteria, wall-clock timing is NOT used (the machine is
 //! loaded). Instead we capture `log` output and assert:
-//!   - the row-fallback marker ("skipping - WHERE clause contains unsupported
-//!     predicates") must NOT appear;
-//!   - the positive marker "Native columnar execution completed" (an `info!`
-//!     emitted only once the native columnar filter+aggregate path commits)
-//!     proves the columnar SIMD filter path ran for the `General`-classified
-//!     LIKE.
+//!   - the row-fallback marker ("skipping - WHERE clause contains unsupported predicates") must NOT
+//!     appear;
+//!   - the positive marker "Native columnar execution completed" (an `info!` emitted only once the
+//!     native columnar filter+aggregate path commits) proves the columnar SIMD filter path ran for
+//!     the `General`-classified LIKE.
 //!
 //! The queries are `COUNT(*)`/`SUM(id)` aggregates filtered by LIKE — that is
 //! the shape that reliably routes through the native columnar zero-copy path

@@ -172,10 +172,9 @@ impl super::super::Catalog {
     /// # Arguments
     /// * `table_name` - Name of the table to check for triggers
     /// * `event` - Optional trigger event to filter by (Insert, Update, Delete)
-    /// * `dml_schema` - Internal schema name (e.g. `main` or `temp_<id>`) that the
-    ///   DML target table resolved to, as returned by
-    ///   [`Catalog::resolve_table_schema_name`]. When `None`, no schema filtering
-    ///   is applied (legacy schema-unaware behavior).
+    /// * `dml_schema` - Internal schema name (e.g. `main` or `temp_<id>`) that the DML target table
+    ///   resolved to, as returned by [`Catalog::resolve_table_schema_name`]. When `None`, no schema
+    ///   filtering is applied (legacy schema-unaware behavior).
     ///
     /// # Schema-aware firing (triggerD-3.1/3.2)
     /// When a `temp` table shadows a same-named `main` table, a trigger must only
@@ -223,10 +222,10 @@ impl super::super::Catalog {
     ///
     /// SQLite binds a trigger to the table its (unqualified) `table_name`
     /// resolves to *from the trigger's own schema*:
-    /// - A `temp` trigger sees temp-then-main (temp shadows main), so it binds to
-    ///   `temp.<table>` when a temp table of that name exists, else `main.<table>`.
-    /// - A `main` trigger sees only the main schema (temp is invisible), so it
-    ///   binds to `main.<table>`.
+    /// - A `temp` trigger sees temp-then-main (temp shadows main), so it binds to `temp.<table>`
+    ///   when a temp table of that name exists, else `main.<table>`.
+    /// - A `main` trigger sees only the main schema (temp is invisible), so it binds to
+    ///   `main.<table>`.
     ///
     /// Returns the internal schema name (`main` or `temp_<id>`) the trigger is
     /// bound to, or `None` if the target table cannot be resolved (e.g. it was

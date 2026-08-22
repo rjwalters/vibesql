@@ -22,13 +22,12 @@ mod vectorized;
 pub(crate) mod view_reference_guard;
 pub(crate) mod window;
 
-pub(crate) use helpers::coerce_limit_offset_to_i64;
-
 pub use cte::CteResult;
 pub use executor::validation::{
     find_window_function_in_expression, validate_predicate_subquery_arity,
     validate_value_subquery_arity,
 };
+pub(crate) use helpers::coerce_limit_offset_to_i64;
 pub use iterator::{RowIterator, TableScanIterator};
 pub use late_materialization::{
     gather_columns, gather_single_column, LazyMaterializedBatch, RowReference, SelectionVector,

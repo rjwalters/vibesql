@@ -1,5 +1,6 @@
-use smallvec::SmallVec;
 use std::collections::HashMap;
+
+use smallvec::SmallVec;
 use vibesql_types::{Date, SqlValue};
 
 /// Transaction identifier type for MVCC version fields.
@@ -68,8 +69,8 @@ pub type RowValues = SmallVec<[SqlValue; ROW_INLINE_CAPACITY]>;
 /// Control:
 ///
 /// - [`xmin`](Self::xmin): the transaction that created this row version.
-/// - [`xmax`](Self::xmax): the transaction that deleted this row version, or
-///   `None` if the row is still live.
+/// - [`xmax`](Self::xmax): the transaction that deleted this row version, or `None` if the row is
+///   still live.
 ///
 /// Phase 1a only adds these fields and threads them through serialization;
 /// no executor code reads or writes them yet, so all constructors default
@@ -394,7 +395,8 @@ impl Row {
             SqlValue::Integer(i) | SqlValue::Bigint(i) => *i as f64,
             SqlValue::Smallint(s) => *s as f64,
             SqlValue::Unsigned(u) => *u as f64,
-            SqlValue::Numeric(n) | SqlValue::Double(n) | SqlValue::Real(n) => *n, // Real is now f64
+            SqlValue::Numeric(n) | SqlValue::Double(n) | SqlValue::Real(n) => *n, /* Real is now */
+            // f64
             SqlValue::Float(f) => *f as f64,
             _ => std::hint::unreachable_unchecked(),
         }
@@ -478,18 +480,15 @@ impl Row {
     /// See [`crate::mvcc`] for the full predicate contract. In summary,
     /// the row is visible iff all three hold:
     ///
-    /// 1. The creator (`xmin`) was committed-as-of the snapshot:
-    ///    `xmin <= snapshot.xmax_committed` AND `xmin` not in
-    ///    `snapshot.in_progress`. The pre-MVCC sentinel
-    ///    [`PRE_MVCC_TXN_ID`] (= 0) is always treated as committed.
-    /// 2. (Implied by clause 1) If the creator is the pre-MVCC sentinel,
-    ///    clause 1 is satisfied trivially.
-    /// 3. The deleter (`xmax`), if any, is **not** committed-as-of the
-    ///    snapshot. Concretely, the row is visible if `xmax.is_none()`,
-    ///    or `xmax > snapshot.xmin_active` (delete happened by a
-    ///    transaction that started after our snapshot's oldest concurrent
-    ///    peer), or `xmax` is in `snapshot.in_progress` (deleter was
-    ///    still running at snapshot time).
+    /// 1. The creator (`xmin`) was committed-as-of the snapshot: `xmin <= snapshot.xmax_committed`
+    ///    AND `xmin` not in `snapshot.in_progress`. The pre-MVCC sentinel [`PRE_MVCC_TXN_ID`] (= 0)
+    ///    is always treated as committed.
+    /// 2. (Implied by clause 1) If the creator is the pre-MVCC sentinel, clause 1 is satisfied
+    ///    trivially.
+    /// 3. The deleter (`xmax`), if any, is **not** committed-as-of the snapshot. Concretely, the
+    ///    row is visible if `xmax.is_none()`, or `xmax > snapshot.xmin_active` (delete happened by
+    ///    a transaction that started after our snapshot's oldest concurrent peer), or `xmax` is in
+    ///    `snapshot.in_progress` (deleter was still running at snapshot time).
     ///
     /// # Phase 1b note
     ///
@@ -513,13 +512,12 @@ impl Row {
             None => true,
             Some(deleter) => {
                 // Row is still visible if:
-                //   - the deleter started after our snapshot's xmin_active
-                //     (so the delete can't have been committed before us), OR
+                //   - the deleter started after our snapshot's xmin_active (so the delete can't
+                //     have been committed before us), OR
                 //   - the deleter was in_progress at snapshot time, OR
-                //   - the deleter is the pre-MVCC sentinel — which would be
-                //     bizarre (xmax = 0 means "deleted by no one") but is
-                //     handled defensively by treating sentinel-as-committed,
-                //     making the row invisible. This matches "PRE_MVCC means
+                //   - the deleter is the pre-MVCC sentinel — which would be bizarre (xmax = 0 means
+                //     "deleted by no one") but is handled defensively by treating
+                //     sentinel-as-committed, making the row invisible. This matches "PRE_MVCC means
                 //     definitely committed" and avoids accidental visibility.
                 if deleter > snapshot.xmin_active {
                     return true;

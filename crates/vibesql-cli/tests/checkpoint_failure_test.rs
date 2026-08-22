@@ -5,15 +5,13 @@
 //
 // Two guarantees are asserted end-to-end against a real `vibesql` subprocess:
 //
-//   1. The original reproducer round-trips: `NUMBER` (any spelling — bare,
-//      `NUMBER(5)`, `NUMBER(5,10)`) is accepted like SQLite accepts any type
-//      name, the column is usable, and — critically — *unrelated tables in the
-//      same database survive* a clean exit + reopen.
+//   1. The original reproducer round-trips: `NUMBER` (any spelling — bare, `NUMBER(5)`,
+//      `NUMBER(5,10)`) is accepted like SQLite accepts any type name, the column is usable, and —
+//      critically — *unrelated tables in the same database survive* a clean exit + reopen.
 //
-//   2. THE INVARIANT: a checkpoint-write failure at exit must NEVER truncate
-//      the WAL or exit 0. It must print a loud ERROR on stderr, leave the WAL
-//      intact (committed changes recoverable on next open), and exit non-zero.
-//      (Cross-link #5807 / PR #5850's fail-closed recovery policy.)
+//   2. THE INVARIANT: a checkpoint-write failure at exit must NEVER truncate the WAL or exit 0. It
+//      must print a loud ERROR on stderr, leave the WAL intact (committed changes recoverable on
+//      next open), and exit non-zero. (Cross-link #5807 / PR #5850's fail-closed recovery policy.)
 
 use std::{fs, path::Path, process::Command};
 
@@ -138,8 +136,8 @@ fn test_number_precision_variants_round_trip() {
 ///
 ///   * exit code is non-zero (never a silent exit 0),
 ///   * a loud ERROR is printed on stderr,
-///   * the WAL is NOT truncated — after clearing the failure, the committed
-///     change is recovered on the next open.
+///   * the WAL is NOT truncated — after clearing the failure, the committed change is recovered on
+///     the next open.
 #[cfg(unix)]
 #[test]
 fn test_checkpoint_write_failure_is_loud_nonzero_and_preserves_wal() {

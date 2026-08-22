@@ -281,11 +281,10 @@ fn test_unqualified_is_null_with_tables_full_join() {
 // intermediate result crossed VECTORIZE_THRESHOLD (256 rows).
 //
 // Two interacting bugs:
-//   * pushdown.rs stripped the intra-left-side equijoin `t1.b = t2.b` from the
-//     left subtree's WHERE, turning `t1 INNER JOIN t2 ON true` into a cartesian
-//     product.
-//   * compiled_predicate.rs then dropped the same column-to-column equality from
-//     the vectorized post-join filter, assuming a hash join had enforced it.
+//   * pushdown.rs stripped the intra-left-side equijoin `t1.b = t2.b` from the left subtree's
+//     WHERE, turning `t1 INNER JOIN t2 ON true` into a cartesian product.
+//   * compiled_predicate.rs then dropped the same column-to-column equality from the vectorized
+//     post-join filter, assuming a hash join had enforced it.
 //
 // We need enough rows in t1 so the t3 amplification pushes the intermediate
 // result above 256 rows and the vectorized compiled-predicate path fires.

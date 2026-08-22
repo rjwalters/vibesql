@@ -8,14 +8,12 @@
 //!
 //! These end-to-end tests drive the real executor scan path and assert on
 //! `columnar_cache_stats().conversions` (a structural stat, not a timer):
-//!   - a hot, scan-dominated large table takes the columnar path and is
-//!     converted + cached,
-//!   - a large table whose access is dominated by point lookups is NOT
-//!     converted (it stays on the row path),
-//!   - result parity: the adaptive columnar path returns byte-identical rows to
-//!     the row path forced by disabling the representation cache
-//!     (`columnar_cache_budget = 0`, the documented `VIBESQL_DISABLE_COLUMNAR=1`
-//!     parity lever for the representation cache).
+//!   - a hot, scan-dominated large table takes the columnar path and is converted + cached,
+//!   - a large table whose access is dominated by point lookups is NOT converted (it stays on the
+//!     row path),
+//!   - result parity: the adaptive columnar path returns byte-identical rows to the row path forced
+//!     by disabling the representation cache (`columnar_cache_budget = 0`, the documented
+//!     `VIBESQL_DISABLE_COLUMNAR=1` parity lever for the representation cache).
 //!
 //! No wall-clock assertions anywhere.
 

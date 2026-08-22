@@ -195,8 +195,8 @@ fn test_not_in_nullable_outer_lhs_is_not_rewritten() {
 /// A catalog for the outer-join null-extension regression tests (issue #6109,
 /// LEFT-JOIN hole). Mirrors the judge's repro schema:
 /// - `t1(a)` — nullable
-/// - `t2(b NOT NULL, k)` — `b` is `NOT NULL` in the catalog but becomes
-///   null-extended on the optional side of an outer join
+/// - `t2(b NOT NULL, k)` — `b` is `NOT NULL` in the catalog but becomes null-extended on the
+///   optional side of an outer join
 /// - `s(c NOT NULL)` — the `NOT IN` subquery source
 fn outer_join_db() -> Database {
     use vibesql_catalog::{ColumnSchema, TableSchema};

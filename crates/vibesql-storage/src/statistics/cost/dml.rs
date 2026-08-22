@@ -9,8 +9,7 @@
 //! not absolute time. The optimizer uses these costs to compare different
 //! execution strategies and choose the most efficient one.
 
-use super::estimator::CostEstimator;
-use super::types::TableIndexInfo;
+use super::{estimator::CostEstimator, types::TableIndexInfo};
 use crate::statistics::TableStatistics;
 
 impl CostEstimator {

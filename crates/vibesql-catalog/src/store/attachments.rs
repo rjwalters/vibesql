@@ -19,8 +19,7 @@
 //! database names case-insensitively and how VibeSQL canonicalizes unquoted
 //! identifiers.
 
-use crate::errors::CatalogError;
-use crate::schema::Schema;
+use crate::{errors::CatalogError, schema::Schema};
 
 /// SQLite's default limit on the number of attached databases.
 pub const MAX_ATTACHED_DATABASES: usize = 10;
@@ -64,8 +63,7 @@ impl super::Catalog {
         }
 
         self.schemas.insert(canonical.clone(), Schema::new(canonical.clone()));
-        self.attached_databases
-            .push(AttachedDatabase { name: canonical, path: path.to_string() });
+        self.attached_databases.push(AttachedDatabase { name: canonical, path: path.to_string() });
         Ok(())
     }
 
@@ -128,8 +126,7 @@ impl super::Catalog {
 
 #[cfg(test)]
 mod tests {
-    use super::super::Catalog;
-    use super::MAX_ATTACHED_DATABASES;
+    use super::{super::Catalog, MAX_ATTACHED_DATABASES};
     use crate::errors::CatalogError;
 
     #[test]
@@ -209,16 +206,10 @@ mod tests {
     #[test]
     fn detach_unknown_name_errors() {
         let mut catalog = Catalog::new();
-        assert!(matches!(
-            catalog.detach_database("nosuch"),
-            Err(CatalogError::SchemaNotFound(_))
-        ));
+        assert!(matches!(catalog.detach_database("nosuch"), Err(CatalogError::SchemaNotFound(_))));
         // A plain (CREATE SCHEMA) schema is not detachable.
         catalog.create_schema("reports".to_string()).unwrap();
-        assert!(matches!(
-            catalog.detach_database("reports"),
-            Err(CatalogError::SchemaNotFound(_))
-        ));
+        assert!(matches!(catalog.detach_database("reports"), Err(CatalogError::SchemaNotFound(_))));
     }
 
     #[test]

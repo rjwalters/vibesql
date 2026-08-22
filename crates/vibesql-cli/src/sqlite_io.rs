@@ -48,12 +48,10 @@ pub fn import_sqlite<P: AsRef<Path>>(path: P) -> anyhow::Result<ImportResult> {
         // Try to parse the CREATE TABLE with VibeSQL's parser
         match vibesql_parser::Parser::parse_sql(create_sql) {
             Ok(vibesql_ast::Statement::CreateTable(create_stmt)) => {
-                if let Err(e) = vibesql_executor::CreateTableExecutor::execute(&create_stmt, &mut db)
+                if let Err(e) =
+                    vibesql_executor::CreateTableExecutor::execute(&create_stmt, &mut db)
                 {
-                    warnings.push(format!(
-                        "Warning: Skipping table '{}': {}",
-                        table_name, e
-                    ));
+                    warnings.push(format!("Warning: Skipping table '{}': {}", table_name, e));
                     tables_skipped += 1;
                     continue;
                 }
@@ -81,10 +79,8 @@ pub fn import_sqlite<P: AsRef<Path>>(path: P) -> anyhow::Result<ImportResult> {
                 tables_imported += 1;
             }
             Err(e) => {
-                warnings.push(format!(
-                    "Warning: Failed to import data for '{}': {}",
-                    table_name, e
-                ));
+                warnings
+                    .push(format!("Warning: Failed to import data for '{}': {}", table_name, e));
                 // Table was created but data import failed — still count as imported
                 tables_imported += 1;
             }
@@ -108,17 +104,11 @@ pub fn import_sqlite<P: AsRef<Path>>(path: P) -> anyhow::Result<ImportResult> {
             Ok(vibesql_ast::Statement::CreateIndex(index_stmt)) => {
                 if let Err(e) = vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut db)
                 {
-                    warnings.push(format!(
-                        "Warning: Skipping index '{}': {}",
-                        index_name, e
-                    ));
+                    warnings.push(format!("Warning: Skipping index '{}': {}", index_name, e));
                 }
             }
             _ => {
-                warnings.push(format!(
-                    "Warning: Skipping index '{}': could not parse",
-                    index_name
-                ));
+                warnings.push(format!("Warning: Skipping index '{}': could not parse", index_name));
             }
         }
     }
@@ -136,18 +126,14 @@ pub fn import_sqlite<P: AsRef<Path>>(path: P) -> anyhow::Result<ImportResult> {
         match vibesql_parser::Parser::parse_sql(view_sql) {
             Ok(vibesql_ast::Statement::CreateView(mut create_view)) => {
                 create_view.sql_definition = Some(view_sql.clone());
-                if let Err(e) = vibesql_executor::ViewExecutor::execute_create_view(&create_view, &mut db) {
-                    warnings.push(format!(
-                        "Warning: Skipping view '{}': {}",
-                        view_name, e
-                    ));
+                if let Err(e) =
+                    vibesql_executor::ViewExecutor::execute_create_view(&create_view, &mut db)
+                {
+                    warnings.push(format!("Warning: Skipping view '{}': {}", view_name, e));
                 }
             }
             _ => {
-                warnings.push(format!(
-                    "Warning: Skipping view '{}': could not parse",
-                    view_name
-                ));
+                warnings.push(format!("Warning: Skipping view '{}': could not parse", view_name));
             }
         }
     }
@@ -164,13 +150,7 @@ pub fn import_sqlite<P: AsRef<Path>>(path: P) -> anyhow::Result<ImportResult> {
         ));
     }
 
-    Ok(ImportResult {
-        database: db,
-        warnings,
-        tables_imported,
-        tables_skipped,
-        rows_imported,
-    })
+    Ok(ImportResult { database: db, warnings, tables_imported, tables_skipped, rows_imported })
 }
 
 /// Import all rows from a SQLite table into the VibeSQL database
@@ -181,10 +161,7 @@ fn import_table_data(
 ) -> anyhow::Result<usize> {
     // Get column count from VibeSQL table
     let vibe_table_name = table_name.to_uppercase();
-    let col_count = db
-        .get_table(&vibe_table_name)
-        .map(|t| t.schema.columns.len())
-        .unwrap_or(0);
+    let col_count = db.get_table(&vibe_table_name).map(|t| t.schema.columns.len()).unwrap_or(0);
 
     if col_count == 0 {
         return Ok(0);
@@ -222,10 +199,8 @@ fn create_table_from_pragma(
     table_name: &str,
     db: &mut Database,
 ) -> anyhow::Result<()> {
-    let mut stmt = conn.prepare(&format!(
-        "PRAGMA table_info(\"{}\")",
-        table_name.replace('"', "\"\"")
-    ))?;
+    let mut stmt =
+        conn.prepare(&format!("PRAGMA table_info(\"{}\")", table_name.replace('"', "\"\"")))?;
 
     let mut columns = Vec::new();
     let mut pk_columns = Vec::new();
@@ -233,10 +208,10 @@ fn create_table_from_pragma(
     let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,    // cid
-            row.get::<_, String>(1)?,  // name
-            row.get::<_, String>(2)?,  // type
-            row.get::<_, bool>(3)?,    // notnull
-            row.get::<_, i64>(5)?,     // pk
+            row.get::<_, String>(1)?, // name
+            row.get::<_, String>(2)?, // type
+            row.get::<_, bool>(3)?,   // notnull
+            row.get::<_, i64>(5)?,    // pk
         ))
     })?;
 
@@ -268,8 +243,7 @@ fn create_table_from_pragma(
     let mut schema = vibesql_catalog::TableSchema::new(table_name.to_string(), columns);
     schema.primary_key = if pk_columns.is_empty() { None } else { Some(pk_columns) };
 
-    db.create_table(schema)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    db.create_table(schema).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     Ok(())
 }
@@ -286,15 +260,14 @@ fn sqlite_type_to_vibesql(type_str: &str) -> vibesql_types::DataType {
         "REAL" | "DOUBLE" | "DOUBLE PRECISION" | "FLOAT" => vibesql_types::DataType::Real,
         "BOOLEAN" | "BOOL" => vibesql_types::DataType::Boolean,
         "DATE" => vibesql_types::DataType::Date,
-        "DATETIME" | "TIMESTAMP" => {
-            vibesql_types::DataType::Timestamp { with_timezone: false }
-        }
+        "DATETIME" | "TIMESTAMP" => vibesql_types::DataType::Timestamp { with_timezone: false },
         "BLOB" => vibesql_types::DataType::BinaryLargeObject,
         "TEXT" => vibesql_types::DataType::Varchar { max_length: None },
         "" => vibesql_types::DataType::Varchar { max_length: None },
         _ => {
             // Try to parse VARCHAR(n) / CHAR(n) patterns
-            if let Some(len_str) = upper.strip_prefix("VARCHAR(").and_then(|s| s.strip_suffix(')')) {
+            if let Some(len_str) = upper.strip_prefix("VARCHAR(").and_then(|s| s.strip_suffix(')'))
+            {
                 if let Ok(len) = len_str.trim().parse::<usize>() {
                     return vibesql_types::DataType::Varchar { max_length: Some(len) };
                 }
@@ -399,16 +372,12 @@ pub fn export_sqlite<P: AsRef<Path>>(db: &Database, path: P) -> anyhow::Result<E
             let mut insert_stmt = conn.prepare(&insert_sql)?;
 
             for (_row_idx, row) in table.scan_live() {
-                let params: Vec<SqliteValue> =
-                    row.values.iter().map(sql_value_to_sqlite).collect();
+                let params: Vec<SqliteValue> = row.values.iter().map(sql_value_to_sqlite).collect();
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                     params.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
 
                 if let Err(e) = insert_stmt.execute(param_refs.as_slice()) {
-                    warnings.push(format!(
-                        "Warning: Skipping row in '{}': {}",
-                        table_name, e
-                    ));
+                    warnings.push(format!("Warning: Skipping row in '{}': {}", table_name, e));
                     continue;
                 }
                 rows_exported += 1;
@@ -426,11 +395,7 @@ pub fn export_sqlite<P: AsRef<Path>>(db: &Database, path: P) -> anyhow::Result<E
 
     conn.execute_batch("COMMIT;")?;
 
-    Ok(ExportResult {
-        warnings,
-        tables_exported,
-        rows_exported,
-    })
+    Ok(ExportResult { warnings, tables_exported, rows_exported })
 }
 
 /// Result of a SQLite export operation
@@ -442,10 +407,7 @@ pub struct ExportResult {
 
 /// Generate a SQLite-compatible CREATE TABLE statement from a VibeSQL TableSchema
 fn generate_create_table_sql(table_name: &str, schema: &vibesql_catalog::TableSchema) -> String {
-    let mut sql = format!(
-        "CREATE TABLE \"{}\" (",
-        table_name.replace('"', "\"\"")
-    );
+    let mut sql = format!("CREATE TABLE \"{}\" (", table_name.replace('"', "\"\""));
 
     for (i, col) in schema.columns.iter().enumerate() {
         if i > 0 {
@@ -468,29 +430,22 @@ fn generate_create_table_sql(table_name: &str, schema: &vibesql_catalog::TableSc
 
     // Primary key
     if let Some(ref pk_cols) = schema.primary_key {
-        let pk_str: Vec<String> = pk_cols
-            .iter()
-            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
-            .collect();
+        let pk_str: Vec<String> =
+            pk_cols.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect();
         sql.push_str(&format!(", PRIMARY KEY ({})", pk_str.join(", ")));
     }
 
     // Unique constraints
     for unique_cols in &schema.unique_constraints {
-        let u_str: Vec<String> = unique_cols
-            .iter()
-            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
-            .collect();
+        let u_str: Vec<String> =
+            unique_cols.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect();
         sql.push_str(&format!(", UNIQUE ({})", u_str.join(", ")));
     }
 
     // Foreign keys
     for fk in &schema.foreign_keys {
-        let fk_cols: Vec<String> = fk
-            .column_names
-            .iter()
-            .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
-            .collect();
+        let fk_cols: Vec<String> =
+            fk.column_names.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect();
         let parent_cols: Vec<String> = fk
             .parent_column_names
             .iter()
@@ -525,9 +480,7 @@ fn vibesql_type_to_sqlite(
 ) -> String {
     use vibesql_types::DataType;
     match data_type {
-        DataType::Integer => {
-            if is_exact_integer_type { "INTEGER" } else { "INT" }.to_string()
-        }
+        DataType::Integer => if is_exact_integer_type { "INTEGER" } else { "INT" }.to_string(),
         DataType::Smallint => "INTEGER".to_string(),
         DataType::Bigint | DataType::Unsigned => "INTEGER".to_string(),
         DataType::Float { .. } | DataType::Real | DataType::DoublePrecision => "REAL".to_string(),
@@ -560,9 +513,7 @@ fn sql_value_to_sqlite(value: &SqlValue) -> SqliteValue {
         SqlValue::Real(f) => SqliteValue::Real(*f),
         SqlValue::Float(f) => SqliteValue::Real(*f as f64),
         SqlValue::Boolean(b) => SqliteValue::Integer(if *b { 1 } else { 0 }),
-        SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            SqliteValue::Text(s.to_string())
-        }
+        SqlValue::Varchar(s) | SqlValue::Character(s) => SqliteValue::Text(s.to_string()),
         SqlValue::Date(d) => SqliteValue::Text(d.to_string()),
         SqlValue::Time(t) => SqliteValue::Text(t.to_string()),
         SqlValue::Timestamp(ts) => SqliteValue::Text(ts.to_string()),

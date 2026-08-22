@@ -12,9 +12,10 @@ use vibesql_storage::{
     Database,
 };
 
-use crate::evaluator::expression_hash::ExpressionHasher;
-
-use crate::optimizer::index_planner::{IndexPlanner, SkipScanInfo};
+use crate::{
+    evaluator::expression_hash::ExpressionHasher,
+    optimizer::index_planner::{IndexPlanner, SkipScanInfo},
+};
 
 /// Conservative selectivity assumed for an **expression-index** predicate when no
 /// column histogram is available. Matches the flat 0.33 fallback `estimate_selectivity`
@@ -272,9 +273,10 @@ pub(crate) fn should_use_index_scan(
                     order_items
                         .iter()
                         .map(|item| {
-                            // For expression indexes, ORDER BY may use expressions (e.g., length(a))
-                            // We use to_sql() to convert the expression to a string representation
-                            // The actual string is only used for metadata; the important part
+                            // For expression indexes, ORDER BY may use expressions (e.g.,
+                            // length(a)) We use to_sql() to convert the
+                            // expression to a string representation The
+                            // actual string is only used for metadata; the important part
                             // is the direction for determining scan order
                             let col_name = match &item.expr {
                                 Expression::ColumnRef(col_id) => {
@@ -393,8 +395,8 @@ pub(crate) fn expression_filters_column(expr: &Expression, column_name: &str) ->
         }
         // IS / IS NOT (NULL-safe comparison)
         // negated=true means "IS NOT DISTINCT FROM" which is equivalent to "IS" (NULL-safe equals)
-        // negated=false means "IS DISTINCT FROM" which is equivalent to "IS NOT" (NULL-safe not-equals)
-        // We only use the index for IS (negated=true) as it's equivalent to =
+        // negated=false means "IS DISTINCT FROM" which is equivalent to "IS NOT" (NULL-safe
+        // not-equals) We only use the index for IS (negated=true) as it's equivalent to =
         Expression::IsDistinctFrom { left, right, negated: true } => {
             let left_is_col = is_column_reference(left, column_name);
             let right_is_col = is_column_reference(right, column_name);
@@ -976,14 +978,13 @@ fn order_by_leads_with_rowid_alias(
 /// scan of `table_name`, if any.
 ///
 /// Checks, in order:
-/// 1. The planner's chosen index (`cost_based_index_selection`): when it
-///    returns full `sorted_columns` the order is satisfied outright; even
-///    when the runtime nullable-column guard withholds `sorted_columns`, a
-///    structural match means the scan still delivers index order (e.g.
-///    windowpushd.test 2.1.3.4: `SEARCH t1 USING INDEX i2 (b>?)` feeds
-///    PARTITION BY b — SQLite shows no temp B-tree).
-/// 2. Any other index with its leading columns pinned by equality/IN whose
-///    remaining columns structurally align with the ORDER BY.
+/// 1. The planner's chosen index (`cost_based_index_selection`): when it returns full
+///    `sorted_columns` the order is satisfied outright; even when the runtime nullable-column guard
+///    withholds `sorted_columns`, a structural match means the scan still delivers index order
+///    (e.g. windowpushd.test 2.1.3.4: `SEARCH t1 USING INDEX i2 (b>?)` feeds PARTITION BY b —
+///    SQLite shows no temp B-tree).
+/// 2. Any other index with its leading columns pinned by equality/IN whose remaining columns
+///    structurally align with the ORDER BY.
 ///
 /// With a WHERE clause, no leading pinned column, and a competing access
 /// path chosen by the planner, an unpinned structural match does NOT count
@@ -1807,9 +1808,10 @@ pub(crate) fn cost_based_index_selection(
                     order_items
                         .iter()
                         .map(|item| {
-                            // For expression indexes, ORDER BY may use expressions (e.g., length(a))
-                            // We use to_sql() to convert the expression to a string representation
-                            // The actual string is only used for metadata; the important part
+                            // For expression indexes, ORDER BY may use expressions (e.g.,
+                            // length(a)) We use to_sql() to convert the
+                            // expression to a string representation The
+                            // actual string is only used for metadata; the important part
                             // is the direction for determining scan order
                             let col_name = match &item.expr {
                                 Expression::ColumnRef(col_id) => {
@@ -1924,12 +1926,12 @@ pub(crate) fn cost_based_index_selection(
 ///
 /// The branch cost is `CostEstimator::estimate_index_scan(table_stats, col_stats,
 /// selectivity)`, and `selectivity` is derived from the branch predicate:
-/// - An **equality** branch (`c = 31031`) gets `estimate_eq_selectivity` ≈
-///   `1/n_distinct` — a point seek matching very few rows → **cheap**.
-/// - An **IS NULL** branch (`d IS NULL`) gets `null_count / row_count` — typically
-///   a handful of rows → **cheap**.
-/// - An **inequality/range** branch (`c >= 31031`) gets
-///   `estimate_range_selectivity` — a range scan matching many rows → **expensive**.
+/// - An **equality** branch (`c = 31031`) gets `estimate_eq_selectivity` ≈ `1/n_distinct` — a point
+///   seek matching very few rows → **cheap**.
+/// - An **IS NULL** branch (`d IS NULL`) gets `null_count / row_count` — typically a handful of
+///   rows → **cheap**.
+/// - An **inequality/range** branch (`c >= 31031`) gets `estimate_range_selectivity` — a range scan
+///   matching many rows → **expensive**.
 ///
 /// So the equality-seek-vs-range-scan distinction the conformance gate demands
 /// falls directly out of the selectivity, not out of any per-query special case.
@@ -2558,10 +2560,10 @@ impl DatabaseBranchResolver<'_> {
 /// Returns `Some(IndexScanChoice::MultiIndexOr { .. })` only when a genuine
 /// multi-index OR union is **the cheapest** of three costed alternatives:
 ///
-/// 1. **MULTI-INDEX OR** — sum of per-branch index-seek/scan costs plus a
-///    dedup/fetch overhead ([`multi_index_or_cost`]).
-/// 2. **Best single index** over the full WHERE, with the OR applied as a
-///    residual filter ([`best_single_index_cost`]).
+/// 1. **MULTI-INDEX OR** — sum of per-branch index-seek/scan costs plus a dedup/fetch overhead
+///    ([`multi_index_or_cost`]).
+/// 2. **Best single index** over the full WHERE, with the OR applied as a residual filter
+///    ([`best_single_index_cost`]).
 /// 3. **Full table scan** ([`CostEstimator::estimate_table_scan`]).
 ///
 /// This replaces PR 2's conservative "only when no single index applies"
@@ -2574,14 +2576,14 @@ impl DatabaseBranchResolver<'_> {
 /// Returns `None` (leaving the caller's single-index / skip-scan / full-scan path
 /// unchanged) when:
 /// - the feature is disabled via `MULTI_INDEX_OR_DISABLED`,
-/// - there is an ORDER BY (a single index may satisfy the ordering; the union has
-///   no inherent sort order — deferred per #5668),
+/// - there is an ORDER BY (a single index may satisfy the ordering; the union has no inherent sort
+///   order — deferred per #5668),
 /// - the table is WITHOUT ROWID (no rowid to dedup on, #5668 §2b),
 /// - the analyzer finds no fully-indexable top-level OR,
-/// - all branches resolve to the **same** index (a single-index scan covers it
-///   identically and more cheaply),
-/// - statistics are missing/stale (cannot cost honestly — defer to the existing
-///   rule-based / single-index path rather than guess), or
+/// - all branches resolve to the **same** index (a single-index scan covers it identically and more
+///   cheaply),
+/// - statistics are missing/stale (cannot cost honestly — defer to the existing rule-based /
+///   single-index path rather than guess), or
 /// - the union is not the cheapest alternative.
 fn select_or_aware_index_method(
     table_name: &str,
@@ -2625,15 +2627,15 @@ fn select_or_aware_index_method(
     // structural heuristic that mirrors SQLite's default optimizer. SQLite's
     // preference order (verified against sqlite3 3.51.0 on the where9 fixture):
     //
-    //   1. A single index on an AND-clause **equality** (`b=?`) beats everything
-    //      — it is the most selective point seek (where9-5.2: `b=1000 AND (...)`
-    //      → `SEARCH t1 USING INDEX t1b (b=?)`).
-    //   2. Otherwise, a MULTI-INDEX OR union wins iff *every* OR branch is an
-    //      equality / IS-NULL point seek (where9-5.1: `b>1000 AND (c=? OR d IS
-    //      NULL)` → the union of two cheap seeks beats the `b>?` range search).
-    //   3. A range OR-branch (`c>=?`) scans many rows, so the union loses to the
-    //      single AND-clause index (where9-5.3: `b>1000 AND (c>=? OR d IS NULL)`
-    //      → `SEARCH t1 USING INDEX t1b (b>?)`).
+    //   1. A single index on an AND-clause **equality** (`b=?`) beats everything — it is the most
+    //      selective point seek (where9-5.2: `b=1000 AND (...)` → `SEARCH t1 USING INDEX t1b
+    //      (b=?)`).
+    //   2. Otherwise, a MULTI-INDEX OR union wins iff *every* OR branch is an equality / IS-NULL
+    //      point seek (where9-5.1: `b>1000 AND (c=? OR d IS NULL)` → the union of two cheap seeks
+    //      beats the `b>?` range search).
+    //   3. A range OR-branch (`c>=?`) scans many rows, so the union loses to the single AND-clause
+    //      index (where9-5.3: `b>1000 AND (c>=? OR d IS NULL)` → `SEARCH t1 USING INDEX t1b
+    //      (b>?)`).
     //
     // This is the structural form of the equality-seek-vs-range-scan cost signal
     // the architect identified; with statistics, the numeric cost comparison
@@ -2685,11 +2687,11 @@ fn select_or_aware_index_method(
     // (see the `selectivity < 0.40` rule there). If we vetoed the union with the
     // raw scan cost, we would reject a union that beats the very index the engine
     // is about to use, which is incoherent. So:
-    //   - If a single index is applicable, the union competes head-to-head with
-    //     it (the scan is not a separate veto — the engine already preferred the
-    //     index over the scan for this selectivity).
-    //   - If NO single index is applicable, the non-OR fallback is a full scan,
-    //     so the union must beat the table scan to be worthwhile.
+    //   - If a single index is applicable, the union competes head-to-head with it (the scan is not
+    //     a separate veto — the engine already preferred the index over the scan for this
+    //     selectivity).
+    //   - If NO single index is applicable, the non-OR fallback is a full scan, so the union must
+    //     beat the table scan to be worthwhile.
     let single_index_applicable =
         cost_based_index_selection(table_name, where_clause, order_by, database).is_some();
     let table_scan_cost = cost_estimator.estimate_table_scan(table_stats);

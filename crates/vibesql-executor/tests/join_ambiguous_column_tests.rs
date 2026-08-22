@@ -517,8 +517,8 @@ fn test_explicit_join_still_ambiguous_after_semi_join_fix() {
 // so the subquery table pulled into the flattened SEMI/ANTI join still tripped the
 // #5870 guard. SQLite scopes ambiguity to the OUTER FROM ONLY, never the subquery
 // tables, so:
-//   - a column unique among the outer tables (but shared with a subquery table)
-//     must resolve and return rows;
+//   - a column unique among the outer tables (but shared with a subquery table) must resolve and
+//     return rows;
 //   - a column genuinely ambiguous AMONG the outer tables must still error.
 //
 // The fix resolves which outer table owns the unqualified column (via the catalog)

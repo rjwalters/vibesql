@@ -3,14 +3,12 @@
 //! These tests cover the contract documented on [`vibesql_storage::mvcc`]'s
 //! Phase 1c helpers (`stamp_xmin_for_write`, `stamp_xmax_for_write`):
 //!
-//! - With the `mvcc_enabled` feature OFF (default): INSERT, UPDATE and
-//!   DELETE produce rows with the pre-MVCC sentinel
-//!   (`xmin = PRE_MVCC_TXN_ID = 0`, `xmax = None`). Bit-for-bit pre-MVCC
+//! - With the `mvcc_enabled` feature OFF (default): INSERT, UPDATE and DELETE produce rows with the
+//!   pre-MVCC sentinel (`xmin = PRE_MVCC_TXN_ID = 0`, `xmax = None`). Bit-for-bit pre-MVCC
 //!   behavior.
-//! - With the feature ON and an active transaction: INSERT stamps
-//!   `xmin = current_txn_id`; UPDATE stamps `xmin = current_txn_id` on
-//!   the in-place new row; DELETE stamps `xmax = current_txn_id` on the
-//!   bitmap-deleted row (still observable via `Table::scan()`).
+//! - With the feature ON and an active transaction: INSERT stamps `xmin = current_txn_id`; UPDATE
+//!   stamps `xmin = current_txn_id` on the in-place new row; DELETE stamps `xmax = current_txn_id`
+//!   on the bitmap-deleted row (still observable via `Table::scan()`).
 //!
 //! The feature-ON assertions are wrapped in `#[cfg(feature = "mvcc_enabled")]`
 //! so the file compiles and runs cleanly under both `cargo test` (off-state)

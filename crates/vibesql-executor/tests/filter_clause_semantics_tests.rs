@@ -1,13 +1,12 @@
 //! Regression tests for aggregate `FILTER (WHERE ...)` clause semantics.
 //!
 //! Covers the filter1.test edge cases fixed under issue #6191:
-//! - a bare `count()` (zero-arg, == `count(*)`) still honors a FILTER clause
-//!   (filter1-8.0);
-//! - a bare column reference with GROUP BY follows the row that produced the
-//!   *filtered* MIN/MAX — and falls back to the first row of the group when the
-//!   FILTER excludes every row (filter1-3.3 / 3.5);
-//! - an aggregate nested inside another aggregate's FILTER is rejected with
-//!   SQLite's "misuse of aggregate function X()" wording (filter1-2.3).
+//! - a bare `count()` (zero-arg, == `count(*)`) still honors a FILTER clause (filter1-8.0);
+//! - a bare column reference with GROUP BY follows the row that produced the *filtered* MIN/MAX —
+//!   and falls back to the first row of the group when the FILTER excludes every row (filter1-3.3 /
+//!   3.5);
+//! - an aggregate nested inside another aggregate's FILTER is rejected with SQLite's "misuse of
+//!   aggregate function X()" wording (filter1-2.3).
 
 use vibesql_executor::SelectExecutor;
 use vibesql_types::SqlValue;

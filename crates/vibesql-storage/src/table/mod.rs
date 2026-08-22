@@ -209,10 +209,9 @@ pub struct Table {
     /// SQLite rowids are signed 64-bit integers (they can be negative), and
     /// `Row::row_id` stores the two's-complement bit pattern of that i64.
     /// This field tracks the maximum under *signed* interpretation:
-    /// - explicit rowids contribute `row_id as i64` (so `-1`, stored as
-    ///   `u64::MAX`, contributes `-1` — it can never poison allocation);
-    /// - implicit rows (no `row_id`) contribute their effective rowid,
-    ///   `physical position + 1`.
+    /// - explicit rowids contribute `row_id as i64` (so `-1`, stored as `u64::MAX`, contributes
+    ///   `-1` — it can never poison allocation);
+    /// - implicit rows (no `row_id`) contribute their effective rowid, `physical position + 1`.
     ///
     /// Updated on `insert` / `insert_batch` / `update_row` (including rows
     /// reloaded from a v13+ snapshot or replayed from a v3+ WAL). Monotone:
@@ -385,9 +384,9 @@ impl Table {
         // For native columnar tables, incrementally append to columnar data
         // This is O(m) per row instead of O(n*m) full rebuild
         if let Some(ref mut columnar) = self.native_columnar {
-            columnar.append_row(&normalized_row).map_err(|e| {
-                StorageError::Other(format!("Columnar append failed: {}", e))
-            })?;
+            columnar
+                .append_row(&normalized_row)
+                .map_err(|e| StorageError::Other(format!("Columnar append failed: {}", e)))?;
         }
 
         Ok(())
@@ -422,7 +421,8 @@ impl Table {
     /// - **Pre-allocation**: Vector capacity is reserved upfront
     /// - **Batch normalization**: Rows are validated/normalized together
     /// - **Deferred index updates**: Indexes are rebuilt once after all inserts
-    /// - **Incremental columnar**: For native columnar tables, appends O(batch * m) instead of O(n * m) rebuild
+    /// - **Incremental columnar**: For native columnar tables, appends O(batch * m) instead of O(n
+    ///   * m) rebuild
     /// - **Statistics update once**: Stats marked stale only at completion
     ///
     /// # Arguments
@@ -513,9 +513,9 @@ impl Table {
         // This is O(batch_size * m) instead of O(n * m) full rebuild
         if let Some(ref mut columnar) = self.native_columnar {
             for row in &self.rows[start_index..] {
-                columnar.append_row(row).map_err(|e| {
-                    StorageError::Other(format!("Columnar append failed: {}", e))
-                })?;
+                columnar
+                    .append_row(row)
+                    .map_err(|e| StorageError::Other(format!("Columnar append failed: {}", e)))?;
             }
         }
 
@@ -659,22 +659,18 @@ impl Table {
     /// [`Row::visible_to`](crate::Row::visible_to) into the SELECT scan
     /// boundary.
     ///
-    /// - With the `mvcc_enabled` feature **OFF** (default), this method
-    ///   behaves identically to [`scan_live_vec`](Self::scan_live_vec):
-    ///   the snapshot argument is ignored and every live row is returned.
-    ///   This preserves bit-for-bit pre-MVCC behavior for builds without
-    ///   the feature flag.
-    /// - With the `mvcc_enabled` feature **ON**, rows additionally have
-    ///   `Row::visible_to(snapshot)` applied. Rows that fail visibility
-    ///   are filtered out. The `snapshot` is typically the transaction's
-    ///   BEGIN-time snapshot (from
-    ///   [`crate::Database::current_snapshot`]); auto-commit reads pass
-    ///   [`TxnSnapshot::empty`](crate::mvcc::TxnSnapshot::empty) which
-    ///   under Phase 1c's write semantics is equivalent to "show only
-    ///   pre-MVCC rows + my-own writes" — but under the empty snapshot,
-    ///   no MVCC rows are visible. The executor must be careful to pass
-    ///   the right snapshot here; see `select::scan::table::execute_table_scan`
-    ///   for the canonical wiring.
+    /// - With the `mvcc_enabled` feature **OFF** (default), this method behaves identically to
+    ///   [`scan_live_vec`](Self::scan_live_vec): the snapshot argument is ignored and every live
+    ///   row is returned. This preserves bit-for-bit pre-MVCC behavior for builds without the
+    ///   feature flag.
+    /// - With the `mvcc_enabled` feature **ON**, rows additionally have `Row::visible_to(snapshot)`
+    ///   applied. Rows that fail visibility are filtered out. The `snapshot` is typically the
+    ///   transaction's BEGIN-time snapshot (from [`crate::Database::current_snapshot`]);
+    ///   auto-commit reads pass [`TxnSnapshot::empty`](crate::mvcc::TxnSnapshot::empty) which under
+    ///   Phase 1c's write semantics is equivalent to "show only pre-MVCC rows + my-own writes" —
+    ///   but under the empty snapshot, no MVCC rows are visible. The executor must be careful to
+    ///   pass the right snapshot here; see `select::scan::table::execute_table_scan` for the
+    ///   canonical wiring.
     ///
     /// # Performance
     /// O(n) time and space where n is the number of live rows.
@@ -910,12 +906,11 @@ impl Table {
     /// `INTEGER PRIMARY KEY` NULL auto-assign). Semantics:
     ///
     /// - empty table (never held a row): `1`;
-    /// - otherwise the signed maximum rowid `+ 1` (negative maxima included —
-    ///   a table whose max rowid is `-5` allocates `-4`, matching sqlite3);
-    /// - when the maximum rowid is already `i64::MAX`, sqlite3 does not reuse it
-    ///   (a silent duplicate) or overflow — it probes up to 100 random positive
-    ///   rowids for one not currently in use, returning [`RowidExhausted`]
-    ///   (`SQLITE_FULL`) only if every probe collides.
+    /// - otherwise the signed maximum rowid `+ 1` (negative maxima included — a table whose max
+    ///   rowid is `-5` allocates `-4`, matching sqlite3);
+    /// - when the maximum rowid is already `i64::MAX`, sqlite3 does not reuse it (a silent
+    ///   duplicate) or overflow — it probes up to 100 random positive rowids for one not currently
+    ///   in use, returning [`RowidExhausted`] (`SQLITE_FULL`) only if every probe collides.
     ///
     /// The random-probe fallback is inherently nondeterministic (as it is in
     /// sqlite3): callers get *some* unused rowid, not a predictable one.
@@ -1072,9 +1067,9 @@ impl Table {
         // For native columnar tables, incrementally update the columnar row
         if let Some(ref mut columnar) = self.native_columnar {
             let columnar_idx = columnar_index_in(&self.deleted, index);
-            columnar.update_row_at(columnar_idx, &normalized_row).map_err(|e| {
-                StorageError::Other(format!("Columnar update failed: {}", e))
-            })?;
+            columnar
+                .update_row_at(columnar_idx, &normalized_row)
+                .map_err(|e| StorageError::Other(format!("Columnar update failed: {}", e)))?;
         }
 
         Ok(())
@@ -1133,9 +1128,9 @@ impl Table {
         // For native columnar tables, incrementally update the columnar row
         if let Some(ref mut columnar) = self.native_columnar {
             let columnar_idx = columnar_index_in(&self.deleted, index);
-            columnar.update_row_at(columnar_idx, &self.rows[index]).map_err(|e| {
-                StorageError::Other(format!("Columnar update failed: {}", e))
-            })?;
+            columnar
+                .update_row_at(columnar_idx, &self.rows[index])
+                .map_err(|e| StorageError::Other(format!("Columnar update failed: {}", e)))?;
         }
 
         Ok(())
@@ -1564,11 +1559,9 @@ impl Table {
     ///
     /// **What does NOT count as reclaimable:**
     /// - Rows with `xmax = None` (still live) — never removed by GC.
-    /// - Rows with `xmax = Some(t)` where `t >= horizon` — some active
-    ///   or future reader may still need to see this row, so we leave
-    ///   it alone.
-    /// - Rows already in the deletion bitmap — counted as "already
-    ///   reclaimed."
+    /// - Rows with `xmax = Some(t)` where `t >= horizon` — some active or future reader may still
+    ///   need to see this row, so we leave it alone.
+    /// - Rows already in the deletion bitmap — counted as "already reclaimed."
     ///
     /// **Off-state (`mvcc_enabled` feature OFF):** this method is still
     /// callable, but rows constructed by the executor have

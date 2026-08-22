@@ -18,7 +18,6 @@
 //! voter; the harness's catch-up loop then becomes the recovery/replay
 //! path only.
 
-
 use crate::{
     backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Snapshot},
     state_machine::{ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine},
@@ -143,10 +142,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::single_node::SingleNodeBackend;
     use vibesql_types::SqlValue;
-    use crate::ConsensusError;
+
+    use super::*;
+    use crate::{single_node::SingleNodeBackend, ConsensusError};
 
     fn replicated() -> ReplicatedDb<SingleNodeBackend<TxnEntry>> {
         ReplicatedDb::new(SingleNodeBackend::new())
@@ -187,10 +186,8 @@ mod tests {
             db.execute_replicated("INSERT INTO users VALUES (2, 'bob')").await.unwrap();
         assert_eq!(index, 3);
 
-        let (index, outcome) = db
-            .execute_replicated("UPDATE users SET name = 'amelia' WHERE id = 1")
-            .await
-            .unwrap();
+        let (index, outcome) =
+            db.execute_replicated("UPDATE users SET name = 'amelia' WHERE id = 1").await.unwrap();
         assert_eq!(index, 4);
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 1 });
 
@@ -581,9 +578,8 @@ mod tests {
         assert_eq!(rows.rows, vec![vec![SqlValue::Integer(3), SqlValue::Integer(92)]]);
 
         // JOIN
-        let rows = db
-            .query("SELECT t1.c, t2.d FROM t1 JOIN t2 ON t1.a = t2.a ORDER BY t1.a")
-            .unwrap();
+        let rows =
+            db.query("SELECT t1.c, t2.d FROM t1 JOIN t2 ON t1.a = t2.a ORDER BY t1.a").unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0][1].to_string(), "zwei");
         assert_eq!(rows[1][1].to_string(), "drei");
@@ -609,10 +605,8 @@ mod tests {
         .unwrap();
 
         // Three rows, column omitted: the DEFAULT fires for each.
-        let (index, outcome) = db
-            .execute_replicated("INSERT INTO events (id) VALUES (1), (2), (3)")
-            .await
-            .unwrap();
+        let (index, outcome) =
+            db.execute_replicated("INSERT INTO events (id) VALUES (1), (2), (3)").await.unwrap();
         assert_eq!(outcome, ApplyOutcome::Applied { rows_affected: 3 });
 
         let entry = db.backend().read_committed(index).await.unwrap();
@@ -746,10 +740,8 @@ mod tests {
         .await
         .unwrap();
         let before = db.backend().last_index();
-        let err = db
-            .execute_replicated("INSERT INTO events (id) SELECT id FROM src")
-            .await
-            .unwrap_err();
+        let err =
+            db.execute_replicated("INSERT INTO events (id) SELECT id FROM src").await.unwrap_err();
         assert!(matches!(err, ConsensusError::Backend(_)), "got: {err:?}");
         assert_eq!(db.backend().last_index(), before, "no log index may be consumed");
     }
@@ -788,7 +780,9 @@ mod tests {
     async fn volatile_bodied_create_trigger_is_rejected_at_propose() {
         let db = replicated();
         db.execute_replicated("CREATE TABLE t (id INTEGER PRIMARY KEY, r INTEGER)").await.unwrap();
-        db.execute_replicated("CREATE TABLE log (id INTEGER PRIMARY KEY, r INTEGER)").await.unwrap();
+        db.execute_replicated("CREATE TABLE log (id INTEGER PRIMARY KEY, r INTEGER)")
+            .await
+            .unwrap();
         let before = db.backend().last_index();
         let err = db
             .execute_replicated(

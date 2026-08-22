@@ -47,8 +47,11 @@ fn create_trigger_accepts_main_qualified_on_target_and_fires() {
     let mut db = Database::new();
     exec(&mut db, "CREATE TABLE t7(a, b)").unwrap();
     exec(&mut db, "CREATE TABLE log(x)").unwrap();
-    exec(&mut db, "CREATE TRIGGER main.tr1 AFTER INSERT ON main.t7 BEGIN INSERT INTO log VALUES(1); END;")
-        .expect("CREATE TRIGGER with qualified ON target should parse and succeed");
+    exec(
+        &mut db,
+        "CREATE TRIGGER main.tr1 AFTER INSERT ON main.t7 BEGIN INSERT INTO log VALUES(1); END;",
+    )
+    .expect("CREATE TRIGGER with qualified ON target should parse and succeed");
 
     exec(&mut db, "INSERT INTO t7 VALUES(1, 2)").unwrap();
     assert_eq!(query_all(&db, "SELECT count(*) FROM log"), vec![SqlValue::Integer(1)]);

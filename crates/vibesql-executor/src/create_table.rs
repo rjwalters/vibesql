@@ -34,7 +34,8 @@ impl CreateTableExecutor {
     /// use vibesql_types::DataType;
     ///
     /// let mut db = Database::new();
-    /// let stmt = CreateTableStmt { temporary: false,
+    /// let stmt = CreateTableStmt {
+    ///     temporary: false,
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![
@@ -45,7 +46,9 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
+    ///             generated_expr: None,
+    ///             is_exact_integer_type: false,
+    ///             type_source: None,
     ///         },
     ///         ColumnDef {
     ///             name: "name".to_string(),
@@ -54,14 +57,18 @@ impl CreateTableExecutor {
     ///             constraints: vec![],
     ///             default_value: None,
     ///             comment: None,
-    ///             generated_expr: None, is_exact_integer_type: false, type_source: None,
+    ///             generated_expr: None,
+    ///             is_exact_integer_type: false,
+    ///             type_source: None,
     ///         },
     ///     ],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
     ///     name_source: None,
-    ///     as_query: None, without_rowid: false, strict: false,
+    ///     as_query: None,
+    ///     without_rowid: false,
+    ///     strict: false,
     /// };
     ///
     /// let result = CreateTableExecutor::execute(&stmt, &mut db);
@@ -106,12 +113,11 @@ impl CreateTableExecutor {
     /// re-rejected by the user-facing conformance guards.
     ///
     /// Specifically this skips:
-    /// - the reserved `sqlite_`-prefix guard, so a table that legitimately
-    ///   reached the catalog (e.g. a pre-#5614 DB where ALTER TABLE RENAME TO
-    ///   `sqlite_x` was still accepted) reloads cleanly instead of bricking the
-    ///   database (issue #5614);
-    /// - the duplicate-column guard, for the same backward-compat reason — a
-    ///   schema that was once persisted must remain loadable.
+    /// - the reserved `sqlite_`-prefix guard, so a table that legitimately reached the catalog
+    ///   (e.g. a pre-#5614 DB where ALTER TABLE RENAME TO `sqlite_x` was still accepted) reloads
+    ///   cleanly instead of bricking the database (issue #5614);
+    /// - the duplicate-column guard, for the same backward-compat reason — a schema that was once
+    ///   persisted must remain loadable.
     ///
     /// All other validation (namespace collisions, etc.) still applies, matching
     /// the prior behavior of the load path for #5613.
@@ -177,7 +183,8 @@ impl CreateTableExecutor {
         } else if let Some((schema_part, table_part)) = stmt.table_name.split_once('.') {
             // Schema-qualified table name - use qualified identifier
             // Note: We use stmt.quoted for both parts since the parser combined them
-            // In a future iteration, CREATE TABLE could also store schema/table quoted status separately
+            // In a future iteration, CREATE TABLE could also store schema/table quoted status
+            // separately
             if schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
                 // SQLite compatibility: the "temp" schema qualifier maps to this
                 // session's temp schema, so `CREATE TABLE temp.t(...)` creates a
@@ -479,7 +486,8 @@ impl CreateTableExecutor {
         // Detect INTEGER PRIMARY KEY for SQLite rowid aliasing (Issue #4536)
         // In SQLite, a single-column PRIMARY KEY with exactly "INTEGER" type is an alias for rowid.
         // The column's value IS the rowid, and SELECT rowid returns this column's value.
-        // IMPORTANT: Only exact "INTEGER" qualifies - "INT" does NOT (even though both parse to DataType::Integer)
+        // IMPORTANT: Only exact "INTEGER" qualifies - "INT" does NOT (even though both parse to
+        // DataType::Integer)
         if let Some(pk_cols) = &table_schema.primary_key {
             if pk_cols.len() == 1 {
                 if let Some(col_idx) = table_schema.get_column_index(&pk_cols[0]) {
@@ -1354,8 +1362,9 @@ impl CreateTableExecutor {
 
 #[cfg(test)]
 mod ctas_sql_source_tests {
-    use super::CreateTableExecutor as E;
     use vibesql_types::TypeAffinity::{Integer, None as Blob, Numeric, Real, Text};
+
+    use super::CreateTableExecutor as E;
 
     fn col(name: &str, aff: vibesql_types::TypeAffinity) -> (String, vibesql_types::TypeAffinity) {
         (name.to_string(), aff)

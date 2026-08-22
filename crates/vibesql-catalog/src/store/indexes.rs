@@ -31,7 +31,8 @@ impl Catalog {
         };
 
         // Verify all column-based index columns exist in the table
-        // Expression indexes skip this validation (they reference expressions, not specific columns)
+        // Expression indexes skip this validation (they reference expressions, not specific
+        // columns)
 
         for col in &index.columns {
             // Only validate column existence for non-expression index columns
@@ -399,7 +400,7 @@ mod tests {
             "idx_age".to_string(),
             "users".to_string(),
             IndexType::BTree,
-            vec![IndexedColumn::new_column("age".to_string(), SortOrder::Ascending)], // Column doesn't exist
+            vec![IndexedColumn::new_column("age".to_string(), SortOrder::Ascending)], /* Column doesn't exist */
             false,
         );
 
@@ -651,7 +652,8 @@ mod tests {
             false,
         );
 
-        // Mixed index should be added successfully (column validation for 'name', skip for expression)
+        // Mixed index should be added successfully (column validation for 'name', skip for
+        // expression)
         assert!(catalog.add_index(index).is_ok());
 
         let retrieved = catalog.get_index("users", "idx_mixed").unwrap();

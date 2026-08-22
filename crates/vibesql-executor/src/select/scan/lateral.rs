@@ -19,14 +19,12 @@
 //! one column (i.e. a correlated / lateral argument). The dependent join:
 //!
 //! 1. Executes the **left** side once (materialized).
-//! 2. For each left row, re-evaluates the table function with that row supplied
-//!    as the outer-correlation context (the executor already threads
-//!    `outer_row`/`outer_schema` into
+//! 2. For each left row, re-evaluates the table function with that row supplied as the
+//!    outer-correlation context (the executor already threads `outer_row`/`outer_schema` into
 //!    [`super::table_function::execute_table_function`]).
-//! 3. Cross-products the left row with the rows the table function produced for
-//!    it, concatenating columns left-then-right and merging the two schemas with
-//!    [`CombinedSchema::merge`] — the same column layout a plain cross join
-//!    yields.
+//! 3. Cross-products the left row with the rows the table function produced for it, concatenating
+//!    columns left-then-right and merging the two schemas with [`CombinedSchema::merge`] — the same
+//!    column layout a plain cross join yields.
 //!
 //! A NULL / absent JSON value for a given left row yields zero table-function
 //! rows for that row (matching sqlite3: `json_each(NULL)` → 0 rows), so that
@@ -36,11 +34,10 @@
 //! ## What this deliberately does NOT handle
 //!
 //! - General LATERAL subqueries (`FROM t, LATERAL (SELECT ...)`).
-//! - A table-function that is the *left* side of a join, or nested deeper than
-//!   the immediate right child.
-//! - Reordering a lateral TVF ahead of the sibling it depends on (join
-//!   reordering is suppressed when a lateral TVF is present; see
-//!   [`from_contains_lateral_tvf`]).
+//! - A table-function that is the *left* side of a join, or nested deeper than the immediate right
+//!   child.
+//! - Reordering a lateral TVF ahead of the sibling it depends on (join reordering is suppressed
+//!   when a lateral TVF is present; see [`from_contains_lateral_tvf`]).
 //!
 //! Reference: ADR-0005 step 4; <https://www.sqlite.org/json1.html#jeach>.
 
@@ -289,12 +286,11 @@ where
         }
     };
 
-    // 1. Execute the left side once. The outer WHERE clause is NOT pushed into
-    //    the left scan here: predicates that reference the table-function
-    //    columns must be evaluated post-join, and predicates local to the left
-    //    table are still applied by the outer WHERE pass after this join. We do
-    //    thread the enclosing outer_row/outer_schema so a lateral TVF nested
-    //    inside a correlated subquery still resolves its outer references.
+    // 1. Execute the left side once. The outer WHERE clause is NOT pushed into the left scan here:
+    //    predicates that reference the table-function columns must be evaluated post-join, and
+    //    predicates local to the left table are still applied by the outer WHERE pass after this
+    //    join. We do thread the enclosing outer_row/outer_schema so a lateral TVF nested inside a
+    //    correlated subquery still resolves its outer references.
     let left_result = super::execute_from_clause(
         left,
         cte_results,
@@ -445,9 +441,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{ColumnIdentifier, Expression};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn col(table: &str, name: &str) -> Expression {
         Expression::ColumnRef(ColumnIdentifier::qualified(table, false, name, false))

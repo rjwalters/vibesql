@@ -21,8 +21,7 @@
 //! This is the single source of truth shared by the parser-side validator and
 //! the executor's fire-time path so the two cannot drift.
 
-use crate::lexer::Lexer;
-use crate::token::Token;
+use crate::{lexer::Lexer, token::Token};
 
 /// Split a `BEGIN ... END` trigger body into its component statements.
 ///

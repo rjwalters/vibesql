@@ -480,13 +480,15 @@ pub fn coerce_value(
         (SqlValue::Integer(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
         (SqlValue::Integer(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Smallint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
-        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
+        (SqlValue::Smallint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), /* Real is now */
+        // f64
         (SqlValue::Smallint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
         (SqlValue::Bigint(i), DataType::Float { .. }) => Ok(SqlValue::Float(*i as f32)),
         (SqlValue::Bigint(i), DataType::Real) => Ok(SqlValue::Real(*i as f64)), // Real is now f64
         (SqlValue::Bigint(i), DataType::DoublePrecision) => Ok(SqlValue::Double(*i as f64)),
 
-        // Integer → Numeric/Decimal (SQLite type affinity - integers can be stored in NUMERIC columns)
+        // Integer → Numeric/Decimal (SQLite type affinity - integers can be stored in NUMERIC
+        // columns)
         (SqlValue::Integer(i), DataType::Numeric { .. }) => Ok(SqlValue::Integer(*i)),
         (SqlValue::Integer(i), DataType::Decimal { .. }) => Ok(SqlValue::Integer(*i)),
         (SqlValue::Smallint(i), DataType::Numeric { .. }) => Ok(SqlValue::Integer(*i as i64)),

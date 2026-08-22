@@ -283,11 +283,7 @@ impl std::fmt::Display for CatalogError {
             }
             CatalogError::TooManyAttachedDatabases => {
                 // SQLite-compat wording (not localized on purpose).
-                write!(
-                    f,
-                    "too many attached databases - max {}",
-                    crate::MAX_ATTACHED_DATABASES
-                )
+                write!(f, "too many attached databases - max {}", crate::MAX_ATTACHED_DATABASES)
             }
         }
     }

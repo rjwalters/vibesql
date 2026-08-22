@@ -5,16 +5,16 @@ use std::collections::{HashMap, HashSet};
 use vibesql_ast::{Expression, FromClause};
 
 use super::{graph, predicates, utils};
-use crate::optimizer::is_constant_false_where;
-use crate::select::scan::bloom_context;
 use crate::{
     debug_output::{Category, DebugEvent, JsonValue},
     errors::ExecutorError,
+    optimizer::is_constant_false_where,
     schema::CombinedSchema,
     select::{
         cte::CteResult,
         join::{nested_loop_join, JoinOrderAnalyzer, JoinOrderSearch},
         scan::{
+            bloom_context,
             derived::execute_derived_table,
             table::{execute_table_scan, execute_table_scan_with_bloom},
             FromResult,
@@ -81,10 +81,11 @@ where
     let table_names: Vec<String> =
         table_refs.iter().map(|t| t.alias.clone().unwrap_or_else(|| t.name.clone())).collect();
 
-    // Step 3.1: Track duplicate table aliases for later error reporting (SQLite compatibility - issue #4507)
-    // This must be done BEFORE building table_map (which uses HashMap and would silently drop duplicates)
-    // We'll track duplicates here and propagate them to the schema so that column resolution
-    // can report the correct error message format: "ambiguous column name: A.f1"
+    // Step 3.1: Track duplicate table aliases for later error reporting (SQLite compatibility -
+    // issue #4507) This must be done BEFORE building table_map (which uses HashMap and would
+    // silently drop duplicates) We'll track duplicates here and propagate them to the schema so
+    // that column resolution can report the correct error message format: "ambiguous column
+    // name: A.f1"
     let mut duplicate_table_aliases = std::collections::HashSet::new();
     {
         let mut seen_names = std::collections::HashSet::new();
@@ -311,7 +312,8 @@ where
             );
         }
 
-        // Build Bloom filter context if we have an accumulated result and a connecting join condition
+        // Build Bloom filter context if we have an accumulated result and a connecting join
+        // condition
         let bloom_ctx = if let Some(ref prev_result) = result {
             // Check if the accumulated result has enough rows to benefit from Bloom filtering
             let prev_row_count = prev_result.data.as_slice().len();

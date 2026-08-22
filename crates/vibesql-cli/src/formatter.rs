@@ -199,9 +199,8 @@ impl ResultFormatter {
     /// Print results in raw format for SQLite TCL test compatibility.
     /// - ASCII 31 (Unit Separator, `\x1f`) between values within each row
     /// - ASCII 30 (Record Separator, `\x1e`) terminating each row
-    /// - NULL values output as the ASCII 1 (`\x01`) sentinel (see
-    ///   [`Self::NULL_SENTINEL`]); an actual empty-string value is emitted as
-    ///   literal empty text, distinct from NULL
+    /// - NULL values output as the ASCII 1 (`\x01`) sentinel (see [`Self::NULL_SENTINEL`]); an
+    ///   actual empty-string value is emitted as literal empty text, distinct from NULL
     /// - No headers, no borders, no row count
     ///
     /// We use ASCII 31 between values (instead of pipe) because pipe can appear

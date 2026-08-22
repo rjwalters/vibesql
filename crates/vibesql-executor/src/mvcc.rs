@@ -21,17 +21,14 @@
 //!
 //! With the feature ON, [`read_snapshot`] returns:
 //!
-//! - **Inside a transaction**: the transaction's BEGIN-time snapshot
-//!   (so reads see a stable snapshot-isolation view across the txn).
-//!   Self-writes pass `is_committed(self)` because the BEGIN-time
-//!   snapshot is widened by [`TransactionManager::capture_snapshot`] to
-//!   set `xmax_committed = txn_id` (see the follow-up #5207 fix).
-//! - **Outside a transaction (autocommit)**: a freshly-captured
-//!   commit-time snapshot, treating every transaction id allocated so
-//!   far as committed. This is the autocommit-snapshot-widening fix
-//!   from #5207: autocommit reads see writes from every txn that has
-//!   already committed, including the transactional inserts that
-//!   stamped `xmin = txn_id`.
+//! - **Inside a transaction**: the transaction's BEGIN-time snapshot (so reads see a stable
+//!   snapshot-isolation view across the txn). Self-writes pass `is_committed(self)` because the
+//!   BEGIN-time snapshot is widened by [`TransactionManager::capture_snapshot`] to set
+//!   `xmax_committed = txn_id` (see the follow-up #5207 fix).
+//! - **Outside a transaction (autocommit)**: a freshly-captured commit-time snapshot, treating
+//!   every transaction id allocated so far as committed. This is the autocommit-snapshot-widening
+//!   fix from #5207: autocommit reads see writes from every txn that has already committed,
+//!   including the transactional inserts that stamped `xmin = txn_id`.
 //!
 //! [`TransactionManager::capture_snapshot`]:
 //!     vibesql_storage::database::transactions::TransactionManager::capture_snapshot
@@ -40,12 +37,11 @@ use vibesql_storage::{Database, TxnSnapshot};
 
 /// Return the snapshot to use for reads.
 ///
-/// - In a transaction: returns the transaction's BEGIN-time snapshot
-///   (so reads see a stable snapshot-isolation view).
-/// - Outside a transaction (autocommit): returns a freshly-captured
-///   commit-time snapshot via
-///   [`Database::capture_commit_time_snapshot`], which treats every
-///   already-allocated transaction id as committed.
+/// - In a transaction: returns the transaction's BEGIN-time snapshot (so reads see a stable
+///   snapshot-isolation view).
+/// - Outside a transaction (autocommit): returns a freshly-captured commit-time snapshot via
+///   [`Database::capture_commit_time_snapshot`], which treats every already-allocated transaction
+///   id as committed.
 ///
 /// # Why autocommit synthesizes a commit-time snapshot
 ///

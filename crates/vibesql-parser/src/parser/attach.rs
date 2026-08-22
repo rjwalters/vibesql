@@ -16,17 +16,14 @@
 //! file-backed attachments land (#6362).
 
 use super::{ParseError, Parser};
-use crate::keywords::Keyword;
-use crate::token::Token;
+use crate::{keywords::Keyword, token::Token};
 
 impl Parser {
     /// Parse `ATTACH [DATABASE] 'filename' AS schema-name`.
     ///
     /// The caller has verified that the current token is an identifier spelled
     /// `ATTACH`.
-    pub(super) fn parse_attach_statement(
-        &mut self,
-    ) -> Result<vibesql_ast::AttachStmt, ParseError> {
+    pub(super) fn parse_attach_statement(&mut self) -> Result<vibesql_ast::AttachStmt, ParseError> {
         self.advance(); // consume ATTACH
         self.consume_optional_database_noise_word();
 
@@ -53,9 +50,7 @@ impl Parser {
     ///
     /// The caller has verified that the current token is an identifier spelled
     /// `DETACH`.
-    pub(super) fn parse_detach_statement(
-        &mut self,
-    ) -> Result<vibesql_ast::DetachStmt, ParseError> {
+    pub(super) fn parse_detach_statement(&mut self) -> Result<vibesql_ast::DetachStmt, ParseError> {
         self.advance(); // consume DETACH
         self.consume_optional_database_noise_word();
 

@@ -20,8 +20,8 @@
 //!
 //! These tests cover:
 //! - the O(n²) perf regression itself (100k rows under a wall-clock budget)
-//! - correctness of the hoisted uncorrelated form (incl. the same-table,
-//!   unqualified-column canonical shape)
+//! - correctness of the hoisted uncorrelated form (incl. the same-table, unqualified-column
+//!   canonical shape)
 //! - correlated subqueries, which must still be evaluated per row
 //! - NULL-returning / empty-result subqueries
 //! - multi-column subqueries in row-value comparisons (must NOT be folded)

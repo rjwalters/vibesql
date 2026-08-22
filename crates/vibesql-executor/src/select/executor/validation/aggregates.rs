@@ -57,8 +57,8 @@ enum WalkAction<T> {
 /// It returns a [`WalkAction`] that controls the walk:
 /// - [`WalkAction::Stop`] short-circuits with the wrapped value.
 /// - [`WalkAction::Skip`] skips this subtree (children are NOT visited).
-/// - [`WalkAction::Descend`] visits all of the node's children using the
-///   standard recursion defined here.
+/// - [`WalkAction::Descend`] visits all of the node's children using the standard recursion defined
+///   here.
 ///
 /// **Subtree skipping** is the mechanism callers use to opt out of certain
 /// scopes (e.g. `ScalarSubquery` / `Exists`, the OVER-clause of a
@@ -1512,14 +1512,13 @@ fn find_outer_referencing_aggregate(expr: &Expression) -> Option<String> {
 /// SQLite has two distinct behaviors for a bare scalar subquery whose body
 /// contains an aggregate referencing an *outer* column:
 ///
-/// 1. **WHERE / HAVING / ORDER BY** (and arguments to other outer functions):
-///    SQLite raises `"misuse of aggregate: X()"`. The outer aggregation context
-///    is not implicitly borrowed in these positions.
+/// 1. **WHERE / HAVING / ORDER BY** (and arguments to other outer functions): SQLite raises
+///    `"misuse of aggregate: X()"`. The outer aggregation context is not implicitly borrowed in
+///    these positions.
 ///
-/// 2. **SELECT list** (issue #5104): SQLite implicitly collapses the outer
-///    query into a single-row aggregate, with the inner aggregate computed
-///    over all outer rows. The aggregate is *not* a misuse here — it's
-///    well-defined and produces a single output row.
+/// 2. **SELECT list** (issue #5104): SQLite implicitly collapses the outer query into a single-row
+///    aggregate, with the inner aggregate computed over all outer rows. The aggregate is *not* a
+///    misuse here — it's well-defined and produces a single output row.
 ///
 /// We therefore parameterize the validator on context: SELECT-list calls pass
 /// [`SubqueryContext::SelectList`] to skip the outer-correlated-aggregate
@@ -1766,8 +1765,8 @@ pub fn validate_subquery_context_misuse(
 pub fn validate_group_by_window_misuse(
     stmt: &vibesql_ast::SelectStmt,
 ) -> Result<(), ExecutorError> {
-    // 1. Check this statement's own GROUP BY for window misuse, with
-    //    positional/alias resolution against its SELECT list.
+    // 1. Check this statement's own GROUP BY for window misuse, with positional/alias resolution
+    //    against its SELECT list.
     if let Some(ref group_by_clause) = stmt.group_by {
         for (term_index, group_expr) in group_by_clause.all_expressions().iter().enumerate() {
             if let Some(window_name) = find_window_function_in_expression(group_expr) {

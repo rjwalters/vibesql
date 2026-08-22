@@ -449,11 +449,7 @@ pub(super) fn truncate_updates_for_or_fail(
 /// Format a constraint's columns as sqlite3's `table.col1, table.col2` list for
 /// a "UNIQUE constraint failed" message (e.g. `t1.a` or `t1.c, t1.d`).
 fn qualify_constraint_columns(table_name: &str, columns: &[String]) -> String {
-    columns
-        .iter()
-        .map(|col| format!("{}.{}", table_name, col))
-        .collect::<Vec<_>>()
-        .join(", ")
+    columns.iter().map(|col| format!("{}.{}", table_name, col)).collect::<Vec<_>>().join(", ")
 }
 
 /// Validate that multiple updates in the same batch don't produce conflicting
@@ -620,7 +616,8 @@ pub(super) fn resolve_cross_update_conflicts_for_replace(
 /// by [`validate_cross_update_uniqueness`], which must be called before this function.
 ///
 /// # Arguments
-/// * `updates` - All pending updates (`PendingUpdate`: row_index, old_row, new_row, changed_columns, updates_pk)
+/// * `updates` - All pending updates (`PendingUpdate`: row_index, old_row, new_row,
+///   changed_columns, updates_pk)
 /// * `schema` - Table schema (for PK/UNIQUE constraint metadata)
 /// * `table` - Storage table reference (for accessing PK/UNIQUE hash indexes)
 /// * `database` - Database reference (for accessing user-defined UNIQUE indexes)
@@ -863,19 +860,16 @@ pub(super) fn validate_post_statement_uniqueness(
 /// Two storage models reach here, both validated row-by-row with the same
 /// immediate semantics:
 ///
-/// * **Virtual rowid** (no INTEGER PRIMARY KEY): the rowid lives in
-///   `Row::row_id`; `SET rowid=` writes it. The effective rowid of a live row at
-///   physical index `i` is `row.row_id.unwrap_or(i + 1)`, matching the read
-///   path. A collision reports against `<table>.rowid` (issue #5559).
+/// * **Virtual rowid** (no INTEGER PRIMARY KEY): the rowid lives in `Row::row_id`; `SET rowid=`
+///   writes it. The effective rowid of a live row at physical index `i` is `row.row_id.unwrap_or(i
+///   + 1)`, matching the read path. A collision reports against `<table>.rowid` (issue #5559).
 ///
-/// * **INTEGER PRIMARY KEY** (`schema.rowid_alias_column` is set): the rowid IS
-///   the IPK column, so `SET rowid=` / `SET <ipk>=` writes that column. The
-///   effective rowid is the IPK column value. A collision reports against
-///   `<table>.<ipk>` (issue #5575). The deferred PK check in
-///   `validate_post_statement_uniqueness` runs first and (correctly) allows the
-///   swap on final-state grounds; this immediate check then rejects it on the
-///   intermediate collision, leaving regular-column deferred PK/UNIQUE behavior
-///   untouched.
+/// * **INTEGER PRIMARY KEY** (`schema.rowid_alias_column` is set): the rowid IS the IPK column, so
+///   `SET rowid=` / `SET <ipk>=` writes that column. The effective rowid is the IPK column value. A
+///   collision reports against `<table>.<ipk>` (issue #5575). The deferred PK check in
+///   `validate_post_statement_uniqueness` runs first and (correctly) allows the swap on final-state
+///   grounds; this immediate check then rejects it on the intermediate collision, leaving
+///   regular-column deferred PK/UNIQUE behavior untouched.
 ///
 /// In both models, rows that are themselves part of this UPDATE vacate their old
 /// rowid before their new rowid is written, so swaps and self-moves are not
@@ -936,8 +930,8 @@ pub(super) fn validate_rowid_relocation(
     // sqlite3 processes the UPDATE one row at a time in ascending (old) rowid
     // order and, as each row is relocated, requires the target rowid to be free
     // *at that moment*. The live set at that moment includes:
-    //   - rows not yet processed (un-updated rows, and updated rows whose old
-    //     rowid sorts later), and
+    //   - rows not yet processed (un-updated rows, and updated rows whose old rowid sorts later),
+    //     and
     //   - rows already relocated earlier in this statement.
     // A row that previously occupied the target but has already been relocated
     // away does NOT collide. Verified against sqlite3 3.51.0 (both virtual-rowid
@@ -1119,9 +1113,9 @@ pub(super) fn validate_unique_relocation(
         Ok(())
     };
 
-    // 1. PRIMARY KEY — but skip the rowid-alias (IPK) column, which
-    //    `validate_rowid_relocation` already handles immediately. A composite PK
-    //    that merely *contains* the IPK is still a multi-column key checked here.
+    // 1. PRIMARY KEY — but skip the rowid-alias (IPK) column, which `validate_rowid_relocation`
+    //    already handles immediately. A composite PK that merely *contains* the IPK is still a
+    //    multi-column key checked here.
     if schema.rowid_alias_column.is_none() {
         if let (Some(pk_indices), Some(pk_cols)) =
             (schema.get_primary_key_indices(), schema.primary_key.as_ref())
@@ -1146,8 +1140,8 @@ pub(super) fn validate_unique_relocation(
         check_key_space(unique_indices, &label)?;
     }
 
-    // 3. User-defined UNIQUE indexes (CREATE UNIQUE INDEX). Expression indexes
-    //    are skipped (handled elsewhere), matching the deferred validator.
+    // 3. User-defined UNIQUE indexes (CREATE UNIQUE INDEX). Expression indexes are skipped (handled
+    //    elsewhere), matching the deferred validator.
     for index_name in database.list_indexes_for_table(table_name) {
         let index_metadata = match database.get_index(&index_name) {
             Some(m) => m,

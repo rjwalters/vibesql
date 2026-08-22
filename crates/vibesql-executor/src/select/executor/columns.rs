@@ -126,7 +126,8 @@ impl SelectExecutor<'_> {
                     //
                     // Issue #4916: SQLite's behavior for USING column reordering:
                     // - Simple USING joins (no alias): columns stay in table order (a, b, c)
-                    // - Aliased USING joins ((t1 JOIN t2 USING(b)) AS j1): USING columns first (b, a, c)
+                    // - Aliased USING joins ((t1 JOIN t2 USING(b)) AS j1): USING columns first (b,
+                    //   a, c)
                     //
                     // We detect aliased joins by checking if there's an alias table that shadows
                     // all non-alias tables. In that case, we use the alias table's column order.
@@ -210,7 +211,8 @@ impl SelectExecutor<'_> {
                                         continue;
                                     }
 
-                                    // For hidden columns, check if they have a replacement or coalesce
+                                    // For hidden columns, check if they have a replacement or
+                                    // coalesce
                                     if from_res.schema.is_column_hidden(abs_idx) {
                                         let has_replacement = from_res
                                             .schema

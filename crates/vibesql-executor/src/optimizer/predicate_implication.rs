@@ -28,13 +28,12 @@
 //! `select::scan::index_scan::predicate::temporal_coercion`).
 //!
 //! Correctness:
-//! - **Extra rows are harmless** — the full WHERE clause is always re-applied
-//!   as a post-filter in `execute_index_scan()`.
-//! - **Missing rows cannot happen** — implication guarantees every row that
-//!   satisfies the query WHERE also satisfies the index predicate, and the
-//!   index body is a superset of predicate-matching rows (build-time filtering
-//!   excludes only predicate-false rows; DML maintenance for expression
-//!   indexes is predicate-unaware and over-inclusive).
+//! - **Extra rows are harmless** — the full WHERE clause is always re-applied as a post-filter in
+//!   `execute_index_scan()`.
+//! - **Missing rows cannot happen** — implication guarantees every row that satisfies the query
+//!   WHERE also satisfies the index predicate, and the index body is a superset of
+//!   predicate-matching rows (build-time filtering excludes only predicate-false rows; DML
+//!   maintenance for expression indexes is predicate-unaware and over-inclusive).
 
 use vibesql_ast::Expression;
 use vibesql_storage::Database;
@@ -99,9 +98,8 @@ pub(crate) fn query_implies_index_predicate(
 /// clause, considering partial-index predicates.
 ///
 /// - Non-partial indexes are always usable (returns `true`).
-/// - Partial indexes (expression or not) are usable only when `query_where`
-///   structurally implies the index predicate (see
-///   [`query_implies_index_predicate`]).
+/// - Partial indexes (expression or not) are usable only when `query_where` structurally implies
+///   the index predicate (see [`query_implies_index_predicate`]).
 /// - A partial index with no query WHERE clause is never usable.
 ///
 /// Partial EXPRESSION indexes were excluded here (v1) while the temporal
@@ -135,8 +133,9 @@ pub(crate) fn partial_index_usable(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::Statement;
+
+    use super::*;
 
     /// Parse the WHERE clause of `SELECT 1 FROM t WHERE <expr>`.
     fn parse_where(expr_sql: &str) -> Expression {

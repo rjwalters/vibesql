@@ -950,8 +950,7 @@ fn test_duplicate_with_table_name_errors() {
 /// table in FROM. Two malformed shapes are rejected before any rows are
 /// produced (issue #6189, with1.test 7.4/7.5):
 ///   - the only self-reference is buried in a subquery -> "circular reference";
-///   - a FROM reference plus a subquery reference -> "multiple recursive
-///     references".
+///   - a FROM reference plus a subquery reference -> "multiple recursive references".
 #[test]
 fn test_recursive_term_reference_shape_errors() {
     let mut db = vibesql_storage::Database::new();

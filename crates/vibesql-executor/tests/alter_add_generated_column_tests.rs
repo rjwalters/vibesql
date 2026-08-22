@@ -3,10 +3,10 @@
 //! value, not read back as NULL.
 //!
 //! Before the fix two gaps combined:
-//!   * the ALTER parser dropped the `GENERATED ALWAYS AS (expr)` clause
-//!     (`generated_expr` stayed `None`), and
-//!   * the ADD COLUMN executor stored a plain column and backfilled existing
-//!     rows with a static NULL.
+//!   * the ALTER parser dropped the `GENERATED ALWAYS AS (expr)` clause (`generated_expr` stayed
+//!     `None`), and
+//!   * the ADD COLUMN executor stored a plain column and backfilled existing rows with a static
+//!     NULL.
 //!
 //! Parity target: sqlite3 3.51.0 (the TCL conformance reference), which returns
 //! the computed value for both the new-row path and the pre-existing-row

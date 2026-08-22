@@ -6,8 +6,8 @@
 //! `strftime()`, `julianday()`, and `unixepoch()`).
 //!
 //! - `date()` returns the date component (SQLite renders `YYYY-MM-DD`)
-//! - `time()` returns the time component truncated to whole seconds (SQLite's
-//!   `time('12:34:56.43')` is `12:34:56`)
+//! - `time()` returns the time component truncated to whole seconds (SQLite's `time('12:34:56.43')`
+//!   is `12:34:56`)
 //!
 //! Both return NULL for NULL/unparseable input or invalid modifiers, and treat
 //! an omitted time-value as 'now' (matching SQLite).

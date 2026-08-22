@@ -308,9 +308,8 @@ pub(in crate::select::join) fn hash_join_left_outer_multi(
 ///
 /// Algorithm:
 /// 1. Build phase: Hash the right table (O(m))
-/// 2. Probe phase: For each left row (O(n)):
-///    a. If no equi-join match: emit left + NULLs
-///    b. If equi-join match: check additional filter for each match
+/// 2. Probe phase: For each left row (O(n)): a. If no equi-join match: emit left + NULLs b. If
+///    equi-join match: check additional filter for each match
 ///       - If any match passes filter: emit left + right for each passing match
 ///       - If ALL matches fail filter: emit left + NULLs (preserves left row!)
 ///

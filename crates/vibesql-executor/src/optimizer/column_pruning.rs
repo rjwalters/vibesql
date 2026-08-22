@@ -303,7 +303,8 @@ pub fn collect_columns_from_expr(expr: &Expression, columns: &mut HashSet<Column
                     collect_columns_from_expr(expr, columns);
                 }
             }
-            // Also extract columns from EXISTS subquery's WHERE clause (may reference outer columns)
+            // Also extract columns from EXISTS subquery's WHERE clause (may reference outer
+            // columns)
             if let Some(where_clause) = &subquery.where_clause {
                 collect_columns_from_expr(where_clause, columns);
             }
@@ -553,11 +554,12 @@ pub fn remap_schema(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema::CombinedSchema;
     use vibesql_ast::BinaryOperator;
     use vibesql_catalog::ColumnSchema;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
+    use crate::schema::CombinedSchema;
 
     #[test]
     fn test_collect_simple_column_ref() {
@@ -715,7 +717,8 @@ mod tests {
     #[test]
     fn test_remap_schema_multiple_tables() {
         // Simulate a JOIN of orders (3 cols) and items (2 cols) = 5 total columns
-        // Original layout: orders.id(0), orders.customer(1), orders.amount(2), items.item_id(3), items.price(4)
+        // Original layout: orders.id(0), orders.customer(1), orders.amount(2), items.item_id(3),
+        // items.price(4)
         let orders = make_table_schema(
             "orders",
             &[

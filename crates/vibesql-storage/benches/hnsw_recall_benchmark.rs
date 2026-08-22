@@ -12,14 +12,12 @@
 //! across a sweep of `ef_search` and delete-ratio so degradation and
 //! restoration are both visible:
 //!
-//!   - `fresh`             : index built over only the live vectors (the
-//!                           best-case reference an ANN index can achieve).
-//!   - `degraded`          : index built over the full dataset, then a fraction
-//!                           of vectors lazily deleted *without* compaction —
-//!                           tombstones erode the small-world graph and recall
-//!                           drops.
-//!   - `compacted`         : same deletes, then `compact()` rebuilds the graph
-//!                           from survivors — recall is restored to ~`fresh`.
+//!   - `fresh`             : index built over only the live vectors (the best-case reference an ANN
+//!     index can achieve).
+//!   - `degraded`          : index built over the full dataset, then a fraction of vectors lazily
+//!     deleted *without* compaction — tombstones erode the small-world graph and recall drops.
+//!   - `compacted`         : same deletes, then `compact()` rebuilds the graph from survivors —
+//!     recall is restored to ~`fresh`.
 //!
 //! The dataset is fully deterministic (seeded xorshift64, no `rand`) so recall
 //! is reproducible run-to-run and the benchmark is not timing-flaky.
@@ -247,10 +245,7 @@ fn main() {
         "{:<10} {:>12} {:>8} {:>9} {:>10} {:>10} {:>10}",
         "EfSearch", "DeleteRatio", "Live", "Deleted", "Fresh", "Degraded", "Compacted"
     );
-    println!(
-        "{:-<10} {:->12} {:->8} {:->9} {:->10} {:->10} {:->10}",
-        "", "", "", "", "", "", ""
-    );
+    println!("{:-<10} {:->12} {:->8} {:->9} {:->10} {:->10} {:->10}", "", "", "", "", "", "", "");
 
     let mut points = Vec::new();
     for &ef_search in &ef_search_sweep {

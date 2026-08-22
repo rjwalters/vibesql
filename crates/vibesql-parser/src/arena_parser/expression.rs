@@ -282,7 +282,8 @@ impl<'arena> ArenaParser<'arena> {
                     }));
                     continue;
                 } else if self.peek_keyword(Keyword::Null) {
-                    // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT NULL"
+                    // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS
+                    // NOT NULL"
                     self.consume_keyword(Keyword::Null)?;
                     let left_ref = self.arena.alloc(left);
                     left = Expression::IsNull { expr: left_ref, negated: true };
@@ -465,7 +466,8 @@ impl<'arena> ArenaParser<'arena> {
                 continue;
             }
 
-            // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
+            // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT]
+            // TRUE/FALSE/UNKNOWN
             if self.peek_keyword(Keyword::Is) {
                 self.consume_keyword(Keyword::Is)?;
                 let negated = self.try_consume_keyword(Keyword::Not);
@@ -600,12 +602,11 @@ impl<'arena> ArenaParser<'arena> {
     // to the standard parser, which places `||`/`->`/`->>` in one shared tier.)
     //
     // Each tier comes in two forms:
-    // - `parse_<tier>_expression()` parses a fresh operand (starting at the
-    //   unary tier) and then climbs from that seed.
-    // - `parse_<tier>_expression_from(left)` takes an already-parsed left
-    //   operand, first runs it through all tighter tiers, then applies this
-    //   tier's operator loop. Each operator loop exists exactly once, in the
-    //   `_from` variant.
+    // - `parse_<tier>_expression()` parses a fresh operand (starting at the unary tier) and then
+    //   climbs from that seed.
+    // - `parse_<tier>_expression_from(left)` takes an already-parsed left operand, first runs it
+    //   through all tighter tiers, then applies this tier's operator loop. Each operator loop
+    //   exists exactly once, in the `_from` variant.
     //
     // Parallel-structure invariant (see parser/expressions/operators.rs): the
     // standard parser has the same decomposition plus shift and bitwise
@@ -818,7 +819,8 @@ impl<'arena> ArenaParser<'arena> {
         }
 
         // Function call or identifier
-        // Extract identifier from token (handles both regular identifiers and keywords-as-identifiers)
+        // Extract identifier from token (handles both regular identifiers and
+        // keywords-as-identifiers)
         let first_ident = match self.peek() {
             Token::Identifier(name) => Some((name.clone(), false)),
             Token::DelimitedIdentifier(name) => Some((name.clone(), true)),

@@ -9,6 +9,10 @@ use bytes::BytesMut;
 use tokio::net::tcp::OwnedWriteHalf;
 use tracing::{debug, warn};
 
+use super::{
+    protocol::{send_subscription_data, send_subscription_error},
+    selective::{rows_to_wire_format, try_send_selective_updates},
+};
 use crate::{
     config::Config,
     observability::ObservabilityProvider,
@@ -20,9 +24,6 @@ use crate::{
     },
     Row,
 };
-
-use super::protocol::{send_subscription_data, send_subscription_error};
-use super::selective::{rows_to_wire_format, try_send_selective_updates};
 
 /// Send a subscription update (either delta or full)
 #[allow(clippy::too_many_arguments)]

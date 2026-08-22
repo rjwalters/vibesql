@@ -35,21 +35,19 @@ impl AlterTableExecutor {
     /// After a successful structural ALTER, two pieces of bookkeeping run
     /// (issue #5625):
     ///
-    /// 1. **Catalog schema sync.** Column operations (ADD/DROP/RENAME/MODIFY)
-    ///    only mutate the *storage* `Table` copy of the schema. The *catalog*
-    ///    copy — read by `sqlite_master`, `PRAGMA table_info`, and DML column
-    ///    resolution — is then re-synced from the storage copy so both stay
-    ///    consistent. (RENAME TABLE syncs via drop+create and is exempt.)
+    /// 1. **Catalog schema sync.** Column operations (ADD/DROP/RENAME/MODIFY) only mutate the
+    ///    *storage* `Table` copy of the schema. The *catalog* copy — read by `sqlite_master`,
+    ///    `PRAGMA table_info`, and DML column resolution — is then re-synced from the storage copy
+    ///    so both stay consistent. (RENAME TABLE syncs via drop+create and is exempt.)
     ///
-    /// 2. **`sql_source` upkeep.** SQLite edits the verbatim `CREATE TABLE` text
-    ///    in `sqlite_master.sql` in place on ALTER rather than reconstructing it.
-    ///    For ADD COLUMN, RENAME COLUMN, DROP COLUMN, and RENAME TO the stored
-    ///    verbatim text is edited to match SQLite (when `alter_sql` is available
-    ///    / the structure permits; RENAME TO is handled in
-    ///    `table_options::execute_rename_table`). For the remaining variants, and
-    ///    whenever an in-place edit cannot apply cleanly, the stale text is
-    ///    invalidated so it is reconstructed from the (now-synced) schema. Either
-    ///    way the stored text remains re-parseable on reload (issue #5619).
+    /// 2. **`sql_source` upkeep.** SQLite edits the verbatim `CREATE TABLE` text in
+    ///    `sqlite_master.sql` in place on ALTER rather than reconstructing it. For ADD COLUMN,
+    ///    RENAME COLUMN, DROP COLUMN, and RENAME TO the stored verbatim text is edited to match
+    ///    SQLite (when `alter_sql` is available / the structure permits; RENAME TO is handled in
+    ///    `table_options::execute_rename_table`). For the remaining variants, and whenever an
+    ///    in-place edit cannot apply cleanly, the stale text is invalidated so it is reconstructed
+    ///    from the (now-synced) schema. Either way the stored text remains re-parseable on reload
+    ///    (issue #5619).
     pub fn execute_with_source(
         stmt: &AlterTableStmt,
         database: &mut Database,
@@ -94,17 +92,12 @@ impl AlterTableExecutor {
             // regardless of which alias (`sqlite_master`/`sqlite_schema`, temp
             // variants) or case the statement used — SQLite canonicalizes this
             // specific message (verified against sqlite3 3.51.0).
-            return Err(ExecutorError::Other(
-                "table sqlite_master may not be altered".to_string(),
-            ));
+            return Err(ExecutorError::Other("table sqlite_master may not be altered".to_string()));
         }
         if crate::sqlite_stat::is_sqlite_stat_table(table_name) {
             // The statistics tables (`sqlite_stat1..4`) echo the actual name as
             // spelled in the statement.
-            return Err(ExecutorError::Other(format!(
-                "table {} may not be altered",
-                table_name
-            )));
+            return Err(ExecutorError::Other(format!("table {} may not be altered", table_name)));
         }
 
         PrivilegeChecker::check_alter(database, table_name)?;

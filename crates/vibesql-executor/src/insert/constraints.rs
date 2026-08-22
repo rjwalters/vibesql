@@ -339,19 +339,15 @@ pub fn enforce_check_constraints(
 #[derive(Debug, Default)]
 pub struct BatchUniqueIndexKeys {
     /// index name -> normalized non-NULL keys claimed by earlier batch rows
-    keys: std::collections::HashMap<
-        String,
-        std::collections::HashSet<Vec<vibesql_types::SqlValue>>,
-    >,
+    keys:
+        std::collections::HashMap<String, std::collections::HashSet<Vec<vibesql_types::SqlValue>>>,
 }
 
 impl BatchUniqueIndexKeys {
     /// True when an earlier row of this statement already claimed `key`
     /// (raw, un-normalized values) under `index_name`.
     pub fn contains(&self, index_name: &str, key: &[vibesql_types::SqlValue]) -> bool {
-        self.keys
-            .get(index_name)
-            .is_some_and(|set| set.contains(&normalize_index_key(key)))
+        self.keys.get(index_name).is_some_and(|set| set.contains(&normalize_index_key(key)))
     }
 
     /// Record `key` (raw, un-normalized values) as claimed under `index_name`.

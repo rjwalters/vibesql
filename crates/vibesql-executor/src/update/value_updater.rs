@@ -7,8 +7,7 @@ use vibesql_ast::Assignment;
 use crate::{
     errors::ExecutorError,
     evaluator::ExpressionEvaluator,
-    insert::validation::coerce_value,
-    insert::{coerce_rowid_affinity, RowidAffinity},
+    insert::{coerce_rowid_affinity, validation::coerce_value, RowidAffinity},
 };
 
 /// Apply SQLite's rowid (INTEGER) affinity to a value assigned to the rowid —

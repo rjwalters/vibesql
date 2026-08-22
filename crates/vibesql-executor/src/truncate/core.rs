@@ -37,11 +37,8 @@ pub fn reset_auto_increment_sequences(
     // to 1, mirrored by removing the `sqlite_sequence` row for this table (an
     // empty table with no `seq` row makes the next NULL insert restart at 1);
     // `bump_sequence_after_insert` lazily recreates the row on the next insert.
-    let autoincrement_cleanup = if table_schema.is_autoincrement {
-        Some(table_schema.name.clone())
-    } else {
-        None
-    };
+    let autoincrement_cleanup =
+        if table_schema.is_autoincrement { Some(table_schema.name.clone()) } else { None };
 
     // Now reset the sequences
     for sequence_name in sequence_names {

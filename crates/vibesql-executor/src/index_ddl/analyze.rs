@@ -18,8 +18,7 @@
 use vibesql_ast::AnalyzeStmt;
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::sqlite_schema::is_sqlite_schema_table;
+use crate::{errors::ExecutorError, sqlite_schema::is_sqlite_schema_table};
 
 /// Executor for ANALYZE statements
 pub struct AnalyzeExecutor;

@@ -3,14 +3,12 @@
 //! Two validators that previously covered only the SELECT-list and WHERE
 //! clauses are extended to the remaining SELECT clauses:
 //!
-//! * #6110 — COLLATE-name validation (`no such collation sequence: <name>`)
-//!   now also walks ORDER BY, GROUP BY, HAVING, and JOIN ... ON. Before the
-//!   fix an unknown collation named there was silently accepted (a false
-//!   negative); the three built-ins (BINARY/NOCASE/RTRIM, any case-spelling)
-//!   must keep passing in every clause (no false positives).
-//! * #6101 — the SELECT-predicate scalar-subquery arity / row-value-misuse
-//!   walk now also runs over HAVING and JOIN ... ON, matching SQLite's
-//!   prepare-time rejection over an empty table.
+//! * #6110 — COLLATE-name validation (`no such collation sequence: <name>`) now also walks ORDER
+//!   BY, GROUP BY, HAVING, and JOIN ... ON. Before the fix an unknown collation named there was
+//!   silently accepted (a false negative); the three built-ins (BINARY/NOCASE/RTRIM, any
+//!   case-spelling) must keep passing in every clause (no false positives).
+//! * #6101 — the SELECT-predicate scalar-subquery arity / row-value-misuse walk now also runs over
+//!   HAVING and JOIN ... ON, matching SQLite's prepare-time rejection over an empty table.
 //!
 //! All expected results verified against sqlite3 3.51.0.
 

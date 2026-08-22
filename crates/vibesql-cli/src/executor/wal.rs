@@ -201,10 +201,10 @@ impl WalState {
     ///   2. Serializes the in-memory database to uncompressed binary bytes.
     ///   3. Writes a checkpoint at the engine's current LSN.
     ///   4. Truncates the WAL up to that LSN.
-    ///   5. Prunes old checkpoints, keeping the `keep_checkpoints` most recent
-    ///      (issue #6023) so the archive does not grow unboundedly. This runs
-    ///      only after steps 1–4 succeed; a pruning failure is logged, not
-    ///      propagated, so a successful checkpoint is never reported as failed.
+    ///   5. Prunes old checkpoints, keeping the `keep_checkpoints` most recent (issue #6023) so the
+    ///      archive does not grow unboundedly. This runs only after steps 1–4 succeed; a pruning
+    ///      failure is logged, not propagated, so a successful checkpoint is never reported as
+    ///      failed.
     ///
     /// **Fail-safe invariant (issue #5832):** the WAL is truncated in step 4
     /// only after steps 1–3 all succeed. Any failure — serialization error,
@@ -217,10 +217,9 @@ impl WalState {
         // 1. Make sure everything already emitted is on disk before we snapshot.
         db.sync_persistence()?;
 
-        // 2. Determine the LSN this checkpoint covers. `persistence_next_lsn`
-        //    returns the next LSN the engine will assign, so every entry with
-        //    LSN < that is captured by this checkpoint snapshot and safe to
-        //    truncate.
+        // 2. Determine the LSN this checkpoint covers. `persistence_next_lsn` returns the next LSN
+        //    the engine will assign, so every entry with LSN < that is captured by this checkpoint
+        //    snapshot and safe to truncate.
         let checkpoint_lsn = db.persistence_next_lsn().unwrap_or(1).saturating_sub(1);
 
         // 3. Serialize the database and write the checkpoint.
@@ -228,17 +227,17 @@ impl WalState {
         let num_tables = db.list_tables().len() as u32;
         self.checkpoint_writer.create_checkpoint(checkpoint_lsn, &data, num_tables)?;
 
-        // 4. Truncate the WAL up to (and including) the checkpoint LSN. Use a
-        //    zero safety buffer: the checkpoint fully captures state at this LSN.
+        // 4. Truncate the WAL up to (and including) the checkpoint LSN. Use a zero safety buffer:
+        //    the checkpoint fully captures state at this LSN.
         if self.paths.wal_path.exists() {
             truncate_wal(&self.paths.wal_path, checkpoint_lsn, Some(0))?;
         }
 
-        // 5. Prune old checkpoints (issue #6023). This runs ONLY after the new
-        //    checkpoint is durably written AND the WAL has been truncated, so
-        //    pruning can never remove a checkpoint the WAL still depends on and
-        //    the newest checkpoint is always present (fail-closed recovery,
-        //    #5807/#5850). `keep_checkpoints` is clamped to >= 1 at construction.
+        // 5. Prune old checkpoints (issue #6023). This runs ONLY after the new checkpoint is
+        //    durably written AND the WAL has been truncated, so pruning can never remove a
+        //    checkpoint the WAL still depends on and the newest checkpoint is always present
+        //    (fail-closed recovery, #5807/#5850). `keep_checkpoints` is clamped to >= 1 at
+        //    construction.
         //
         //    A cleanup failure is a logged warning, NOT a checkpoint failure:
         //    the durable checkpoint + truncated WAL already succeeded, so the

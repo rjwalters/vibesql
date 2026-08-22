@@ -126,7 +126,8 @@ impl ColumnarBatch {
                         ColumnArray::Mixed(Arc::new(sql_values))
                     }
                     ColumnData::Time { values, nulls } => {
-                        // Convert Time to Mixed (fallback - Time doesn't have direct i64 conversion)
+                        // Convert Time to Mixed (fallback - Time doesn't have direct i64
+                        // conversion)
                         let sql_values: Vec<SqlValue> = values
                             .iter()
                             .zip(nulls.iter())

@@ -5,14 +5,12 @@
 //! operator, or the column's declared collation. List-element collations are
 //! irrelevant. Four code paths are covered:
 //!
-//! - the slow-path `eval_in_list` (both the <=3-element linear scan and the
-//!   >3-element HashSet lookup), in both evaluators;
-//! - the columnar `ColumnPredicate::InList` pushdown (declined for
-//!   non-BINARY-collated columns);
+//! - the slow-path `eval_in_list` (both the <=3-element linear scan and the >3-element HashSet
+//!   lookup), in both evaluators;
+//! - the columnar `ColumnPredicate::InList` pushdown (declined for non-BINARY-collated columns);
 //! - the vectorized `try_compile_in_list` (same decline);
-//! - the index-probe path (`IndexPredicate::In` is declined for a
-//!   non-BINARY-collated indexed column, falling back to the
-//!   collation-aware WHERE filter).
+//! - the index-probe path (`IndexPredicate::In` is declined for a non-BINARY-collated indexed
+//!   column, falling back to the collation-aware WHERE filter).
 //!
 //! Expected values verified against sqlite3 3.x with the same fixture.
 

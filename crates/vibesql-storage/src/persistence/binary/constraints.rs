@@ -24,18 +24,17 @@
 // `ConstraintValidator::process_constraints`), which cannot be called from
 // this crate (the executor depends on storage, not vice versa):
 //
-// - CHECK constraint names: explicit `CONSTRAINT <name>` when given,
-//   otherwise the expression's SQL text (SQLite-compatible error messages).
-//   Column-level CHECKs are collected first (in column order), then
-//   table-level CHECKs, matching `ConstraintValidator`.
-// - FK ordering: table-level constraints in declaration order, then
-//   column-level `REFERENCES` constraints in REVERSE column order (SQLite's
-//   FK id assignment, mirrored from `create_table.rs`).
-// - Implicit parent keys (`REFERENCES p` with no column list): parent column
-//   names are stored as empty strings and indices as 0, exactly like the
-//   CREATE path; enforcement resolves the parent's PK by name at runtime.
-// - Unknown parent tables keep placeholder indices (SQLite stores FK
-//   metadata even when the parent doesn't exist yet).
+// - CHECK constraint names: explicit `CONSTRAINT <name>` when given, otherwise the expression's SQL
+//   text (SQLite-compatible error messages). Column-level CHECKs are collected first (in column
+//   order), then table-level CHECKs, matching `ConstraintValidator`.
+// - FK ordering: table-level constraints in declaration order, then column-level `REFERENCES`
+//   constraints in REVERSE column order (SQLite's FK id assignment, mirrored from
+//   `create_table.rs`).
+// - Implicit parent keys (`REFERENCES p` with no column list): parent column names are stored as
+//   empty strings and indices as 0, exactly like the CREATE path; enforcement resolves the parent's
+//   PK by name at runtime.
+// - Unknown parent tables keep placeholder indices (SQLite stores FK metadata even when the parent
+//   doesn't exist yet).
 //
 // A `sql_source` that fails to re-parse, or that is not a CREATE TABLE
 // statement, is a hard load error — never a silently-unenforced constraint —
@@ -226,9 +225,10 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
         let col_name = &schema.columns[col_idx].name;
         let is_autoincrement = create.columns.iter().any(|col_def| {
             col_def.name.eq_ignore_ascii_case(col_name)
-                && col_def.constraints.iter().any(|c| {
-                    matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
-                })
+                && col_def
+                    .constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
         });
         if is_autoincrement {
             schema.is_autoincrement = true;

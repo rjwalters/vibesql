@@ -7,9 +7,8 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
-use crate::select::scan::index_scan::selection::is_column_reference;
-
 use super::RangePredicate;
+use crate::select::scan::index_scan::selection::is_column_reference;
 
 /// Extract range predicate bounds for an indexed column from WHERE clause
 ///
@@ -34,7 +33,8 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(
                                 return None;
                             }
                             // Equal is a range with same start and end, both inclusive
-                            // For equality, exclude_nulls is false since we're matching a specific value
+                            // For equality, exclude_nulls is false since we're matching a specific
+                            // value
                             return Some(RangePredicate {
                                 start: Some(value.clone()),
                                 end: Some(value.clone()),
@@ -168,7 +168,8 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(
                                 (Some(v), None) => (Some(v.clone()), l.inclusive_start),
                                 (None, Some(v)) => (Some(v.clone()), r.inclusive_start),
                                 (Some(lv), Some(rv)) => {
-                                    // Use Ord::cmp for cross-type comparison (handles Integer vs Real)
+                                    // Use Ord::cmp for cross-type comparison (handles Integer vs
+                                    // Real)
                                     match lv.cmp(rv) {
                                         std::cmp::Ordering::Greater => {
                                             (Some(lv.clone()), l.inclusive_start)
@@ -192,7 +193,8 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(
                                 (Some(v), None) => (Some(v.clone()), l.inclusive_end),
                                 (None, Some(v)) => (Some(v.clone()), r.inclusive_end),
                                 (Some(lv), Some(rv)) => {
-                                    // Use Ord::cmp for cross-type comparison (handles Integer vs Real)
+                                    // Use Ord::cmp for cross-type comparison (handles Integer vs
+                                    // Real)
                                     match lv.cmp(rv) {
                                         std::cmp::Ordering::Less => {
                                             (Some(lv.clone()), l.inclusive_end)
@@ -219,13 +221,16 @@ pub(in crate::select::scan::index_scan) fn extract_range_predicate(
                             //
                             // Previously, we used Integer(1)/Integer(0) as a marker, but this
                             // caused type mismatch issues when merging with Real/Float values
-                            // in nested AND expressions (PartialOrd returns None for different types).
+                            // in nested AND expressions (PartialOrd returns None for different
+                            // types).
                             //
                             // Note: We still check for equal bounds with exclusive to detect
-                            // impossible ranges like col > 5 AND col < 5, which need special handling.
+                            // impossible ranges like col > 5 AND col < 5, which need special
+                            // handling.
                             if let (Some(ref start), Some(ref end)) = (&merged_start, &merged_end) {
-                                // For equal bounds with any exclusive: return impossible range marker
-                                // This case needs a marker because start == end would pass the
+                                // For equal bounds with any exclusive: return impossible range
+                                // marker This case needs a marker
+                                // because start == end would pass the
                                 // storage layer's inverted range check
                                 if start == end
                                     && (!merged_inclusive_start || !merged_inclusive_end)

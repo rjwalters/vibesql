@@ -18,8 +18,10 @@
 //! builds even at SF 0.01.
 #![cfg(feature = "sqlite")]
 
-use vibesql_bench_common::tpch::queries::{TPCH_Q7_SQLITE, TPCH_Q8_SQLITE, TPCH_Q9_SQLITE};
-use vibesql_bench_common::tpch::schema::{load_sqlite, load_vibesql};
+use vibesql_bench_common::tpch::{
+    queries::{TPCH_Q7_SQLITE, TPCH_Q8_SQLITE, TPCH_Q9_SQLITE},
+    schema::{load_sqlite, load_vibesql},
+};
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;
 use vibesql_types::SqlValue;

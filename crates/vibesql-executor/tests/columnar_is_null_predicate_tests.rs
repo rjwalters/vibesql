@@ -7,9 +7,9 @@
 //! test directly from the column's null bitmap.
 //!
 //! Correctness is cross-checked two ways:
-//!  1. Every `WHERE <pred>` result is compared against a per-row projection of
-//!     the same predicate (`SELECT id, <pred>`), which runs the expression
-//!     evaluator — the canonical, row-path semantics.
+//!  1. Every `WHERE <pred>` result is compared against a per-row projection of the same predicate
+//!     (`SELECT id, <pred>`), which runs the expression evaluator — the canonical, row-path
+//!     semantics.
 //!  2. Literal expectations are pinned and were verified against sqlite3.
 //!
 //! The matrix runs at two table sizes — 2 rows (scalar columnar path, below the

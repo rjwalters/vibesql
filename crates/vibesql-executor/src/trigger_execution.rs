@@ -1,7 +1,9 @@
 //! Trigger execution logic for firing triggers on DML operations
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+};
 
 use vibesql_ast::{PseudoTable, TriggerEvent, TriggerGranularity, TriggerTiming};
 use vibesql_catalog::{TableSchema, TriggerDefinition};
@@ -92,10 +94,9 @@ fn grow_stack_for_trigger<R>(f: impl FnOnce() -> R) -> R {
 /// SQLite lets a connection lower its trigger-recursion limit at runtime via
 /// `sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, N)` (exercised by
 /// triggerC-3.5.x / 3.6.x). VibeSQL honors that here (#5536):
-///   - no per-connection limit set: the compile-time stack-safe cap
-///     `MAX_TRIGGER_RECURSION_DEPTH`,
-///   - a per-connection limit `N`: `N` clamped into the stack-safe range
-///     `[1, MAX_TRIGGER_RECURSION_DEPTH]`.
+///   - no per-connection limit set: the compile-time stack-safe cap `MAX_TRIGGER_RECURSION_DEPTH`,
+///   - a per-connection limit `N`: `N` clamped into the stack-safe range `[1,
+///     MAX_TRIGGER_RECURSION_DEPTH]`.
 ///
 /// Clamping matches SQLite, which never lets a runtime limit exceed the
 /// compile-time `SQLITE_MAX_TRIGGER_DEPTH`, and never lets it drop below 1

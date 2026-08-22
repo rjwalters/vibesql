@@ -349,8 +349,7 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         .catalog
         .iter_triggers()
         .filter(|t| {
-            !t.is_temp()
-                && !t.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
+            !t.is_temp() && !t.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
         })
         .collect();
     write_u32(writer, triggers.len() as u32)?;
@@ -1722,8 +1721,8 @@ mod tests {
             ))
             .unwrap();
 
-        // 4. RECURSIVE CTE view — ToSql must render the RECURSIVE keyword so
-        //    the flag survives the text round-trip.
+        // 4. RECURSIVE CTE view — ToSql must render the RECURSIVE keyword so the flag survives the
+        //    text round-trip.
         db.catalog
             .create_view(vibesql_catalog::ViewDefinition::new(
                 "v_rec".to_string(),

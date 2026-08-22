@@ -5,8 +5,10 @@
 //! Covered rejections:
 //!   * a UNIQUE column                  -> `cannot drop UNIQUE column: "z"`
 //!   * a PRIMARY KEY column             -> `cannot drop PRIMARY KEY column: "x"`
-//!   * a plain-index-referenced column  -> `error in index t2y after drop column: no such column: y`
-//!   * an expression-index column       -> `error in index t3rs after drop column: no such column: s`
+//!   * a plain-index-referenced column  -> `error in index t2y after drop column: no such column:
+//!     y`
+//!   * an expression-index column       -> `error in index t3rs after drop column: no such column:
+//!     s`
 //!   * a column of a VIEW               -> `cannot drop column from view "v1"`
 //!   * the schema table                 -> `table sqlite_master may not be altered`
 //!   * a missing column                 -> `no such column: "d"`

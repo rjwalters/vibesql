@@ -5,11 +5,14 @@
 // This module provides table management methods for the Database struct.
 // Includes create, drop, insert, update operations.
 
-use super::Database;
-use crate::change_events::{ChangeEvent, ChangeEventPk};
-use crate::wal::WalOp;
-use crate::{Row, StorageError, Table};
 use vibesql_catalog::{TableIdentifier, TableSchema};
+
+use super::Database;
+use crate::{
+    change_events::{ChangeEvent, ChangeEventPk},
+    wal::WalOp,
+    Row, StorageError, Table,
+};
 
 /// Extract the single-column primary-key identity (column name + value) of `row`
 /// for the given `schema`, for stamping onto a [`ChangeEvent`] (#5472).
@@ -350,12 +353,8 @@ impl Database {
 
             // Finally, check attached databases in attachment order (SQLite
             // searches temp, then main, then each ATTACHed database — #6310).
-            let attached_names: Vec<String> = self
-                .catalog
-                .attached_databases()
-                .iter()
-                .map(|a| a.name.clone())
-                .collect();
+            let attached_names: Vec<String> =
+                self.catalog.attached_databases().iter().map(|a| a.name.clone()).collect();
             for attached_name in attached_names {
                 let attached_qualified = format!("{}.{}", attached_name, lowercase_name);
                 if self.tables.contains_key(&attached_qualified) {
@@ -736,16 +735,14 @@ impl Database {
         // Broadcast change event to subscribers, carrying BOTH the pre-image and
         // post-image single-column PK so consumers can reason about a row that
         // moves into or out of a filter (or whose PK itself changed) (#5472).
-        let pk = match (
-            single_pk_identity(&schema, &old_row),
-            single_pk_identity(&schema, &new_row),
-        ) {
-            (Some(old_pk), Some(new_pk)) => {
-                Some(ChangeEventPk::updated(old_pk.column, old_pk.value, new_pk.value))
-            }
-            // If either image's PK is unavailable, fall back to no PK (re-query).
-            _ => None,
-        };
+        let pk =
+            match (single_pk_identity(&schema, &old_row), single_pk_identity(&schema, &new_row)) {
+                (Some(old_pk), Some(new_pk)) => {
+                    Some(ChangeEventPk::updated(old_pk.column, old_pk.value, new_pk.value))
+                }
+                // If either image's PK is unavailable, fall back to no PK (re-query).
+                _ => None,
+            };
         self.broadcast_change(ChangeEvent::Update {
             table_name: resolved_name.clone(),
             row_index,

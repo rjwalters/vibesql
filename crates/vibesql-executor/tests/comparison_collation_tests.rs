@@ -3,14 +3,12 @@
 //!
 //! Two defects are covered:
 //!
-//! - Defect A (slow path): implicit column collation must NOT propagate
-//!   through `||` (or other operators/functions) — `(b||'')` has no
-//!   collating sequence even when `b` is declared `COLLATE NOCASE`, so
-//!   `(a||'')=(b||'')` compares BINARY.
-//! - Defect B (fast paths): compiled/vectorized/columnar predicates compare
-//!   raw values, so compilation must be declined for columns with a
-//!   non-BINARY collation and fall back to the collation-aware evaluator
-//!   (`b=a` must apply NOCASE; `b='XYZ'` must match 'xyz').
+//! - Defect A (slow path): implicit column collation must NOT propagate through `||` (or other
+//!   operators/functions) — `(b||'')` has no collating sequence even when `b` is declared `COLLATE
+//!   NOCASE`, so `(a||'')=(b||'')` compares BINARY.
+//! - Defect B (fast paths): compiled/vectorized/columnar predicates compare raw values, so
+//!   compilation must be declined for columns with a non-BINARY collation and fall back to the
+//!   collation-aware evaluator (`b=a` must apply NOCASE; `b='XYZ'` must match 'xyz').
 //!
 //! Expected values verified against sqlite3 (and `in4.test` lines 255-292).
 

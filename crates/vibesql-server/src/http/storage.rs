@@ -7,27 +7,23 @@
 //!
 //! The blob storage API has two backends selected by the server mode:
 //!
-//! * **Standalone**: blobs are written to a separate [`BlobStorageService`]
-//!   byte store (OpenDAL — filesystem, S3, GCS, Azure, in-memory). This path is
-//!   unchanged: the bytes live outside the SQL database and never touch
-//!   consensus.
+//! * **Standalone**: blobs are written to a separate [`BlobStorageService`] byte store (OpenDAL —
+//!   filesystem, S3, GCS, Azure, in-memory). This path is unchanged: the bytes live outside the SQL
+//!   database and never touch consensus.
 //!
-//! * **Replicated**: a separate node-local byte store would never replicate, so
-//!   blob writes are instead routed through the **same consensus SQL write
-//!   path** every other replicated HTTP surface uses. Each blob is a row in the
-//!   replicated `__vibesql_blobs` system table `(id, content_type, size,
-//!   created_at, data BLOB)`. An upload proposes an `INSERT` through consensus
-//!   via the [`HttpState::session`](crate::http::rest::HttpState) choke point
-//!   (leader-only, freeze-at-propose); a delete proposes a `DELETE`; a download
-//!   / metadata read runs the `SELECT` against the replicated state machine. So
-//!   a blob written on the leader replicates to every follower and is readable
-//!   on any node, an upload/delete on a follower surfaces the `NOT_LEADER`
-//!   refusal as `421` (never written locally — the split-brain invariant), and
-//!   there is no local-only blob write. The blob bytes ride the Raft log as a
-//!   SQL `BLOB` literal; this is sound for modest blobs but large blobs would
-//!   bloat the log/snapshots, so replicated uploads are capped at
-//!   [`MAX_REPLICATED_BLOB_BYTES`] (streaming large blobs out-of-band is a
-//!   documented follow-on).
+//! * **Replicated**: a separate node-local byte store would never replicate, so blob writes are
+//!   instead routed through the **same consensus SQL write path** every other replicated HTTP
+//!   surface uses. Each blob is a row in the replicated `__vibesql_blobs` system table `(id,
+//!   content_type, size, created_at, data BLOB)`. An upload proposes an `INSERT` through consensus
+//!   via the [`HttpState::session`](crate::http::rest::HttpState) choke point (leader-only,
+//!   freeze-at-propose); a delete proposes a `DELETE`; a download / metadata read runs the `SELECT`
+//!   against the replicated state machine. So a blob written on the leader replicates to every
+//!   follower and is readable on any node, an upload/delete on a follower surfaces the `NOT_LEADER`
+//!   refusal as `421` (never written locally — the split-brain invariant), and there is no
+//!   local-only blob write. The blob bytes ride the Raft log as a SQL `BLOB` literal; this is sound
+//!   for modest blobs but large blobs would bloat the log/snapshots, so replicated uploads are
+//!   capped at [`MAX_REPLICATED_BLOB_BYTES`] (streaming large blobs out-of-band is a documented
+//!   follow-on).
 
 use std::sync::Arc;
 
@@ -44,8 +40,10 @@ use vibesql_storage::{
     shared_metadata_db, BlobId, BlobStorageConfig, BlobStorageService, Database, SharedMetadataDb,
 };
 
-use super::rest::{execution_error_response, get_database_name, HttpState};
-use super::types::*;
+use super::{
+    rest::{execution_error_response, get_database_name, HttpState},
+    types::*,
+};
 use crate::registry::DatabaseRegistry;
 
 /// Replicated system table that holds blobs as rows so blob writes ride the
@@ -550,12 +548,8 @@ async fn replicated_get_blob_metadata(
 
     match fetch_replicated_blob(&state, &db_name, &id).await {
         Ok(Some((content_type, size, created_at, _data))) => {
-            let response = BlobMetadataResponse {
-                id: id.to_string(),
-                size,
-                content_type,
-                created_at,
-            };
+            let response =
+                BlobMetadataResponse { id: id.to_string(), size, content_type, created_at };
             (StatusCode::OK, Json(response)).into_response()
         }
         Ok(None) => (
@@ -593,10 +587,8 @@ async fn replicated_delete_blob(
         return execution_error_response(&e);
     }
 
-    let sql = format!(
-        "DELETE FROM {BLOB_TABLE} WHERE id = {}",
-        sql_string_literal(&id.to_string()),
-    );
+    let sql =
+        format!("DELETE FROM {BLOB_TABLE} WHERE id = {}", sql_string_literal(&id.to_string()),);
 
     let shared_db = state.registry.get_or_create(&db_name).await;
     let mut session = state.session(&db_name, shared_db);

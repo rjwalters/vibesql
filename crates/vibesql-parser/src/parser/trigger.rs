@@ -510,13 +510,12 @@ impl Parser {
     /// Reject the create-time-invalid constructs SQLite disallows on a
     /// trigger-body INSERT/UPDATE/DELETE statement (ticket #3947, trigger1-16.x):
     ///
-    /// 1. A schema-qualified DML target (`INSERT INTO main.t ...`,
-    ///    `UPDATE main.t ...`, `DELETE FROM main.t ...`). The trigger grammar
-    ///    never permitted a schema qualifier on the DML target — the whole
-    ///    trigger program runs in the schema of the trigger's own table — so
+    /// 1. A schema-qualified DML target (`INSERT INTO main.t ...`, `UPDATE main.t ...`, `DELETE
+    ///    FROM main.t ...`). The trigger grammar never permitted a schema qualifier on the DML
+    ///    target — the whole trigger program runs in the schema of the trigger's own table — so
     ///    SQLite rejects it with a full message rather than a bare syntax error.
-    /// 2. An `INDEXED BY <index>` / `NOT INDEXED` clause on a body UPDATE/DELETE,
-    ///    which SQLite likewise forbids inside a trigger program.
+    /// 2. An `INDEXED BY <index>` / `NOT INDEXED` clause on a body UPDATE/DELETE, which SQLite
+    ///    likewise forbids inside a trigger program.
     ///
     /// Only runs on statements VibeSQL parsed successfully, so bodies using
     /// constructs VibeSQL cannot yet parse are still tolerated as before.
@@ -590,17 +589,14 @@ impl Parser {
     ///
     /// Two classes are propagated:
     ///
-    /// 1. The `NULLS FIRST/LAST`-in-index-position error class (nulls1.test
-    ///    3.1.12), whose message is emitted verbatim by
-    ///    `reject_nulls_in_index_position`.
-    /// 2. Token-level syntax errors (`near "X": syntax error`). A genuine
-    ///    syntax error in a body statement — e.g. `SELECT * FROM;`
-    ///    (trigger1-2.1 / 2.2) — is rejected by SQLite at create time, so we
-    ///    surface it too. This is deliberately distinguished from VibeSQL
-    ///    *parser gaps*, which produce descriptive messages (e.g. "Expected
-    ///    ...") rather than the `near "X": syntax error` form; those are still
-    ///    tolerated so we don't reject bodies SQLite accepts but VibeSQL
-    ///    cannot yet parse.
+    /// 1. The `NULLS FIRST/LAST`-in-index-position error class (nulls1.test 3.1.12), whose message
+    ///    is emitted verbatim by `reject_nulls_in_index_position`.
+    /// 2. Token-level syntax errors (`near "X": syntax error`). A genuine syntax error in a body
+    ///    statement — e.g. `SELECT * FROM;` (trigger1-2.1 / 2.2) — is rejected by SQLite at create
+    ///    time, so we surface it too. This is deliberately distinguished from VibeSQL *parser
+    ///    gaps*, which produce descriptive messages (e.g. "Expected ...") rather than the `near
+    ///    "X": syntax error` form; those are still tolerated so we don't reject bodies SQLite
+    ///    accepts but VibeSQL cannot yet parse.
     ///
     /// Additional create-time rejection classes can be added here as they are
     /// identified.

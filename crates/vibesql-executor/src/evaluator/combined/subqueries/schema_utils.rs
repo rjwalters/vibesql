@@ -276,7 +276,8 @@ fn compute_single_select_column_count(
 ///
 /// # Returns
 /// - Some(TypeAffinity) if the first expression is a column reference with known affinity
-/// - None if the expression doesn't have a determinable affinity (e.g., function, literal, complex expr)
+/// - None if the expression doesn't have a determinable affinity (e.g., function, literal, complex
+///   expr)
 pub fn get_subquery_first_column_affinity(
     stmt: &vibesql_ast::SelectStmt,
     database: &vibesql_storage::Database,
@@ -303,11 +304,11 @@ pub fn get_subquery_first_column_affinity(
 /// `get_subquery_first_column_affinity`.
 ///
 /// # Returns
-/// - `Some(TypeAffinity)` if the expression at `idx` is a column reference (or a
-///   CAST/COLLATE thereof) with a determinable affinity.
-/// - `None` if the position is out of range, is a wildcard, or the expression
-///   does not carry a column affinity (e.g. a literal, function call, or an
-///   affinity-stripping expression like `+col`).
+/// - `Some(TypeAffinity)` if the expression at `idx` is a column reference (or a CAST/COLLATE
+///   thereof) with a determinable affinity.
+/// - `None` if the position is out of range, is a wildcard, or the expression does not carry a
+///   column affinity (e.g. a literal, function call, or an affinity-stripping expression like
+///   `+col`).
 pub fn get_subquery_column_affinity_at(
     stmt: &vibesql_ast::SelectStmt,
     idx: usize,
@@ -325,13 +326,13 @@ pub fn get_subquery_column_affinity_at(
 /// column for a datatype3 §7.1 comparison.
 ///
 /// Returns:
-/// - `Some(Some(coll))` — the column position is a §7.1 "column operand" with a
-///   declared collation `coll` (an explicit COLLATE, or a bare column /
-///   unary-`+` / CAST wrapping a column declared `COLLATE coll`);
-/// - `Some(None)` — a column operand with the default BINARY collation, which
-///   still *blocks* fallback to the other operand's collation;
-/// - `None` — not a column operand (literal, `||`, function, …), so it does not
-///   contribute a collation and the comparison falls through to the other side.
+/// - `Some(Some(coll))` — the column position is a §7.1 "column operand" with a declared collation
+///   `coll` (an explicit COLLATE, or a bare column / unary-`+` / CAST wrapping a column declared
+///   `COLLATE coll`);
+/// - `Some(None)` — a column operand with the default BINARY collation, which still *blocks*
+///   fallback to the other operand's collation;
+/// - `None` — not a column operand (literal, `||`, function, …), so it does not contribute a
+///   collation and the comparison falls through to the other side.
 ///
 /// This distinction (column-with-BINARY vs not-a-column) is what makes
 /// `(SELECT +bb, 1) >= (aa, 1)` compare element 0 as BINARY: `+bb` is a BINARY

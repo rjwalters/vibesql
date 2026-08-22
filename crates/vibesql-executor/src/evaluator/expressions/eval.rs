@@ -70,14 +70,12 @@ impl ExpressionEvaluator<'_> {
             // wrongly coerce the column value to text). TEXT / BLOB casts stay
             // affinity-less (`None`) to avoid making a CAST-to-text look like a
             // TEXT column in the IN-list path (in-17.3/17.4).
-            vibesql_ast::Expression::Cast { data_type, .. } => {
-                match data_type.sqlite_affinity() {
-                    affinity @ (vibesql_types::TypeAffinity::Numeric
-                    | vibesql_types::TypeAffinity::Integer
-                    | vibesql_types::TypeAffinity::Real) => Some(affinity),
-                    _ => None,
-                }
-            }
+            vibesql_ast::Expression::Cast { data_type, .. } => match data_type.sqlite_affinity() {
+                affinity @ (vibesql_types::TypeAffinity::Numeric
+                | vibesql_types::TypeAffinity::Integer
+                | vibesql_types::TypeAffinity::Real) => Some(affinity),
+                _ => None,
+            },
             // Literals, functions, and other expressions don't have column affinity
             _ => None,
         }
@@ -207,12 +205,12 @@ impl ExpressionEvaluator<'_> {
     /// expressions available on the current evaluator. It mirrors the
     /// column-vs-column cases of [`Self::apply_affinity_for_comparison`]:
     ///
-    /// - A NUMERIC/INTEGER/REAL side coerces a TEXT *value* on the other side to
-    ///   numeric (SQLite datatype3 §4.2 — NUMERIC applied to the other operand).
-    /// - TEXT-vs-NONE (or NONE-vs-NONE, TEXT-vs-TEXT) column comparisons perform
-    ///   NO coercion: they compare by storage class, so `'1'` (TEXT) does not
-    ///   equal `1` (INTEGER stored in a BLOB/NONE column). This is what makes
-    ///   `(a, b) IN (SELECT x, y FROM blob_table)` match SQLite (rowvalue9 1.6.1).
+    /// - A NUMERIC/INTEGER/REAL side coerces a TEXT *value* on the other side to numeric (SQLite
+    ///   datatype3 §4.2 — NUMERIC applied to the other operand).
+    /// - TEXT-vs-NONE (or NONE-vs-NONE, TEXT-vs-TEXT) column comparisons perform NO coercion: they
+    ///   compare by storage class, so `'1'` (TEXT) does not equal `1` (INTEGER stored in a
+    ///   BLOB/NONE column). This is what makes `(a, b) IN (SELECT x, y FROM blob_table)` match
+    ///   SQLite (rowvalue9 1.6.1).
     ///
     /// A `None` affinity (a non-column expression such as `+col`, matching
     /// SQLite's rule that unary `+` strips affinity to NONE) behaves like a real
@@ -362,8 +360,8 @@ impl ExpressionEvaluator<'_> {
         }
 
         // Case 5: Left is NUMERIC/INTEGER/REAL column, right is NONE/TEXT column with TEXT value
-        // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE affinity,
-        // try to convert the TEXT value to a number for comparison.
+        // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE
+        // affinity, try to convert the TEXT value to a number for comparison.
         // This handles column-to-column comparisons like: NUMERIC_col = NONE_col
         let is_right_non_numeric_affinity =
             matches!(right_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
@@ -1385,7 +1383,8 @@ impl ExpressionEvaluator<'_> {
                 }
 
                 // Use get_row_id_for_table to handle both single-table and multi-table (JOIN) rows
-                // This fixes issue #4370 where qualified ROWIDs like `t1.rowid` returned NULL in JOINs
+                // This fixes issue #4370 where qualified ROWIDs like `t1.rowid` returned NULL in
+                // JOINs
                 if let Some(row_id) = row.get_row_id_for_table(table_qualifier) {
                     return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
                 }
@@ -1736,10 +1735,10 @@ impl ExpressionEvaluator<'_> {
             let tuple_val = self.eval(tuple_expr, row)?;
             // datatype3 §7.1 comparison collation with correct left-operand
             // precedence (`tuple_on_left` selects the left side).
-            let tuple_operand = crate::evaluator::collation::operand_column_collation(
-                tuple_expr,
-                &|col_id| self.column_collation_of(col_id),
-            );
+            let tuple_operand =
+                crate::evaluator::collation::operand_column_collation(tuple_expr, &|col_id| {
+                    self.column_collation_of(col_id)
+                });
             let sub_operand = sub_collations[idx].clone();
             let (left_operand, right_operand) = if tuple_on_left {
                 (tuple_operand, sub_operand)
@@ -1825,10 +1824,10 @@ impl ExpressionEvaluator<'_> {
     /// Evaluate row value IS [NOT] DISTINCT FROM comparison
     ///
     /// In SQLite:
-    /// - `(a, b) IS (c, d)` means `(a, b) IS NOT DISTINCT FROM (c, d)`
-    ///   Returns TRUE if a IS c AND b IS d (NULL-safe equality, NULL IS NULL = TRUE)
-    /// - `(a, b) IS NOT (c, d)` means `(a, b) IS DISTINCT FROM (c, d)`
-    ///   Returns TRUE if any element is distinct (NULL IS NOT NULL = TRUE)
+    /// - `(a, b) IS (c, d)` means `(a, b) IS NOT DISTINCT FROM (c, d)` Returns TRUE if a IS c AND b
+    ///   IS d (NULL-safe equality, NULL IS NULL = TRUE)
+    /// - `(a, b) IS NOT (c, d)` means `(a, b) IS DISTINCT FROM (c, d)` Returns TRUE if any element
+    ///   is distinct (NULL IS NOT NULL = TRUE)
     ///
     /// SQLite applies the same per-column affinity to IS / IS NOT as to = / <>.
     fn eval_row_value_is_distinct(
@@ -1916,8 +1915,9 @@ impl ExpressionEvaluator<'_> {
 
 #[cfg(test)]
 mod affinity_values_tests {
-    use super::ExpressionEvaluator;
     use vibesql_types::{SqlValue, TypeAffinity};
+
+    use super::ExpressionEvaluator;
 
     // Regression tests for issue #6045: the value-level affinity core used by
     // row-value `IN (subquery)` and `= (SELECT ...)` comparisons. It must match

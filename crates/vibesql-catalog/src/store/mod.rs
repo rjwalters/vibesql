@@ -9,9 +9,12 @@
 //! - `session` - Session configuration (SQL:1999)
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     advanced_objects::{

@@ -4,10 +4,10 @@
 //! INTEGER PRIMARY KEY position before storing it (and before triggers observe
 //! `NEW.rowid`):
 //!   - a TEXT value that is losslessly an integer (e.g. `'45'`) is coerced,
-//!   - a REAL value that is losslessly an integer (e.g. `45.0`, `-42.0`) is
-//!     coerced to the integer rowid,
-//!   - a value with a fractional part (e.g. `42.4`) or a non-numeric TEXT/BLOB
-//!     raises `datatype mismatch`.
+//!   - a REAL value that is losslessly an integer (e.g. `45.0`, `-42.0`) is coerced to the integer
+//!     rowid,
+//!   - a value with a fractional part (e.g. `42.4`) or a non-numeric TEXT/BLOB raises `datatype
+//!     mismatch`.
 //!
 //! Before #5520, VibeSQL handled positive REAL/TEXT rowid *literals*, but the
 //! unary-minus path (e.g. `-42.0`) only handled integers, so the residual

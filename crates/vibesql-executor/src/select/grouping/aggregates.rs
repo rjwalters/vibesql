@@ -84,13 +84,13 @@ pub enum AggregateAccumulator {
     /// approach on large-magnitude / near-constant columns).
     ///
     /// Semantics (matching PostgreSQL/MySQL/Oracle and the six SQL spellings):
-    /// - `VARIANCE` / `VAR_SAMP` / `STDDEV` / `STDDEV_SAMP` use the sample
-    ///   estimator (divisor `n - 1`); bare `STDDEV`/`VARIANCE` default to the
-    ///   sample form, consistent with the common SQL-engine convention.
+    /// - `VARIANCE` / `VAR_SAMP` / `STDDEV` / `STDDEV_SAMP` use the sample estimator (divisor `n -
+    ///   1`); bare `STDDEV`/`VARIANCE` default to the sample form, consistent with the common
+    ///   SQL-engine convention.
     /// - `VAR_POP` / `STDDEV_POP` use the population estimator (divisor `n`).
     /// - NULL and non-numeric inputs are skipped (do not affect `n`).
-    /// - Result is NULL when there are no non-NULL inputs; sample variants are
-    ///   additionally NULL when `n < 2` (population variants yield 0.0 at n == 1).
+    /// - Result is NULL when there are no non-NULL inputs; sample variants are additionally NULL
+    ///   when `n < 2` (population variants yield 0.0 at n == 1).
     /// - `is_stddev` selects the square-root (STDDEV) vs raw-variance result.
     Variance {
         /// Count of non-NULL numeric values seen so far.
@@ -587,10 +587,10 @@ impl AggregateAccumulator {
     ///
     /// Mirrors percentStep() in SQLite's ext/misc/percentile.c:
     /// 1. The fraction is validated per row (numeric, in `0..=mx_frac`).
-    /// 2. The normalized fraction may differ from the first row's by at most
-    ///    0.001, else "not the same for all input rows".
-    /// 3. NULL Y values are skipped (NaN is treated as NULL, matching SQLite
-    ///    which stores NaN as NULL).
+    /// 2. The normalized fraction may differ from the first row's by at most 0.001, else "not the
+    ///    same for all input rows".
+    /// 3. NULL Y values are skipped (NaN is treated as NULL, matching SQLite which stores NaN as
+    ///    NULL).
     /// 4. Non-NULL non-numeric Y is an error (by type - no text coercion).
     /// 5. +/-Inf Y is an error.
     ///
@@ -1509,11 +1509,12 @@ fn escape_json_string(s: &str) -> String {
 fn sql_value_to_json(
     value: &vibesql_types::SqlValue,
 ) -> Result<String, crate::errors::ExecutorError> {
+    use vibesql_types::SqlValue;
+
     use crate::evaluator::functions::sqlite_compat::{
         json_funcs::{json_node_to_json_text, render_json_number},
         jsonb,
     };
-    use vibesql_types::SqlValue;
     let rendered = match value {
         SqlValue::Null => "null".to_string(),
         SqlValue::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
@@ -1666,11 +1667,10 @@ pub fn compare_sql_values_with_collation(
 /// Compare two SqlValues for ordering purposes (SQL ORDER BY semantics)
 ///
 /// Implements SQLite type-class ordering as a genuine total order (#5802):
-/// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC; this is
-///   the contract MIN/MAX aggregates rely on)
-/// - numeric (all integer and float variants, inter-comparable and compared
-///   exactly — never through lossy `as f64` casts) < text < blob < other
-///   types in deterministic slots
+/// - NULL values sort last (NULLS LAST - SQL:1999 default for ASC; this is the contract MIN/MAX
+///   aggregates rely on)
+/// - numeric (all integer and float variants, inter-comparable and compared exactly — never through
+///   lossy `as f64` casts) < text < blob < other types in deterministic slots
 ///
 /// See [`vibesql_types::total_order_cmp`] for the full ordering definition
 /// and its totality/transitivity guarantees.
@@ -2482,7 +2482,8 @@ mod tests {
 
     #[test]
     fn test_json_group_array_jsonb_blob_embeds() {
-        // A well-formed JSONB blob embeds as its decoded JSON: json_group_array(jsonb('[1]')) -> [[1]].
+        // A well-formed JSONB blob embeds as its decoded JSON: json_group_array(jsonb('[1]')) ->
+        // [[1]].
         use crate::evaluator::functions::sqlite_compat::jsonb;
         let blob = jsonb::encode(&serde_json::json!([1]));
         let mut acc = AggregateAccumulator::new("JSON_GROUP_ARRAY", false).unwrap();

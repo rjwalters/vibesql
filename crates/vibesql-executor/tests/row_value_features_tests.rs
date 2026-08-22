@@ -1,25 +1,25 @@
 //! Tests for the remaining row-value features from issue #5790:
 //!
-//! - Row-value `IN (list)` / `NOT IN (list)` with SQLite three-valued NULL
-//!   semantics and per-column affinity.
-//! - "row value misused" errors for row values in scalar contexts (compared
-//!   against scalars, bare in a SELECT list, in ORDER BY / GROUP BY, mixed
-//!   into BETWEEN), raised at prepare time even for empty tables.
-//! - COLLATE (explicit and column-declared) honored inside row-value
-//!   comparison, including the tuple-vs-subquery form.
+//! - Row-value `IN (list)` / `NOT IN (list)` with SQLite three-valued NULL semantics and per-column
+//!   affinity.
+//! - "row value misused" errors for row values in scalar contexts (compared against scalars, bare
+//!   in a SELECT list, in ORDER BY / GROUP BY, mixed into BETWEEN), raised at prepare time even for
+//!   empty tables.
+//! - COLLATE (explicit and column-declared) honored inside row-value comparison, including the
+//!   tuple-vs-subquery form.
 //! - Row-value simple CASE (`CASE (2,2) WHEN (1,1) THEN ... END`).
-//! - Row-value BETWEEN with a scalar-subquery operand and in multi-table
-//!   (combined evaluator) contexts.
+//! - Row-value BETWEEN with a scalar-subquery operand and in multi-table (combined evaluator)
+//!   contexts.
 //! - Multi-column scalar subquery on the LHS of IN.
 //! - `IN (VALUES(...))` table value constructors.
 //! - Nested row values inside IS.
-//! - Join WHERE-clause conjunct coverage: predicates the columnar join path
-//!   cannot consume (e.g. `+col == other`) must not be silently dropped.
-//! - Outer join (LEFT / RIGHT / FULL) with a row-value equality in the ON
-//!   clause: an unmatched row-value predicate must null-extend the other side
-//!   instead of dropping the driving row (rowvalue.test section 12).
-//! - Scalar-subquery row on the LHS of `IN (subquery)` combined with a join
-//!   (rowvalue.test section 18.4).
+//! - Join WHERE-clause conjunct coverage: predicates the columnar join path cannot consume (e.g.
+//!   `+col == other`) must not be silently dropped.
+//! - Outer join (LEFT / RIGHT / FULL) with a row-value equality in the ON clause: an unmatched
+//!   row-value predicate must null-extend the other side instead of dropping the driving row
+//!   (rowvalue.test section 12).
+//! - Scalar-subquery row on the LHS of `IN (subquery)` combined with a join (rowvalue.test section
+//!   18.4).
 //!
 //! Expected values verified against SQLite (rowvalue.test / rowvalue2.test).
 

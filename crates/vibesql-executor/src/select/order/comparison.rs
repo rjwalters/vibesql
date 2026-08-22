@@ -7,8 +7,7 @@
 
 use std::{borrow::Cow, cmp::Ordering};
 
-use super::grouping::compare_sql_values;
-use super::SortKey;
+use super::{grouping::compare_sql_values, SortKey};
 
 /// Apply collation transformation to a SQL value for comparison.
 ///

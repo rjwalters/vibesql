@@ -135,14 +135,12 @@ impl CommitExecutor {
 /// ([`Database::capture_commit_time_snapshot`]), not the BEGIN-time
 /// snapshot. Under MVCC, this ensures that:
 ///
-/// - The child-side check sees the committing transaction's own
-///   INSERT/UPDATE (the row that triggered the deferred violation in the
-///   first place) — even though it was stamped with this txn's `xmin`,
-///   the commit-time snapshot treats this txn id as committed.
-/// - The parent-side check sees any parent rows committed by OTHER
-///   transactions between BEGIN and COMMIT — which is exactly what we
-///   want: deferred FK is checked against the latest visible state, not
-///   a stale BEGIN-time view.
+/// - The child-side check sees the committing transaction's own INSERT/UPDATE (the row that
+///   triggered the deferred violation in the first place) — even though it was stamped with this
+///   txn's `xmin`, the commit-time snapshot treats this txn id as committed.
+/// - The parent-side check sees any parent rows committed by OTHER transactions between BEGIN and
+///   COMMIT — which is exactly what we want: deferred FK is checked against the latest visible
+///   state, not a stale BEGIN-time view.
 ///
 /// With the `mvcc_enabled` feature OFF (default), the storage-layer
 /// `is_row_visible` reduces to a deletion-bitmap check and the snapshot
@@ -170,9 +168,8 @@ fn check_deferred_fk_violations(
             None => continue, // FK index out of range — schema changed
         };
 
-        // 1) Child-side check: does a row matching this snapshot still
-        //    exist in the child table? If the user has since deleted or
-        //    updated the offending child row, the violation is moot.
+        // 1) Child-side check: does a row matching this snapshot still exist in the child table? If
+        //    the user has since deleted or updated the offending child row, the violation is moot.
         let child_table = match db.get_table(&violation.child_table) {
             Some(t) => t,
             None => continue,
@@ -209,8 +206,7 @@ fn check_deferred_fk_violations(
             continue;
         }
 
-        // 2) Parent-side check: does a parent row now exist that
-        //    matches the FK columns?
+        // 2) Parent-side check: does a parent row now exist that matches the FK columns?
         let parent_table = match db.get_table(&fk.parent_table) {
             Some(t) => t,
             None => {
@@ -301,13 +297,11 @@ fn check_deferred_fk_violations(
 /// child-side / parent-side checks. The differences are:
 ///
 /// 1. This function is purely read-only and never drains the queue.
-/// 2. Both child- and parent-side scans use `scan_live()` (bitmap-
-///    filtered) so that DELETEs performed earlier in the current
-///    transaction are honored. The COMMIT path's parent scan
-///    intentionally includes soft-deleted rows under the MVCC-OFF
-///    feature flag for backward-compatibility — for status reporting
-///    we want the SQLite-compatible "is there a live parent right
-///    now?" answer instead.
+/// 2. Both child- and parent-side scans use `scan_live()` (bitmap- filtered) so that DELETEs
+///    performed earlier in the current transaction are honored. The COMMIT path's parent scan
+///    intentionally includes soft-deleted rows under the MVCC-OFF feature flag for
+///    backward-compatibility — for status reporting we want the SQLite-compatible "is there a live
+///    parent right now?" answer instead.
 ///
 /// Backs the `PRAGMA deferred_fk_count` bridge that the TCL shim
 /// translates `sqlite3_db_status db DBSTATUS_DEFERRED_FKS` into
@@ -451,10 +445,7 @@ impl SavepointExecutor {
             if auto_started {
                 let _ = db.rollback_transaction();
             }
-            return Err(ExecutorError::StorageError(format!(
-                "Failed to create savepoint: {}",
-                e
-            )));
+            return Err(ExecutorError::StorageError(format!("Failed to create savepoint: {}", e)));
         }
 
         if auto_started {
@@ -508,8 +499,7 @@ impl ReleaseSavepointExecutor {
         stmt: &ReleaseSavepointStmt,
         db: &mut Database,
     ) -> Result<String, ExecutorError> {
-        let will_finalize =
-            db.is_implicit_savepoint_txn() && db.is_outermost_savepoint(&stmt.name);
+        let will_finalize = db.is_implicit_savepoint_txn() && db.is_outermost_savepoint(&stmt.name);
 
         if will_finalize {
             // Read-only pre-check: does NOT mutate the savepoint stack or

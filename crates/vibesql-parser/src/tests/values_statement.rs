@@ -5,9 +5,10 @@
 //! 2. In set operations: VALUES(1) UNION VALUES(2);
 //! 3. Mixed with SELECT: SELECT * FROM t INTERSECT VALUES(1,2,3);
 
-use crate::Parser;
 use vibesql_ast::{Expression, SelectStmt, SetOperator, Statement};
 use vibesql_types::SqlValue;
+
+use crate::Parser;
 
 fn parse(sql: &str) -> Statement {
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse: {}", sql))

@@ -6,17 +6,14 @@
 //! they abort the firing statement inside an explicit multi-statement
 //! transaction. Verified against sqlite3 3.51.x:
 //!
-//! - **`RAISE(ABORT, msg)`** — roll back the current **statement** (undo the
-//!   partial changes it already applied), but keep the enclosing transaction
-//!   open: statements that ran *before* it in the same transaction survive.
-//!   This is also SQLite's default conflict behavior.
-//! - **`RAISE(FAIL, msg)`** — stop the statement at the failing row but do
-//!   **not** undo the changes it already applied to earlier rows; keep the
-//!   transaction open.
-//! - **`RAISE(ROLLBACK, msg)`** — roll back the **entire** enclosing
-//!   transaction.
-//! - `RAISE(IGNORE)` is handled earlier as a control-flow signal
-//!   ([`ExecutorError::RaiseIgnore`]) and never reaches this module.
+//! - **`RAISE(ABORT, msg)`** — roll back the current **statement** (undo the partial changes it
+//!   already applied), but keep the enclosing transaction open: statements that ran *before* it in
+//!   the same transaction survive. This is also SQLite's default conflict behavior.
+//! - **`RAISE(FAIL, msg)`** — stop the statement at the failing row but do **not** undo the changes
+//!   it already applied to earlier rows; keep the transaction open.
+//! - **`RAISE(ROLLBACK, msg)`** — roll back the **entire** enclosing transaction.
+//! - `RAISE(IGNORE)` is handled earlier as a control-flow signal ([`ExecutorError::RaiseIgnore`])
+//!   and never reaches this module.
 //!
 //! `ABORT` vs `ROLLBACK` is only observable inside an explicit transaction
 //! (whether earlier statements survive); in auto-commit both undo the whole
@@ -106,8 +103,8 @@ pub(crate) fn table_may_fire_trigger(db: &Database, table: &str) -> bool {
 /// - `Abort` → roll back to the statement savepoint (undo this statement only).
 /// - `Fail` → keep the statement's partial changes; just release the savepoint.
 /// - `Rollback` → roll back the whole transaction.
-/// - `Ignore` → unreachable (handled as a control-flow signal upstream); kept
-///   as a no-op for totality.
+/// - `Ignore` → unreachable (handled as a control-flow signal upstream); kept as a no-op for
+///   totality.
 pub(crate) fn apply_raise_scope(
     db: &mut Database,
     action: RaiseAction,
@@ -153,19 +150,18 @@ pub(crate) fn apply_raise_scope(
 /// or a constraint violation) leaves *no* partial changes. VibeSQL realizes
 /// the two modes a statement can run in:
 ///
-/// 1. **Inside an explicit transaction** (`db.in_transaction()`): arm an
-///    implicit *statement savepoint* before `f` so a `RAISE(ABORT)` undoes just
-///    this statement while earlier statements in the transaction survive, the
-///    transaction staying open. This is the #5417/#5431/#5440 path, unchanged.
+/// 1. **Inside an explicit transaction** (`db.in_transaction()`): arm an implicit *statement
+///    savepoint* before `f` so a `RAISE(ABORT)` undoes just this statement while earlier statements
+///    in the transaction survive, the transaction staying open. This is the #5417/#5431/#5440 path,
+///    unchanged.
 ///
-/// 2. **In auto-commit** (no explicit transaction, #5464): wrap the statement
-///    in an *implicit transaction* (`begin_transaction`) so the same partial
-///    changes can be rolled back. On success the implicit transaction commits;
-///    on `RAISE(ABORT)`/`RAISE(ROLLBACK)` or any other error it rolls back the
-///    whole statement; on `RAISE(FAIL)` it commits the rows applied so far
-///    (matching sqlite3 3.51 FAIL semantics). The implicit transaction emits
-///    the usual `TxnBegin`/`TxnCommit`/`TxnRollback` WAL markers, so crash
-///    recovery buffers and applies-or-discards the statement atomically too.
+/// 2. **In auto-commit** (no explicit transaction, #5464): wrap the statement in an *implicit
+///    transaction* (`begin_transaction`) so the same partial changes can be rolled back. On success
+///    the implicit transaction commits; on `RAISE(ABORT)`/`RAISE(ROLLBACK)` or any other error it
+///    rolls back the whole statement; on `RAISE(FAIL)` it commits the rows applied so far (matching
+///    sqlite3 3.51 FAIL semantics). The implicit transaction emits the usual
+///    `TxnBegin`/`TxnCommit`/`TxnRollback` WAL markers, so crash recovery buffers and
+///    applies-or-discards the statement atomically too.
 ///
 /// In both modes the work only happens when `may_fire_trigger` is true (the
 /// only way a `RAISE()` can fire, and the only way a single statement applies
@@ -260,7 +256,8 @@ where
             // `OR IGNORE`/`OR FAIL`/`OR ROLLBACK`/`OR REPLACE` on the statement
             // (fkey2-20.2.x/20.3.x). Route it through the default arm below
             // even when `conflict_clause` says otherwise.
-            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            let scoped_clause =
+                if other.is_foreign_key_violation() { None } else { conflict_clause };
             match scoped_clause {
                 Some(ConflictClause::Rollback) => {
                     // `OR ROLLBACK`: abort the entire enclosing transaction,
@@ -360,7 +357,8 @@ where
             // mirroring `RAISE(FAIL)` above — except a FOREIGN KEY violation,
             // which is exempt from the statement's own conflict clause and
             // always gets the default (rollback) scope (fkey2-20.2.x/20.3.x).
-            let scoped_clause = if other.is_foreign_key_violation() { None } else { conflict_clause };
+            let scoped_clause =
+                if other.is_foreign_key_violation() { None } else { conflict_clause };
             match scoped_clause {
                 Some(ConflictClause::Fail) => commit_implicit_best_effort(db),
                 _ => rollback_implicit_best_effort(db),

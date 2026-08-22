@@ -567,8 +567,9 @@ impl<'a> SelectExecutor<'a> {
         group_rows: &[vibesql_storage::Row],
         evaluator: &crate::evaluator::CombinedExpressionEvaluator,
     ) -> Option<usize> {
-        use crate::select::grouping::compare_sql_values;
         use vibesql_types::SqlValue;
+
+        use crate::select::grouping::compare_sql_values;
 
         if group_rows.is_empty() {
             return None;

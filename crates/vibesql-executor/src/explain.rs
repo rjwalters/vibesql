@@ -12,12 +12,11 @@
 //! - PostgreSQL-style text output (default for EXPLAIN)
 //! - SQLite-style EXPLAIN QUERY PLAN output (for TCL test compatibility)
 
-use std::fmt::Write;
+use std::{collections::HashSet, fmt::Write};
 
-use std::collections::HashSet;
-
-use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement};
+use vibesql_ast::{
+    pretty_print::ToSql, ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement,
+};
 use vibesql_storage::Database;
 
 use crate::{
@@ -1003,18 +1002,15 @@ impl ExplainExecutor {
 
         // Analyze FROM clause. The base scan's effective ordering
         // requirement follows SQLite's pipeline priority:
-        // - When the SELECT list contains window functions, the scan feeds
-        //   the INNERMOST window sorting pass (SQLite's co-routine rewrite,
-        //   see count_window_sorts) — SQLite picks an index that delivers
-        //   PARTITION BY/ORDER BY order even without any predicate
+        // - When the SELECT list contains window functions, the scan feeds the INNERMOST window
+        //   sorting pass (SQLite's co-routine rewrite, see count_window_sorts) — SQLite picks an
+        //   index that delivers PARTITION BY/ORDER BY order even without any predicate
         //   (windowpushd.test 2.1.3.6).
-        // - Otherwise the grouping/dedup pass consumes the scan's order:
-        //   when its suppression fired, the scan rides the delivering index
-        //   (#5371, sqlite3 3.51.0 verified live).
-        // - Otherwise the statement-level ORDER BY applies; the scan may
-        //   ride an ordering index exactly when the ORDER BY temp-line
-        //   suppression fires, so non-suppressed shapes keep their
-        //   pre-existing rendering.
+        // - Otherwise the grouping/dedup pass consumes the scan's order: when its suppression
+        //   fired, the scan rides the delivering index (#5371, sqlite3 3.51.0 verified live).
+        // - Otherwise the statement-level ORDER BY applies; the scan may ride an ordering index
+        //   exactly when the ORDER BY temp-line suppression fires, so non-suppressed shapes keep
+        //   their pre-existing rendering.
         //
         // The scan rendering and the suppression stay COUPLED on purpose
         // (#5373, investigated): sqlite3 also rides an index satisfying only
@@ -1342,30 +1338,24 @@ impl ExplainExecutor {
     /// SELECT list that are not satisfied by an index.
     ///
     /// SQLite semantics (window1.test section 23, `do_ordercount_test`):
-    /// - The sort key for a window is its PARTITION BY expressions (treated
-    ///   as ASC with default null ordering) followed by its ORDER BY items.
-    ///   `OVER (PARTITION BY a ORDER BY b)` and `OVER (ORDER BY a, b)` share
-    ///   the key `(a, b)`.
-    /// - Keys are deduplicated by exact structural equality (including
-    ///   direction and COLLATE); frame clauses are ignored entirely.
-    /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no
-    ///   sorting pass.
-    /// - Only the INNERMOST sorting pass scans the base table and can be
-    ///   satisfied by an index (e.g. key `(a, b)` with index `t5ab(a, b)`).
-    ///   SQLite's nested co-routine rewrite emits passes in reverse
-    ///   SELECT-list order, so the innermost pass corresponds to the LAST
+    /// - The sort key for a window is its PARTITION BY expressions (treated as ASC with default
+    ///   null ordering) followed by its ORDER BY items. `OVER (PARTITION BY a ORDER BY b)` and
+    ///   `OVER (ORDER BY a, b)` share the key `(a, b)`.
+    /// - Keys are deduplicated by exact structural equality (including direction and COLLATE);
+    ///   frame clauses are ignored entirely.
+    /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no sorting pass.
+    /// - Only the INNERMOST sorting pass scans the base table and can be satisfied by an index
+    ///   (e.g. key `(a, b)` with index `t5ab(a, b)`). SQLite's nested co-routine rewrite emits
+    ///   passes in reverse SELECT-list order, so the innermost pass corresponds to the LAST
     ///   distinct key (by first occurrence).
-    /// - When the innermost pass IS satisfied by an index, sortedness
-    ///   propagates outward: each outer pass whose key is a structural
-    ///   prefix of the order delivered by the pass below it needs no sort
-    ///   either, because the rows flow through in an order that already
-    ///   satisfies it (window9.test 5.1.1: index `i1(a,b,c,d,e)` satisfies
-    ///   keys `(a,b,c,d)`, `(a,b,c)`, `(a,b)` and `(a)` — zero sorts).
-    ///   The chain breaks at the first outer key that is not such a prefix;
-    ///   that key and all keys outside it need temp B-trees (the temp
-    ///   B-tree sort is not guaranteed to preserve residual ordering, so no
-    ///   further propagation is attempted — matching the conservative
-    ///   pre-existing behavior validated by window1.test section 23).
+    /// - When the innermost pass IS satisfied by an index, sortedness propagates outward: each
+    ///   outer pass whose key is a structural prefix of the order delivered by the pass below it
+    ///   needs no sort either, because the rows flow through in an order that already satisfies it
+    ///   (window9.test 5.1.1: index `i1(a,b,c,d,e)` satisfies keys `(a,b,c,d)`, `(a,b,c)`, `(a,b)`
+    ///   and `(a)` — zero sorts). The chain breaks at the first outer key that is not such a
+    ///   prefix; that key and all keys outside it need temp B-trees (the temp B-tree sort is not
+    ///   guaranteed to preserve residual ordering, so no further propagation is attempted —
+    ///   matching the conservative pre-existing behavior validated by window1.test section 23).
     fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
         let distinct_keys = Self::distinct_window_keys(stmt);
 
@@ -1890,27 +1880,21 @@ impl ExplainExecutor {
                 // `SCAN <view>`. CTE names shadow same-named views and are
                 // never expanded.
                 //
-                // - Window-function views (#5347) and blocked bodies —
-                //   aggregates, GROUP BY/HAVING, DISTINCT, LIMIT/OFFSET,
-                //   compound, VALUES, WITH (#5361): SQLite cannot flatten
-                //   them, so the body's plan renders as a CO-ROUTINE block
-                //   plus a trailing `SCAN <name>` (windowpushd.test 2.1.3.6;
-                //   sqlite3 3.51.0 verified per category). VibeSQL's runtime
-                //   materializes every view body, so the block + inner plan
-                //   is truthful even where SQLite manages to flatten a
-                //   specific shape (LIMIT-only bodies, UNION ALL bodies,
-                //   single-use plain CTEs — documented divergences in
+                // - Window-function views (#5347) and blocked bodies — aggregates, GROUP BY/HAVING,
+                //   DISTINCT, LIMIT/OFFSET, compound, VALUES, WITH (#5361): SQLite cannot flatten
+                //   them, so the body's plan renders as a CO-ROUTINE block plus a trailing `SCAN
+                //   <name>` (windowpushd.test 2.1.3.6; sqlite3 3.51.0 verified per category).
+                //   VibeSQL's runtime materializes every view body, so the block + inner plan is
+                //   truthful even where SQLite manages to flatten a specific shape (LIMIT-only
+                //   bodies, UNION ALL bodies, single-use plain CTEs — documented divergences in
                 //   explain_view_expansion_tests.rs).
-                // - Plain flattenable views (#5355): SQLite inlines the body
-                //   into the outer query and shows the underlying table
-                //   access with no mention of the view. VibeSQL's runtime
-                //   MATERIALIZES views (select/scan/table.rs executes the
-                //   full body, then post-filters the outer WHERE), so the
-                //   inner scans shown here are the truthful access path; we
-                //   deliberately do NOT fabricate SQLite's outer-WHERE
-                //   push-down (`SEARCH <table> (x=?)`) because no index
-                //   probe happens at runtime. Where no index applies the
-                //   output matches SQLite exactly (`SCAN <table>`).
+                // - Plain flattenable views (#5355): SQLite inlines the body into the outer query
+                //   and shows the underlying table access with no mention of the view. VibeSQL's
+                //   runtime MATERIALIZES views (select/scan/table.rs executes the full body, then
+                //   post-filters the outer WHERE), so the inner scans shown here are the truthful
+                //   access path; we deliberately do NOT fabricate SQLite's outer-WHERE push-down
+                //   (`SEARCH <table> (x=?)`) because no index probe happens at runtime. Where no
+                //   index applies the output matches SQLite exactly (`SCAN <table>`).
                 if !ctes.contains(&name.to_ascii_lowercase()) {
                     if let Some(view) = database.catalog.get_view(name) {
                         let source = alias.as_deref().unwrap_or(name.as_str());
@@ -3207,8 +3191,7 @@ fn extract_predicates_recursive(
     index_columns: &[String],
     predicates: &mut Vec<(String, String)>,
 ) {
-    use vibesql_ast::pretty_print::ToSql;
-    use vibesql_ast::BinaryOperator;
+    use vibesql_ast::{pretty_print::ToSql, BinaryOperator};
 
     /// Check if an expression matches any index column (column ref or expression index)
     fn expr_matches_index(expr: &Expression, index_columns: &[String]) -> Option<String> {

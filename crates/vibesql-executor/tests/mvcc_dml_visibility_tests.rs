@@ -4,16 +4,15 @@
 //!
 //! The contract these tests pin down:
 //!
-//! - **FK parent-existence checks** (INSERT/UPDATE): when MVCC is ON, a
-//!   parent row that is tombstoned from our snapshot's perspective must
-//!   not be treated as a valid parent for a new child row.
-//! - **FK child-reference scans** (DELETE/UPDATE): when MVCC is ON, a
-//!   child row that has been tombstoned must not be treated as a
-//!   referencing row that would block parent deletion / parent key
-//!   update.
-//! - **UPDATE/DELETE row selection**: the WHERE-clause scan + PK fast
-//!   path must honor MVCC visibility. A row that has been deleted (and
-//!   tombstoned) must not be re-picked by a subsequent UPDATE/DELETE.
+//! - **FK parent-existence checks** (INSERT/UPDATE): when MVCC is ON, a parent row that is
+//!   tombstoned from our snapshot's perspective must not be treated as a valid parent for a new
+//!   child row.
+//! - **FK child-reference scans** (DELETE/UPDATE): when MVCC is ON, a child row that has been
+//!   tombstoned must not be treated as a referencing row that would block parent deletion / parent
+//!   key update.
+//! - **UPDATE/DELETE row selection**: the WHERE-clause scan + PK fast path must honor MVCC
+//!   visibility. A row that has been deleted (and tombstoned) must not be re-picked by a subsequent
+//!   UPDATE/DELETE.
 //!
 //! Off-state (`mvcc_enabled` OFF): the visibility predicate collapses to
 //! the deletion-bitmap check, so every test must continue to pass with

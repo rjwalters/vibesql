@@ -17,8 +17,8 @@
 //! # Dispatch Strategy
 //!
 //! - **aarch64**: NEON is always available, so we call NEON directly (no runtime check).
-//! - **x86_64**: Runtime detection via `is_x86_feature_detected!("avx2")`.
-//!   Falls back to scalar if AVX2 is not available.
+//! - **x86_64**: Runtime detection via `is_x86_feature_detected!("avx2")`. Falls back to scalar if
+//!   AVX2 is not available.
 //! - **Other**: Always uses scalar fallback.
 //!
 //! # Safety

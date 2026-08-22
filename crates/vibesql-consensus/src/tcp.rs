@@ -86,25 +86,25 @@
 //! [`ClusterConfig`]: crate::cluster_config::ClusterConfig
 //! [`OpenraftBackend::shutdown`]: crate::OpenraftBackend::shutdown
 
-use std::collections::BTreeMap;
-use std::io;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::BTreeMap, io, sync::Arc, time::Duration};
 
-use openraft::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
-use openraft::network::RPCOption;
-use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+use openraft::{
+    error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable},
+    network::RPCOption,
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, VoteRequest, VoteResponse,
+    },
+    BasicNode, Raft, RaftNetwork, RaftNetworkFactory,
 };
-use openraft::{BasicNode, Raft, RaftNetwork, RaftNetworkFactory};
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpSocket, TcpStream};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpSocket, TcpStream},
+    task::{JoinHandle, JoinSet},
+};
 
-use crate::cluster_config::ClusterConfig;
-use crate::openraft_backend::TypeConfig;
+use crate::{cluster_config::ClusterConfig, openraft_backend::TypeConfig};
 
 /// Upper bound on a single frame's payload. Far above any AppendEntries
 /// batch this phase produces and above any snapshot *chunk* (snapshots are

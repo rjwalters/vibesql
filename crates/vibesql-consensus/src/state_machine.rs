@@ -129,15 +129,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use vibesql_ast::Statement;
-use vibesql_storage::persistence::binary::{
-    read_catalog_v, read_data, read_header, write_catalog, write_data, write_header,
+use vibesql_storage::{
+    persistence::binary::{
+        read_catalog_v, read_data, read_header, write_catalog, write_data, write_header,
+    },
+    Database,
 };
-use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use crate::backend::{ConsensusError, LogIndex, Result, Snapshot};
-use crate::freeze::{self, FrozenValue, SubstituteError};
-use crate::snapshot::SnapshotHorizonPin;
+use crate::{
+    backend::{ConsensusError, LogIndex, Result, Snapshot},
+    freeze::{self, FrozenValue, SubstituteError},
+    snapshot::SnapshotHorizonPin,
+};
 
 // ---------------------------------------------------------------------------
 // The replicated entry type
@@ -236,14 +240,9 @@ impl TxnEntry {
     /// all-empty list is normalized to empty so DEFAULT-free entries
     /// keep the pre-#5381 byte encoding.
     pub fn with_frozen_defaults(mut self, frozen_defaults: Vec<Vec<FrozenValue>>) -> Self {
-        debug_assert!(
-            frozen_defaults.is_empty() || frozen_defaults.len() == self.statements.len()
-        );
-        self.frozen_defaults = if frozen_defaults.iter().all(Vec::is_empty) {
-            Vec::new()
-        } else {
-            frozen_defaults
-        };
+        debug_assert!(frozen_defaults.is_empty() || frozen_defaults.len() == self.statements.len());
+        self.frozen_defaults =
+            if frozen_defaults.iter().all(Vec::is_empty) { Vec::new() } else { frozen_defaults };
         self
     }
 
@@ -457,16 +456,12 @@ impl VibesqlStateMachine {
 
     /// Apply one committed log entry.
     ///
-    /// - `index <= last_applied`: idempotent no-op
-    ///   ([`ApplyOutcome::AlreadyApplied`]).
-    /// - `index == last_applied + 1`: the entry's statements run in a
-    ///   single storage transaction whose `TxnId` — and therefore every
-    ///   MVCC stamp it writes — is `index` (commit_ts = log index). A
-    ///   statement failure rolls the whole transaction back
-    ///   ([`ApplyOutcome::Rejected`]); the entry still consumes its
-    ///   index, because every replica rejects it identically.
-    /// - `index > last_applied + 1`: a gap — protocol violation, loud
-    ///   error.
+    /// - `index <= last_applied`: idempotent no-op ([`ApplyOutcome::AlreadyApplied`]).
+    /// - `index == last_applied + 1`: the entry's statements run in a single storage transaction
+    ///   whose `TxnId` — and therefore every MVCC stamp it writes — is `index` (commit_ts = log
+    ///   index). A statement failure rolls the whole transaction back ([`ApplyOutcome::Rejected`]);
+    ///   the entry still consumes its index, because every replica rejects it identically.
+    /// - `index > last_applied + 1`: a gap — protocol violation, loud error.
     pub fn apply(&self, index: LogIndex, entry: &TxnEntry) -> Result<ApplyOutcome> {
         let mut inner = self.lock();
         if index == 0 {
@@ -587,33 +582,39 @@ impl VibesqlStateMachine {
         sql: &str,
     ) -> std::result::Result<(Vec<FrozenValue>, Vec<FrozenValue>), freeze::FreezeError> {
         let schema: Option<vibesql_catalog::TableSchema> =
-            vibesql_parser::parse_with_arena_fallback(sql).ok().and_then(|statement| {
-                let inner = self.lock();
-                // Precise propose-side audit of the #5398 residual against
-                // the leader's applied catalog (#5406): reject a
-                // genuinely-TIME TIME→TIMESTAMP cast in a query body now,
-                // with an actionable error, before a log index is
-                // consumed — while accepting provably-non-TIME casts that
-                // the schema-free propose validator would over-reject.
-                // The authoritative deterministic rejection still happens
-                // at apply on every replica.
-                if let Some(reason) =
-                    freeze::time_cast_query_violation_with_db(&statement, &inner.db)
-                {
-                    return Some(Err(reason));
-                }
-                let resolved = match &statement {
-                    Statement::Insert(stmt) => {
-                        lookup_table_schema(&inner.db, stmt.schema_name.as_deref(), &stmt.table_name)
-                            .cloned()
+            vibesql_parser::parse_with_arena_fallback(sql)
+                .ok()
+                .and_then(|statement| {
+                    let inner = self.lock();
+                    // Precise propose-side audit of the #5398 residual against
+                    // the leader's applied catalog (#5406): reject a
+                    // genuinely-TIME TIME→TIMESTAMP cast in a query body now,
+                    // with an actionable error, before a log index is
+                    // consumed — while accepting provably-non-TIME casts that
+                    // the schema-free propose validator would over-reject.
+                    // The authoritative deterministic rejection still happens
+                    // at apply on every replica.
+                    if let Some(reason) =
+                        freeze::time_cast_query_violation_with_db(&statement, &inner.db)
+                    {
+                        return Some(Err(reason));
                     }
-                    Statement::Update(stmt) => {
-                        lookup_table_schema(&inner.db, None, &stmt.table_name).cloned()
-                    }
-                    _ => None,
-                };
-                resolved.map(Ok)
-            }).transpose().map_err(freeze::FreezeError::NotReplicable)?;
+                    let resolved = match &statement {
+                        Statement::Insert(stmt) => lookup_table_schema(
+                            &inner.db,
+                            stmt.schema_name.as_deref(),
+                            &stmt.table_name,
+                        )
+                        .cloned(),
+                        Statement::Update(stmt) => {
+                            lookup_table_schema(&inner.db, None, &stmt.table_name).cloned()
+                        }
+                        _ => None,
+                    };
+                    resolved.map(Ok)
+                })
+                .transpose()
+                .map_err(freeze::FreezeError::NotReplicable)?;
         freeze::freeze_statement_with_schema(sql, schema.as_ref())
     }
 
@@ -743,11 +744,7 @@ impl VibesqlStateMachine {
     /// constraint violation) surfaces here as a [`ConsensusError`] — the
     /// same failure the client would see at `COMMIT` — leaving the applied
     /// state untouched.
-    pub fn speculative_query(
-        &self,
-        entry: &TxnEntry,
-        select_sql: &str,
-    ) -> Result<QueryResult> {
+    pub fn speculative_query(&self, entry: &TxnEntry, select_sql: &str) -> Result<QueryResult> {
         let select = match vibesql_parser::parse_with_arena_fallback(select_sql)
             .map_err(|e| ConsensusError::Backend(format!("parse error: {e}")))?
         {
@@ -794,9 +791,7 @@ impl VibesqlStateMachine {
             vibesql_executor::SelectExecutor::new(&inner.db)
                 .execute_with_columns(&select)
                 .map(QueryResult::from)
-                .map_err(|e| {
-                    ConsensusError::Backend(format!("speculative query failed: {e}"))
-                })
+                .map_err(|e| ConsensusError::Backend(format!("speculative query failed: {e}")))
         })();
 
         // Discard the scratch transaction unconditionally: the
@@ -1082,11 +1077,10 @@ fn execute_write_statement(
     // see (#5381). The schema is replicated state, so everything below
     // is identical on every replica.
     //
-    // 1. Non-deterministic column DEFAULTs the statement fires: splice
-    //    in the proposer-frozen values (`frozen_defaults`); reject
-    //    deterministically when the sites and values disagree (entries
-    //    proposed around / before DEFAULT freezing, or a schema change
-    //    between propose and apply).
+    // 1. Non-deterministic column DEFAULTs the statement fires: splice in the proposer-frozen
+    //    values (`frozen_defaults`); reject deterministically when the sites and values disagree
+    //    (entries proposed around / before DEFAULT freezing, or a schema change between propose and
+    //    apply).
     let target_schema: Option<vibesql_catalog::TableSchema> = match &statement {
         Statement::Insert(stmt) => {
             lookup_table_schema(db, stmt.schema_name.as_deref(), &stmt.table_name).cloned()
@@ -1095,8 +1089,8 @@ fn execute_write_statement(
         Statement::Delete(stmt) => lookup_table_schema(db, None, &stmt.table_name).cloned(),
         _ => None,
     };
-    let can_fire_defaults = matches!(statement, Statement::Insert(_) | Statement::Update(_))
-        && target_schema.is_some();
+    let can_fire_defaults =
+        matches!(statement, Statement::Insert(_) | Statement::Update(_)) && target_schema.is_some();
     let statement = if can_fire_defaults {
         let schema = target_schema.as_ref().expect("checked above");
         freeze::substitute_volatile_defaults(statement, schema, frozen_defaults)
@@ -1116,9 +1110,8 @@ fn execute_write_statement(
         statement
     };
 
-    // 2. `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the
-    //    current date per row at apply time): reject against the
-    //    replicated target-table schema.
+    // 2. `CAST(<TIME column> AS TIMESTAMP)` (SQL:1999 stamps the current date per row at apply
+    //    time): reject against the replicated target-table schema.
     if let Some(schema) = &target_schema {
         if let Some(reason) = freeze::time_cast_violation(&statement, schema) {
             return Err(StatementFailure::Rejected(reason));
@@ -1143,11 +1136,10 @@ fn execute_write_statement(
         return Err(StatementFailure::Rejected(reason));
     }
 
-    // 3. Trigger-body backstop (#5381): this DML may fire triggers
-    //    whose bodies were audited at CREATE time against a schema that
-    //    later DDL may have invalidated (drop + recreate with a
-    //    volatile DEFAULT); re-audit them — transitively through
-    //    trigger cascades — against the current replicated catalog.
+    // 3. Trigger-body backstop (#5381): this DML may fire triggers whose bodies were audited at
+    //    CREATE time against a schema that later DDL may have invalidated (drop + recreate with a
+    //    volatile DEFAULT); re-audit them — transitively through trigger cascades — against the
+    //    current replicated catalog.
     let trigger_target: Option<&str> = match &statement {
         Statement::Insert(stmt) => Some(&stmt.table_name),
         Statement::Update(stmt) => Some(&stmt.table_name),
@@ -1286,7 +1278,10 @@ mod tests {
         // Composite primary key → None (by-id endpoints support single-column
         // keys only, matching the standalone path).
         machine
-            .apply(3, &TxnEntry::single("CREATE TABLE composite (a INT, b INT, PRIMARY KEY (a, b))"))
+            .apply(
+                3,
+                &TxnEntry::single("CREATE TABLE composite (a INT, b INT, PRIMARY KEY (a, b))"),
+            )
             .unwrap();
         assert_eq!(machine.primary_key_column("composite"), None);
     }
@@ -1294,11 +1289,11 @@ mod tests {
     #[test]
     fn resolve_column_names_matches_query_columns_without_executing() {
         let shapes = [
-            "SELECT id, name FROM users",       // explicit columns
+            "SELECT id, name FROM users",           // explicit columns
             "SELECT id AS k, name AS v FROM users", // aliases
-            "SELECT id + 1 FROM users",         // derived expression
-            "SELECT * FROM users",              // wildcard expansion
-            "SELECT users.* FROM users",        // table wildcard
+            "SELECT id + 1 FROM users",             // derived expression
+            "SELECT * FROM users",                  // wildcard expansion
+            "SELECT users.* FROM users",            // table wildcard
         ];
 
         // Names are resolved from the applied catalog, not from data: an
@@ -1474,10 +1469,7 @@ mod tests {
         assert!(names(&machine_b).is_empty());
 
         // Re-applying the already-consumed index is idempotent.
-        assert_eq!(
-            machine_a.apply(3, &raising_entry()).unwrap(),
-            ApplyOutcome::AlreadyApplied
-        );
+        assert_eq!(machine_a.apply(3, &raising_entry()).unwrap(), ApplyOutcome::AlreadyApplied);
     }
 
     /// Speculative reads (#5401) see the buffer's own writes but never
@@ -1496,7 +1488,8 @@ mod tests {
         ]);
 
         // The speculative read sees the committed row plus the buffered ones.
-        let rows = machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
+        let rows =
+            machine.speculative_query(&buffer, "SELECT name FROM users ORDER BY id").unwrap();
         let seen: Vec<String> = rows.into_iter().map(|r| r[0].to_string()).collect();
         assert_eq!(seen, vec!["alice", "bob", "carol"], "read-your-own-writes");
 
@@ -1522,8 +1515,7 @@ mod tests {
 
         // Duplicate primary key inside the buffer.
         let buffer = TxnEntry::batch(["INSERT INTO users VALUES (1, 'dup')"]);
-        let err =
-            machine.speculative_query(&buffer, "SELECT name FROM users").unwrap_err();
+        let err = machine.speculative_query(&buffer, "SELECT name FROM users").unwrap_err();
         assert!(format!("{err}").contains("speculative replay"), "unexpected error: {err}");
 
         // Applied state untouched; no open transaction left behind.
@@ -1933,7 +1925,11 @@ mod tests {
         // nothing from the rejected residual entries.
         let rows_a = a.query("SELECT * FROM sched").unwrap();
         assert_eq!(rows_a, b.query("SELECT * FROM sched").unwrap());
-        assert_eq!(rows_a.len(), 1, "only the single setup row may remain; no residual cast applied");
+        assert_eq!(
+            rows_a.len(),
+            1,
+            "only the single setup row may remain; no residual cast applied"
+        );
     }
 
     /// The deterministic-vs-resource error split (judge note on PR
@@ -1968,14 +1964,8 @@ mod tests {
             // RAISE(ABORT|FAIL|ROLLBACK) from a trigger (#5409/#5417): a pure
             // function of the (replicated) statement + state, so it rejects the
             // entry identically on every replica — never a node-local halt.
-            E::Raise {
-                action: vibesql_ast::RaiseAction::Abort,
-                message: "boom".to_string(),
-            },
-            E::Raise {
-                action: vibesql_ast::RaiseAction::Rollback,
-                message: "boom".to_string(),
-            },
+            E::Raise { action: vibesql_ast::RaiseAction::Abort, message: "boom".to_string() },
+            E::Raise { action: vibesql_ast::RaiseAction::Rollback, message: "boom".to_string() },
         ];
         for e in &deterministic {
             assert!(
@@ -2124,17 +2114,12 @@ mod tests {
     //
     //   - `foreign_keys_enabled`  (whether FK constraints are enforced on DML)
     //   - `defer_foreign_keys`    (whether FK checks defer to COMMIT)
-    //   - `case_sensitive_like`   (changes which rows a LIKE predicate selects,
-    //                              so it changes UPDATE/DELETE *effects*, not
-    //                              just SELECT presentation)
-    //   - `reverse_unordered_selects`
-    //                             (reverses the output order of an unordered
-    //                              SELECT — so an `INSERT ... SELECT` with no
-    //                              `ORDER BY` materializes rows in the opposite
-    //                              order and assigns rowids accordingly; a write
-    //                              effect, not just SELECT presentation)
-    //   - `sql_mode`              (MySQL vs SQLite type coercion / division /
-    //                              REPLACE semantics)
+    //   - `case_sensitive_like`   (changes which rows a LIKE predicate selects, so it changes
+    //     UPDATE/DELETE *effects*, not just SELECT presentation)
+    //   - `reverse_unordered_selects` (reverses the output order of an unordered SELECT — so an
+    //     `INSERT ... SELECT` with no `ORDER BY` materializes rows in the opposite order and
+    //     assigns rowids accordingly; a write effect, not just SELECT presentation)
+    //   - `sql_mode`              (MySQL vs SQLite type coercion / division / REPLACE semantics)
     //   - generic `session_variables` read by SQL functions
     //   - role / security enforcement (`is_security_enabled`)
     //
@@ -2249,10 +2234,8 @@ mod tests {
             "CREATE TABLE src (id INTEGER PRIMARY KEY, txt TEXT, tm TIME)",
             "INSERT INTO src (id, txt, tm) VALUES (1, '2026-06-13 09:00:00', '09:00:00')",
         ];
-        let accept =
-            "INSERT INTO sched (id, ts) SELECT id, CAST(src.txt AS TIMESTAMP) FROM src";
-        let reject =
-            "INSERT INTO sched (id, ts) SELECT id, CAST(src.tm AS TIMESTAMP) FROM src";
+        let accept = "INSERT INTO sched (id, ts) SELECT id, CAST(src.txt AS TIMESTAMP) FROM src";
+        let reject = "INSERT INTO sched (id, ts) SELECT id, CAST(src.tm AS TIMESTAMP) FROM src";
 
         let a = VibesqlStateMachine::new();
         let b = VibesqlStateMachine::new();

@@ -11,12 +11,6 @@ use vibesql_catalog::TableIdentifier;
 use vibesql_storage::{statistics::CostEstimator, Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::{
-    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, partial_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
-};
-
 use super::{
     constraints::ConstraintValidator,
     fast_path,
@@ -31,6 +25,11 @@ use super::{
     triggers,
     value_updater::ValueUpdater,
     PendingUpdate,
+};
+use crate::{
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    expression_index_maintenance, partial_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table,
 };
 
 /// Internal implementation supporting both schema caching, procedural context, and trigger
@@ -2762,10 +2761,11 @@ fn apply_order_by_and_limit(
 
 #[cfg(test)]
 mod alias_scope_tests {
-    use super::validate_alias_scoped_qualifiers;
-    use crate::errors::ExecutorError;
     use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
     use vibesql_types::SqlValue;
+
+    use super::validate_alias_scoped_qualifiers;
+    use crate::errors::ExecutorError;
 
     fn qualified_eq(table: &str, column: &str) -> Expression {
         Expression::BinaryOp {
