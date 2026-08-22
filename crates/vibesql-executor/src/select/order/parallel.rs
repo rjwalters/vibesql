@@ -7,11 +7,9 @@
 #[cfg(feature = "parallel")]
 use rayon::slice::ParallelSliceMut;
 
+use super::{comparison::compare_rows_by_sort_keys, RowWithSortKeys};
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
-
-use super::comparison::compare_rows_by_sort_keys;
-use super::RowWithSortKeys;
 
 /// Sort rows using either parallel or sequential sorting based on dataset size.
 ///

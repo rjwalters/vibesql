@@ -137,9 +137,7 @@ impl IndexMetadata {
 #[derive(Debug, Clone)]
 pub enum IndexData {
     /// In-memory BTreeMap (for small indexes or backward compatibility)
-    InMemory {
-        data: BTreeMap<Vec<SqlValue>, Vec<usize>>,
-    },
+    InMemory { data: BTreeMap<Vec<SqlValue>, Vec<usize>> },
     /// Disk-backed B+ tree (for large indexes or persistence)
     /// Note: The B+ tree stores (key, row_id) pairs. For non-unique indexes,
     /// we serialize Vec<usize> as the row_id value to support multiple rows per key.
@@ -225,7 +223,6 @@ impl IndexData {
             _ => None,
         }
     }
-
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

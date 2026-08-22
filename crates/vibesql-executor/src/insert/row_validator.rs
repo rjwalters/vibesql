@@ -194,7 +194,8 @@ impl<'a> RowValidator<'a> {
         }
 
         // Store extracted keys in result
-        // Only store PRIMARY KEY if no NULL values (multiple NULLs allowed in non-INTEGER PRIMARY KEY)
+        // Only store PRIMARY KEY if no NULL values (multiple NULLs allowed in non-INTEGER PRIMARY
+        // KEY)
         if let Some(pk_vals) = pk_values {
             if !pk_vals.contains(&vibesql_types::SqlValue::Null) {
                 result.primary_key = Some(pk_vals);

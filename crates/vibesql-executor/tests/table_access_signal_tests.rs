@@ -4,8 +4,8 @@
 //! through the real executor + storage paths:
 //!   - analytical scans increment `scan_count`,
 //!   - point lookups increment `point_lookup_count`,
-//!   - writes increment `write_count` (including for a native-columnar table,
-//!     proving the increment fires before the `is_native_columnar` early-return),
+//!   - writes increment `write_count` (including for a native-columnar table, proving the increment
+//!     fires before the `is_native_columnar` early-return),
 //!   - two tables' signals stay independent and table names are case-insensitive,
 //!   - the signal is observation-only (columnar-vs-row path is unchanged).
 //!

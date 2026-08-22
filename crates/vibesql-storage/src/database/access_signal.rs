@@ -27,6 +27,8 @@
 // use `parking_lot::RwLock`; wasm uses `std::sync::RwLock`, matching the
 // `columnar_cache.rs` cfg split.
 
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicU64, Ordering},
@@ -34,8 +36,6 @@ use std::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
-#[cfg(target_arch = "wasm32")]
-use std::sync::RwLock;
 
 use super::core::Database;
 

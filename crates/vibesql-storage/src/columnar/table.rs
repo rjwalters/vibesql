@@ -264,11 +264,8 @@ impl ColumnarTable {
         // Handle empty table: need to initialize columns from the row
         if self.columns.is_empty() && !self.column_names.is_empty() {
             // Infer column types from row values
-            let col_types: Vec<_> = row
-                .values
-                .iter()
-                .map(|v| ColumnTypeClass::from_sql_value(v))
-                .collect();
+            let col_types: Vec<_> =
+                row.values.iter().map(|v| ColumnTypeClass::from_sql_value(v)).collect();
 
             // Create columns using ColumnBuilder for initial row
             for (col_idx, col_name) in self.column_names.iter().enumerate() {
@@ -283,9 +280,10 @@ impl ColumnarTable {
 
         // Append to existing columns
         for (col_idx, col_name) in self.column_names.iter().enumerate() {
-            let column = self.columns.get_mut(col_name).ok_or_else(|| {
-                format!("Column '{}' not found in columnar table", col_name)
-            })?;
+            let column = self
+                .columns
+                .get_mut(col_name)
+                .ok_or_else(|| format!("Column '{}' not found in columnar table", col_name))?;
             column.push_value(&row.values[col_idx])?;
         }
 
@@ -338,9 +336,10 @@ impl ColumnarTable {
         }
 
         for (col_idx, col_name) in self.column_names.iter().enumerate() {
-            let column = self.columns.get_mut(col_name).ok_or_else(|| {
-                format!("Column '{}' not found in columnar table", col_name)
-            })?;
+            let column = self
+                .columns
+                .get_mut(col_name)
+                .ok_or_else(|| format!("Column '{}' not found in columnar table", col_name))?;
             column.set_value(index, &row.values[col_idx])?;
         }
 

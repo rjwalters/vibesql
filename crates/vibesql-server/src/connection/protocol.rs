@@ -3,13 +3,13 @@
 //! This module provides helper functions for encoding and sending PostgreSQL
 //! wire protocol messages to the client.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use bytes::BytesMut;
 use tokio::net::tcp::OwnedWriteHalf;
 
+use super::io::flush_write_buffer;
 use crate::{
     observability::ObservabilityProvider,
     protocol::{
@@ -18,8 +18,6 @@ use crate::{
     },
     session::ExecutionResult,
 };
-
-use super::io::flush_write_buffer;
 
 /// Send parameter status message
 pub async fn send_parameter_status(

@@ -435,36 +435,30 @@ impl Keyword {
     ///
     /// The denylist intentionally covers three categories of keyword:
     ///
-    /// 1. **Operators** consumed by the expression precedence cascade in
-    ///    *operator* position (`AND`, `OR`, `NOT`, `IN`, `BETWEEN`,
-    ///    `ESCAPE`, `IS`, `ISNULL`, `NOTNULL`, `COLLATE`, `DIV`,
-    ///    `ALL`/`ANY`/`SOME`, `AS`). These must never be reinterpreted as a
-    ///    column when an operand is expected. Note that `LIKE`/`GLOB` are
-    ///    *not* denied: at operand start they can only be a column reference
-    ///    (or a `like(...)`/`glob(...)` function call, which the function-call
-    ///    parser claims first); their operator role only arises in operator
-    ///    position, which this predicate never governs (keyword1.test).
-    /// 2. **Statement / clause structure** keywords that terminate or introduce
-    ///    a clause and which the expression caller relies on to STOP parsing
-    ///    (`SELECT`, `FROM`, `WHERE`, `GROUP`, `HAVING`, `ORDER`,
-    ///    `LIMIT`, `WINDOW`, `UNION`, `INTERSECT`, `EXCEPT`, `INTO`,
-    ///    `VALUES`, `SET`, `ON`, `USING`, `JOIN` and its modifiers, the DML/DDL
-    ///    verbs, etc.). Words that only structure a clause *after* another
-    ///    keyword has been consumed (`BY`, `OFFSET`, `WITH`, `RECURSIVE`,
-    ///    `REPLACE`, `PRAGMA`) are NOT denied: at operand start they are
-    ///    unambiguous column references, matching SQLite's fallback rules
-    ///    (`SELECT by FROM t ORDER BY by`, keyword1.test).
+    /// 1. **Operators** consumed by the expression precedence cascade in *operator* position
+    ///    (`AND`, `OR`, `NOT`, `IN`, `BETWEEN`, `ESCAPE`, `IS`, `ISNULL`, `NOTNULL`, `COLLATE`,
+    ///    `DIV`, `ALL`/`ANY`/`SOME`, `AS`). These must never be reinterpreted as a column when an
+    ///    operand is expected. Note that `LIKE`/`GLOB` are *not* denied: at operand start they can
+    ///    only be a column reference (or a `like(...)`/`glob(...)` function call, which the
+    ///    function-call parser claims first); their operator role only arises in operator position,
+    ///    which this predicate never governs (keyword1.test).
+    /// 2. **Statement / clause structure** keywords that terminate or introduce a clause and which
+    ///    the expression caller relies on to STOP parsing (`SELECT`, `FROM`, `WHERE`, `GROUP`,
+    ///    `HAVING`, `ORDER`, `LIMIT`, `WINDOW`, `UNION`, `INTERSECT`, `EXCEPT`, `INTO`, `VALUES`,
+    ///    `SET`, `ON`, `USING`, `JOIN` and its modifiers, the DML/DDL verbs, etc.). Words that only
+    ///    structure a clause *after* another keyword has been consumed (`BY`, `OFFSET`, `WITH`,
+    ///    `RECURSIVE`, `REPLACE`, `PRAGMA`) are NOT denied: at operand start they are unambiguous
+    ///    column references, matching SQLite's fallback rules (`SELECT by FROM t ORDER BY by`,
+    ///    keyword1.test).
     /// 3. **Special primary forms / literals** that have dedicated parsing
-    ///    (`CASE`/`WHEN`/`THEN`/`ELSE`, `CAST`, `EXISTS`, `NULL`, `TRUE`,
-    ///    `FALSE`, the `CURRENT_*` constants, `DISTINCT`). `UNKNOWN` is NOT
-    ///    denied: SQLite has no `IS UNKNOWN` truth-value predicate and treats
-    ///    `UNKNOWN` in expression position as an ordinary identifier / column
-    ///    reference (`SELECT 1 IS UNKNOWN` errors with "no such column:
-    ///    UNKNOWN"), so it round-trips as a column name here. `END` is
-    ///    NOT denied: it is only meaningful *after* a complete CASE body, where
-    ///    the CASE parser consumes it at clause level before expression
-    ///    parsing resumes; at operand start SQLite treats it as a column
-    ///    (`ORDER BY end`, keyword1.test).
+    ///    (`CASE`/`WHEN`/`THEN`/`ELSE`, `CAST`, `EXISTS`, `NULL`, `TRUE`, `FALSE`, the `CURRENT_*`
+    ///    constants, `DISTINCT`). `UNKNOWN` is NOT denied: SQLite has no `IS UNKNOWN` truth-value
+    ///    predicate and treats `UNKNOWN` in expression position as an ordinary identifier / column
+    ///    reference (`SELECT 1 IS UNKNOWN` errors with "no such column: UNKNOWN"), so it
+    ///    round-trips as a column name here. `END` is NOT denied: it is only meaningful *after* a
+    ///    complete CASE body, where the CASE parser consumes it at clause level before expression
+    ///    parsing resumes; at operand start SQLite treats it as a column (`ORDER BY end`,
+    ///    keyword1.test).
     ///
     /// Everything else — including otherwise-reserved column-name words like
     /// `RELEASE`, `SAVEPOINT`, `KEY`, `ASC`, `DESC`, `BEGIN`, `COMMIT`,
@@ -574,8 +568,8 @@ impl Keyword {
     /// fallback keyword as a name but truly-reserved words (`PRIMARY`, `NOT`,
     /// `CROSS`, `SELECT`, ...) must stay rejected:
     ///
-    /// - column *type* names (`CREATE TABLE abort(abort abort)` is legal;
-    ///   `CREATE TABLE t(x primary)` is not)
+    /// - column *type* names (`CREATE TABLE abort(abort abort)` is legal; `CREATE TABLE t(x
+    ///   primary)` is not)
     /// - index names in `CREATE INDEX` / `DROP INDEX`
     /// - index names after `INDEXED BY`
     ///

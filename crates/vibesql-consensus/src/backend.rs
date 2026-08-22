@@ -1,8 +1,7 @@
 //! The engine-agnostic [`ConsensusBackend`] adapter trait and its companion
 //! types. See ADR-0004 for the full design rationale.
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 /// Index of an entry in the replicated log.
 ///

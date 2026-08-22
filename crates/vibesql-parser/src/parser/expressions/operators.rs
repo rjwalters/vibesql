@@ -78,12 +78,11 @@ impl Parser {
     // tier (tighter than `* / %`); they live in parse_concat_json_expression.
     //
     // Each tier comes in two forms:
-    // - `parse_<tier>_expression()` parses a fresh operand (starting at the
-    //   unary tier) and then climbs from that seed.
-    // - `parse_<tier>_expression_from(left)` takes an already-parsed left
-    //   operand, first runs it through all tighter tiers, then applies this
-    //   tier's operator loop. Each operator loop exists exactly once, in the
-    //   `_from` variant.
+    // - `parse_<tier>_expression()` parses a fresh operand (starting at the unary tier) and then
+    //   climbs from that seed.
+    // - `parse_<tier>_expression_from(left)` takes an already-parsed left operand, first runs it
+    //   through all tighter tiers, then applies this tier's operator loop. Each operator loop
+    //   exists exactly once, in the `_from` variant.
     //
     // Parallel-structure invariant (see arena_parser/expression.rs): the
     // arena parser mirrors this decomposition minus the bitwise tier
@@ -507,8 +506,9 @@ impl Parser {
                             let values = self.parse_expression_list()?;
                             self.expect_token(Token::RParen)?;
 
-                            // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT IN)
-                            // Don't return - assign to left and continue to check for IS NULL
+                            // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT
+                            // IN) Don't return - assign to left and
+                            // continue to check for IS NULL
                             left = vibesql_ast::Expression::InList {
                                 expr: Box::new(left),
                                 values,
@@ -638,10 +638,10 @@ impl Parser {
                     };
                     continue;
                 } else if self.peek_keyword(Keyword::Null) {
-                    // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS NOT
-                    // NULL" BUT: In column definition context, "DEFAULT expr NOT NULL"
-                    // should parse NOT NULL as a column constraint, not as part of the
-                    // expression.
+                    // SQLite compatibility: "expr NOT NULL" (without IS) is equivalent to "expr IS
+                    // NOT NULL" BUT: In column definition context, "DEFAULT
+                    // expr NOT NULL" should parse NOT NULL as a column
+                    // constraint, not as part of the expression.
                     //
                     // Heuristic: If the left expression is a simple literal and what follows NULL
                     // could be a column constraint context (`,` `)` or constraint keyword), then
@@ -650,8 +650,8 @@ impl Parser {
                     // But allows: WHERE col NOT NULL (col is not a literal)
                     self.consume_keyword(Keyword::Null)?;
 
-                    // Check if left is a literal (in which case NOT NULL as an operator is semantically
-                    // odd)
+                    // Check if left is a literal (in which case NOT NULL as an operator is
+                    // semantically odd)
                     let left_is_literal = matches!(&left, vibesql_ast::Expression::Literal(_));
 
                     // Check what comes after NULL
@@ -671,7 +671,8 @@ impl Parser {
                                 | Keyword::AutoIncrement
                                 | Keyword::Constraint
                         ),
-                        Token::Semicolon | Token::Eof => false, // At end of query, treat as operator
+                        Token::Semicolon | Token::Eof => false, /* At end of query, treat as */
+                        // operator
                         _ => false,
                     };
 
@@ -1017,7 +1018,8 @@ impl Parser {
                 continue;
             }
 
-            // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT] TRUE/FALSE/UNKNOWN
+            // Check for IS NULL / IS NOT NULL / IS [NOT] DISTINCT FROM / IS [NOT]
+            // TRUE/FALSE/UNKNOWN
             if self.peek_keyword(Keyword::Is) {
                 self.consume_keyword(Keyword::Is)?;
 

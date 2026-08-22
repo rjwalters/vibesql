@@ -702,9 +702,10 @@ fn collect_correlation_refs_from_expr(
 
 #[cfg(test)]
 mod tests {
+    use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
+
     use super::*;
     use crate::schema::CombinedSchema;
-    use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectItem, SelectStmt};
 
     fn col(name: &str) -> Expression {
         Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(name, false))

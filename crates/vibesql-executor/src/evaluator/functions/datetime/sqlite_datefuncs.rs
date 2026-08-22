@@ -5,10 +5,10 @@
 //! `strftime()`).
 //!
 //! - `julianday(time-value, modifiers...)` — fractional Julian Day number as REAL
-//! - `unixepoch(time-value, modifiers...)` — seconds since the Unix epoch as
-//!   INTEGER, or as REAL (millisecond precision) with the `'subsec'` modifier
-//! - `timediff(A, B)` — TEXT in `±YYYY-MM-DD HH:MM:SS.SSS` format such that
-//!   `datetime(B, timediff(A, B)) == datetime(A)`
+//! - `unixepoch(time-value, modifiers...)` — seconds since the Unix epoch as INTEGER, or as REAL
+//!   (millisecond precision) with the `'subsec'` modifier
+//! - `timediff(A, B)` — TEXT in `±YYYY-MM-DD HH:MM:SS.SSS` format such that `datetime(B,
+//!   timediff(A, B)) == datetime(A)`
 //!
 //! SQLite Reference: https://www.sqlite.org/lang_datefunc.html
 
@@ -264,8 +264,7 @@ fn timediff_string(d1: &NaiveDateTime, d2: &NaiveDateTime) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::current::datetime;
-    use super::*;
+    use super::{super::current::datetime, *};
 
     fn text(s: &str) -> SqlValue {
         SqlValue::Varchar(s.into())

@@ -2,8 +2,7 @@
 //!
 //! SQL:1999 Section 6.29: String value functions
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::coerce_to_string;
+use crate::{errors::ExecutorError, evaluator::functions::coercion::coerce_to_string};
 
 /// REPLACE(string, from, to) - Replace occurrences
 /// SQL:1999 Section 6.29: String value functions

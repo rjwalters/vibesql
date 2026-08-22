@@ -5,17 +5,15 @@
 //! snapshot stable across reads (correct for repeatable-read). It also
 //! left two gaps that this follow-up closes:
 //!
-//! 1. **Autocommit sees prior transactional commits**: with the
-//!    pre-1207 `read_snapshot` returning `TxnSnapshot::empty()` for
-//!    autocommit reads (`xmax_committed = 0`), MVCC-stamped rows from
-//!    *committed* transactions were invisible to autocommit reads. The
-//!    fix synthesizes a commit-time-style snapshot at every autocommit
-//!    read so reads see everything that has committed so far.
-//! 2. **A transaction sees its own writes**: with the pre-1207 BEGIN
-//!    snapshot setting `xmax_committed = txn_id - 1`, a row stamped
-//!    with `xmin = txn_id` failed the `xmin <= xmax_committed` clause.
-//!    The fix widens the BEGIN-time snapshot to set
-//!    `xmax_committed = txn_id` so self-writes pass `is_committed(self)`.
+//! 1. **Autocommit sees prior transactional commits**: with the pre-1207 `read_snapshot` returning
+//!    `TxnSnapshot::empty()` for autocommit reads (`xmax_committed = 0`), MVCC-stamped rows from
+//!    *committed* transactions were invisible to autocommit reads. The fix synthesizes a
+//!    commit-time-style snapshot at every autocommit read so reads see everything that has
+//!    committed so far.
+//! 2. **A transaction sees its own writes**: with the pre-1207 BEGIN snapshot setting
+//!    `xmax_committed = txn_id - 1`, a row stamped with `xmin = txn_id` failed the `xmin <=
+//!    xmax_committed` clause. The fix widens the BEGIN-time snapshot to set `xmax_committed =
+//!    txn_id` so self-writes pass `is_committed(self)`.
 //!
 //! # Why these tests use tables without a PRIMARY KEY
 //!

@@ -10,12 +10,11 @@
 // These tests assert:
 //
 //   * DDL (table schemas) survives an unclean shutdown via WAL replay.
-//   * DML (row data) survives an unclean shutdown via WAL replay — both inserts
-//     and the post-recovery state of updates/deletes.
-//   * Uncommitted rows (BEGIN ... INSERT, no COMMIT before the crash) are NOT
-//     replayed.
-//   * End-to-end: a real `vibesql` subprocess survives a SIGKILL with both its
-//     table schema and its committed rows intact on reopen.
+//   * DML (row data) survives an unclean shutdown via WAL replay — both inserts and the
+//     post-recovery state of updates/deletes.
+//   * Uncommitted rows (BEGIN ... INSERT, no COMMIT before the crash) are NOT replayed.
+//   * End-to-end: a real `vibesql` subprocess survives a SIGKILL with both its table schema and its
+//     committed rows intact on reopen.
 
 use std::{
     fs,

@@ -6,8 +6,8 @@
 //! for equality and lookup, **even when quoted** (issue #5553):
 //!
 //! - Canonical form is always lowercase, regardless of quoting.
-//! - The `quoted` flag is retained only to preserve the original spelling in
-//!   the display form (for error messages, `sqlite_master`, column headers).
+//! - The `quoted` flag is retained only to preserve the original spelling in the display form (for
+//!   error messages, `sqlite_master`, column headers).
 //!
 //! # Example
 //!
@@ -28,14 +28,16 @@
 //! assert_eq!(quoted.display(), "MyTable"); // original spelling preserved
 //! ```
 
-use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+};
 
 /// A SQL identifier with SQLite-compatible case handling.
 ///
 /// This type separates three concerns:
-/// - **Canonical form**: Used for HashMap keys and equality comparison
-///   (always ASCII case-folded, like SQLite — see issue #5553)
+/// - **Canonical form**: Used for HashMap keys and equality comparison (always ASCII case-folded,
+///   like SQLite — see issue #5553)
 /// - **Display form**: Preserves user's original input for error messages
 /// - **Quoted flag**: Whether the identifier was delimited (quoted)
 ///
@@ -521,9 +523,9 @@ impl ColumnIdentifier {
     /// use vibesql_ast::ColumnIdentifier;
     ///
     /// let c = ColumnIdentifier::fully_qualified(
-    ///     "myApp", true,   // quoted schema
-    ///     "users", false,  // unquoted table
-    ///     "ID", false      // unquoted column
+    ///     "myApp", true, // quoted schema
+    ///     "users", false, // unquoted table
+    ///     "ID", false, // unquoted column
     /// );
     /// assert_eq!(c.canonical(), "myapp.users.id");
     /// ```
@@ -880,8 +882,8 @@ pub type Identifier = TableIdentifier;
 ///
 /// // User wrote SUBSTR in their query
 /// let func = FunctionIdentifier::new("SUBSTR");
-/// assert_eq!(func.canonical(), "substr");  // Lowercase for comparison
-/// assert_eq!(func.display(), "SUBSTR");    // Original case for errors
+/// assert_eq!(func.canonical(), "substr"); // Lowercase for comparison
+/// assert_eq!(func.display(), "SUBSTR"); // Original case for errors
 /// ```
 #[derive(Debug, Clone)]
 pub struct FunctionIdentifier {
@@ -985,8 +987,9 @@ impl From<String> for FunctionIdentifier {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     #[test]
     fn test_unquoted_case_insensitive() {

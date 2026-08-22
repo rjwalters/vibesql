@@ -3,8 +3,7 @@
 //! SQL:1999 Section 6.29: String value functions
 //! SQLite compatibility: trim(X), trim(X,Y), ltrim(X), ltrim(X,Y), rtrim(X), rtrim(X,Y)
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::coerce_to_string;
+use crate::{errors::ExecutorError, evaluator::functions::coercion::coerce_to_string};
 
 /// TRIM(X) or TRIM(X, Y) - Remove characters from both ends of a string
 ///
@@ -185,8 +184,9 @@ pub(crate) fn trim_advanced(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     #[test]
     fn test_trim_whitespace() {

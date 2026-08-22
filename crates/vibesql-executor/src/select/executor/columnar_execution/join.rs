@@ -3,8 +3,7 @@
 //! This module implements vectorized JOIN execution for multi-table queries,
 //! providing 3-5x improvement for JOIN-heavy queries like TPC-H Q3, Q5, Q7-Q10, Q19.
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::OnceLock};
 
 use vibesql_ast::{FromClause, JoinType, SelectItem};
 
@@ -173,8 +172,8 @@ impl SelectExecutor<'_> {
         // / subquery predicate, return Ok(None), and the row-oriented path
         // would redo everything from scratch.
 
-        // 1. WHERE clause subquery predicates (Q18: IN (SELECT ...))
-        //    Must bail before join, not after.
+        // 1. WHERE clause subquery predicates (Q18: IN (SELECT ...)) Must bail before join, not
+        //    after.
         if let Some(ref where_clause) = stmt.where_clause {
             if contains_unsupported_predicates(where_clause) {
                 log::debug!(
@@ -184,13 +183,11 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // 2. GROUP BY key shapes the columnar join path cannot handle.
-        //    The join GROUP BY path (`execute_columnar_join_group_by`) supports
-        //    bare ColumnRef keys and numeric-arithmetic expression keys, which it
-        //    materializes as derived key columns via the shared #5994
-        //    `extract_derived_expr` / `materialize_derived_column` helpers (issue
-        //    #5995). Anything else (scalar functions like `strftime(...)`, casts,
-        //    string arithmetic) is unsupported.
+        // 2. GROUP BY key shapes the columnar join path cannot handle. The join GROUP BY path
+        //    (`execute_columnar_join_group_by`) supports bare ColumnRef keys and numeric-arithmetic
+        //    expression keys, which it materializes as derived key columns via the shared #5994
+        //    `extract_derived_expr` / `materialize_derived_column` helpers (issue #5995). Anything
+        //    else (scalar functions like `strftime(...)`, casts, string arithmetic) is unsupported.
         //
         //    This early check is a *schema-free structural* pre-filter: it bails
         //    before the expensive table-load/hash-join work for clearly
@@ -219,11 +216,10 @@ impl SelectExecutor<'_> {
             }
         }
 
-        // 3. Aggregate function args the columnar join path can't handle
-        //    (Q12: SUM(CASE WHEN ...), Q10: SUM(expr * expr) => Expression aggregate)
-        //    The join GROUP BY path rejects AggregateSource::Expression entirely,
-        //    so any aggregate arg that isn't a simple ColumnRef or Wildcard will
-        //    cause a late bail-out. Check this up front.
+        // 3. Aggregate function args the columnar join path can't handle (Q12: SUM(CASE WHEN ...),
+        //    Q10: SUM(expr * expr) => Expression aggregate) The join GROUP BY path rejects
+        //    AggregateSource::Expression entirely, so any aggregate arg that isn't a simple
+        //    ColumnRef or Wildcard will cause a late bail-out. Check this up front.
         if stmt.group_by.is_some() {
             if has_unsupported_join_aggregates(&stmt.select_list) {
                 log::debug!(

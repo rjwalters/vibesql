@@ -1726,9 +1726,8 @@ fn test_create_trigger_unknown_database_errors_at_execution() {
         .unwrap_err();
     assert_eq!(err.to_string(), "unknown database temporary");
     // An arbitrary unknown qualifier errors the same way…
-    let err = ex
-        .execute("CREATE TRIGGER auxdb.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END")
-        .unwrap_err();
+    let err =
+        ex.execute("CREATE TRIGGER auxdb.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END").unwrap_err();
     assert_eq!(err.to_string(), "unknown database auxdb");
     // …and succeeds once a database of that name is attached.
     ex.execute("ATTACH ':memory:' AS auxdb").unwrap();

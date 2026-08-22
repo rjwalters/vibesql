@@ -41,6 +41,24 @@ pub mod schema;
 pub mod transactions;
 
 // Re-export data generators from shared crate
+// Re-export schema loaders
+#[cfg(feature = "duckdb")]
+pub use schema::load_duckdb;
+#[cfg(feature = "mysql")]
+pub use schema::load_mysql;
+#[cfg(feature = "sqlite")]
+pub use schema::load_sqlite;
+pub use schema::load_vibesql;
+// Re-export transaction executors (engine-specific implementations)
+#[cfg(feature = "duckdb")]
+pub use transactions::DuckdbTransactionExecutor;
+#[cfg(feature = "mysql")]
+pub use transactions::MysqlTransactionExecutor;
+#[cfg(feature = "sqlite")]
+pub use transactions::SqliteTransactionExecutor;
+pub use transactions::{
+    print_profile_summary, reset_profile_counters, TPCCExecutor, VibesqlTransactionExecutor,
+};
 pub use vibesql_bench_common::tpcc::{
     // Input generators
     generate_delivery_input,
@@ -72,24 +90,4 @@ pub use vibesql_bench_common::tpcc::{
     TPCCWorkload,
     TransactionResult,
     Warehouse,
-};
-
-// Re-export schema loaders
-#[cfg(feature = "duckdb")]
-pub use schema::load_duckdb;
-#[cfg(feature = "mysql")]
-pub use schema::load_mysql;
-#[cfg(feature = "sqlite")]
-pub use schema::load_sqlite;
-pub use schema::load_vibesql;
-
-// Re-export transaction executors (engine-specific implementations)
-#[cfg(feature = "duckdb")]
-pub use transactions::DuckdbTransactionExecutor;
-#[cfg(feature = "mysql")]
-pub use transactions::MysqlTransactionExecutor;
-#[cfg(feature = "sqlite")]
-pub use transactions::SqliteTransactionExecutor;
-pub use transactions::{
-    print_profile_summary, reset_profile_counters, TPCCExecutor, VibesqlTransactionExecutor,
 };

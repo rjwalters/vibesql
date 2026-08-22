@@ -492,11 +492,10 @@ pub(crate) fn cascade_delete(
                 // The skipped child still carries the parent's key, which is
                 // about to disappear (the parent DELETE is applied after this
                 // cascade returns). That is an FK violation. Match sqlite3:
-                //   - immediate FK -> raise now; the statement savepoint
-                //     rolls the whole statement back.
-                //   - deferred FK (INITIALLY DEFERRED or session
-                //     defer_foreign_keys=ON inside a txn) -> queue the
-                //     surviving row for the COMMIT-time re-check.
+                //   - immediate FK -> raise now; the statement savepoint rolls the whole statement
+                //     back.
+                //   - deferred FK (INITIALLY DEFERRED or session defer_foreign_keys=ON inside a
+                //     txn) -> queue the surviving row for the COMMIT-time re-check.
                 let should_defer = in_txn && (fk.initially_deferred || session_defer);
                 if should_defer {
                     db.queue_deferred_fk_violation(DeferredFkViolation {
@@ -714,14 +713,12 @@ pub(crate) fn set_default(
 ///
 /// For each affected child row:
 ///   1. Fire BEFORE UPDATE triggers (OLD = current row, NEW = rewritten row).
-///   2. On `RAISE(IGNORE)` (SkipRow) the child's rewrite is abandoned: the
-///      surviving child keeps its OLD FK value, which references the parent
-///      key that is about to disappear (the parent DELETE is applied after
-///      this cascade returns). That is an orphaned FK reference and must
-///      trip the statement-end FK check (#5465) — immediate FK raises now;
-///      deferred FK queues the surviving OLD row for the COMMIT re-check.
-///   3. Otherwise apply the rewrite via `update_row`, then fire AFTER UPDATE
-///      triggers.
+///   2. On `RAISE(IGNORE)` (SkipRow) the child's rewrite is abandoned: the surviving child keeps
+///      its OLD FK value, which references the parent key that is about to disappear (the parent
+///      DELETE is applied after this cascade returns). That is an orphaned FK reference and must
+///      trip the statement-end FK check (#5465) — immediate FK raises now; deferred FK queues the
+///      surviving OLD row for the COMMIT re-check.
+///   3. Otherwise apply the rewrite via `update_row`, then fire AFTER UPDATE triggers.
 ///
 /// `RAISE(ABORT|FAIL|ROLLBACK)` propagates as `Err` and aborts the statement.
 #[allow(clippy::too_many_arguments)]

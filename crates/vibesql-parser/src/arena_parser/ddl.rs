@@ -884,7 +884,12 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            columns.push(IndexColumn::Column { column_name, direction, prefix_length, collation: None });
+            columns.push(IndexColumn::Column {
+                column_name,
+                direction,
+                prefix_length,
+                collation: None,
+            });
 
             if !self.try_consume(&Token::Comma) {
                 break;
@@ -1079,7 +1084,12 @@ impl<'arena> ArenaParser<'arena> {
                 OrderDirection::Asc
             };
 
-            columns.push(IndexColumn::Column { column_name, direction, prefix_length, collation: None });
+            columns.push(IndexColumn::Column {
+                column_name,
+                direction,
+                prefix_length,
+                collation: None,
+            });
 
             if !self.try_consume(&Token::Comma) {
                 break;

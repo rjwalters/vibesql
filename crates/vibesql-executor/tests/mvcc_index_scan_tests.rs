@@ -4,16 +4,13 @@
 //!
 //! The contract these tests pin down:
 //!
-//! - **Index scans** (`crates/vibesql-executor/src/select/scan/index_scan/`):
-//!   when a B-tree / hash index lookup lands on a row index `i`, the
-//!   scan must verify `table.is_row_visible(i, &snapshot)` before
-//!   yielding the row.
+//! - **Index scans** (`crates/vibesql-executor/src/select/scan/index_scan/`): when a B-tree / hash
+//!   index lookup lands on a row index `i`, the scan must verify `table.is_row_visible(i,
+//!   &snapshot)` before yielding the row.
 //! - **Primary-key point lookups**: the O(1) PK fast path in
-//!   `select::scan::table::try_primary_key_lookup` must also gate on
-//!   visibility.
-//! - **UNIQUE constraint scans**: during INSERT (and UPDATE)
-//!   validation, a tombstoned existing row that shares the new row's
-//!   unique key must NOT block the insert.
+//!   `select::scan::table::try_primary_key_lookup` must also gate on visibility.
+//! - **UNIQUE constraint scans**: during INSERT (and UPDATE) validation, a tombstoned existing row
+//!   that shares the new row's unique key must NOT block the insert.
 //!
 //! Off-state (`mvcc_enabled` OFF): `is_row_visible` collapses to the
 //! existing not-bitmap-deleted check, so every test must pass with the

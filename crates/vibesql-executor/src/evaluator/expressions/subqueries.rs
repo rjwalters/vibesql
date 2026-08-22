@@ -200,7 +200,8 @@ impl ExpressionEvaluator<'_> {
 
             // Apply affinity coercion before comparison
             // SQLite IN subquery coercion rules:
-            // - If subquery has INTEGER/REAL/NUMERIC affinity and expr is TEXT, convert TEXT to numeric
+            // - If subquery has INTEGER/REAL/NUMERIC affinity and expr is TEXT, convert TEXT to
+            //   numeric
             // - If subquery has TEXT affinity and expr is numeric, convert numeric to TEXT
             let (coerced_expr, coerced_subquery) = apply_in_subquery_affinity_coercion(
                 expr_val.clone(),

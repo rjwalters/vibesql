@@ -58,18 +58,15 @@ pub(super) struct InToJoinResult {
 /// view, CTE, derived subquery table, and `VALUES` table).
 ///
 /// Returns:
-/// - `Some(expr')` — the expression to fold into the join predicate. When `expr`
-///   is an unqualified `ColumnRef` that resolves to exactly one outer source,
-///   `expr'` is that reference qualified with the source's effective name; in
-///   every other resolvable case (already qualified, not a column reference, or
-///   genuinely ambiguous / a correlated reference) `expr'` is `expr` unchanged so
-///   downstream resolution — including the ambiguity guard — behaves exactly as
-///   SQLite requires.
-/// - `None` — the outer column can only be resolved against a derived/VALUES
-///   source whose columns cannot be enumerated here. The caller must abort the
-///   IN→join transform and fall back to row-by-row evaluation, which never
-///   over-errors (preserving `main`'s behavior instead of regressing to an
-///   ambiguity error).
+/// - `Some(expr')` — the expression to fold into the join predicate. When `expr` is an unqualified
+///   `ColumnRef` that resolves to exactly one outer source, `expr'` is that reference qualified
+///   with the source's effective name; in every other resolvable case (already qualified, not a
+///   column reference, or genuinely ambiguous / a correlated reference) `expr'` is `expr` unchanged
+///   so downstream resolution — including the ambiguity guard — behaves exactly as SQLite requires.
+/// - `None` — the outer column can only be resolved against a derived/VALUES source whose columns
+///   cannot be enumerated here. The caller must abort the IN→join transform and fall back to
+///   row-by-row evaluation, which never over-errors (preserving `main`'s behavior instead of
+///   regressing to an ambiguity error).
 fn qualify_outer_expr_in_scope(
     expr: &Expression,
     from: &FromClause,
@@ -95,9 +92,7 @@ fn qualify_outer_expr_in_scope(
             // against the scanned table correctly.
             if is_rowid_pseudo_column(col_id.column_canonical()) {
                 return match single_outer_rowid_table(from, database) {
-                    Some(table) => {
-                        Some(rewrite_column_refs_with_alias(expr, &table, &table))
-                    }
+                    Some(table) => Some(rewrite_column_refs_with_alias(expr, &table, &table)),
                     None => None,
                 };
             }
@@ -167,11 +162,10 @@ fn single_outer_rowid_table(from: &FromClause, database: &Database) -> Option<St
 ///
 /// A projection is provably non-NULL when it is:
 /// - a non-NULL literal; or
-/// - a bare column reference to a base table column that is either declared
-///   `NOT NULL` or is the `INTEGER PRIMARY KEY` rowid alias (rowids are never
-///   NULL). Note that a *composite* or non-INTEGER `PRIMARY KEY` column is **not**
-///   sufficient: SQLite (and VibeSQL) permit NULLs in such columns, so we must not
-///   treat them as non-NULL here.
+/// - a bare column reference to a base table column that is either declared `NOT NULL` or is the
+///   `INTEGER PRIMARY KEY` rowid alias (rowids are never NULL). Note that a *composite* or
+///   non-INTEGER `PRIMARY KEY` column is **not** sufficient: SQLite (and VibeSQL) permit NULLs in
+///   such columns, so we must not treat them as non-NULL here.
 ///
 /// Everything else (arbitrary expressions, function calls, nullable columns,
 /// columns from a derived/joined/VALUES source, the bare `rowid` pseudo-column,
@@ -209,7 +203,11 @@ fn subquery_projection_is_provably_non_null(
 /// joins, derived/VALUES sources, nullable columns, arbitrary expressions) is
 /// treated conservatively as possibly-NULL, aborting the rewrite in favor of the
 /// NULL-correct row-by-row path.
-fn outer_expr_is_provably_non_null(expr: &Expression, from: &FromClause, database: &Database) -> bool {
+fn outer_expr_is_provably_non_null(
+    expr: &Expression,
+    from: &FromClause,
+    database: &Database,
+) -> bool {
     match expr {
         Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
         // Resolve the column against the whole outer FROM scope (which may already
@@ -234,7 +232,11 @@ fn outer_expr_is_provably_non_null(expr: &Expression, from: &FromClause, databas
 /// NOT treated as non-NULL: SQLite (and VibeSQL) permit NULLs there. The bare
 /// `rowid` pseudo-column and all other expression shapes are treated
 /// conservatively as possibly-NULL.
-fn expression_is_provably_non_null(expr: &Expression, table_name: &str, database: &Database) -> bool {
+fn expression_is_provably_non_null(
+    expr: &Expression,
+    table_name: &str,
+    database: &Database,
+) -> bool {
     match expr {
         Expression::Literal(value) => !matches!(value, vibesql_types::SqlValue::Null),
         Expression::ColumnRef(col_id) => {
@@ -279,8 +281,8 @@ pub(super) fn try_convert_in_to_join(
     // base tables. The IN→SEMI/ANTI-join rewrite below reads `subquery.from` as if it
     // named a real table and synthesizes a join against it, producing a bogus
     // "no such table" for the CTE name (with2.test 7.5:
-    // `... WHERE y IN (WITH ss(x) AS (VALUES(7) UNION ALL SELECT x+7 FROM ss ...) SELECT x FROM ss)`).
-    // The subquery's WITH clause is also silently dropped by the rewrite. Bail so the
+    // `... WHERE y IN (WITH ss(x) AS (VALUES(7) UNION ALL SELECT x+7 FROM ss ...) SELECT x FROM
+    // ss)`). The subquery's WITH clause is also silently dropped by the rewrite. Bail so the
     // caller falls back to row-by-row `eval_in_subquery`, whose `.execute()` path
     // materializes the subquery's own WITH clause correctly.
     if subquery.with_clause.is_some() {
@@ -302,14 +304,12 @@ pub(super) fn try_convert_in_to_join(
     // `x NOT IN (S)` cannot become a plain ANTI join unless BOTH sides are provably
     // free of NULLs, because an equality-based ANTI join diverges from three-valued
     // `NOT IN` at each NULL:
-    //   - NULL in the subquery `S`: when `S` yields a NULL and `x` matches no
-    //     non-NULL member, `x NOT IN (S)` is UNKNOWN → the row is dropped; but an
-    //     ANTI join *keeps* it (no equal partner on the right). So the subquery
-    //     projection must be provably non-NULL.
-    //   - NULL on the left (`x`): `NULL NOT IN (S)` is UNKNOWN for non-empty `S`
-    //     (row dropped) and TRUE only for empty `S`; but `NULL = v` is never TRUE,
-    //     so an ANTI join *always* keeps a NULL-LHS row. So the outer LHS must be
-    //     provably non-NULL too.
+    //   - NULL in the subquery `S`: when `S` yields a NULL and `x` matches no non-NULL member, `x
+    //     NOT IN (S)` is UNKNOWN → the row is dropped; but an ANTI join *keeps* it (no equal
+    //     partner on the right). So the subquery projection must be provably non-NULL.
+    //   - NULL on the left (`x`): `NULL NOT IN (S)` is UNKNOWN for non-empty `S` (row dropped) and
+    //     TRUE only for empty `S`; but `NULL = v` is never TRUE, so an ANTI join *always* keeps a
+    //     NULL-LHS row. So the outer LHS must be provably non-NULL too.
     // If we cannot prove both, abort the transform so the caller falls back to
     // row-by-row `eval_in_subquery`, which implements the correct three-valued
     // semantics. (Plain `IN` → SEMI join is unaffected: for IN, a NULL on either
@@ -367,10 +367,10 @@ pub(super) fn try_convert_in_to_join(
     // that might be correlated references IN SELF-JOINS.
     //
     // This check is ONLY needed for self-joins because:
-    // - For non-self-joins (orders vs lineitem): unqualified columns in the subquery
-    //   can ONLY refer to the subquery's table. No ambiguity possible.
-    // - For self-joins (tab0 vs tab0): unqualified columns could refer to either
-    //   the outer tab0 or inner tab0, creating ambiguity.
+    // - For non-self-joins (orders vs lineitem): unqualified columns in the subquery can ONLY refer
+    //   to the subquery's table. No ambiguity possible.
+    // - For self-joins (tab0 vs tab0): unqualified columns could refer to either the outer tab0 or
+    //   inner tab0, creating ambiguity.
     //
     // Example that should NOT be transformed (self-join with multiple outer tables):
     //   SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t1 WHERE ...)
@@ -392,8 +392,8 @@ pub(super) fn try_convert_in_to_join(
                     is_simple_single_table_self_join(from, &table_name, &table_alias);
 
                 if !is_simple_self_join {
-                    // Self-join with multiple outer tables - unqualified column might be correlated.
-                    // Skip optimization to be safe.
+                    // Self-join with multiple outer tables - unqualified column might be
+                    // correlated. Skip optimization to be safe.
                     return None;
                 }
                 // else: Simple self-join with single table - safe to optimize
@@ -463,10 +463,11 @@ pub(super) fn try_convert_in_to_join(
         //   - This prevents col3 from incorrectly resolving to the outer tab0.col3
         //
         // Note: This is safe because:
-        // 1. For self-joins with a single outer table, unqualified columns in the subquery
-        //    must belong to the subquery's table (verified by is_simple_single_table_self_join check above)
-        // 2. For deeply nested subqueries with correlation, the earlier check at line 109-121
-        //    skips this optimization path entirely, so we won't break correlation
+        // 1. For self-joins with a single outer table, unqualified columns in the subquery must
+        //    belong to the subquery's table (verified by is_simple_single_table_self_join check
+        //    above)
+        // 2. For deeply nested subqueries with correlation, the earlier check at line 109-121 skips
+        //    this optimization path entirely, so we won't break correlation
         let rewritten_where = subquery
             .where_clause
             .as_ref()
@@ -507,17 +508,15 @@ pub(super) fn try_convert_in_to_join(
         // So we resolve which outer table the column belongs to using the catalog and
         // qualify against exactly that table, regardless of how many tables are in the
         // outer FROM:
-        //   - column present in exactly ONE outer table  → qualify to it (unambiguous,
-        //     even if the subquery table shares the name). Qualified refs bypass the
-        //     guard, restoring SQLite-matching results on both the row and columnar
-        //     join paths.
-        //   - column present in TWO+ outer tables         → genuinely ambiguous in the
-        //     outer scope; leave unqualified so the guard errors, matching SQLite.
-        //   - column resolvable only against a derived/VALUES table whose columns
-        //     can't be enumerated here → abort the transform (return None) and
-        //     fall back to row-by-row IN evaluation, which never over-errors.
-        //   - anything else (non-column expr, correlated reference, unresolved) →
-        //     leave unchanged.
+        //   - column present in exactly ONE outer table  → qualify to it (unambiguous, even if the
+        //     subquery table shares the name). Qualified refs bypass the guard, restoring
+        //     SQLite-matching results on both the row and columnar join paths.
+        //   - column present in TWO+ outer tables         → genuinely ambiguous in the outer scope;
+        //     leave unqualified so the guard errors, matching SQLite.
+        //   - column resolvable only against a derived/VALUES table whose columns can't be
+        //     enumerated here → abort the transform (return None) and fall back to row-by-row IN
+        //     evaluation, which never over-errors.
+        //   - anything else (non-column expr, correlated reference, unresolved) → leave unchanged.
         let outer_expr_qualified = qualify_outer_expr_in_scope(expr, from, database, with_clause)?;
 
         (

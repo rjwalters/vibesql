@@ -211,8 +211,5 @@ fn create_index_schema_qualified_missing_table() {
 
     let result = exec_create_index(&mut db, "CREATE INDEX main.i1 ON nonexistent(x)");
     assert!(result.is_err(), "CREATE INDEX main.i1 ON nonexistent(x) should fail");
-    assert!(matches!(
-        result.unwrap_err(),
-        vibesql_executor::ExecutorError::TableNotFound(_)
-    ));
+    assert!(matches!(result.unwrap_err(), vibesql_executor::ExecutorError::TableNotFound(_)));
 }

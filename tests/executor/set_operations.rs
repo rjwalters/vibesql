@@ -244,10 +244,9 @@ fn test_union_dedup_storage_class_last_wins() {
     assert_eq!(results.len(), 1);
     match &results[0].values[0] {
         SqlValue::Real(_) | SqlValue::Float(_) | SqlValue::Double(_) | SqlValue::Numeric(_) => {}
-        other => panic!(
-            "Expected REAL-class value for `SELECT 0 UNION SELECT 0.0`, got {:?}",
-            other
-        ),
+        other => {
+            panic!("Expected REAL-class value for `SELECT 0 UNION SELECT 0.0`, got {:?}", other)
+        }
     }
 
     // Right-arm INTEGER should win over left-arm REAL for same magnitude.
@@ -255,10 +254,9 @@ fn test_union_dedup_storage_class_last_wins() {
     assert_eq!(results.len(), 1);
     match &results[0].values[0] {
         SqlValue::Integer(_) | SqlValue::Bigint(_) | SqlValue::Smallint(_) => {}
-        other => panic!(
-            "Expected INTEGER-class value for `SELECT 0.0 UNION SELECT 0`, got {:?}",
-            other
-        ),
+        other => {
+            panic!("Expected INTEGER-class value for `SELECT 0.0 UNION SELECT 0`, got {:?}", other)
+        }
     }
 
     // Three-arm chain: ((0 UNION 0.0) UNION 0) → final right arm INTEGER wins.

@@ -4,14 +4,12 @@
 //! emitted row order matches the row path exactly.
 //!
 //! Per the acceptance criteria:
-//!   - Wall-clock timing is NOT used (the machine is loaded). Instead we capture
-//!     `log` output and assert the positive marker "Native columnar execution
-//!     completed" appears and the row-fallback marker "Standard columnar runtime
-//!     fallback to row-oriented" does NOT.
+//!   - Wall-clock timing is NOT used (the machine is loaded). Instead we capture `log` output and
+//!     assert the positive marker "Native columnar execution completed" appears and the
+//!     row-fallback marker "Standard columnar runtime fallback to row-oriented" does NOT.
 //!   - Result parity is checked against the row path (`VIBESQL_DISABLE_COLUMNAR=1`).
-//!   - Ordering parity is compared in EMITTED ROW ORDER — neither side is sorted
-//!     by the test harness. (A prior pre-sorting harness masked a real ordering
-//!     bug; we must not repeat it.)
+//!   - Ordering parity is compared in EMITTED ROW ORDER — neither side is sorted by the test
+//!     harness. (A prior pre-sorting harness masked a real ordering bug; we must not repeat it.)
 //!
 //! This test installs a process-global `log` logger, so it lives in its own test
 //! binary. Every test acquires the `SERIAL` mutex (PR #6006 pattern) because

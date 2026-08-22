@@ -8,8 +8,7 @@
 
 use std::sync::Mutex;
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
 

@@ -506,9 +506,10 @@ impl Parser {
                 self.peek(),
                 Token::Number(_) | Token::Symbol('-') | Token::Symbol('+')
             ) {
-                // Numeric literal or unary operator - cannot be a column name, must be an expression
-                // SQLite allows: CREATE INDEX i ON t(0), CREATE INDEX i ON t(0 LIKE col)
-                // SQLite also allows: CREATE INDEX i ON t(-b=b), CREATE INDEX i ON t(-a)
+                // Numeric literal or unary operator - cannot be a column name, must be an
+                // expression SQLite allows: CREATE INDEX i ON t(0), CREATE INDEX i
+                // ON t(0 LIKE col) SQLite also allows: CREATE INDEX i ON t(-b=b),
+                // CREATE INDEX i ON t(-a)
                 let expr = self.parse_expression()?;
 
                 // Check for optional ASC/DESC

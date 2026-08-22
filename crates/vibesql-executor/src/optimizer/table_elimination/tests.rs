@@ -496,8 +496,10 @@ mod helper_function_tests {
     use vibesql_ast::{BinaryOperator, Expression, SelectItem};
     use vibesql_types::SqlValue;
 
-    use super::super::predicate::{combine_predicates, flatten_and_chain};
-    use super::super::select_analysis::{collect_unqualified_columns, has_unqualified_column_ref};
+    use super::super::{
+        predicate::{combine_predicates, flatten_and_chain},
+        select_analysis::{collect_unqualified_columns, has_unqualified_column_ref},
+    };
 
     #[test]
     fn flatten_and_chain_single() {

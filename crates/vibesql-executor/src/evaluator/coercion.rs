@@ -74,8 +74,8 @@ fn parse_date_string(s: &str) -> Result<SqlValue, ExecutorError> {
 /// though the row exists and would match the full WHERE clause.
 ///
 /// SQLite affinity rules applied:
-/// - INTEGER/NUMERIC affinity column with string literal: try to parse as i64,
-///   then f64; if neither parses, return the original value (lookup will miss).
+/// - INTEGER/NUMERIC affinity column with string literal: try to parse as i64, then f64; if neither
+///   parses, return the original value (lookup will miss).
 /// - REAL affinity column with string literal: try to parse as f64.
 /// - TEXT affinity column with numeric literal: format the number as a string.
 /// - All other combinations: pass through unchanged.

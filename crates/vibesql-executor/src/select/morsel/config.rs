@@ -196,11 +196,7 @@ impl MorselConfig {
     /// use vibesql_executor::select::morsel::MorselConfig;
     /// use vibesql_types::DataType;
     ///
-    /// let schema = [
-    ///     DataType::Integer,
-    ///     DataType::Varchar { max_length: Some(100) },
-    ///     DataType::Date,
-    /// ];
+    /// let schema = [DataType::Integer, DataType::Varchar { max_length: Some(100) }, DataType::Date];
     /// let config = MorselConfig::for_schema(&schema);
     /// assert!(config.morsel_size > 0);
     /// ```

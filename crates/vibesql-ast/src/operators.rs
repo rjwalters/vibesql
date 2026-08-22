@@ -39,7 +39,7 @@ pub enum BinaryOperator {
 
     // JSON operators (SQLite/PostgreSQL compatible)
     JsonExtract, // -> (extract JSON value)
-    JsonExtractText, // ->> (extract as text)
+    JsonExtractText, /* ->> (extract as text) */
 
                  /* Note: LIKE and IN are not simple binary operators. They are
                   * implemented as Expression variants in

@@ -2,12 +2,11 @@
 //! on the native columnar path.
 //!
 //! Coverage:
-//!   - The native columnar path (not row fallback) is taken for flat
-//!     `STDDEV/VARIANCE`, a mixed SELECT list combining `SUM/AVG` with a
-//!     statistical aggregate (proves the whole-query drop is gone), and
-//!     `GROUP BY` with a statistical aggregate.
-//!   - Result parity vs the row path (`VIBESQL_DISABLE_COLUMNAR=1`) for all six
-//!     spellings, within a float epsilon.
+//!   - The native columnar path (not row fallback) is taken for flat `STDDEV/VARIANCE`, a mixed
+//!     SELECT list combining `SUM/AVG` with a statistical aggregate (proves the whole-query drop is
+//!     gone), and `GROUP BY` with a statistical aggregate.
+//!   - Result parity vs the row path (`VIBESQL_DISABLE_COLUMNAR=1`) for all six spellings, within a
+//!     float epsilon.
 //!
 //! Wall-clock timing is NOT used (the machine is loaded). We capture `log`
 //! output and assert the positive marker "Native columnar execution completed"

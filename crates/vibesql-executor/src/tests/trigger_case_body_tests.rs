@@ -7,13 +7,12 @@
 //! with `incomplete input`).
 //!
 //! Behavior verified against sqlite3 3.51.0:
-//! - `BEGIN UPDATE ... CASE ... END; INSERT INTO log ...; END` fires BOTH
-//!   statements (the CASE...END does not truncate the body).
-//! - Multiple CASE expressions across statements, nested CASE, and CASE in a
-//!   WHERE clause all leave the trailing statements intact.
-//! - `INSTEAD OF INSERT` with `SELECT CASE WHEN ... THEN raise(IGNORE) END`
-//!   followed by an `INSERT INTO base` skips the matching row but still runs the
-//!   base write for non-matching rows.
+//! - `BEGIN UPDATE ... CASE ... END; INSERT INTO log ...; END` fires BOTH statements (the
+//!   CASE...END does not truncate the body).
+//! - Multiple CASE expressions across statements, nested CASE, and CASE in a WHERE clause all leave
+//!   the trailing statements intact.
+//! - `INSTEAD OF INSERT` with `SELECT CASE WHEN ... THEN raise(IGNORE) END` followed by an `INSERT
+//!   INTO base` skips the matching row but still runs the base write for non-matching rows.
 
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;

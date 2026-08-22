@@ -1,6 +1,7 @@
 #![allow(clippy::doc_lazy_continuation)]
 
 use ahash::AHashMap;
+use vibesql_types::{SqlValue, TypeAffinity};
 
 use super::{
     combine_rows,
@@ -16,7 +17,6 @@ use crate::{
     schema::CombinedSchema,
     timeout::{TimeoutContext, CHECK_INTERVAL},
 };
-use vibesql_types::{SqlValue, TypeAffinity};
 
 /// Hash anti-join implementation
 ///

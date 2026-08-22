@@ -350,7 +350,8 @@ pub fn assert_constraint_violation(
     match result.unwrap_err() {
         ExecutorError::ConstraintViolation(msg) | ExecutorError::SqliteCompatError(msg) => {
             // Accept both ConstraintViolation and SqliteCompatError for constraint violations
-            // SqliteCompatError is used for SQLite-compatible error messages like UNIQUE constraint failed
+            // SqliteCompatError is used for SQLite-compatible error messages like UNIQUE constraint
+            // failed
             for fragment in expected_fragments {
                 assert!(
                     msg.contains(fragment),

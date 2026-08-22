@@ -6,14 +6,14 @@
 //! the correlated outer scope is unavailable at scan level. These tests cover
 //! the bisection ladder from the issue:
 //!
-//! - Bug B: `Expression::In` predicates pushed to a single-table scan drop the
-//!   correlated outer scope (`graph.rs` now inserts the `__subquery__` marker).
-//! - Unresolvable (correlated) unqualified columns in predicates now insert
-//!   `__outer_ref__` so the predicate stays post-join.
-//! - The complex EXISTS → semi-join transform bails out when the subquery's
-//!   FROM clause contains correlated derived tables.
-//! - The IN → EXISTS rewrite no longer mis-qualifies the IN's left-hand
-//!   expression when multiple outer tables are present.
+//! - Bug B: `Expression::In` predicates pushed to a single-table scan drop the correlated outer
+//!   scope (`graph.rs` now inserts the `__subquery__` marker).
+//! - Unresolvable (correlated) unqualified columns in predicates now insert `__outer_ref__` so the
+//!   predicate stays post-join.
+//! - The complex EXISTS → semi-join transform bails out when the subquery's FROM clause contains
+//!   correlated derived tables.
+//! - The IN → EXISTS rewrite no longer mis-qualifies the IN's left-hand expression when multiple
+//!   outer tables are present.
 
 use vibesql_executor::SelectExecutor;
 use vibesql_parser::Parser;

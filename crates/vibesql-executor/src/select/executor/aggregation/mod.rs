@@ -216,9 +216,9 @@ impl SelectExecutor<'_> {
                     });
                 }
 
-                // 2. Resolve positional/alias references against SELECT list and re-check.
-                //    Catches `GROUP BY 1` referencing a window-function SELECT item, e.g.
-                //    `SELECT sum(a) OVER() FROM t1 GROUP BY 1` (window1.test 47.2).
+                // 2. Resolve positional/alias references against SELECT list and re-check. Catches
+                //    `GROUP BY 1` referencing a window-function SELECT item, e.g. `SELECT sum(a)
+                //    OVER() FROM t1 GROUP BY 1` (window1.test 47.2).
                 let resolved = resolve_group_by_alias(group_expr, &stmt.select_list, term_index)?;
                 if let Some(window_name) =
                     crate::select::executor::validation::find_window_function_in_expression(
@@ -502,8 +502,9 @@ impl SelectExecutor<'_> {
                     // Check timeout during aggregation
                     self.check_timeout()?;
 
-                    // Find the representative row for aggregate-context subquery evaluation (issue #4683)
-                    // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
+                    // Find the representative row for aggregate-context subquery evaluation (issue
+                    // #4683) SQLite uses the row corresponding to MAX/MIN
+                    // aggregate for correlated subqueries
                     let representative_row_idx = self.find_representative_row_index(
                         &expanded_select_list,
                         &group_rows,
@@ -557,17 +558,21 @@ impl SelectExecutor<'_> {
 
                     // Apply HAVING filter
                     let include_group = if let Some(having_expr) = &stmt.having {
-                        // Build alias and expression values map from computed aggregate results (issue #4676, #4731)
-                        // This enables correlated subqueries in HAVING to access outer aliases AND aggregate expressions
+                        // Build alias and expression values map from computed aggregate results
+                        // (issue #4676, #4731) This enables correlated
+                        // subqueries in HAVING to access outer aliases AND aggregate expressions
                         let (alias_values, expr_values) =
                             build_alias_values_map(&expanded_select_list, &aggregate_results);
 
-                        // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
-                        // Pass ORIGINAL GROUP BY expressions so aliases that shadow GROUP BY columns
+                        // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is
+                        // count(*)) Pass ORIGINAL GROUP BY expressions so
+                        // aliases that shadow GROUP BY columns
                         // aren't resolved (HAVING should use GROUP BY columns, not SELECT aliases)
-                        // Also pass schema_columns so table columns take precedence over aliases (#4531)
-                        // Use resolve_having_aliases_with_values to also resolve outer aliases in subqueries
-                        // Pass expr_values to resolve aggregate expressions like avg(a.y) in subqueries (#4731)
+                        // Also pass schema_columns so table columns take precedence over aliases
+                        // (#4531) Use resolve_having_aliases_with_values to
+                        // also resolve outer aliases in subqueries
+                        // Pass expr_values to resolve aggregate expressions like avg(a.y) in
+                        // subqueries (#4731)
                         let resolved_having = resolve_having_aliases_with_values(
                             having_expr,
                             &expanded_select_list,
@@ -689,8 +694,9 @@ impl SelectExecutor<'_> {
                 // Check timeout during aggregation
                 self.check_timeout()?;
 
-                // Find the representative row for aggregate-context subquery evaluation (issue #4683)
-                // SQLite uses the row corresponding to MAX/MIN aggregate for correlated subqueries
+                // Find the representative row for aggregate-context subquery evaluation (issue
+                // #4683) SQLite uses the row corresponding to MAX/MIN aggregate for
+                // correlated subqueries
                 let representative_row_idx = self.find_representative_row_index(
                     &expanded_select_list,
                     &group_rows,
@@ -724,16 +730,19 @@ impl SelectExecutor<'_> {
 
                 // Apply HAVING filter
                 let include_group = if let Some(having_expr) = &stmt.having {
-                    // Build alias and expression values map from computed aggregate results (issue #4676, #4731)
-                    // This enables correlated subqueries in HAVING to access outer aliases AND aggregate expressions
+                    // Build alias and expression values map from computed aggregate results (issue
+                    // #4676, #4731) This enables correlated subqueries in
+                    // HAVING to access outer aliases AND aggregate expressions
                     let (alias_values, expr_values) =
                         build_alias_values_map(&expanded_select_list, &aggregate_results);
 
-                    // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is count(*))
-                    // No GROUP BY, so no GROUP BY expressions to exclude from alias resolution
-                    // Still pass schema_columns so table columns take precedence over aliases (#4531)
-                    // Use resolve_having_aliases_with_values to also resolve outer aliases in subqueries
-                    // Pass expr_values to resolve aggregate expressions in subqueries (#4731)
+                    // Resolve SELECT list aliases in HAVING (e.g., HAVING y >= 4 where y is
+                    // count(*)) No GROUP BY, so no GROUP BY expressions to
+                    // exclude from alias resolution Still pass schema_columns
+                    // so table columns take precedence over aliases (#4531) Use
+                    // resolve_having_aliases_with_values to also resolve outer aliases in
+                    // subqueries Pass expr_values to resolve aggregate
+                    // expressions in subqueries (#4731)
                     let resolved_having = resolve_having_aliases_with_values(
                         having_expr,
                         &expanded_select_list,

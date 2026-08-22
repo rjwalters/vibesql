@@ -7,10 +7,11 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
+use super::{
+    in_list::{extract_index_predicate, where_clause_fully_satisfied_by_index},
+    IndexPredicate, RangePredicate,
+};
 use crate::select::scan::index_scan::selection::expressions_match;
-
-use super::in_list::{extract_index_predicate, where_clause_fully_satisfied_by_index};
-use super::{IndexPredicate, RangePredicate};
 
 /// Check if an expression matches an indexed expression (for expression indexes)
 fn is_expression_match(expr: &Expression, index_expr: &Expression) -> bool {

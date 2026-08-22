@@ -13,10 +13,10 @@ use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
-use crate::select::scan::index_scan::selection::{
-    expression_filters_index_expression, index_column_can_filter,
+use crate::select::{
+    scan::index_scan::selection::{expression_filters_index_expression, index_column_can_filter},
+    SelectExecutor,
 };
-use crate::select::SelectExecutor;
 
 /// Create a test database with users table
 fn create_test_db() -> Database {
@@ -309,10 +309,12 @@ fn test_expression_index_between() {
 fn test_expression_index_functional_after_binary_reload() {
     use vibesql_catalog::{ColumnSchema, TableSchema};
 
-    use crate::index_ddl::expression_index::{
-        create_expression_index, rebuild_pending_expression_indexes,
+    use crate::{
+        index_ddl::expression_index::{
+            create_expression_index, rebuild_pending_expression_indexes,
+        },
+        optimizer::index_planner::IndexPlanner,
     };
-    use crate::optimizer::index_planner::IndexPlanner;
 
     // Build a table t3(r, s) with a few rows.
     let mut db = Database::new();

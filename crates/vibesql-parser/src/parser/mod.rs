@@ -183,9 +183,7 @@ impl Parser {
         }
         let open_span = self.spans.get(open)?;
         let close_span = self.spans.get(close)?;
-        self.source
-            .get(open_span.end..close_span.start)
-            .map(|s| s.trim().to_string())
+        self.source.get(open_span.end..close_span.start).map(|s| s.trim().to_string())
     }
 
     /// Parse a comma-separated list of items using a provided parser function

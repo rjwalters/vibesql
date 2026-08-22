@@ -3,15 +3,13 @@
 //! This module centralizes two pieces of FK enforcement that must stay in sync
 //! across multiple call sites (INSERT, UPDATE, PRAGMA `foreign_key_check`):
 //!
-//! 1. [`detect_fk_mismatch`] — Verify that the parent table actually has a PK,
-//!    UNIQUE constraint, or non-partial UNIQUE INDEX that *exactly* covers the
-//!    columns referenced by the FK. SQLite raises a `foreign key mismatch`
-//!    error before any row-existence check when no such key exists.
-//! 2. [`fk_values_equal`] — SQLite-style equality for FK comparisons that
-//!    honours numeric coercion as well as the parent column's `NOCASE` /
-//!    `RTRIM` collation. The non-collation logic mirrors VibeSQL's
-//!    [`vibesql_types::SqlValue`] strict equality; the collation logic mirrors
-//!    the helpers used in `select::grouping::aggregates`.
+//! 1. [`detect_fk_mismatch`] — Verify that the parent table actually has a PK, UNIQUE constraint,
+//!    or non-partial UNIQUE INDEX that *exactly* covers the columns referenced by the FK. SQLite
+//!    raises a `foreign key mismatch` error before any row-existence check when no such key exists.
+//! 2. [`fk_values_equal`] — SQLite-style equality for FK comparisons that honours numeric coercion
+//!    as well as the parent column's `NOCASE` / `RTRIM` collation. The non-collation logic mirrors
+//!    VibeSQL's [`vibesql_types::SqlValue`] strict equality; the collation logic mirrors the
+//!    helpers used in `select::grouping::aggregates`.
 //!
 //! See issue #5084 for context.
 
@@ -100,11 +98,10 @@ pub(crate) fn check_fk_definition_error(
 /// called per-row from the INSERT/UPDATE paths) already catches this for any
 /// statement that processes at least one row. This entry point additionally
 /// covers:
-///   1. UPDATE/DELETE statements that end up touching zero rows (their
-///      per-row FK loops never run at all).
-///   2. DML against the *parent* side of a broken FK — SQLite reports the
-///      same error when preparing a statement against the referenced table,
-///      not just the referencing one.
+///   1. UPDATE/DELETE statements that end up touching zero rows (their per-row FK loops never run
+///      at all).
+///   2. DML against the *parent* side of a broken FK — SQLite reports the same error when preparing
+///      a statement against the referenced table, not just the referencing one.
 pub fn validate_fk_schema_for_dml(
     db: &Database,
     table_name: &str,
@@ -124,9 +121,9 @@ pub fn validate_fk_schema_for_dml(
         }
     }
 
-    // 2. Other tables' FKs that reference this table as their parent. Skip
-    //    the O(tables) scan entirely when nothing in the schema declares any
-    //    FK at all (the overwhelmingly common case).
+    // 2. Other tables' FKs that reference this table as their parent. Skip the O(tables) scan
+    //    entirely when nothing in the schema declares any FK at all (the overwhelmingly common
+    //    case).
     let has_any_fks = db
         .catalog
         .list_tables()
@@ -222,10 +219,9 @@ fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: 
         }
     }
 
-    // 3. Non-partial UNIQUE INDEX exact match. Partial indexes (those with a
-    //    WHERE clause) are excluded — SQLite's `sqlite3FkLocateIndex` only
-    //    accepts indexes that cover every parent row. Expression indexes can
-    //    never back an FK either.
+    // 3. Non-partial UNIQUE INDEX exact match. Partial indexes (those with a WHERE clause) are
+    //    excluded — SQLite's `sqlite3FkLocateIndex` only accepts indexes that cover every parent
+    //    row. Expression indexes can never back an FK either.
     //
     //    EVIDENCE-OF R-00376-39212: the UNIQUE index must use the collation
     //    sequences specified in the CREATE TABLE statement for the parent
@@ -270,9 +266,8 @@ fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: 
         }
     }
 
-    // 4. Fallback: a single-column FK against a column that is itself
-    //    declared with column-level UNIQUE is represented in
-    //    `unique_constraints`, so the match succeeds at step 2 above.
+    // 4. Fallback: a single-column FK against a column that is itself declared with column-level
+    //    UNIQUE is represented in `unique_constraints`, so the match succeeds at step 2 above.
     false
 }
 
@@ -281,11 +276,11 @@ fn parent_has_matching_key(db: &Database, parent: &TableSchema, parent_indices: 
 /// or any non-partial, non-expression UNIQUE INDEX.
 ///
 /// Used to decide whether an UPDATE needs to run the (relatively expensive)
-/// child-reference scan ([`crate::update::foreign_keys::ForeignKeyValidator::check_no_child_references`]).
-/// Historically that scan only fired when the update touched the table's
-/// PRIMARY KEY, silently skipping cascade/RESTRICT/NO ACTION enforcement for
-/// any FK whose parent key is a UNIQUE constraint/index instead (e_fkey-18.*,
-/// fkey2-genfkey.2/3 — `t3` references `t1(b, c)` where `t1`'s actual PK is
+/// child-reference scan
+/// ([`crate::update::foreign_keys::ForeignKeyValidator::check_no_child_references`]). Historically
+/// that scan only fired when the update touched the table's PRIMARY KEY, silently skipping
+/// cascade/RESTRICT/NO ACTION enforcement for any FK whose parent key is a UNIQUE constraint/index
+/// instead (e_fkey-18.*, fkey2-genfkey.2/3 — `t3` references `t1(b, c)` where `t1`'s actual PK is
 /// `a`). This helper is intentionally permissive (any candidate key, not
 /// "the exact key some FK targets") — the per-FK old/new-value comparison
 /// inside `check_no_child_references` does the precise work; this is only a
@@ -461,13 +456,11 @@ pub(crate) enum FkRowCheck {
 ///
 /// # Preconditions
 ///
-/// * `fk_values` must be non-empty and contain no NULLs — the caller is
-///   responsible for the NULL-skip. (NULL FK values pass FK enforcement
-///   per SQL / SQLite.)
-/// * The PRAGMA `foreign_keys` gate, schema-mismatch check, and parent-table
-///   existence must already be verified by the caller. This helper does
-///   **not** call [`detect_fk_mismatch`] and does **not** look up the
-///   parent table — the caller passes those results in.
+/// * `fk_values` must be non-empty and contain no NULLs — the caller is responsible for the
+///   NULL-skip. (NULL FK values pass FK enforcement per SQL / SQLite.)
+/// * The PRAGMA `foreign_keys` gate, schema-mismatch check, and parent-table existence must already
+///   be verified by the caller. This helper does **not** call [`detect_fk_mismatch`] and does
+///   **not** look up the parent table — the caller passes those results in.
 ///
 /// # Self-referential multi-row INSERT (fkey1-5.1)
 ///
@@ -500,12 +493,10 @@ pub(crate) fn check_fk_row_existence(
     // Parent table is required for the existence scan. Caller has already
     // confirmed schema mismatch is OK (and a mismatch error path would
     // have returned before reaching this helper).
-    let parent_table = db
-        .get_table(&fk.parent_table)
-        .ok_or_else(|| {
-            crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
-                .with_main_schema_qualifier()
-        })?;
+    let parent_table = db.get_table(&fk.parent_table).ok_or_else(|| {
+        crate::errors::ExecutorError::TableNotFound(fk.parent_table.clone())
+            .with_main_schema_qualifier()
+    })?;
 
     let parent_collations = parent_collations_for_fk(db, fk);
     let parent_indices = resolved_parent_indices_for_fk(db, fk);

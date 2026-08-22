@@ -3,15 +3,13 @@
 //!
 //! Two behaviors are pinned here independent of the TCL harness:
 //!
-//! 1. An aggregate that appears *only* in a HAVING predicate must not leak
-//!    into the result set as an extra column. The native columnar aggregation
-//!    path appended the HAVING-only aggregate to the row layout so the
-//!    predicate could be evaluated, but never stripped it from the output
+//! 1. An aggregate that appears *only* in a HAVING predicate must not leak into the result set as
+//!    an extra column. The native columnar aggregation path appended the HAVING-only aggregate to
+//!    the row layout so the predicate could be evaluated, but never stripped it from the output
 //!    projection (`e_select-4.13.1.*`).
 //!
-//! 2. An aggregate function used directly in a GROUP BY expression is a
-//!    compile-time error in SQLite with the fixed wording
-//!    "aggregate functions are not allowed in the GROUP BY clause"
+//! 2. An aggregate function used directly in a GROUP BY expression is a compile-time error in
+//!    SQLite with the fixed wording "aggregate functions are not allowed in the GROUP BY clause"
 //!    (`e_select-4.12.*`), not the generic "misuse of aggregate" message.
 
 use vibesql_ast::Statement;

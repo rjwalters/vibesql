@@ -196,10 +196,9 @@ fn on_recurses_to_completion() {
 /// Toggling the pragma mid-session takes effect. Each phase uses a disjoint
 /// value band so the same self-recursive countdown trigger never hits a PRIMARY
 /// KEY collision, isolating the on/off behavior:
-///   - ON: inserting 5 recurses down its band (5,4,3,2,1 — stops at the band
-///     floor) producing 5 rows.
-///   - OFF: inserting 25 fires once (no re-fire), adding 25 and its single
-///     decrement 24 — 2 rows.
+///   - ON: inserting 5 recurses down its band (5,4,3,2,1 — stops at the band floor) producing 5
+///     rows.
+///   - OFF: inserting 25 fires once (no re-fire), adding 25 and its single decrement 24 — 2 rows.
 ///   - ON: inserting 45 recurses again down its band (45..=41) — 5 rows.
 ///
 /// The trigger is guarded `new.a > floor(a)` per band via `new.a % 10 != 1`

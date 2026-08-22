@@ -56,8 +56,10 @@ use std::{env, hint::black_box, time::Instant};
 
 use harness::{print_group_header, BenchConfig, BenchResult, Harness};
 use vibesql_catalog::{ColumnSchema, TableSchema};
-use vibesql_executor::select::morsel::{morsel_parallel_filter, MorselConfig};
-use vibesql_executor::SelectExecutor;
+use vibesql_executor::{
+    select::morsel::{morsel_parallel_filter, MorselConfig},
+    SelectExecutor,
+};
 use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
@@ -230,7 +232,7 @@ fn bench_filter_operation(harness: &Harness) {
         ("filter_50pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE FLAG = 1"), // 50%
         ("filter_10pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 10"), // 10%
         ("filter_1pct", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY = 0"), // 1%
-        ("filter_compound", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 50 AND FLAG = 1"), // ~25%
+        ("filter_compound", "SELECT COUNT(*) FROM FILTER_DATA WHERE CATEGORY < 50 AND FLAG = 1"), /* ~25% */
     ];
 
     for &row_count in &row_counts {

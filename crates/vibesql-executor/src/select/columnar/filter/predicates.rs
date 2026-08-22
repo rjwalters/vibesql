@@ -809,14 +809,12 @@ fn is_supported_derived_operator(op: &BinaryOperator) -> bool {
 /// numeric columns and constants (issue #5994).
 ///
 /// Returns `Some((expr, columns))` only when:
-/// - every leaf is either a numeric column reference (a bare `ColumnRef` in
-///   this scan's schema whose declared type is numeric — see
-///   [`column_type_is_numeric`]) or a numeric constant (folded via
-///   [`try_fold_constant`]);
+/// - every leaf is either a numeric column reference (a bare `ColumnRef` in this scan's schema
+///   whose declared type is numeric — see [`column_type_is_numeric`]) or a numeric constant (folded
+///   via [`try_fold_constant`]);
 /// - every operator is one of `+ - * /` (or unary minus);
-/// - the tree references at least one column (a fully-constant tree is not a
-///   computed-column predicate — it would fold to a literal and take the plain
-///   column-vs-constant path).
+/// - the tree references at least one column (a fully-constant tree is not a computed-column
+///   predicate — it would fold to a literal and take the plain column-vs-constant path).
 ///
 /// Any other shape — scalar functions, casts, string/date arithmetic, columns
 /// from another table, non-numeric columns — returns `None`, so the caller

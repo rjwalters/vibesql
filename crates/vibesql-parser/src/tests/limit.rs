@@ -1,6 +1,7 @@
-use super::*;
 use vibesql_ast::Expression;
 use vibesql_types::SqlValue;
+
+use super::*;
 
 // ========================================================================
 // LIMIT and OFFSET Tests

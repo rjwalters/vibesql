@@ -120,8 +120,9 @@ impl SelectExecutor<'_> {
                 let column = col_id.column_canonical();
                 if schema.get_column_index(table, column).is_none() {
                     // SQLite compatibility: Allow ROWID pseudo-column references
-                    // Only if there's no actual column with that name (real columns take precedence)
-                    // WITHOUT ROWID tables do NOT have the rowid pseudo-column (Issue #4953)
+                    // Only if there's no actual column with that name (real columns take
+                    // precedence) WITHOUT ROWID tables do NOT have the rowid
+                    // pseudo-column (Issue #4953)
                     let lower = column.to_lowercase();
                     let is_rowid_alias = lower == "rowid" || lower == "_rowid_" || lower == "oid";
                     if is_rowid_alias {

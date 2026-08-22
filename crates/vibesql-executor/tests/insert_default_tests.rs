@@ -220,7 +220,8 @@ fn test_insert_default_no_default_value_defined() {
 fn test_insert_default_values_syntax() {
     let mut db = vibesql_storage::Database::new();
 
-    // CREATE TABLE test_defaults (id INTEGER DEFAULT 42, name TEXT DEFAULT 'default_name', value REAL)
+    // CREATE TABLE test_defaults (id INTEGER DEFAULT 42, name TEXT DEFAULT 'default_name', value
+    // REAL)
     let mut id_column = vibesql_catalog::ColumnSchema::new(
         "id".to_string(),
         vibesql_types::DataType::Integer,

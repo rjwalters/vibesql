@@ -20,8 +20,15 @@
 pub mod schema;
 
 // Re-export queries module from shared crate for backwards compatibility
+// Re-export schema loaders
+#[cfg(feature = "duckdb")]
+pub use schema::load_duckdb;
+#[cfg(feature = "mysql")]
+pub use schema::load_mysql;
+#[cfg(feature = "sqlite")]
+pub use schema::load_sqlite;
+pub use schema::load_vibesql;
 pub use vibesql_bench_common::tpch::queries;
-
 // Re-export data generators and queries from shared crate
 pub use vibesql_bench_common::tpch::{
     // Helper function
@@ -40,12 +47,3 @@ pub use vibesql_bench_common::tpch::{
     TYPE_SYLLABLE2,
     TYPE_SYLLABLE3,
 };
-
-// Re-export schema loaders
-#[cfg(feature = "duckdb")]
-pub use schema::load_duckdb;
-#[cfg(feature = "mysql")]
-pub use schema::load_mysql;
-#[cfg(feature = "sqlite")]
-pub use schema::load_sqlite;
-pub use schema::load_vibesql;

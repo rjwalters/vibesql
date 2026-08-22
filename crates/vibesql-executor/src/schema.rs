@@ -158,8 +158,8 @@ pub struct CombinedSchema {
     pub column_replacement_map: HashMap<usize, usize>,
     /// Alias tables that are added for parenthesized join expressions (issue #4905).
     /// These are virtual tables that point to the same columns as existing tables.
-    /// They exist for column resolution (e.g., `j1.id` in `FROM t1 JOIN (...) AS j1 ON j1.id = t1.id`).
-    /// Stores the table identifiers of alias tables.
+    /// They exist for column resolution (e.g., `j1.id` in `FROM t1 JOIN (...) AS j1 ON j1.id =
+    /// t1.id`). Stores the table identifiers of alias tables.
     pub alias_tables: HashSet<TableIdentifier>,
     /// Tables that are shadowed by an alias table (issue #4786).
     /// When a parenthesized join has an alias, the underlying tables are shadowed

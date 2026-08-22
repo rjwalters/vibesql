@@ -11,9 +11,10 @@
 
 use std::collections::HashMap;
 
+use vibesql_catalog::TableIdentifier;
+
 use super::{cte::CteResult, join::FromResult};
 use crate::errors::ExecutorError;
-use vibesql_catalog::TableIdentifier;
 
 // Strategy modules
 pub(crate) mod bloom_context;

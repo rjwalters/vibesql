@@ -113,12 +113,7 @@ async fn test_handle_change_notifies_subscribers() {
     let _id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
     // Simulate a change to users table
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::insert("users".to_string(), 0), &db).await;
 
     // Should receive a notification (empty result since table is empty)
     let update = rx.try_recv();
@@ -143,12 +138,7 @@ async fn test_handle_change_ignores_unrelated_tables() {
     let _id = manager.subscribe("SELECT * FROM users".to_string(), tx).unwrap();
 
     // Simulate a change to orders table (not subscribed)
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::insert("orders".to_string(), 0),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::insert("orders".to_string(), 0), &db).await;
 
     // Should NOT receive a notification
     let update = rx.try_recv();
@@ -206,12 +196,7 @@ async fn test_results_changed_detection() {
     }
 
     // Trigger change notification
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::insert("users".to_string(), 0), &db).await;
 
     // Should receive update with new data (as Delta since we have previous results)
     let update = rx.recv().await.unwrap();
@@ -244,12 +229,7 @@ async fn test_no_notification_when_unchanged() {
     let _ = rx.recv().await; // Consume initial
 
     // Trigger change (but data didn't actually change since we didn't insert)
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::insert("users".to_string(), 0),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::insert("users".to_string(), 0), &db).await;
 
     // Should NOT receive notification (results haven't changed)
     let update = rx.try_recv();
@@ -308,12 +288,7 @@ async fn test_delta_update_on_insert() {
     }
 
     // Trigger change notification
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::insert("users".to_string(), 1),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::insert("users".to_string(), 1), &db).await;
 
     // Should receive a Delta update (not Full)
     let update = rx.recv().await.unwrap();
@@ -369,12 +344,7 @@ async fn test_delta_update_on_delete() {
     }
 
     // Trigger change notification
-    manager
-        .handle_change(
-            vibesql_storage::ChangeEvent::delete("users".to_string(), 1),
-            &db,
-        )
-        .await;
+    manager.handle_change(vibesql_storage::ChangeEvent::delete("users".to_string(), 1), &db).await;
 
     // Should receive a Delta update with delete
     let update = rx.recv().await.unwrap();
@@ -956,9 +926,7 @@ fn test_update_pk_columns_with_eligibility_not_confident() {
 /// Insert one user row into the test db.
 fn insert_user(db: &mut Database, id: i64, name: &str, active: bool) {
     let sql = format!("INSERT INTO users VALUES ({id}, '{name}', {active})");
-    if let vibesql_ast::Statement::Insert(stmt) =
-        vibesql_parser::Parser::parse_sql(&sql).unwrap()
-    {
+    if let vibesql_ast::Statement::Insert(stmt) = vibesql_parser::Parser::parse_sql(&sql).unwrap() {
         vibesql_executor::InsertExecutor::execute(db, &stmt).unwrap();
     }
 }
@@ -1055,8 +1023,12 @@ async fn test_coalesced_delivers_insert_update_delete() {
     }
     match rx.recv().await.unwrap() {
         SubscriptionUpdate::Delta { updates, .. } => {
-            assert!(updates.iter().any(|(_, new)| new.values[1]
-                == SqlValue::Varchar(arcstr::ArcStr::from("robert"))));
+            assert!(
+                updates
+                    .iter()
+                    .any(|(_, new)| new.values[1]
+                        == SqlValue::Varchar(arcstr::ArcStr::from("robert")))
+            );
         }
         SubscriptionUpdate::Partial { .. } => {} // selective-column form also acceptable
         SubscriptionUpdate::Full { rows, .. } => assert_eq!(rows.len(), 2),
@@ -1444,8 +1416,9 @@ async fn test_range_filter_prunes_outside_and_keeps_inside() {
     let (tx, mut rx) = mpsc::channel(16);
     let mut db = setup_test_db();
 
-    let id =
-        manager.subscribe("SELECT * FROM users WHERE id >= 100 ORDER BY id".to_string(), tx).unwrap();
+    let id = manager
+        .subscribe("SELECT * FROM users WHERE id >= 100 ORDER BY id".to_string(), tx)
+        .unwrap();
     manager.send_initial_results(id, &db).await.unwrap();
     let _ = rx.recv().await.unwrap();
 
@@ -1524,9 +1497,7 @@ async fn test_event_without_pk_is_never_pruned() {
     insert_user(&mut db, 5, "alice", true);
     {
         let qf = query_against(&db);
-        manager
-            .handle_changes_coalesced(&[ChangeEvent::insert("users", 0)], &qf)
-            .await;
+        manager.handle_changes_coalesced(&[ChangeEvent::insert("users", 0)], &qf).await;
     }
     match rx.recv().await.unwrap() {
         SubscriptionUpdate::Delta { inserts, .. } => {

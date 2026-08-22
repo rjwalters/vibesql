@@ -5,15 +5,13 @@
 //! SQLite semantics (date.c / vdbeapi.c `sqlite3NotPureFunc`), verified by
 //! the conformance file `date2.test`:
 //!
-//! - The rejection happens when the schema expression is EVALUATED
-//!   (INSERT/UPDATE/CREATE INDEX build), never at DDL time: `CREATE TABLE
-//!   t(a CHECK(a < julianday('now')))` succeeds.
+//! - The rejection happens when the schema expression is EVALUATED (INSERT/UPDATE/CREATE INDEX
+//!   build), never at DDL time: `CREATE TABLE t(a CHECK(a < julianday('now')))` succeeds.
 //! - The trigger can come from row data (`date(x)` with the value `'now'`).
-//! - Triggers: resolving the current time (`'now'`, zero-argument `date()`)
-//!   or applying the `'localtime'`/`'utc'` modifiers.
-//! - Error text: `non-deterministic use of <fn>() in a CHECK constraint`
-//!   / `in a generated column` / `in an index` (lowercase function name;
-//!   partial-index WHERE clauses also report "an index").
+//! - Triggers: resolving the current time (`'now'`, zero-argument `date()`) or applying the
+//!   `'localtime'`/`'utc'` modifiers.
+//! - Error text: `non-deterministic use of <fn>() in a CHECK constraint` / `in a generated column`
+//!   / `in an index` (lowercase function name; partial-index WHERE clauses also report "an index").
 //!
 //! Issue #5313.
 

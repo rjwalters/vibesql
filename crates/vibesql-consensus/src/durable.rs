@@ -46,11 +46,10 @@
 //!
 //! ## Durability contract
 //!
-//! - `save_vote` fsyncs **before** returning — a vote that is not durable
-//!   breaks election safety across restarts.
-//! - `append` fsyncs the whole batch **before** invoking openraft's
-//!   [`LogFlushed`] callback, honoring the storage-v2 contract that entries
-//!   are acknowledged only once durable.
+//! - `save_vote` fsyncs **before** returning — a vote that is not durable breaks election safety
+//!   across restarts.
+//! - `append` fsyncs the whole batch **before** invoking openraft's [`LogFlushed`] callback,
+//!   honoring the storage-v2 contract that entries are acknowledged only once durable.
 //! - `truncate` / `purge` / `save_committed` fsync before returning.
 //!
 //! ## Torn-tail tolerance vs. mid-file corruption
@@ -59,20 +58,18 @@
 //! whose CRC does not match. What happens next follows etcd's WAL repair
 //! rule: **repair (truncation) is only permitted at the tail.**
 //!
-//! - **Torn tail** — no complete, CRC-valid record exists anywhere after the
-//!   invalid frame. Appends are sequential and every batch is fsynced before
-//!   the next write begins, so only the final (possibly never-acknowledged)
-//!   batch can be in this state. The tail is physically truncated back to the
-//!   end of the last valid record and the open succeeds — same recovery rule
-//!   as `vibesql-storage::wal::reader::find_recovery_point`.
-//! - **Mid-file corruption** — at least one complete, CRC-valid record
-//!   follows the invalid frame ([`scan_for_valid_frame`]). The damage then
-//!   sits inside the fsynced prefix; truncating there would silently drop
-//!   entries already acknowledged via [`LogFlushed`] and roll back the
-//!   fsynced vote (an election-safety violation once peers exist), while
-//!   also destroying the forensic evidence. `open` instead fails loudly with
-//!   an `InvalidData` error and leaves the file byte-for-byte untouched so an
-//!   operator can intervene (post-A4, such a node can heal via snapshot).
+//! - **Torn tail** — no complete, CRC-valid record exists anywhere after the invalid frame. Appends
+//!   are sequential and every batch is fsynced before the next write begins, so only the final
+//!   (possibly never-acknowledged) batch can be in this state. The tail is physically truncated
+//!   back to the end of the last valid record and the open succeeds — same recovery rule as
+//!   `vibesql-storage::wal::reader::find_recovery_point`.
+//! - **Mid-file corruption** — at least one complete, CRC-valid record follows the invalid frame
+//!   ([`scan_for_valid_frame`]). The damage then sits inside the fsynced prefix; truncating there
+//!   would silently drop entries already acknowledged via [`LogFlushed`] and roll back the fsynced
+//!   vote (an election-safety violation once peers exist), while also destroying the forensic
+//!   evidence. `open` instead fails loudly with an `InvalidData` error and leaves the file
+//!   byte-for-byte untouched so an operator can intervene (post-A4, such a node can heal via
+//!   snapshot).
 //!
 //! Boundary case: corruption confined to the *last* complete record is
 //! indistinguishable from a torn write of that record at frame granularity
@@ -89,20 +86,23 @@
 //!
 //! [`OpenraftBackend`]: crate::OpenraftBackend
 
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::ops::RangeBounds;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    fs::{File, OpenOptions},
+    io::{self, Read, Seek, SeekFrom, Write},
+    ops::RangeBounds,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard},
+};
 
-use openraft::storage::{LogFlushed, RaftLogStorage};
-use openraft::{Entry, LogId, LogState, RaftLogReader, StorageError, StorageIOError, Vote};
+use openraft::{
+    storage::{LogFlushed, RaftLogStorage},
+    Entry, LogId, LogState, RaftLogReader, StorageError, StorageIOError, Vote,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::openraft_backend::TypeConfig;
-use crate::snapshot::DurableSnapshotWatermark;
+use crate::{openraft_backend::TypeConfig, snapshot::DurableSnapshotWatermark};
 
 /// Name of the Raft log file inside the data directory.
 const RAFT_LOG_FILE_NAME: &str = "raft.log";
@@ -580,27 +580,21 @@ impl DurableLogStore {
     /// the backend's recovery repair for an interrupted install (Raft Phase
     /// A4, PR 2 of #5198 — see `DurableStorage::open`). Two rules:
     ///
-    /// 1. **Coverage** (Phase A4 safety): a purge above the last *durable*
-    ///    snapshot is **deferred** — nothing is written and the call
-    ///    succeeds as a no-op. The on-disk invariant is absolute: a durable
-    ///    purge record never exceeds a durable snapshot (recording one
-    ///    would make the covered entries unrecoverable across a crash).
-    ///    The no-op (rather than an error, as in PR 1) is required by
-    ///    openraft's snapshot-install path: the engine's `PurgeLog` command
-    ///    carries no completion condition, so on a follower it reaches this
-    ///    store *before* the state-machine worker has persisted the
-    ///    installed snapshot — erroring here would (and did, in testing)
-    ///    fatally kill the follower's Raft core mid-install. The deferred
-    ///    purge is written durably moments later by
-    ///    `install_snapshot` (once the snapshot file is fsynced, before the
-    ///    install is acknowledged), or by the recovery repair if the node
-    ///    crashes in between. The watermark only advances after the
-    ///    snapshot file is fsynced and renamed, so a purge *recorded* here
-    ///    can never outrun what would survive a crash.
-    /// 2. **Monotonicity**: a purge at or below the existing watermark is a
-    ///    no-op success (never regress `last_purged`, never rewrite for
-    ///    nothing). openraft's engine already guards this; the storage-level
-    ///    guard makes the install/repair paths idempotent too.
+    /// 1. **Coverage** (Phase A4 safety): a purge above the last *durable* snapshot is **deferred**
+    ///    — nothing is written and the call succeeds as a no-op. The on-disk invariant is absolute:
+    ///    a durable purge record never exceeds a durable snapshot (recording one would make the
+    ///    covered entries unrecoverable across a crash). The no-op (rather than an error, as in PR
+    ///    1) is required by openraft's snapshot-install path: the engine's `PurgeLog` command
+    ///    carries no completion condition, so on a follower it reaches this store *before* the
+    ///    state-machine worker has persisted the installed snapshot — erroring here would (and did,
+    ///    in testing) fatally kill the follower's Raft core mid-install. The deferred purge is
+    ///    written durably moments later by `install_snapshot` (once the snapshot file is fsynced,
+    ///    before the install is acknowledged), or by the recovery repair if the node crashes in
+    ///    between. The watermark only advances after the snapshot file is fsynced and renamed, so a
+    ///    purge *recorded* here can never outrun what would survive a crash.
+    /// 2. **Monotonicity**: a purge at or below the existing watermark is a no-op success (never
+    ///    regress `last_purged`, never rewrite for nothing). openraft's engine already guards this;
+    ///    the storage-level guard makes the install/repair paths idempotent too.
     ///
     /// The compaction itself is atomic (tmp → fsync → rename → dir-fsync),
     /// and the in-memory image is only swapped once the rewrite is durable.

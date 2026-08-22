@@ -85,11 +85,11 @@ impl Division {
         // their surface type rather than their numeric affinity. That produced
         // two bugs:
         //   1. text-integer operands like `'2245'/3` yielded float in MySQL mode
-        //      (`division_result_type` always returns Numeric there), diverging
-        //      from sqlite3's integer division (748.33 vs 748).
-        //   2. `'2245.5'/3` in SQLite mode hit the `(ApproximateNumeric, Integer)`
-        //      unreachable! panic, because coercion says float but
-        //      `division_result_type` says Integer for a Varchar operand.
+        //      (`division_result_type` always returns Numeric there), diverging from sqlite3's
+        //      integer division (748.33 vs 748).
+        //   2. `'2245.5'/3` in SQLite mode hit the `(ApproximateNumeric, Integer)` unreachable!
+        //      panic, because coercion says float but `division_result_type` says Integer for a
+        //      Varchar operand.
         //
         // Mirror how Modulo derives its result type: use the CoercedValues
         // variant directly to pick Integer vs Float in SQLite-semantics modes.

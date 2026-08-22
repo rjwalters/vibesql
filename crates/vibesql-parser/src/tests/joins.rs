@@ -570,11 +570,7 @@ fn test_parse_legacy_comma_join_using(/* issue #6192 */) {
     match stmt {
         vibesql_ast::Statement::Select(select) => match select.from.as_ref().unwrap() {
             vibesql_ast::FromClause::Join {
-                join_type,
-                condition,
-                using_columns,
-                natural,
-                ..
+                join_type, condition, using_columns, natural, ..
             } => {
                 // Comma-join with USING behaves like INNER JOIN ... USING.
                 assert_eq!(*join_type, vibesql_ast::JoinType::Inner);

@@ -6,9 +6,8 @@
 //!
 //! - `SELECT t FROM cte` to fail with "Column 't' not found"
 //! - `SELECT * FROM cte` to silently DROP all but the first column
-//! - correlated subqueries against the CTE to fail (and, in window
-//!   PARTITION BY position, to silently collapse into one partition because
-//!   the evaluation error was swallowed as NULL)
+//! - correlated subqueries against the CTE to fail (and, in window PARTITION BY position, to
+//!   silently collapse into one partition because the evaluation error was swallowed as NULL)
 //!
 //! The fix statically expands wildcard SELECT items in `derive_cte_schema`
 //! using the database catalog and prior CTE schemas.

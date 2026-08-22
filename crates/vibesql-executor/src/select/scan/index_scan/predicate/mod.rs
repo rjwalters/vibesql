@@ -52,24 +52,20 @@ pub(crate) enum IndexPredicate {
 }
 
 // Re-export composite index functions
+// Test-only re-export (function kept for backward compatibility with tests)
+#[cfg(test)]
+pub(crate) use composite::extract_composite_equality_predicates;
 pub(crate) use composite::{
     build_residual_where_clause, extract_composite_predicates_with_in,
     extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
     generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
 };
-
-// Test-only re-export (function kept for backward compatibility with tests)
-#[cfg(test)]
-pub(crate) use composite::extract_composite_equality_predicates;
-
 // Re-export expression index functions
 pub(crate) use expression_index::{
     extract_index_predicate_for_indexed_column, where_clause_fully_satisfied_by_indexed_column,
 };
-
 // Re-export main extraction function
 pub(crate) use in_list::{extract_index_predicate, where_clause_fully_satisfied_by_index};
-
 // Re-export temporal probe-bound coercion (issue #5333)
 pub(crate) use temporal_coercion::{
     coerce_equality_key, coerce_index_predicate_for_temporal_keys, EqualityKeyCoercion,

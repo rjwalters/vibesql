@@ -148,7 +148,8 @@ impl Operations {
 
         // Try with schema prefix if not already qualified
         if !table_name.contains('.') {
-            // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main tables)
+            // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main
+            // tables)
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if tables.contains_key(&temp_qualified) {
                 return Ok(tables.get_mut(&temp_qualified).unwrap());
@@ -319,11 +320,8 @@ impl Operations {
         // the bulk append, so without in-batch tracking two colliding rows
         // in one batch would both pass and both be written.
         if let Some(schema) = table_schema {
-            self.index_manager.check_unique_constraints_for_insert_batch(
-                table_name,
-                schema,
-                &rows,
-            )?;
+            self.index_manager
+                .check_unique_constraints_for_insert_batch(table_name, schema, &rows)?;
         }
 
         // Record start index for return value
@@ -1795,11 +1793,8 @@ mod spatial_schema_tests {
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .expect("create main.ix");
         // Same bare name on a temp-schema table must NOT collide with main.ix.
-        ops.create_spatial_index(
-            meta("ix", "t", "temp_42"),
-            SpatialIndex::new("g".to_string()),
-        )
-        .expect("create temp_42.ix should not collide with main.ix");
+        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
+            .expect("create temp_42.ix should not collide with main.ix");
 
         // Both keys are present: bare `ix` (main) and `temp_42.ix` (temp).
         let keys = ops.list_spatial_indexes();
@@ -1818,11 +1813,8 @@ mod spatial_schema_tests {
         let mut ops = Operations::new();
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .unwrap();
-        ops.create_spatial_index(
-            meta("ix", "t", "temp_42"),
-            SpatialIndex::new("g".to_string()),
-        )
-        .unwrap();
+        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
+            .unwrap();
 
         // Bare name resolves to the temp index (temp shadows main).
         assert_eq!(ops.get_spatial_index_metadata("ix").unwrap().schema, "temp_42");

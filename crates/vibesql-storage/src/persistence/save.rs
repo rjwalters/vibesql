@@ -215,10 +215,10 @@ impl Database {
         for index_name in self.list_indexes() {
             // Skip auto-generated indexes - these are automatically created by constraints:
             // - "pk_<table_name>" indexes are created by PRIMARY KEY constraints
-            // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE constraints
-            //   (follows SQLite naming convention for implicit indexes)
-            // - the WITHOUT ROWID PK internal index (issue #5882) is regenerated from the
-            //   CREATE TABLE DDL on reload, so it must not be dumped as a CREATE INDEX
+            // - "sqlite_autoindex_<table>_<n>" indexes are created by PRIMARY KEY/UNIQUE
+            //   constraints (follows SQLite naming convention for implicit indexes)
+            // - the WITHOUT ROWID PK internal index (issue #5882) is regenerated from the CREATE
+            //   TABLE DDL on reload, so it must not be dumped as a CREATE INDEX
             let lower_name = index_name.to_lowercase();
             if lower_name.starts_with("pk_")
                 || lower_name.starts_with("sqlite_autoindex_")
@@ -374,19 +374,15 @@ impl Database {
             // the SQL dump (issue #5940, Cluster A). Triggers in attached
             // schemas are likewise session-scoped (#6310).
             if trigger_def.is_temp()
-                || trigger_def
-                    .schema
-                    .as_deref()
-                    .is_some_and(|s| self.catalog.is_attached_schema(s))
+                || trigger_def.schema.as_deref().is_some_and(|s| self.catalog.is_attached_schema(s))
             {
                 continue;
             }
             match trigger_def.sql_definition.as_ref() {
                 Some(sql) => {
                     let sql = sql.trim_end_matches(';').trim();
-                    writeln!(writer, "{};", sql).map_err(|e| {
-                        StorageError::NotImplemented(format!("Write error: {}", e))
-                    })?;
+                    writeln!(writer, "{};", sql)
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
                 }
                 None => {
                     writeln!(
@@ -607,8 +603,7 @@ fn write_create_table_ddl<W: Write>(
     }
 
     // Close the column definitions
-    write!(writer, ")")
-        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+    write!(writer, ")").map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
     // Add WITHOUT ROWID / STRICT clauses for SQLite compatibility
     // (Issue #4803, #5837). SQLite accepts both together, comma-

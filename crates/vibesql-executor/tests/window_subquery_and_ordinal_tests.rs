@@ -2,14 +2,13 @@
 //!
 //! Covers two independent fixes:
 //!
-//! 1. IN/NOT IN subqueries whose SELECT list contains a window function must
-//!    NOT be converted to semi/anti joins (the window function is computed
-//!    over the subquery's whole result set and cannot be hoisted into a
-//!    per-row join condition). They fall back to row-by-row IN evaluation.
+//! 1. IN/NOT IN subqueries whose SELECT list contains a window function must NOT be converted to
+//!    semi/anti joins (the window function is computed over the subquery's whole result set and
+//!    cannot be hoisted into a per-row join condition). They fall back to row-by-row IN evaluation.
 //!
-//! 2. Ordinal ORDER BY terms that land inside a `SELECT *` wildcard expansion
-//!    must resolve to a table-qualified column reference so the ambiguity
-//!    check is not tripped when multiple tables expose the same column name.
+//! 2. Ordinal ORDER BY terms that land inside a `SELECT *` wildcard expansion must resolve to a
+//!    table-qualified column reference so the ambiguity check is not tripped when multiple tables
+//!    expose the same column name.
 
 use vibesql_executor::SelectExecutor;
 use vibesql_types::SqlValue;

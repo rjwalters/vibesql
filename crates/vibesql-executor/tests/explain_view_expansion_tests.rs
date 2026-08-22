@@ -356,13 +356,12 @@ fn test_outer_order_by_over_flattened_view_keeps_temp_btree() {
 //
 // Expected shapes verified against sqlite3 3.51.0 per category; divergences
 // are noted on each test:
-// - Since #5371, bodies whose GROUP BY/DISTINCT/ORDER BY key rides the i3x
-//   index render the scan on that index (`SCAN t3 USING [COVERING ]INDEX
-//   i3x`) like sqlite3. Bodies with no usable ordering key keep `SCAN t3`.
-// - `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines render like
-//   SQLite's since #5367 (suppressed here because the i3x index delivers
-//   x-order for the grouping/dedup keys below — sqlite3 suppresses too;
-//   see explain_temp_btree_annotation_tests.rs for the emitted cases).
+// - Since #5371, bodies whose GROUP BY/DISTINCT/ORDER BY key rides the i3x index render the scan on
+//   that index (`SCAN t3 USING [COVERING ]INDEX i3x`) like sqlite3. Bodies with no usable ordering
+//   key keep `SCAN t3`.
+// - `USE TEMP B-TREE FOR GROUP BY` / `FOR DISTINCT` lines render like SQLite's since #5367
+//   (suppressed here because the i3x index delivers x-order for the grouping/dedup keys below —
+//   sqlite3 suppresses too; see explain_temp_btree_annotation_tests.rs for the emitted cases).
 
 // Aggregate + GROUP BY view. sqlite3:
 //   |--CO-ROUTINE av

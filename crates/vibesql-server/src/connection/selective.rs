@@ -4,21 +4,19 @@
 //! only changed columns plus primary key columns to reduce wire traffic for
 //! subscription updates.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use bytes::BytesMut;
 use tokio::net::tcp::OwnedWriteHalf;
 use tracing::debug;
 
+use super::protocol::send_subscription_partial_data;
 use crate::{
     config::Config,
     observability::ObservabilityProvider,
     subscription::{create_partial_row_update, SubscriptionManager},
     Row,
 };
-
-use super::protocol::send_subscription_partial_data;
 
 /// Convert rows to wire format for sending over the protocol
 pub fn rows_to_wire_format(rows: &[Row]) -> Vec<Vec<Option<Vec<u8>>>> {

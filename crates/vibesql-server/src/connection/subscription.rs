@@ -3,16 +3,19 @@
 //! This module handles subscription registration, update notifications,
 //! and cross-connection subscription management.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use bytes::BytesMut;
-use tokio::net::tcp::OwnedWriteHalf;
-use tokio::sync::broadcast;
+use tokio::{net::tcp::OwnedWriteHalf, sync::broadcast};
 use tracing::debug;
 use vibesql_executor::cache::table_extractor;
 
+use super::{
+    protocol::{send_subscription_data, send_subscription_error},
+    updates::send_subscription_update,
+    TableMutationNotification,
+};
 use crate::{
     config::Config,
     observability::ObservabilityProvider,
@@ -24,10 +27,6 @@ use crate::{
     },
     Row,
 };
-
-use super::protocol::{send_subscription_data, send_subscription_error};
-use super::updates::send_subscription_update;
-use super::TableMutationNotification;
 
 /// Handle a subscription request
 ///

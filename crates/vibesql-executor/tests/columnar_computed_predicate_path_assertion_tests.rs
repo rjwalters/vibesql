@@ -5,10 +5,10 @@
 //!
 //! Per the acceptance criteria, wall-clock timing is NOT used (the machine is
 //! loaded). Instead we capture the `log` output and assert:
-//!   - the negative marker "WHERE clause contains unsupported predicates"
-//!     (row fallback) must NOT appear;
-//!   - the positive marker "Native columnar execution completed" (info) proves
-//!     the columnar path ran with the predicate applied.
+//!   - the negative marker "WHERE clause contains unsupported predicates" (row fallback) must NOT
+//!     appear;
+//!   - the positive marker "Native columnar execution completed" (info) proves the columnar path
+//!     ran with the predicate applied.
 //!
 //! Parity is checked by comparing the columnar result against the row path
 //! (`VIBESQL_DISABLE_COLUMNAR=1`) for the same query.

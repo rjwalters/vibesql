@@ -83,7 +83,9 @@ impl DeleteExecutor {
     ///     alias: None,
     ///     index_hint: None,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-    ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+    ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+    ///             "id", false,
+    ///         ))),
     ///         op: BinaryOperator::Equal,
     ///         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     ///     })),
@@ -315,7 +317,8 @@ impl DeleteExecutor {
                         && !has_expression_indexes
                         && !has_partial_indexes
                     {
-                        // Use the fast path - no triggers, no FKs, no expression indexes, single row PK delete
+                        // Use the fast path - no triggers, no FKs, no expression indexes, single
+                        // row PK delete
                         match database.delete_by_pk_fast(table_name, &pk_values) {
                             Ok(deleted) => {
                                 let count = if deleted { 1 } else { 0 };

@@ -6,15 +6,13 @@
 //! TCP proxy (the partition machinery from #5197/#5200 PR 1), and proves
 //! the B2 PR 2 read-path contract end-to-end:
 //!
-//! - **read-your-writes**: write on the leader, carry the returned dense
-//!   index as the session token — `query_at_least` on ANY node observes
-//!   the write, and a partitioned (lagging) follower blocks until the
-//!   heal lets it catch up rather than serving early;
-//! - **bounded staleness**: a fresh follower serves within the bound; a
-//!   `max_staleness = 0` read on a follower redirects to the leader; a
-//!   PARTITIONED follower refuses once its last leader-clock stamp ages
-//!   past the bound — provably stale data is never served within the
-//!   claimed bound — and resumes service after the heal.
+//! - **read-your-writes**: write on the leader, carry the returned dense index as the session token
+//!   — `query_at_least` on ANY node observes the write, and a partitioned (lagging) follower blocks
+//!   until the heal lets it catch up rather than serving early;
+//! - **bounded staleness**: a fresh follower serves within the bound; a `max_staleness = 0` read on
+//!   a follower redirects to the leader; a PARTITIONED follower refuses once its last leader-clock
+//!   stamp ages past the bound — provably stale data is never served within the claimed bound — and
+//!   resumes service after the heal.
 //!
 //! The `Proxy` here intentionally duplicates the one in
 //! `tests/tcp_cluster.rs` / `tests/leader_reads.rs`: integration-test
@@ -25,15 +23,20 @@
 //! sleeps on the critical path; every wait fails loudly instead of
 //! hanging.
 
-use std::collections::BTreeMap;
-use std::net::TcpListener as StdTcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    net::TcpListener as StdTcpListener,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
 
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
-
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task::JoinHandle,
+};
 use vibesql_consensus::{
     ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role,
 };

@@ -183,19 +183,17 @@ pub(crate) fn navigate<'a>(
 /// behavior of `json()`, `json_extract()`, and `json_type()`.
 ///
 /// Strategy (in order):
-///   1. Strict `serde_json` — the fast, exact path for canonical JSON. With
-///      `arbitrary_precision` it preserves the source number token verbatim
-///      (so `json('1.50')` round-trips to `1.50`, matching SQLite).
-///   2. A JSON5 → strict-JSON pre-processor ([`json5_to_json`]) that normalizes
-///      only the JSON5-specific surface (unquoted keys, single-quoted and
-///      multi-line strings, comments, trailing commas, and the number
-///      extensions: hex, leading/trailing decimal points, explicit `+`, and
-///      `Infinity`/`NaN`). Number tokens are rewritten to the *minimal* valid
-///      JSON form SQLite emits — e.g. `.5e3` → `0.5e3`, `4.e0` → `4.0e0`,
-///      `0xABCDEF` → `11259375`, `Infinity` → `9e999` — and then handed to
-///      `serde_json`, which (again via `arbitrary_precision`) preserves that
-///      exact token. This reproduces SQLite's number rendering, which the
-///      `json5` crate cannot because it round-trips every number through `f64`.
+///   1. Strict `serde_json` — the fast, exact path for canonical JSON. With `arbitrary_precision`
+///      it preserves the source number token verbatim (so `json('1.50')` round-trips to `1.50`,
+///      matching SQLite).
+///   2. A JSON5 → strict-JSON pre-processor ([`json5_to_json`]) that normalizes only the
+///      JSON5-specific surface (unquoted keys, single-quoted and multi-line strings, comments,
+///      trailing commas, and the number extensions: hex, leading/trailing decimal points, explicit
+///      `+`, and `Infinity`/`NaN`). Number tokens are rewritten to the *minimal* valid JSON form
+///      SQLite emits — e.g. `.5e3` → `0.5e3`, `4.e0` → `4.0e0`, `0xABCDEF` → `11259375`, `Infinity`
+///      → `9e999` — and then handed to `serde_json`, which (again via `arbitrary_precision`)
+///      preserves that exact token. This reproduces SQLite's number rendering, which the `json5`
+///      crate cannot because it round-trips every number through `f64`.
 /// The pre-processor is authoritative for the relaxed grammar: we deliberately
 /// do *not* fall back to the `json5` crate, because it accepts constructs SQLite
 /// rejects (e.g. leading-zero integers like `-01`, which must be malformed so
@@ -316,14 +314,14 @@ fn json_nesting_within_cap(s: &str) -> bool {
 /// liftable via `disable_recursion_limit()` (gated behind the `unbounded_depth`
 /// feature). Disabling it removes *all* depth checking, so we take two
 /// precautions:
-///   1. Run the non-recursive [`json_nesting_within_cap`] gate first: nesting
-///      beyond 1000 is rejected here (mirroring SQLite's `SQLITE_MAX_JSON_DEPTH`)
-///      *before* serde ever recurses, so serde sees at most 1000 levels on
-///      already-bounded input — never unbounded on untrusted input.
-///   2. Even 1000-deep recursion overflows an ordinary native stack (serde
-///      builds a map/vec per level), so we route serde's recursion through
-///      [`serde_stacker`], which grows the stack on the heap. This is the
-///      pairing serde_json's own docs recommend for `disable_recursion_limit()`.
+///   1. Run the non-recursive [`json_nesting_within_cap`] gate first: nesting beyond 1000 is
+///      rejected here (mirroring SQLite's `SQLITE_MAX_JSON_DEPTH`) *before* serde ever recurses, so
+///      serde sees at most 1000 levels on already-bounded input — never unbounded on untrusted
+///      input.
+///   2. Even 1000-deep recursion overflows an ordinary native stack (serde builds a map/vec per
+///      level), so we route serde's recursion through [`serde_stacker`], which grows the stack on
+///      the heap. This is the pairing serde_json's own docs recommend for
+///      `disable_recursion_limit()`.
 /// (issue #6052)
 fn parse_strict_json_bounded(s: &str) -> Result<serde_json::Value, ()> {
     if !json_nesting_within_cap(s) {
@@ -977,8 +975,8 @@ pub(crate) fn eval_json_arrow(
 /// count as valid (<https://sqlite.org/json1.html#jvalid>). We honor:
 ///   - `0x01`: canonical RFC-8259 JSON text
 ///   - `0x02`: JSON5 text
-///   - `0x04`/`0x08`: JSONB blob (a BLOB argument validates when it decodes as a
-///     well-formed JSONB document via [`super::jsonb::decode`])
+///   - `0x04`/`0x08`: JSONB blob (a BLOB argument validates when it decodes as a well-formed JSONB
+///     document via [`super::jsonb::decode`])
 /// Default FLAGS is `1` (canonical text only), so a JSON5 input like `{a:5}`
 /// validates as 0 unless bit `0x02` is set, and a JSONB blob validates as 0
 /// unless bit `0x04` or `0x08` is set (SQLite's documented default-flags
@@ -1485,16 +1483,14 @@ pub(crate) fn jsonb(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
 /// The flag combines two sources, both computed by the caller before dispatch
 /// (see the per-front-end `eval_json_subtype_function` helpers):
 ///
-/// 1. an *AST-derived* flag — the argument expression is itself a call to a
-///    JSON-producing function whose output is always well-formed JSON; and
-/// 2. a *runtime* flag — the evaluated value already carries the JSON subtype
-///    marker ([`sql_value_is_json_subtyped`]) **and** the argument expression is
-///    eligible to carry it (it is not a read of a declared CHAR/VARCHAR column;
-///    see `expr_runtime_json_subtype_eligible`). This lets a container `value`
-///    column from json_each/json_tree embed through an opaque column reference
-///    (json101-5.10) without an ordinary fixed-width `CHAR(n)` column whose text
-///    happens to parse as a JSON container being silently embedded unquoted
-///    (issue #6007 regression).
+/// 1. an *AST-derived* flag — the argument expression is itself a call to a JSON-producing function
+///    whose output is always well-formed JSON; and
+/// 2. a *runtime* flag — the evaluated value already carries the JSON subtype marker
+///    ([`sql_value_is_json_subtyped`]) **and** the argument expression is eligible to carry it (it
+///    is not a read of a declared CHAR/VARCHAR column; see `expr_runtime_json_subtype_eligible`).
+///    This lets a container `value` column from json_each/json_tree embed through an opaque column
+///    reference (json101-5.10) without an ordinary fixed-width `CHAR(n)` column whose text happens
+///    to parse as a JSON container being silently embedded unquoted (issue #6007 regression).
 ///
 /// Because the eligibility gate lives at the call site (where the argument
 /// expression is available), this function no longer inspects the value's
@@ -1670,15 +1666,14 @@ fn parse_json_doc_arg(value: &SqlValue) -> Result<Option<serde_json::Value>, Exe
 /// a CHAR column holding container-shaped text (issue #6007). Two guards keep
 /// the marker from mis-firing:
 ///
-/// 1. the value must be well-formed JSON of container type (array/object) —
-///    exactly the nodes json_each/json_tree tag (checked here); and
-/// 2. the *argument expression* must be eligible — it must not be a read of a
-///    column declared with a real string type (CHAR/VARCHAR). That gate lives
-///    at the call site in `expr_runtime_json_subtype_eligible`, because only
-///    there is the argument expression (and its declared schema type) known.
-///    A `CHAR(20)` (or snug `CHAR(7)`) column read is therefore *not* eligible
-///    and its container-shaped text quotes as SQLite does, while a json_tree
-///    `value` column (declared dynamic/NULL type) stays eligible.
+/// 1. the value must be well-formed JSON of container type (array/object) — exactly the nodes
+///    json_each/json_tree tag (checked here); and
+/// 2. the *argument expression* must be eligible — it must not be a read of a column declared with
+///    a real string type (CHAR/VARCHAR). That gate lives at the call site in
+///    `expr_runtime_json_subtype_eligible`, because only there is the argument expression (and its
+///    declared schema type) known. A `CHAR(20)` (or snug `CHAR(7)`) column read is therefore *not*
+///    eligible and its container-shaped text quotes as SQLite does, while a json_tree `value`
+///    column (declared dynamic/NULL type) stays eligible.
 ///
 /// This distinguishes json101-5.10 (`json_tree('[1,2,3]')`.value, a container ->
 /// `{"a":[1,2,3]}`) from json101-5.11 (a JSON string atom -> `{"a":"[1,2,3]"}`,

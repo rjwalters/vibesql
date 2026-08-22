@@ -27,8 +27,7 @@
 //! AST nodes back to valid SQL strings:
 //!
 //! ```
-//! use vibesql_ast::pretty_print::ToSql;
-//! use vibesql_ast::BinaryOperator;
+//! use vibesql_ast::{pretty_print::ToSql, BinaryOperator};
 //!
 //! let op = BinaryOperator::Plus;
 //! assert_eq!(op.to_sql(), "+");
@@ -49,7 +48,8 @@ pub mod volatility;
 /// This struct captures whether an identifier was quoted (delimited) in the
 /// original SQL, which is necessary for correct SQL:1999 case handling:
 ///
-/// - **Unquoted identifiers**: Case-insensitive (e.g., `MyTable`, `mytable`, `MYTABLE` are equivalent)
+/// - **Unquoted identifiers**: Case-insensitive (e.g., `MyTable`, `mytable`, `MYTABLE` are
+///   equivalent)
 /// - **Quoted identifiers**: Case-sensitive (e.g., `"MyTable"` is different from `"mytable"`)
 ///
 /// # Example
@@ -193,6 +193,8 @@ pub use expression::{
     WindowFunctionSpec, WindowSpec,
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};
+// SQL Identifiers with SQL:1999 case sensitivity handling
+pub use identifier::{ColumnIdentifier, FunctionIdentifier, Identifier, TableIdentifier};
 pub use introspection::{
     DescribeStmt, ExplainFormat, ExplainStmt, ShowColumnsStmt, ShowCreateTableStmt,
     ShowDatabasesStmt, ShowIndexStmt, ShowTablesStmt,
@@ -205,6 +207,3 @@ pub use select::{
     SelectStmt, SetOperation, SetOperator, WindowDefinition,
 };
 pub use statement::Statement;
-
-// SQL Identifiers with SQL:1999 case sensitivity handling
-pub use identifier::{ColumnIdentifier, FunctionIdentifier, Identifier, TableIdentifier};

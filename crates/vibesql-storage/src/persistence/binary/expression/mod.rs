@@ -28,8 +28,7 @@ use types::{
     read_trim_position, read_truth_value, write_character_unit, write_fulltext_mode,
     write_interval_unit, write_pseudo_table, write_trim_position, write_truth_value,
 };
-use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::Expression;
+use vibesql_ast::{pretty_print::ToSql, Expression};
 use window::{
     read_window_function_spec, read_window_spec, write_window_function_spec, write_window_spec,
 };
@@ -896,10 +895,8 @@ mod tests {
 
     #[test]
     fn test_raise_ignore_roundtrip() {
-        let expr = Expression::Raise {
-            action: vibesql_ast::RaiseAction::Ignore,
-            error_message: None,
-        };
+        let expr =
+            Expression::Raise { action: vibesql_ast::RaiseAction::Ignore, error_message: None };
         let mut buf = Vec::new();
         write_expression(&mut buf, &expr).unwrap();
 
@@ -919,10 +916,9 @@ mod tests {
             .unwrap_or_else(|e| panic!("parse `{sql}` failed: {e}"));
 
         let mut buf = Vec::new();
-        write_expression(&mut buf, &expr)
-            .unwrap_or_else(|e| panic!("write `{sql}` failed: {e}"));
-        let first = read_expression(&mut &buf[..])
-            .unwrap_or_else(|e| panic!("read `{sql}` failed: {e}"));
+        write_expression(&mut buf, &expr).unwrap_or_else(|e| panic!("write `{sql}` failed: {e}"));
+        let first =
+            read_expression(&mut &buf[..]).unwrap_or_else(|e| panic!("read `{sql}` failed: {e}"));
 
         // Re-serializing the loaded AST and reading it back is a fixpoint.
         let mut buf2 = Vec::new();

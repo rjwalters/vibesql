@@ -168,9 +168,9 @@ impl Parser {
 
             // Parse data type (optional for SQLite compatibility)
             // SQLite allows typeless columns with BLOB affinity
-            // Also check for generated column syntax: AS(expression) or GENERATED ALWAYS AS(expression)
-            // Record the token index at the start of the (optional) datatype so
-            // we can capture its verbatim source spelling for STRICT-table
+            // Also check for generated column syntax: AS(expression) or GENERATED ALWAYS
+            // AS(expression) Record the token index at the start of the (optional)
+            // datatype so we can capture its verbatim source spelling for STRICT-table
             // validation (`type_source`).
             let type_start = self.current_position();
             let (data_type, is_exact_integer_type, mut generated_expr, type_source) =

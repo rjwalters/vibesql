@@ -765,21 +765,18 @@ pub(crate) fn execute_index_scan(
 ///
 /// # Correctness (the dominant risk — see #5668 §2b/§3)
 ///
-/// - **Exactly-once semantics.** A row satisfying multiple branches (e.g.
-///   `c = 31031 OR d IS NULL` where both hold) must appear **exactly once**.
-///   SQLite deduplicates by **rowid**: it unions the rowid sets from each
-///   per-branch lookup, deduplicating, then fetches each surviving row once.
-///   This function accumulates rows into an **insertion-ordered** dedup set
-///   keyed by rowid (first-encounter order: branch 1's matches, then branch 2's
-///   not-already-seen, ...), matching SQLite's union emission order. Any explicit
-///   `ORDER BY` sorts downstream as today.
-/// - **`IS NULL` vs `=`.** Each branch is executed by running its original
-///   branch predicate through [`execute_index_scan`]. An `IS NULL` branch is
-///   therefore evaluated as `col IS NULL` (a NULL-key match), distinct from the
-///   `=` equality seek a `col = ?` branch performs — never conflated.
-/// - **Residual.** The non-OR AND-conjuncts (e.g. `b > 1000`) are applied as a
-///   filter **around** the deduped union, so they constrain rows regardless of
-///   which branch matched them.
+/// - **Exactly-once semantics.** A row satisfying multiple branches (e.g. `c = 31031 OR d IS NULL`
+///   where both hold) must appear **exactly once**. SQLite deduplicates by **rowid**: it unions the
+///   rowid sets from each per-branch lookup, deduplicating, then fetches each surviving row once.
+///   This function accumulates rows into an **insertion-ordered** dedup set keyed by rowid
+///   (first-encounter order: branch 1's matches, then branch 2's not-already-seen, ...), matching
+///   SQLite's union emission order. Any explicit `ORDER BY` sorts downstream as today.
+/// - **`IS NULL` vs `=`.** Each branch is executed by running its original branch predicate through
+///   [`execute_index_scan`]. An `IS NULL` branch is therefore evaluated as `col IS NULL` (a
+///   NULL-key match), distinct from the `=` equality seek a `col = ?` branch performs — never
+///   conflated.
+/// - **Residual.** The non-OR AND-conjuncts (e.g. `b > 1000`) are applied as a filter **around**
+///   the deduped union, so they constrain rows regardless of which branch matched them.
 ///
 /// # Rowid source
 ///

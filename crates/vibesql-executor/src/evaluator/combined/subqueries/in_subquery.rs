@@ -12,6 +12,8 @@
 
 use std::{cell::RefCell, collections::HashSet};
 
+use vibesql_types::TypeAffinity;
+
 use super::{
     super::super::core::{CombinedExpressionEvaluator, ExpressionEvaluator},
     schema_utils::{
@@ -20,7 +22,6 @@ use super::{
     },
 };
 use crate::errors::ExecutorError;
-use vibesql_types::TypeAffinity;
 
 /// Cached HashSet entry for IN subquery optimization
 /// Built once from subquery rows, then reused for O(1) membership checks
@@ -355,8 +356,9 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Correlated subquery - execute with outer context (can't cache, use linear search)
-        // Fix for issue #4493: Build merged schema if EITHER current level has tables OR outer level exists
-        // Without this check, deeply nested subqueries lose access to outer-level tables
+        // Fix for issue #4493: Build merged schema if EITHER current level has tables OR outer
+        // level exists Without this check, deeply nested subqueries lose access to
+        // outer-level tables
         let merged_schema = if !self.schema.table_schemas.is_empty() || self.outer_schema.is_some()
         {
             Some(build_merged_outer_schema(self.schema, self.outer_schema))
@@ -427,11 +429,11 @@ impl CombinedExpressionEvaluator<'_> {
     /// performed element-wise (lhs[i] = rhs[i] for all i).
     ///
     /// Behavior:
-    /// - The subquery must produce exactly the same number of columns as the row
-    ///   value's arity; otherwise returns SubqueryColumnCountMismatch.
-    /// - NULL semantics follow SQL three-valued logic. Any NULL on either side of
-    ///   an element comparison makes the row's match UNKNOWN. If no row matches
-    ///   exactly and any NULL was seen, the result is NULL.
+    /// - The subquery must produce exactly the same number of columns as the row value's arity;
+    ///   otherwise returns SubqueryColumnCountMismatch.
+    /// - NULL semantics follow SQL three-valued logic. Any NULL on either side of an element
+    ///   comparison makes the row's match UNKNOWN. If no row matches exactly and any NULL was seen,
+    ///   the result is NULL.
     /// - Empty subquery results: `(...) IN ()` is FALSE, `(...) NOT IN ()` is TRUE.
     fn eval_row_value_in_subquery(
         &self,
@@ -666,7 +668,8 @@ fn eval_in_with_hashset(
             return Ok(vibesql_types::SqlValue::Boolean(!negated));
         }
 
-        // Also check with eval_binary_op_static for numeric type equivalence (e.g., Integer vs Float)
+        // Also check with eval_binary_op_static for numeric type equivalence (e.g., Integer vs
+        // Float)
         if std::mem::discriminant(&coerced_expr) != std::mem::discriminant(&coerced_value) {
             let eq_result = ExpressionEvaluator::eval_binary_op_static(
                 &coerced_expr,

@@ -11,13 +11,12 @@
 //
 // Invariants asserted end-to-end:
 //
-//   1. With `keep_checkpoints = N`, repeated saves leave at most `N` checkpoint
-//      files (cleanup runs AFTER the new checkpoint is written, so the newest
-//      one is always among the survivors).
-//   2. Recovery is unaffected: after many prune cycles, the latest data is
-//      still recovered on reopen (pruning never removes the newest checkpoint).
-//   3. The `keep_checkpoints = 0` edge case is clamped to "keep at least 1" so
-//      recovery can never be left with an empty archive (fail-closed, #5807).
+//   1. With `keep_checkpoints = N`, repeated saves leave at most `N` checkpoint files (cleanup runs
+//      AFTER the new checkpoint is written, so the newest one is always among the survivors).
+//   2. Recovery is unaffected: after many prune cycles, the latest data is still recovered on
+//      reopen (pruning never removes the newest checkpoint).
+//   3. The `keep_checkpoints = 0` edge case is clamped to "keep at least 1" so recovery can never
+//      be left with an empty archive (fail-closed, #5807).
 
 use std::{fs, path::Path, process::Command};
 

@@ -3,15 +3,20 @@
 //! This module handles SQL query execution, including tracking metrics,
 //! handling mutations that affect subscriptions, and managing transaction status.
 
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 use bytes::BytesMut;
-use tokio::net::tcp::OwnedWriteHalf;
-use tokio::sync::broadcast;
+use tokio::{net::tcp::OwnedWriteHalf, sync::broadcast};
 use tracing::error;
 
+use super::{
+    protocol::{
+        send_empty_query_response, send_execution_error, send_query_result, send_ready_for_query,
+    },
+    subscription::{broadcast_mutation, notify_affected_subscriptions},
+    TableMutationNotification,
+};
 use crate::{
     config::Config,
     observability::ObservabilityProvider,
@@ -19,12 +24,6 @@ use crate::{
     session::{ExecutionResult, Session},
     subscription::SubscriptionManager,
 };
-
-use super::protocol::{
-    send_empty_query_response, send_execution_error, send_query_result, send_ready_for_query,
-};
-use super::subscription::{broadcast_mutation, notify_affected_subscriptions};
-use super::TableMutationNotification;
 
 /// Execute a SQL query
 #[allow(clippy::too_many_arguments)]

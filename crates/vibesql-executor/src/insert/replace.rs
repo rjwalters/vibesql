@@ -447,21 +447,18 @@ pub fn handle_replace_conflicts(
 /// referenced that parent's key is affected exactly as it would be by a
 /// plain `DELETE` of that row:
 ///
-/// - **NO ACTION / RESTRICT**: SQLite checks this at *statement end*, after
-///   the REPLACE re-inserts its new row: the orphan is repaired if the new
-///   row restores the same parent-key value (fkey2-13.1.3/4). Because a
-///   foreign key's parent columns are always a key (PRIMARY KEY / UNIQUE),
-///   at most one parent row can carry a given key value, so "some surviving
-///   parent still provides the key" reduces to "the re-inserted row
-///   provides the key". REPLACE's conflict-delete is always immediate
-///   (never deferred), so RESTRICT collapses to the same check as NO
-///   ACTION here.
-/// - **CASCADE / SET NULL / SET DEFAULT**: the action actually runs against
-///   the child rows (reusing `delete::integrity`'s DELETE-side handlers),
-///   exactly as a plain `DELETE FROM <parent_table> WHERE ...` would
-///   (fkey1-5.2/5.4). If that action itself orphans the row the REPLACE is
-///   about to re-insert (e.g. a self-referential CASCADE that removes the
-///   very parent key the new row needs), the statement still fails.
+/// - **NO ACTION / RESTRICT**: SQLite checks this at *statement end*, after the REPLACE re-inserts
+///   its new row: the orphan is repaired if the new row restores the same parent-key value
+///   (fkey2-13.1.3/4). Because a foreign key's parent columns are always a key (PRIMARY KEY /
+///   UNIQUE), at most one parent row can carry a given key value, so "some surviving parent still
+///   provides the key" reduces to "the re-inserted row provides the key". REPLACE's conflict-delete
+///   is always immediate (never deferred), so RESTRICT collapses to the same check as NO ACTION
+///   here.
+/// - **CASCADE / SET NULL / SET DEFAULT**: the action actually runs against the child rows (reusing
+///   `delete::integrity`'s DELETE-side handlers), exactly as a plain `DELETE FROM <parent_table>
+///   WHERE ...` would (fkey1-5.2/5.4). If that action itself orphans the row the REPLACE is about
+///   to re-insert (e.g. a self-referential CASCADE that removes the very parent key the new row
+///   needs), the statement still fails.
 ///
 /// Returns `Err(ConstraintViolation)` on any of the above.
 fn enforce_replace_fk_actions(
@@ -476,8 +473,7 @@ fn enforce_replace_fk_actions(
     // Collect (child_table, fk, fk_idx, action) pairs up front so the
     // action-performing loop below does not hold a borrow of `db.catalog`
     // while mutating tables.
-    let mut matching_fks: Vec<(String, vibesql_catalog::ForeignKeyConstraint, usize)> =
-        Vec::new();
+    let mut matching_fks: Vec<(String, vibesql_catalog::ForeignKeyConstraint, usize)> = Vec::new();
     for child_table_name in db.catalog.list_tables() {
         let child_schema = match db.catalog.get_table(&child_table_name) {
             Some(s) => s,
@@ -589,15 +585,13 @@ fn enforce_replace_fk_actions(
                         if child_fk_values.iter().any(|v| matches!(v, SqlValue::Null)) {
                             return false;
                         }
-                        child_fk_values.iter().zip(&deleted_key).enumerate().all(
-                            |(i, (cv, pv))| {
-                                crate::foreign_key_check::fk_values_equal(
-                                    cv,
-                                    pv,
-                                    parent_collations.get(i).and_then(|c| c.as_deref()),
-                                )
-                            },
-                        )
+                        child_fk_values.iter().zip(&deleted_key).enumerate().all(|(i, (cv, pv))| {
+                            crate::foreign_key_check::fk_values_equal(
+                                cv,
+                                pv,
+                                parent_collations.get(i).and_then(|c| c.as_deref()),
+                            )
+                        })
                     });
 
                     if orphaned {

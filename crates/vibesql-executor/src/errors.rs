@@ -139,9 +139,11 @@ pub enum ExecutorError {
         values: usize,
     },
     /// Set operation (UNION, INTERSECT, EXCEPT) column count mismatch (SQLite-compatible)
-    /// Format: "SELECTs to the left and right of {op} do not have the same number of result columns"
+    /// Format: "SELECTs to the left and right of {op} do not have the same number of result
+    /// columns"
     SetOperationColumnMismatch {
-        /// The set operator name: "UNION", "UNION ALL", "INTERSECT", "INTERSECT ALL", "EXCEPT", "EXCEPT ALL"
+        /// The set operator name: "UNION", "UNION ALL", "INTERSECT", "INTERSECT ALL", "EXCEPT",
+        /// "EXCEPT ALL"
         operator: String,
     },
     ColumnCountMismatch {
@@ -834,7 +836,8 @@ impl std::fmt::Display for ExecutorError {
                     // SQLite format when explicit column list: "M values for N columns"
                     write!(f, "{} values for {} columns", provided, expected)
                 } else {
-                    // SQLite format when no column list: "table T has N columns but M values were supplied"
+                    // SQLite format when no column list: "table T has N columns but M values were
+                    // supplied"
                     write!(
                         f,
                         "table {} has {} columns but {} values were supplied",
@@ -1357,7 +1360,8 @@ impl std::fmt::Display for ExecutorError {
                 column_number: _,
                 select_list_len,
             } => {
-                // SQLite-compatible error format: "1st ORDER BY term out of range - should be between 1 and N"
+                // SQLite-compatible error format: "1st ORDER BY term out of range - should be
+                // between 1 and N"
                 let ordinal = format_ordinal(*term_position);
                 if *select_list_len == 0 {
                     write!(f, "{} ORDER BY term out of range - should be between 1 and 1", ordinal)
@@ -1374,7 +1378,8 @@ impl std::fmt::Display for ExecutorError {
                 column_number: _,
                 select_list_len,
             } => {
-                // SQLite-compatible error format: "1st GROUP BY term out of range - should be between 1 and N"
+                // SQLite-compatible error format: "1st GROUP BY term out of range - should be
+                // between 1 and N"
                 let ordinal = format_ordinal(*term_position);
                 if *select_list_len == 0 {
                     write!(f, "{} GROUP BY term out of range - should be between 1 and 1", ordinal)
@@ -1387,7 +1392,8 @@ impl std::fmt::Display for ExecutorError {
                 }
             }
             ExecutorError::OrderByTermNotInResultSet { term_position } => {
-                // SQLite-compatible error format: "1st ORDER BY term does not match any column in the result set"
+                // SQLite-compatible error format: "1st ORDER BY term does not match any column in
+                // the result set"
                 let ordinal = format_ordinal(*term_position);
                 write!(f, "{} ORDER BY term does not match any column in the result set", ordinal)
             }

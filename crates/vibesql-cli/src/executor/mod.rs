@@ -689,7 +689,8 @@ impl SqlExecutor {
     pub fn execute(&mut self, sql: &str) -> anyhow::Result<QueryResult> {
         let start = Instant::now();
 
-        // Parse SQL using arena fallback for SELECT statements (preserves original case in source_text)
+        // Parse SQL using arena fallback for SELECT statements (preserves original case in
+        // source_text)
         let statement = parse_with_arena_fallback(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // The CLI executes statements directly and has no parameter-binding
@@ -719,7 +720,8 @@ impl SqlExecutor {
                         // Use column names from the executor result
                         result.columns = select_result.columns;
                         // Convert rows to string representation using SQLite-compatible format
-                        // NULL values are represented as None to distinguish from the literal string "NULL"
+                        // NULL values are represented as None to distinguish from the literal
+                        // string "NULL"
                         for row in select_result.rows {
                             let row_strs: Vec<Option<String>> = row
                                 .values
@@ -1005,7 +1007,8 @@ impl SqlExecutor {
                             // SQLite-compatible EXPLAIN QUERY PLAN format
                             let output = explain_result.to_sqlite_eqp();
                             // Use "detail" as column name (matches SQLite's actual column)
-                            // The "QUERY PLAN" header is now included in the data for TCL test compatibility
+                            // The "QUERY PLAN" header is now included in the data for TCL test
+                            // compatibility
                             result.columns = vec!["detail".to_string()];
                             // Split output into rows for better display
                             for line in output.lines() {
@@ -1236,16 +1239,14 @@ impl SqlExecutor {
             if attached.path == ":memory:" || attached.path.is_empty() {
                 continue;
             }
-            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(
-                |e| {
-                    anyhow::anyhow!(
-                        "Failed to save attached database '{}' to {}: {}",
-                        attached.name,
-                        attached.path,
-                        e
-                    )
-                },
-            )?;
+            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to save attached database '{}' to {}: {}",
+                    attached.name,
+                    attached.path,
+                    e
+                )
+            })?;
         }
         Ok(())
     }
@@ -2663,12 +2664,10 @@ impl SqlExecutor {
             return Err(anyhow::anyhow!("cannot ATTACH database within transaction"));
         }
 
-        let existing_nonempty = stmt.filename != ":memory:"
-            && !stmt.filename.is_empty()
-            && {
-                let path = std::path::Path::new(&stmt.filename);
-                path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
-            };
+        let existing_nonempty = stmt.filename != ":memory:" && !stmt.filename.is_empty() && {
+            let path = std::path::Path::new(&stmt.filename);
+            path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+        };
 
         self.db.catalog.attach_database(&stmt.schema_name, &stmt.filename).map_err(
             |e| match e {
@@ -2849,11 +2848,7 @@ impl SqlExecutor {
                     .and_then(|p| p.to_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| attached.path.clone())
             };
-            rows.push(vec![
-                Some((2 + i).to_string()),
-                Some(attached.name.clone()),
-                Some(file),
-            ]);
+            rows.push(vec![Some((2 + i).to_string()), Some(attached.name.clone()), Some(file)]);
         }
 
         let row_count = rows.len();
@@ -2953,9 +2948,10 @@ impl SqlExecutor {
 
         // Schema-qualified pragma handling. VibeSQL only carries a single schema today,
         // so:
-        //   PRAGMA <unknown>.foreign_key_check;            -> return empty (no tables in that schema)
-        //   PRAGMA <unknown>.foreign_key_check(table);     -> error "no such table: <schema>.<table>"
-        // "main" and the current schema both refer to the only available schema.
+        //   PRAGMA <unknown>.foreign_key_check;            -> return empty (no tables in that
+        // schema)   PRAGMA <unknown>.foreign_key_check(table);     -> error "no such table:
+        // <schema>.<table>" "main" and the current schema both refer to the only available
+        // schema.
         let current_schema = self.db.catalog.get_current_schema().to_string();
         if let Some(ref schema) = stmt.database {
             let is_current =
@@ -3245,40 +3241,34 @@ impl SqlExecutor {
         // quirks depend on the original declaration rather than the internal
         // affinity/rowid state:
         //
-        //   * The `type` column echoes the *declared* type text. A typeless
-        //     column (`CREATE TABLE t(a)`) reports an empty type in SQLite, but
-        //     VibeSQL folds it into BLOB affinity — so without this we'd wrongly
-        //     print "BLOB". `type_source == None` marks the typeless case.
-        //   * The `notnull` column reflects only an *explicit* NOT NULL clause.
-        //     An `INTEGER PRIMARY KEY` rowid alias is internally non-nullable
-        //     (VibeSQL sets `nullable = false`) yet SQLite reports `notnull = 0`
-        //     for it. Deriving notnull from the explicit NOT NULL constraint in
-        //     the source matches SQLite exactly.
-        //   * The `pk` column reports the 1-based position of a column within the
-        //     declared PRIMARY KEY. SQLite keys this off the *first* occurrence
-        //     of each column in the declared key list but still advances the
-        //     ordinal for repeated columns, so `PRIMARY KEY(a,b,a,c)` yields
-        //     a=1, b=2, c=4 (the duplicate `a` consumes position 3). VibeSQL's
-        //     catalog `primary_key` list is de-duplicated and loses that gap, so
-        //     we recover the raw ordinals from the re-parsed table-level PK
-        //     constraint.
+        //   * The `type` column echoes the *declared* type text. A typeless column (`CREATE TABLE
+        //     t(a)`) reports an empty type in SQLite, but VibeSQL folds it into BLOB affinity — so
+        //     without this we'd wrongly print "BLOB". `type_source == None` marks the typeless
+        //     case.
+        //   * The `notnull` column reflects only an *explicit* NOT NULL clause. An `INTEGER PRIMARY
+        //     KEY` rowid alias is internally non-nullable (VibeSQL sets `nullable = false`) yet
+        //     SQLite reports `notnull = 0` for it. Deriving notnull from the explicit NOT NULL
+        //     constraint in the source matches SQLite exactly.
+        //   * The `pk` column reports the 1-based position of a column within the declared PRIMARY
+        //     KEY. SQLite keys this off the *first* occurrence of each column in the declared key
+        //     list but still advances the ordinal for repeated columns, so `PRIMARY KEY(a,b,a,c)`
+        //     yields a=1, b=2, c=4 (the duplicate `a` consumes position 3). VibeSQL's catalog
+        //     `primary_key` list is de-duplicated and loses that gap, so we recover the raw
+        //     ordinals from the re-parsed table-level PK constraint.
         //
         // `decl_facts` is keyed by lowercase column name. Absent (no sql_source,
         // a CREATE ... AS SELECT with no explicit column list, or a re-parse
         // failure) means we fall back to the catalog-derived behavior below,
         // unchanged. `pk_source_positions` is likewise a best-effort override.
-        //   * The `type` column echoes the *declared* type text verbatim, as
-        //     written in the CREATE TABLE statement (only the surrounding
-        //     delimiters of a bracketed/quoted type name are stripped). The
-        //     catalog's affinity-only `data_type` is lossy — it renders
-        //     `VARCHAR(45, 65)` as `VARCHAR(45)` — so we prefer the re-parsed
-        //     `type_source`. `decl_type` holds the delimiter-stripped verbatim
-        //     text; `None` marks a typeless column (empty type).
-        //   * The `dflt_value` column echoes the *verbatim* DEFAULT expression
-        //     source (e.g. `X'abcdef'`, `'abcde'`, `-1`, `CURRENT_TIME`) rather
-        //     than a lossy `ToSql` re-render that uppercases blob hex and drops
-        //     operator spacing. A single balanced outer parenthesis pair is
-        //     stripped (`DEFAULT (5+3)` -> `5+3`), matching SQLite.
+        //   * The `type` column echoes the *declared* type text verbatim, as written in the CREATE
+        //     TABLE statement (only the surrounding delimiters of a bracketed/quoted type name are
+        //     stripped). The catalog's affinity-only `data_type` is lossy — it renders `VARCHAR(45,
+        //     65)` as `VARCHAR(45)` — so we prefer the re-parsed `type_source`. `decl_type` holds
+        //     the delimiter-stripped verbatim text; `None` marks a typeless column (empty type).
+        //   * The `dflt_value` column echoes the *verbatim* DEFAULT expression source (e.g.
+        //     `X'abcdef'`, `'abcde'`, `-1`, `CURRENT_TIME`) rather than a lossy `ToSql` re-render
+        //     that uppercases blob hex and drops operator spacing. A single balanced outer
+        //     parenthesis pair is stripped (`DEFAULT (5+3)` -> `5+3`), matching SQLite.
         let mut decl_facts: std::collections::HashMap<String, (bool, bool)> =
             std::collections::HashMap::new();
         let mut decl_types: std::collections::HashMap<String, Option<String>> =

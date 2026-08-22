@@ -1,19 +1,17 @@
 //! Control flow functions (IF)
 
-use crate::errors::ExecutorError;
-use crate::evaluator::operators::is_truthy;
+use crate::{errors::ExecutorError, evaluator::operators::is_truthy};
 
 /// IF(...) - MySQL-style / SQLite variadic conditional
 ///
 /// Supported forms:
-/// - `IF(condition, true_value)` — 2-argument form (SQLite `if(X,Y)`): returns
-///   `true_value` if `condition` is truthy, otherwise `NULL` (implicit ELSE).
-/// - `IF(condition, true_value, false_value)` — ternary; returns `true_value`
-///   if `condition` is truthy, otherwise `false_value`.
-/// - `IF(c1, v1, c2, v2, ..., else)` — CASE-chain form (odd argument count,
-///   `>= 3`). Evaluates each condition in order and returns the value paired
-///   with the first truthy condition; if none match, returns the trailing
-///   `else` argument.
+/// - `IF(condition, true_value)` — 2-argument form (SQLite `if(X,Y)`): returns `true_value` if
+///   `condition` is truthy, otherwise `NULL` (implicit ELSE).
+/// - `IF(condition, true_value, false_value)` — ternary; returns `true_value` if `condition` is
+///   truthy, otherwise `false_value`.
+/// - `IF(c1, v1, c2, v2, ..., else)` — CASE-chain form (odd argument count, `>= 3`). Evaluates each
+///   condition in order and returns the value paired with the first truthy condition; if none
+///   match, returns the trailing `else` argument.
 ///
 /// Conditions use SQLite truthiness rules (see
 /// `crate::evaluator::operators::is_truthy`): `NULL` and numeric zero are

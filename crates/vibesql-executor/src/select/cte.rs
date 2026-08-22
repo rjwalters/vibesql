@@ -1418,8 +1418,7 @@ fn rebuild_compound(
     for i in (0..connectors.len()).rev() {
         let (op, all) = connectors[i].clone();
         let mut term = terms[i].clone();
-        term.set_operation =
-            Some(vibesql_ast::SetOperation { op, all, right: Box::new(acc) });
+        term.set_operation = Some(vibesql_ast::SetOperation { op, all, right: Box::new(acc) });
         acc = term;
     }
     acc
@@ -1488,10 +1487,7 @@ fn split_recursive_compound(
     // a mix as a circular reference (with5.test 120/121).
     let boundary = recursive_connectors[0].clone();
     if recursive_connectors.iter().any(|c| *c != boundary) {
-        return Err(ExecutorError::SqliteCompatError(format!(
-            "circular reference: {}",
-            cte.name
-        )));
+        return Err(ExecutorError::SqliteCompatError(format!("circular reference: {}", cte.name)));
     }
     // UNION (all == false) deduplicates; UNION ALL (all == true) keeps rows.
     let dedup_rows = !boundary.1;
@@ -1562,8 +1558,7 @@ where
     // (with5.test 113), `VALUES(..) UNION ALL VALUES(..)` (114/131) — and there
     // may be more than one recursive term. `split_recursive_compound` performs
     // the seed/recursive partition and validates the recursive connectors.
-    let RecursiveSplit { base_query, recursive_query, dedup_rows } =
-        split_recursive_compound(cte)?;
+    let RecursiveSplit { base_query, recursive_query, dedup_rows } = split_recursive_compound(cte)?;
     // The recursive term(s) drive per-iteration expansion; execute as written
     // (they carry no compound-level ORDER BY/LIMIT/OFFSET).
     let recursive_query = &recursive_query;
@@ -1599,14 +1594,11 @@ where
     // SQLite requires a recursive term to reference the CTE exactly once, and
     // only as a base table in its FROM clause. Two shapes are rejected before
     // any rows are produced (with1.test 7.4/7.5):
-    //   - the sole reference is buried in a subquery (no direct FROM ref)
-    //     -> "circular reference: <name>" (7.4:
-    //     `... FROM tree WHERE p IN (SELECT id FROM t)`);
-    //   - the name appears more than once in the FROM clause
-    //     -> "multiple references to recursive table: <name>" (with2.test 1.16:
-    //     `... FROM t4, main.t4, t4 ...`);
-    //   - a single FROM ref plus a subquery ref
-    //     -> "multiple recursive references: <name>" (7.5:
+    //   - the sole reference is buried in a subquery (no direct FROM ref) -> "circular reference:
+    //     <name>" (7.4: `... FROM tree WHERE p IN (SELECT id FROM t)`);
+    //   - the name appears more than once in the FROM clause -> "multiple references to recursive
+    //     table: <name>" (with2.test 1.16: `... FROM t4, main.t4, t4 ...`);
+    //   - a single FROM ref plus a subquery ref -> "multiple recursive references: <name>" (7.5:
     //     `... FROM tree, t WHERE p=id AND p IN (SELECT id FROM t)`).
     // SQLite distinguishes these two verbatim (confirmed against sqlite3 3.51).
     // Only this leading recursive term is inspected; a compound recursive term

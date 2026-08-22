@@ -148,8 +148,9 @@ impl SubscriptionManager {
                     // 1. Subscription is selective_eligible (confident PK detection)
                     // 2. Delta has only updates (no inserts or deletes)
                     // 3. Updates exist
-                    if let SubscriptionUpdate::Delta { ref inserts, ref updates, ref deletes, .. } =
-                        delta
+                    if let SubscriptionUpdate::Delta {
+                        ref inserts, ref updates, ref deletes, ..
+                    } = delta
                     {
                         if subscription.selective_eligible
                             && inserts.is_empty()

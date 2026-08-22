@@ -4,8 +4,10 @@
 
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_number};
+use crate::{
+    errors::ExecutorError,
+    evaluator::functions::coercion::{coerce_to_integer, coerce_to_number},
+};
 
 /// ROUND(x [, precision]) - Round to nearest integer or decimal places
 /// SQL:1999 Section 6.27: Numeric value functions

@@ -12,12 +12,11 @@
 //! Two compounding defects existed before the fix (see
 //! `crates/vibesql-executor/src/select/executor/set_operations.rs`):
 //!
-//! 1. Only the leftmost arm was ever consulted for collation, so an explicit
-//!    `COLLATE` on a later arm never participated in ORDER BY resolution.
-//! 2. The per-arm extractor conflated "no defined collation" (a computed
-//!    expression like `a||''`) with "default BINARY" (a bare column
-//!    reference without an explicit schema `COLLATE`), both represented as
-//!    `None`. Without a tri-state signal, a leftmost-arm walk that correctly
+//! 1. Only the leftmost arm was ever consulted for collation, so an explicit `COLLATE` on a later
+//!    arm never participated in ORDER BY resolution.
+//! 2. The per-arm extractor conflated "no defined collation" (a computed expression like `a||''`)
+//!    with "default BINARY" (a bare column reference without an explicit schema `COLLATE`), both
+//!    represented as `None`. Without a tri-state signal, a leftmost-arm walk that correctly
 //!    distinguishes "stop here" from "fall through" cannot be implemented.
 //!
 //! Covers `docs/reference/sqlite/test/with1.test` cases 10.8.4.1/.2/.3.

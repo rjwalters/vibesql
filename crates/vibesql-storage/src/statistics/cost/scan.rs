@@ -5,8 +5,7 @@
 //! - Index scan (B-tree lookup + random access)
 //! - Skip-scan (for composite indexes)
 
-use super::estimator::CostEstimator;
-use super::types::AccessMethod;
+use super::{estimator::CostEstimator, types::AccessMethod};
 use crate::statistics::{ColumnStatistics, TableStatistics};
 
 impl CostEstimator {

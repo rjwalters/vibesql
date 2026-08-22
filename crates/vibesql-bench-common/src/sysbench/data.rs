@@ -16,8 +16,7 @@
 //! - `c`: String of 120 chars with format "###-###-...-###"
 //! - `padding`: String of 60 chars with format "###-###-...-###"
 
-use rand::prelude::*;
-use rand::RngExt;
+use rand::{prelude::*, RngExt};
 use rand_chacha::ChaCha8Rng;
 
 /// Default table size (number of rows) - matches sysbench default

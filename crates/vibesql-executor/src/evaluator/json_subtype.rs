@@ -11,42 +11,35 @@
 //! - `->` (`JsonExtract`): JSON subtype whenever the result is non-NULL.
 //! - `->>` (`JsonExtractText`): never JSON subtype.
 //! - `json()`, `json_array()`, `json_object()`, `json_quote()`, and the text
-//!   insert/replace/set/remove/patch mutation functions, plus the two
-//!   pure-construction `jsonb` builders `jsonb_array()` / `jsonb_object()`: JSON
-//!   subtype whenever the result is non-NULL. `json_quote()` always returns valid
-//!   JSON text and SQLite tags it with subtype 74 unconditionally, so — for
-//!   `subtype()` purposes — it is an unconditional JSON producer here. (It is
-//!   deliberately *not* treated as an embedding producer in `special.rs` /
-//!   `arena.rs`, which keeps json_quote's quoted result quoting when passed into
-//!   another JSON function.)
-//!   The BLOB-emitting `jsonb()` / `jsonb_insert/replace/set/remove/patch()`
-//!   functions are deliberately *excluded*: since Stage 1 they emit real
-//!   `SqlValue::Blob` output, and SQLite does not tag a JSONB BLOB result with the
-//!   JSON subtype the way it tags their text counterparts — `subtype()` on any of
-//!   them is `0` (matching sqlite3 3.51). `jsonb_array()` / `jsonb_object()` are
-//!   the sole exceptions: they take no BLOB input and SQLite keeps their subtype
-//!   at 74.
-//! - `json_extract()`: conditional — JSON subtype only when the result is a JSON
-//!   container (array/object), matching SQLite's behaviour of tagging only
-//!   container extractions.
-//! - `CAST(inner AS <text type>)`: recurses into `inner`, so
-//!   `subtype(CAST(json('[1,2]') AS TEXT))` reports the subtype of `json('[1,2]')`
-//!   (SQLite preserves the JSON subtype across a text-typed CAST).
-//! - a scalar subquery `(SELECT expr ...)` with a single projected expression:
-//!   recurses into that projected expression, so `subtype((SELECT json('[1,2]')))`
-//!   reports the subtype of `json('[1,2]')`. The recursion is best-effort — if the
-//!   projected expression cannot be evaluated against the current row (e.g. it
-//!   references a subquery-local column) the recursion yields no subtype rather
-//!   than erroring.
-//! - `if()` / `iif()` / `coalesce()` / `ifnull()` / `nullif()` / `CASE`: the
-//!   subtype of the branch actually selected at runtime (recurses; covers
-//!   json102-1620's `subtype(if(json_valid(x), x->y))`).
+//!   insert/replace/set/remove/patch mutation functions, plus the two pure-construction `jsonb`
+//!   builders `jsonb_array()` / `jsonb_object()`: JSON subtype whenever the result is non-NULL.
+//!   `json_quote()` always returns valid JSON text and SQLite tags it with subtype 74
+//!   unconditionally, so — for `subtype()` purposes — it is an unconditional JSON producer here.
+//!   (It is deliberately *not* treated as an embedding producer in `special.rs` / `arena.rs`, which
+//!   keeps json_quote's quoted result quoting when passed into another JSON function.) The
+//!   BLOB-emitting `jsonb()` / `jsonb_insert/replace/set/remove/patch()` functions are deliberately
+//!   *excluded*: since Stage 1 they emit real `SqlValue::Blob` output, and SQLite does not tag a
+//!   JSONB BLOB result with the JSON subtype the way it tags their text counterparts — `subtype()`
+//!   on any of them is `0` (matching sqlite3 3.51). `jsonb_array()` / `jsonb_object()` are the sole
+//!   exceptions: they take no BLOB input and SQLite keeps their subtype at 74.
+//! - `json_extract()`: conditional — JSON subtype only when the result is a JSON container
+//!   (array/object), matching SQLite's behaviour of tagging only container extractions.
+//! - `CAST(inner AS <text type>)`: recurses into `inner`, so `subtype(CAST(json('[1,2]') AS TEXT))`
+//!   reports the subtype of `json('[1,2]')` (SQLite preserves the JSON subtype across a text-typed
+//!   CAST).
+//! - a scalar subquery `(SELECT expr ...)` with a single projected expression: recurses into that
+//!   projected expression, so `subtype((SELECT json('[1,2]')))` reports the subtype of
+//!   `json('[1,2]')`. The recursion is best-effort — if the projected expression cannot be
+//!   evaluated against the current row (e.g. it references a subquery-local column) the recursion
+//!   yields no subtype rather than erroring.
+//! - `if()` / `iif()` / `coalesce()` / `ifnull()` / `nullif()` / `CASE`: the subtype of the branch
+//!   actually selected at runtime (recurses; covers json102-1620's `subtype(if(json_valid(x),
+//!   x->y))`).
 //! - anything else: the value's own runtime subtype marker (see
-//!   [`json_funcs::sql_value_is_json_subtyped`]) — but only when the argument
-//!   expression is *eligible* (see [`expr_runtime_json_subtype_eligible`]). This
-//!   lets a container `value` column from json_each/json_tree keep its subtype
-//!   through an opaque column reference (json101-5.10) while an ordinary
-//!   `CHAR(n)` column read never picks it up (issue #6007).
+//!   [`json_funcs::sql_value_is_json_subtyped`]) — but only when the argument expression is
+//!   *eligible* (see [`expr_runtime_json_subtype_eligible`]). This lets a container `value` column
+//!   from json_each/json_tree keep its subtype through an opaque column reference (json101-5.10)
+//!   while an ordinary `CHAR(n)` column read never picks it up (issue #6007).
 //!
 //! The three evaluator front-ends (`ExpressionEvaluator`,
 //! `CombinedExpressionEvaluator`, and the arena evaluator) all delegate here via
@@ -56,9 +49,10 @@
 use vibesql_ast::{BinaryOperator, CaseWhen, Expression, SelectItem, SelectStmt};
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::sqlite_compat::json_funcs;
-use crate::evaluator::operators::is_truthy;
+use crate::{
+    errors::ExecutorError,
+    evaluator::{functions::sqlite_compat::json_funcs, operators::is_truthy},
+};
 
 /// SQLite's JSON subtype tag value (ASCII `'J'`).
 pub(crate) const JSON_SUBTYPE_TAG: i64 = 74;

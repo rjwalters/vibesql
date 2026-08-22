@@ -6,8 +6,10 @@ use std::collections::HashMap;
 
 use bytes::{Buf, BytesMut};
 
-use super::helpers::read_cstring;
-use super::types::{ProtocolError, SelectiveUpdatesConfig};
+use super::{
+    helpers::read_cstring,
+    types::{ProtocolError, SelectiveUpdatesConfig},
+};
 
 /// Frontend message types (client -> server)
 #[derive(Debug, Clone, PartialEq)]

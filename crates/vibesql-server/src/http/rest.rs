@@ -162,7 +162,6 @@ impl HttpState {
             }
         }
     }
-
 }
 
 /// Map an execution error to an HTTP response, translating a structured
@@ -170,19 +169,18 @@ impl HttpState {
 /// / FATAL surface) onto idiomatic HTTP semantics (#5410). The mapping mirrors
 /// the wire path's SQLSTATEs:
 ///
-/// - **NotLeader** (`25006`) → **421 Misdirected Request** with the leader hint
-///   in the [`LEADER_HINT_HEADER`] response header (and the detail/hint in the
-///   body). 421 is the HTTP "you reached the wrong node, retarget" status — the
-///   HTTP-shaped equivalent of the wire redirect contract. The leader address
-///   lets a client redirect without re-probing the cluster.
-/// - **StalenessExceeded / ReadTimeout** (`57P03`) → **503 Service Unavailable**
-///   with `Retry-After: 1` — a retryable "can't serve this right now".
-/// - **FatalApply** (`58000`) → **503 Service Unavailable** — this node halted
-///   and must be restarted to resync.
+/// - **NotLeader** (`25006`) → **421 Misdirected Request** with the leader hint in the
+///   [`LEADER_HINT_HEADER`] response header (and the detail/hint in the body). 421 is the HTTP "you
+///   reached the wrong node, retarget" status — the HTTP-shaped equivalent of the wire redirect
+///   contract. The leader address lets a client redirect without re-probing the cluster.
+/// - **StalenessExceeded / ReadTimeout** (`57P03`) → **503 Service Unavailable** with `Retry-After:
+///   1` — a retryable "can't serve this right now".
+/// - **FatalApply** (`58000`) → **503 Service Unavailable** — this node halted and must be
+///   restarted to resync.
 /// - **Any other structured SqlError** → **500 Internal Server Error**.
-/// - **A plain (non-structured) executor error** — e.g. a deterministic
-///   constraint/SQL rejection, identical on every replica — → **400 Bad
-///   Request** with the SQL error message, the same status standalone uses.
+/// - **A plain (non-structured) executor error** — e.g. a deterministic constraint/SQL rejection,
+///   identical on every replica — → **400 Bad Request** with the SQL error message, the same status
+///   standalone uses.
 pub(crate) fn execution_error_response(err: &anyhow::Error) -> axum::response::Response {
     use axum::http::HeaderValue;
 
@@ -244,9 +242,8 @@ fn sql_error_message(e: &SqlError) -> String {
 /// * `registry` - Database registry for shared database access
 /// * `subscription_manager` - Subscription manager for real-time updates
 /// * `metrics` - Optional server metrics for observability
-/// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"`
-///   escape hatch (default off; see
-///   [`crate::config::ServerConfig::graphql_allow_raw_where`])
+/// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"` escape hatch
+///   (default off; see [`crate::config::ServerConfig::graphql_allow_raw_where`])
 pub fn create_http_router(
     db: Arc<Database>,
     registry: DatabaseRegistry,
@@ -951,9 +948,9 @@ async fn subscribe_stream(
 
     // Subscriptions are coherent in both modes (#5422):
     //   * Standalone: fed by the local HTTP `Database`'s change stream.
-    //   * Replicated: fed by the consensus **apply-path** change feed — every
-    //     node emits a change event as it applies a committed entry, so a
-    //     subscriber on any node (leader or follower) observes committed writes.
+    //   * Replicated: fed by the consensus **apply-path** change feed — every node emits a change
+    //     event as it applies a committed entry, so a subscriber on any node (leader or follower)
+    //     observes committed writes.
     // The initial snapshot, PK detection, and initial result below therefore
     // read from the replicated state machine (not the empty local registry DB)
     // when in replicated mode, keeping the snapshot consistent with the feed.

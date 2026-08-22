@@ -55,9 +55,10 @@ impl<'a> ConstraintValidator<'a> {
     /// Validate non-uniqueness constraints (NOT NULL, CHECK) for an updated row.
     ///
     /// This is the per-row half of constraint validation. PK and UNIQUE checks must be
-    /// deferred to a post-statement pass (see [`super::index_sync::validate_post_statement_uniqueness`])
-    /// to match SQLite's deferred UNIQUE semantics — e.g. `UPDATE p SET a = a - 1` must
-    /// succeed even when intermediate states transiently duplicate keys.
+    /// deferred to a post-statement pass (see
+    /// [`super::index_sync::validate_post_statement_uniqueness`]) to match SQLite's deferred
+    /// UNIQUE semantics — e.g. `UPDATE p SET a = a - 1` must succeed even when intermediate
+    /// states transiently duplicate keys.
     pub fn validate_row_skip_uniqueness(
         &self,
         table_name: &str,
@@ -88,7 +89,8 @@ impl<'a> ConstraintValidator<'a> {
                 }
 
                 // Build the key values from the new row for this index
-                // Skip expression indexes - they are handled separately by expression_index_maintenance
+                // Skip expression indexes - they are handled separately by
+                // expression_index_maintenance
                 let mut new_key_values = Vec::new();
                 let mut is_expression_index = false;
                 for index_col in &index_metadata.columns {
@@ -119,7 +121,8 @@ impl<'a> ConstraintValidator<'a> {
                     })?;
                     new_key_values.push(new_row.values[col_idx].clone());
                 }
-                // Skip expression indexes - their uniqueness is handled by expression index maintenance
+                // Skip expression indexes - their uniqueness is handled by expression index
+                // maintenance
                 if is_expression_index {
                     continue;
                 }
@@ -148,7 +151,8 @@ impl<'a> ConstraintValidator<'a> {
                 if let Some(index_data) = db.get_index_data(&index_name) {
                     if index_data.contains_key(&new_key_values) {
                         // SQLite format: "UNIQUE constraint failed: table.col1, table.col2"
-                        // We already filtered out expression indexes, so column_name() should be Some
+                        // We already filtered out expression indexes, so column_name() should be
+                        // Some
                         let columns_str = index_metadata
                             .columns
                             .iter()
@@ -294,7 +298,8 @@ impl<'a> ConstraintValidator<'a> {
                     if new_unique_values != original_unique_values {
                         let unique_col_names: Vec<String> =
                             self.schema.unique_constraints[constraint_idx].clone();
-                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                        // Format: "UNIQUE constraint failed: table.col1, table.col2"
+                        // (SQLite-compatible)
                         let qualified_cols: Vec<String> = unique_col_names
                             .iter()
                             .map(|col| format!("{}.{}", self.schema.name, col))
@@ -325,7 +330,8 @@ impl<'a> ConstraintValidator<'a> {
                     if new_unique_values.iter().zip(other_unique_values).all(|(a, b)| *a == *b) {
                         let unique_col_names: Vec<String> =
                             self.schema.unique_constraints[constraint_idx].clone();
-                        // Format: "UNIQUE constraint failed: table.col1, table.col2" (SQLite-compatible)
+                        // Format: "UNIQUE constraint failed: table.col1, table.col2"
+                        // (SQLite-compatible)
                         let qualified_cols: Vec<String> = unique_col_names
                             .iter()
                             .map(|col| format!("{}.{}", self.schema.name, col))

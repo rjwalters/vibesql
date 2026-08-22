@@ -32,11 +32,9 @@ pub mod window;
 mod tests;
 
 // Re-export public API
-pub use core::{CombinedExpressionEvaluator, ExpressionEvaluator};
-// Schema-attached expression context (CHECK / generated column / index)
-pub use schema_context::SchemaExprContext;
 // Re-export values_are_equal for cross-type hash join comparisons
 pub(crate) use core::values_are_equal;
+pub use core::{CombinedExpressionEvaluator, ExpressionEvaluator};
 
 pub use arena::ArenaExpressionEvaluator;
 // Re-export cache clearing function for benchmarks
@@ -45,3 +43,5 @@ pub use combined::clear_in_subquery_cache;
 pub(crate) use combined::subqueries::schema_utils::compute_select_list_column_count;
 // Re-export eval_unary_op for use in other modules
 pub(crate) use expressions::operators::eval_unary_op;
+// Schema-attached expression context (CHECK / generated column / index)
+pub use schema_context::SchemaExprContext;

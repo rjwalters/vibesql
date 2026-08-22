@@ -3,10 +3,10 @@
 //! (trigger1-15.1, issue #6176).
 //!
 //! sqlite3 3.51.0 semantics (verified against the reference binary):
-//!   - a TEXT/REAL value that is losslessly an integer is coerced
-//!     (`SET a='5'` stores 5; `SET a=7.0` stores 7);
-//!   - anything else — non-numeric TEXT, BLOB, fractional REAL, and (unlike
-//!     INSERT, where it means auto-assign) NULL — raises `datatype mismatch`.
+//!   - a TEXT/REAL value that is losslessly an integer is coerced (`SET a='5'` stores 5; `SET
+//!     a=7.0` stores 7);
+//!   - anything else — non-numeric TEXT, BLOB, fractional REAL, and (unlike INSERT, where it means
+//!     auto-assign) NULL — raises `datatype mismatch`.
 
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;

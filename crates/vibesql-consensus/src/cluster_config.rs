@@ -38,8 +38,7 @@
 //! absence of `:` in the address, so IPv6 literals must always carry an
 //! explicit port (`[::1]:5433`).
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use openraft::BasicNode;
 use serde::Deserialize;

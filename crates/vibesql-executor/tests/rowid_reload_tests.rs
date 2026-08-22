@@ -3,16 +3,14 @@
 //! path used by the CLI and the TCL harness) and across WAL crash recovery.
 //!
 //! Before the fix:
-//!   * `TableSchema::rowid_alias_column` was not rebuilt on load, so after a
-//!     reopen `WHERE rowid=N` on an INTEGER PRIMARY KEY table returned zero
-//!     rows — and `DELETE ... WHERE rowid=N` deleted the WRONG row
-//!     (intpkey-2.6).
-//!   * `Row::row_id` was not persisted (format v12), so explicit rowids were
-//!     lost and implicit rowids were renumbered whenever tombstones were
-//!     dropped at save time.
-//!   * WAL `Insert` replay dropped the rowid, and the REPLACE conflict-delete
-//!     emitted no WAL op at all — REPLACE resurrected the old conflicting row
-//!     next to the new one after a restart (check-13.x, issue #5871).
+//!   * `TableSchema::rowid_alias_column` was not rebuilt on load, so after a reopen `WHERE rowid=N`
+//!     on an INTEGER PRIMARY KEY table returned zero rows — and `DELETE ... WHERE rowid=N` deleted
+//!     the WRONG row (intpkey-2.6).
+//!   * `Row::row_id` was not persisted (format v12), so explicit rowids were lost and implicit
+//!     rowids were renumbered whenever tombstones were dropped at save time.
+//!   * WAL `Insert` replay dropped the rowid, and the REPLACE conflict-delete emitted no WAL op at
+//!     all — REPLACE resurrected the old conflicting row next to the new one after a restart
+//!     (check-13.x, issue #5871).
 
 use vibesql_ast::Statement;
 use vibesql_executor::{

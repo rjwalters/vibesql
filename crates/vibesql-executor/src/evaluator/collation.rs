@@ -4,14 +4,12 @@
 //! (https://sqlite.org/datatype3.html#collation, section 7.1):
 //!
 //! For a binary comparison `X <op> Y` the collating sequence is chosen by:
-//! 1. An explicit `COLLATE` operator anywhere inside either operand's
-//!    subtree, with precedence to the left operand.
-//! 2. Otherwise, if either operand *is a column* — optionally wrapped in
-//!    unary `+` and/or `CAST` — that column's collation is used, with
-//!    precedence to the left operand. Note that a column with no declared
-//!    collation still counts: it contributes the default BINARY and blocks
-//!    fallback to the right operand (`a = b` compares BINARY even when `b`
-//!    is NOCASE, per in4-4.1).
+//! 1. An explicit `COLLATE` operator anywhere inside either operand's subtree, with precedence to
+//!    the left operand.
+//! 2. Otherwise, if either operand *is a column* — optionally wrapped in unary `+` and/or `CAST` —
+//!    that column's collation is used, with precedence to the left operand. Note that a column with
+//!    no declared collation still counts: it contributes the default BINARY and blocks fallback to
+//!    the right operand (`a = b` compares BINARY even when `b` is NOCASE, per in4-4.1).
 //! 3. Otherwise, BINARY.
 //!
 //! Crucially, a column's *implicit* collation does **not** propagate through
@@ -92,12 +90,11 @@ pub(crate) fn operand_column_collation(
 ///
 /// SQLite propagates a view column's collation to the outer query in two ways
 /// (ticket a7debbe0ad1, issue #5864):
-///  1. An explicit `COLLATE` operator anywhere in the defining expression's
-///     subtree — including through `||`, `CAST`, and unary `+` — wins
-///     (`explicit_collation_of`).
-///  2. Otherwise a bare column reference (optionally wrapped in unary `+` or
-///     `CAST`) to an underlying column with a *declared* collation propagates
-///     that collation, resolved via the `column_collation` callback.
+///  1. An explicit `COLLATE` operator anywhere in the defining expression's subtree — including
+///     through `||`, `CAST`, and unary `+` — wins (`explicit_collation_of`).
+///  2. Otherwise a bare column reference (optionally wrapped in unary `+` or `CAST`) to an
+///     underlying column with a *declared* collation propagates that collation, resolved via the
+///     `column_collation` callback.
 ///
 /// Any other expression (bare literal, function result, a `||` of operands
 /// without an explicit `COLLATE`, ...) has no collating sequence — `None`,
@@ -124,11 +121,9 @@ pub(crate) fn view_select_list_collations(
 /// Mirrors SQLite's `sqlite3ExprCollSeq`:
 /// - An explicit `COLLATE` operator assigns its collation.
 /// - A column reference carries the column's declared (implicit) collation.
-/// - Unary `+` and `CAST` are transparent: a column wrapped in them still
-///   counts as that column.
-/// - Any other operator or function does **not** carry its operands'
-///   implicit collation; only an explicit `COLLATE` somewhere in the subtree
-///   propagates out.
+/// - Unary `+` and `CAST` are transparent: a column wrapped in them still counts as that column.
+/// - Any other operator or function does **not** carry its operands' implicit collation; only an
+///   explicit `COLLATE` somewhere in the subtree propagates out.
 /// - Everything else has no collating sequence (callers default to BINARY).
 ///
 /// `column_collation` resolves a column reference to its declared collation
@@ -173,9 +168,8 @@ pub(crate) fn resolve_expression_collation(
 /// per SQLite datatype3 §7.1:
 ///
 /// 1. explicit COLLATE in left subtree, else explicit in right subtree;
-/// 2. else, if the left operand is a column (through unary `+`/CAST), that
-///    column's collation — *including* the default BINARY, which blocks the
-///    right operand's collation;
+/// 2. else, if the left operand is a column (through unary `+`/CAST), that column's collation —
+///    *including* the default BINARY, which blocks the right operand's collation;
 /// 3. else the same for the right operand;
 /// 4. else `None` (BINARY).
 pub(crate) fn comparison_collation(

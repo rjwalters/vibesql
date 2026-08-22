@@ -26,17 +26,16 @@
 //! list (shared with the optimizer's push-down guard). Per category:
 //!
 //! - **Clock readings** (`CURRENT_TIMESTAMP`/`CURRENT_DATE`/ `CURRENT_TIME` keywords, `now()`,
-//!   `current_*()` call forms and their MySQL aliases `curdate()`/`curtime()`, the SQLite
-//!   date/time functions when they reference `'now'` — explicitly, implicitly by omitting the
-//!   time value, or via the timezone-dependent `'localtime'`/`'utc'` modifiers — the one-argument
-//!   PostgreSQL `age(x)` (which compares against the current date; the two-argument form is
-//!   pure), and `CAST(<TIME literal> AS TIMESTAMP)` (SQL:1999 stamps the current date)): frozen
-//!   **anywhere** in a write statement. SQLite already fixes `'now'` per statement, so a single
-//!   per-statement value is the correct semantics even in per-row contexts like
-//!   `SET ts = CURRENT_TIMESTAMP`. `CAST(<TIME column> AS TIMESTAMP)` is a per-row clock read
-//!   whose operand type is only known against the schema; it is rejected at apply by
-//!   [`time_cast_violation`] (see #5381 for operand shapes beyond literals and target-table
-//!   columns).
+//!   `current_*()` call forms and their MySQL aliases `curdate()`/`curtime()`, the SQLite date/time
+//!   functions when they reference `'now'` — explicitly, implicitly by omitting the time value, or
+//!   via the timezone-dependent `'localtime'`/`'utc'` modifiers — the one-argument PostgreSQL
+//!   `age(x)` (which compares against the current date; the two-argument form is pure), and
+//!   `CAST(<TIME literal> AS TIMESTAMP)` (SQL:1999 stamps the current date)): frozen **anywhere**
+//!   in a write statement. SQLite already fixes `'now'` per statement, so a single per-statement
+//!   value is the correct semantics even in per-row contexts like `SET ts = CURRENT_TIMESTAMP`.
+//!   `CAST(<TIME column> AS TIMESTAMP)` is a per-row clock read whose operand type is only known
+//!   against the schema; it is rejected at apply by [`time_cast_violation`] (see #5381 for operand
+//!   shapes beyond literals and target-table columns).
 //! - **Per-row volatile functions** (`random()`, `randomblob()`, `rand()`): frozen only where the
 //!   call site evaluates **exactly once** — expressions in `INSERT … VALUES` rows (and `DELETE`'s
 //!   `LIMIT`/`OFFSET`). In per-row contexts (`SET`, `WHERE`, `ORDER BY`) a single frozen value
@@ -44,8 +43,8 @@
 //!   propose with an explanatory error.
 //! - **Session-state functions** (`last_insert_rowid()`, `changes()`, `total_changes()`, and the
 //!   identity/server-information functions `user()`/`current_user()`/`database()`/`schema()`/
-//!   `version()`): always rejected. Their value depends on session/server state that is not part
-//!   of replicated database state (e.g. snapshots do not carry the rowid counter, so replay paths
+//!   `version()`): always rejected. Their value depends on session/server state that is not part of
+//!   replicated database state (e.g. snapshots do not carry the rowid counter, so replay paths
 //!   would disagree; node versions differ during rolling upgrades).
 //! - **Deterministic date/time usage** (`strftime('%s', col)`, `datetime(col, '+1 day')`, …): pure
 //!   functions of their arguments — left untouched.
@@ -88,16 +87,16 @@
 //!   ([`vibesql_executor::evaluate_default_expression`]), **once per firing row** — exactly the
 //!   per-row evaluation `apply_default_values` performs at execution time. (sqlite3 stamps one
 //!   statement-stable `CURRENT_TIMESTAMP` across a multi-row INSERT; VibeSQL's executor has no
-//!   per-statement 'now' cache, so per-row draws are the faithful semantics — see the #5382
-//!   review notes.) The drawn values travel in `TxnEntry::frozen_defaults`.
+//!   per-statement 'now' cache, so per-row draws are the faithful semantics — see the #5382 review
+//!   notes.) The drawn values travel in `TxnEntry::frozen_defaults`.
 //! - [`substitute_volatile_defaults`] (apply, every replica): repeat the same enumeration against
 //!   the same (replicated, hence identical) schema and splice the values in as literals — the
 //!   executor then never fires the volatile DEFAULT. A site/value count mismatch means the schema
 //!   changed between propose and apply (a propose-time race, not version skew): the mismatch is a
-//!   *deterministic* function of the entry and the replicated schema, so it rejects identically
-//!   on every replica. An entry with firing sites and **no** frozen values (produced by pre-#5381
-//!   propose code, or proposed around the freeze pass) is rejected the same way — the #5377
-//!   defense in depth is preserved.
+//!   *deterministic* function of the entry and the replicated schema, so it rejects identically on
+//!   every replica. An entry with firing sites and **no** frozen values (produced by pre-#5381
+//!   propose code, or proposed around the freeze pass) is rejected the same way — the #5377 defense
+//!   in depth is preserved.
 //!
 //! Sites that cannot be frozen are rejected at propose: `INSERT … SELECT` into a table with a
 //! volatile DEFAULT (row count and NULL-ness are not statically known), a non-literal VALUES
@@ -463,8 +462,8 @@ pub fn substitute_statement(
 ///   around it (the #5377 defense-in-depth rejection, preserved);
 /// - a site/value count mismatch — the schema changed between propose and apply (a propose-time
 ///   race, not version skew; retrying the statement re-freezes against the current schema);
-/// - sites that can never be frozen (non-literal cell for a volatile-DEFAULT column,
-///   `INSERT … SELECT`, session-state DEFAULTs).
+/// - sites that can never be frozen (non-literal cell for a volatile-DEFAULT column, `INSERT …
+///   SELECT`, session-state DEFAULTs).
 pub fn substitute_volatile_defaults(
     mut statement: Statement,
     schema: &vibesql_catalog::TableSchema,
@@ -578,18 +577,14 @@ fn transform_insert_default_sites(
                             for row in rows.iter_mut() {
                                 let Some(cell) = row.get_mut(position) else { continue };
                                 match cell {
-                                    Expression::Default
-                                    | Expression::Literal(SqlValue::Null) => {
+                                    Expression::Default | Expression::Literal(SqlValue::Null) => {
                                         reject_unfreezable_default(
                                             default_expr,
                                             &column.name,
                                             &schema.name,
                                         )?;
-                                        *cell = default_site_literal(
-                                            default_expr,
-                                            &column.name,
-                                            mode,
-                                        )?;
+                                        *cell =
+                                            default_site_literal(default_expr, &column.name, mode)?;
                                     }
                                     Expression::Literal(_) => {}
                                     _ => {
@@ -805,9 +800,9 @@ pub fn volatile_default_violation_update(
 /// the body is volatile-free, but two hazards only resolve against the
 /// (replicated, hence identical) catalog:
 ///
-/// - body DML that would **fire a non-deterministic DEFAULT** of its own target table (the
-///   classic audit-table pattern `audit(…, ts DEFAULT CURRENT_TIMESTAMP)` — the trigger fires at
-///   apply, the body INSERT fires the DEFAULT, every replica stamps its own clock);
+/// - body DML that would **fire a non-deterministic DEFAULT** of its own target table (the classic
+///   audit-table pattern `audit(…, ts DEFAULT CURRENT_TIMESTAMP)` — the trigger fires at apply, the
+///   body INSERT fires the DEFAULT, every replica stamps its own clock);
 /// - body DML containing `CAST(<TIME column> AS TIMESTAMP)` (per-row clock read).
 ///
 /// Body DML targeting a table that does not exist is rejected too: the
@@ -849,10 +844,7 @@ pub fn trigger_body_schema_violation(
 /// over-approximation that keeps the walk simple; it can only reject
 /// statements on tables whose trigger graph has rotted, where a loud
 /// deterministic error is the desired behavior.
-pub fn dml_trigger_violation(
-    db: &vibesql_storage::Database,
-    table_name: &str,
-) -> Option<String> {
+pub fn dml_trigger_violation(db: &vibesql_storage::Database, table_name: &str) -> Option<String> {
     let mut visited: HashSet<String> = HashSet::new();
     let mut pending = vec![table_name.to_ascii_lowercase()];
     while let Some(table) = pending.pop() {
@@ -1032,10 +1024,9 @@ pub fn time_cast_violation(
 /// it is identical on every replica — so we can resolve each in-scope
 /// table/alias to its schema and type column references precisely:
 ///
-/// * a `CAST(<provably-non-TIME expression> AS TIMESTAMP)` is **accepted**
-///   (no over-rejection), and
-/// * only a genuinely-TIME (or unresolvable) operand is rejected — the
-///   same deterministic rejection on every replica.
+/// * a `CAST(<provably-non-TIME expression> AS TIMESTAMP)` is **accepted** (no over-rejection), and
+/// * only a genuinely-TIME (or unresolvable) operand is rejected — the same deterministic rejection
+///   on every replica.
 ///
 /// Falls back to the conservative schema-free classifier wherever the
 /// scope cannot be resolved precisely (a derived table / VALUES / CTE
@@ -1244,28 +1235,30 @@ fn from_subquery_time_cast_violation(
     db: &vibesql_storage::Database,
 ) -> Option<String> {
     match from {
-        FromClause::Table { .. }
-        | FromClause::Values { .. }
-        | FromClause::TableFunction { .. } => None,
+        FromClause::Table { .. } | FromClause::Values { .. } | FromClause::TableFunction { .. } => {
+            None
+        }
         FromClause::Subquery { query, .. } => query_body_time_cast_violation(query, db),
-        FromClause::Join { left, right, condition, .. } => from_subquery_time_cast_violation(left, db)
-            .or_else(|| from_subquery_time_cast_violation(right, db))
-            .or_else(|| {
-                // A join condition binds against the surrounding scope; it
-                // is checked at that level by the caller via the WHERE/
-                // SELECT walk only if it surfaces there. ON conditions are
-                // their own expressions, so walk them with no scope-precise
-                // typing of correlated refs would be unsound — but they
-                // rarely carry casts; resolve them against the empty scope
-                // (conservative).
-                condition.as_ref().and_then(|cond| {
-                    scoped_expr_time_cast_violation(
-                        cond,
-                        &Scope { tables: Vec::new(), opaque: true },
-                        db,
-                    )
+        FromClause::Join { left, right, condition, .. } => {
+            from_subquery_time_cast_violation(left, db)
+                .or_else(|| from_subquery_time_cast_violation(right, db))
+                .or_else(|| {
+                    // A join condition binds against the surrounding scope; it
+                    // is checked at that level by the caller via the WHERE/
+                    // SELECT walk only if it surfaces there. ON conditions are
+                    // their own expressions, so walk them with no scope-precise
+                    // typing of correlated refs would be unsound — but they
+                    // rarely carry casts; resolve them against the empty scope
+                    // (conservative).
+                    condition.as_ref().and_then(|cond| {
+                        scoped_expr_time_cast_violation(
+                            cond,
+                            &Scope { tables: Vec::new(), opaque: true },
+                            db,
+                        )
+                    })
                 })
-            }),
+        }
     }
 }
 
@@ -1395,9 +1388,7 @@ fn cast_operand_could_be_time_scoped(operand: &Expression, scope: &Scope<'_>) ->
         Expression::Cast { data_type, .. } => matches!(data_type, DataType::Time { .. }),
         Expression::Case { when_clauses, else_result, .. } => {
             when_clauses.iter().any(|w| cast_operand_could_be_time_scoped(&w.result, scope))
-                || else_result
-                    .as_ref()
-                    .is_some_and(|e| cast_operand_could_be_time_scoped(e, scope))
+                || else_result.as_ref().is_some_and(|e| cast_operand_could_be_time_scoped(e, scope))
         }
         Expression::BinaryOp { .. }
         | Expression::UnaryOp { .. }
@@ -1527,13 +1518,11 @@ impl ExpressionVisitor for TimeCastDetector<'_> {
 /// accept a per-row clock read that would diverge across replicas — this
 /// returns `true` (reject) unless the operand is *provably non-TIME*:
 ///
-/// * a non-TIME literal — the only literal that could be TIME is
-///   `Time`, but those freeze at propose and arrive substituted, so a
-///   literal operand here is non-TIME;
+/// * a non-TIME literal — the only literal that could be TIME is `Time`, but those freeze at
+///   propose and arrive substituted, so a literal operand here is non-TIME;
 /// * a target-table column whose schema type is known and not TIME;
-/// * an expression whose result type is structurally non-TIME (string /
-///   numeric / boolean operators and the obvious non-TIME-returning
-///   value functions);
+/// * an expression whose result type is structurally non-TIME (string / numeric / boolean operators
+///   and the obvious non-TIME-returning value functions);
 /// * a nested `CAST(… AS <non-TIME>)` — the cast fixes the output type.
 ///
 /// Everything else — a column of another table (unresolvable), a `time(…)`
@@ -1541,10 +1530,7 @@ impl ExpressionVisitor for TimeCastDetector<'_> {
 /// unknown branch, or any expression shape not enumerated as safe — is
 /// treated as possibly-TIME and rejected. Over-rejection is sound (it
 /// only refuses some always-safe casts); silent acceptance is not.
-fn cast_operand_could_be_time(
-    operand: &Expression,
-    schema: &vibesql_catalog::TableSchema,
-) -> bool {
+fn cast_operand_could_be_time(operand: &Expression, schema: &vibesql_catalog::TableSchema) -> bool {
     cast_operand_could_be_time_inner(operand, schema)
 }
 
@@ -1573,9 +1559,7 @@ fn cast_operand_is_provably_time(operand: &Expression) -> bool {
             // Provably TIME only if *every* possible result is provably
             // TIME (including the implicit NULL else, which is not TIME) —
             // so an else-less CASE is never provably TIME.
-            else_result
-                .as_ref()
-                .is_some_and(|e| cast_operand_is_provably_time(e))
+            else_result.as_ref().is_some_and(|e| cast_operand_is_provably_time(e))
                 && when_clauses.iter().all(|w| cast_operand_is_provably_time(&w.result))
         }
         _ => false,
@@ -1625,9 +1609,7 @@ fn cast_operand_could_be_time_inner(
         // result (or the implicit NULL else) could be TIME.
         Expression::Case { when_clauses, else_result, .. } => {
             when_clauses.iter().any(|w| cast_operand_could_be_time_inner(&w.result, schema))
-                || else_result
-                    .as_ref()
-                    .is_some_and(|e| cast_operand_could_be_time_inner(e, schema))
+                || else_result.as_ref().is_some_and(|e| cast_operand_could_be_time_inner(e, schema))
         }
 
         // Structurally non-TIME result shapes: arithmetic / string
@@ -3076,7 +3058,8 @@ mod tests {
             "CREATE TRIGGER trg AFTER DELETE ON t \
              BEGIN DELETE FROM audit WHERE k = OLD.id; END",
         ] {
-            validate_statement(&parse(sql)).unwrap_or_else(|e| panic!("{sql} must be admitted: {e}"));
+            validate_statement(&parse(sql))
+                .unwrap_or_else(|e| panic!("{sql} must be admitted: {e}"));
         }
     }
 

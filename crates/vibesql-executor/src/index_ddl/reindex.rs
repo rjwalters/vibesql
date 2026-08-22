@@ -251,10 +251,7 @@ mod tests {
         // with no matching table/index (e_reindex-0.1: REINDEX nocase/binary).
         for name in ["nocase", "NOCASE", "binary", "rtrim", "RTRIM"] {
             let stmt = ReindexStmt { target: Some(name.to_string()) };
-            assert!(
-                ReindexExecutor::execute(&stmt, &db).is_ok(),
-                "REINDEX {name} should succeed"
-            );
+            assert!(ReindexExecutor::execute(&stmt, &db).is_ok(), "REINDEX {name} should succeed");
         }
     }
 

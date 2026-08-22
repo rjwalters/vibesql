@@ -226,7 +226,8 @@ fn parse_memory_size(s: &str) -> Option<usize> {
 ///
 /// ```
 /// use std::sync::Arc;
-/// use vibesql_executor::memory::{MemoryController, MemoryConfig};
+///
+/// use vibesql_executor::memory::{MemoryConfig, MemoryController};
 ///
 /// let controller = Arc::new(MemoryController::new(MemoryConfig::with_budget(1024 * 1024 * 1024)));
 ///

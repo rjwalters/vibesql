@@ -10,13 +10,11 @@
 //!
 //! Storage comes in both flavors:
 //!
-//! - **In-memory** ([`InMemoryLogStore`]): the harness keeps a handle to
-//!   each node's store, so a killed node's log and vote survive until
-//!   `restore` reboots a node on the same store — modeling a process that
-//!   lost its volatile state machine but kept its Raft log.
-//! - **Durable** ([`DurableLogStore`]): each node gets a tempdir; `restore`
-//!   reopens `raft.log` from disk, exercising the real recovery path from
-//!   Phase A2 inside a cluster.
+//! - **In-memory** ([`InMemoryLogStore`]): the harness keeps a handle to each node's store, so a
+//!   killed node's log and vote survive until `restore` reboots a node on the same store — modeling
+//!   a process that lost its volatile state machine but kept its Raft log.
+//! - **Durable** ([`DurableLogStore`]): each node gets a tempdir; `restore` reopens `raft.log` from
+//!   disk, exercising the real recovery path from Phase A2 inside a cluster.
 //!
 //! Deliberately out of scope here (matching the issue): snapshot-based
 //! catch-up (Phase A4, #5198 — these tests stay far below any log-purge
@@ -28,16 +26,17 @@
 //! tests provide (`tests/tcp_cluster.rs`, via per-edge proxies; Phase A3,
 //! PR 2). The TCP transport itself lives in `crate::tcp`.
 
-use std::collections::BTreeMap;
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use openraft::BasicNode;
 use tempfile::TempDir;
 
-use crate::durable::DurableLogStore;
-use crate::network::ChannelRouter;
-use crate::openraft_backend::{Bootstrap, InMemoryLogStore};
-use crate::{ConsensusBackend, ConsensusError, LogIndex, OpenraftBackend, Role};
+use crate::{
+    durable::DurableLogStore,
+    network::ChannelRouter,
+    openraft_backend::{Bootstrap, InMemoryLogStore},
+    ConsensusBackend, ConsensusError, LogIndex, OpenraftBackend, Role,
+};
 
 /// Upper bound for any single cluster-level wait (election, catch-up).
 /// Generous next to the 200–400ms election timeouts so CI machines under

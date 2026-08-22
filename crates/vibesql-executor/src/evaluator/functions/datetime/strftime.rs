@@ -39,8 +39,8 @@
 //! | `%%`      | literal `%`                              | `%`                                  |
 //!
 //! Out of scope (returns NULL like SQLite does for unknown specifiers):
-//! - Modifiers beyond what `datetime()` supports (`subsec`, real timezone
-//!   conversion for `localtime`/`utc`)
+//! - Modifiers beyond what `datetime()` supports (`subsec`, real timezone conversion for
+//!   `localtime`/`utc`)
 //!
 //! SQLite Reference: https://www.sqlite.org/lang_datefunc.html
 

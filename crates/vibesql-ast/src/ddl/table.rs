@@ -318,10 +318,7 @@ pub enum TableConstraintKind {
     },
     /// FULLTEXT index constraint
     /// Example: FULLTEXT INDEX ft_search (title, body)
-    Fulltext {
-        index_name: Option<String>,
-        columns: Vec<crate::IndexColumn>,
-    },
+    Fulltext { index_name: Option<String>, columns: Vec<crate::IndexColumn> },
 }
 
 /// DROP TABLE statement

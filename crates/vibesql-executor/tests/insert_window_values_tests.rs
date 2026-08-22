@@ -54,11 +54,7 @@ fn test_insert_values_single_window_row() {
     run_stmt(&mut db, "INSERT INTO y1 VALUES(1, 2), (3, 4), (row_number() OVER (), 5)");
 
     let rows = query(&db, "SELECT * FROM y1");
-    assert_eq!(rows, vec![
-        vec![int(1), int(2)],
-        vec![int(3), int(4)],
-        vec![int(1), int(5)],
-    ]);
+    assert_eq!(rows, vec![vec![int(1), int(2)], vec![int(3), int(4)], vec![int(1), int(5)],]);
 }
 
 /// values.test 3.2.1 — two separate window rows. Each is its own single-row
@@ -74,12 +70,15 @@ fn test_insert_values_two_window_rows_each_reset() {
     );
 
     let rows = query(&db, "SELECT * FROM y1");
-    assert_eq!(rows, vec![
-        vec![int(1), int(2)],
-        vec![int(3), int(4)],
-        vec![int(1), int(6)],
-        vec![int(1), int(7)],
-    ]);
+    assert_eq!(
+        rows,
+        vec![
+            vec![int(1), int(2)],
+            vec![int(3), int(4)],
+            vec![int(1), int(6)],
+            vec![int(1), int(7)],
+        ]
+    );
 }
 
 /// values.test 16.2 — a window row surrounded by plain rows on both sides.
@@ -94,16 +93,19 @@ fn test_insert_values_window_row_between_plain_rows() {
     );
 
     let rows = query(&db, "SELECT * FROM t1 ORDER BY a, b");
-    assert_eq!(rows, vec![
-        vec![int(1), int(2)],
-        vec![int(3), int(4)],
-        vec![int(5), int(6)],
-        vec![int(7), int(1)],
-        vec![int(9), int(10)],
-        vec![int(11), int(12)],
-        vec![int(13), int(14)],
-        vec![int(15), int(16)],
-    ]);
+    assert_eq!(
+        rows,
+        vec![
+            vec![int(1), int(2)],
+            vec![int(3), int(4)],
+            vec![int(5), int(6)],
+            vec![int(7), int(1)],
+            vec![int(9), int(10)],
+            vec![int(11), int(12)],
+            vec![int(13), int(14)],
+            vec![int(15), int(16)],
+        ]
+    );
 }
 
 /// values.test 16.4 — the leading row carries the window function.
@@ -114,12 +116,15 @@ fn test_insert_values_leading_window_row() {
     run_stmt(&mut db, "INSERT INTO t1 VALUES(1,row_number()OVER()),(2,3), (4,5), (6,7)");
 
     let rows = query(&db, "SELECT * FROM t1 ORDER BY a, b");
-    assert_eq!(rows, vec![
-        vec![int(1), int(1)],
-        vec![int(2), int(3)],
-        vec![int(4), int(5)],
-        vec![int(6), int(7)],
-    ]);
+    assert_eq!(
+        rows,
+        vec![
+            vec![int(1), int(1)],
+            vec![int(2), int(3)],
+            vec![int(4), int(5)],
+            vec![int(6), int(7)],
+        ]
+    );
 }
 
 /// A plain INSERT VALUES with no window function must be entirely unaffected by
@@ -131,9 +136,5 @@ fn test_insert_values_no_window_unchanged() {
     run_stmt(&mut db, "INSERT INTO t1 VALUES(1,2),(3,4),(5,6)");
 
     let rows = query(&db, "SELECT * FROM t1");
-    assert_eq!(rows, vec![
-        vec![int(1), int(2)],
-        vec![int(3), int(4)],
-        vec![int(5), int(6)],
-    ]);
+    assert_eq!(rows, vec![vec![int(1), int(2)], vec![int(3), int(4)], vec![int(5), int(6)],]);
 }

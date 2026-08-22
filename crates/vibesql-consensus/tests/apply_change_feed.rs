@@ -11,9 +11,7 @@
 //! without an HTTP streaming client (the SSE wiring is covered in
 //! `vibesql-server`).
 
-use std::collections::BTreeMap;
-use std::net::TcpListener as StdTcpListener;
-use std::time::Duration;
+use std::{collections::BTreeMap, net::TcpListener as StdTcpListener, time::Duration};
 
 use vibesql_consensus::{ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, RaftTuning, Role};
 use vibesql_storage::{change_events::RecvError, ChangeEventReceiver};
@@ -159,8 +157,7 @@ async fn wait_for_table_change(rx: &mut ChangeEventReceiver, table: &str) {
 async fn follower_apply_feed_observes_leader_write() {
     let cluster = Cluster::boot(3).await;
 
-    let (_, idx) =
-        cluster.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await;
+    let (_, idx) = cluster.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await;
     for id in cluster.ids() {
         cluster.wait_for_apply(id, idx).await;
     }
@@ -176,8 +173,7 @@ async fn follower_apply_feed_observes_leader_write() {
         .expect("apply-path change feed must be available on a follower");
 
     // Write on the leader; the follower applies it via replication.
-    let (write_leader, write_idx) =
-        cluster.execute("INSERT INTO users VALUES (1, 'alice')").await;
+    let (write_leader, write_idx) = cluster.execute("INSERT INTO users VALUES (1, 'alice')").await;
     assert_eq!(write_leader, leader, "leadership should not have moved");
     cluster.wait_for_apply(follower, write_idx).await;
 
@@ -203,8 +199,7 @@ async fn follower_apply_feed_observes_leader_write() {
 async fn leader_apply_feed_observes_own_write() {
     let cluster = Cluster::boot(3).await;
 
-    let (_, idx) =
-        cluster.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").await;
+    let (_, idx) = cluster.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").await;
     for id in cluster.ids() {
         cluster.wait_for_apply(id, idx).await;
     }

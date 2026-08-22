@@ -23,15 +23,13 @@ use std::collections::HashMap;
 use bytes::BytesMut;
 use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf};
 use tracing::{debug, warn};
-
+use vibesql_ast::{SelectItem, Statement};
 use vibesql_parser::Parser;
 
 use crate::{
     protocol::{BackendMessage, FieldDescription, TransactionStatus},
     session::{ExecutionResult, Session},
 };
-
-use vibesql_ast::{SelectItem, Statement};
 
 /// PostgreSQL OID for TEXT type (used as default for unspecified parameter types)
 const TEXT_OID: i32 = 25;

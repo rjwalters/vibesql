@@ -380,10 +380,8 @@ mod tests {
         let mut columnar = ColumnarTable::from_rows(&[], &column_names).unwrap();
         assert_eq!(columnar.row_count(), 0);
 
-        let row = Row::new(vec![
-            SqlValue::Integer(1),
-            SqlValue::Varchar(arcstr::ArcStr::from("Alice")),
-        ]);
+        let row =
+            Row::new(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("Alice"))]);
         columnar.append_row(&row).unwrap();
 
         assert_eq!(columnar.row_count(), 1);
@@ -512,10 +510,7 @@ mod tests {
 
     #[test]
     fn test_clear_columnar_table() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Integer(2)]),
-        ];
+        let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
         let column_names = vec!["id".to_string()];
         let mut columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
 
@@ -580,10 +575,8 @@ mod tests {
         use std::sync::Arc;
 
         // Test push_value for Int64
-        let mut col = ColumnData::Int64 {
-            values: Arc::new(vec![1, 2]),
-            nulls: Arc::new(vec![false, false]),
-        };
+        let mut col =
+            ColumnData::Int64 { values: Arc::new(vec![1, 2]), nulls: Arc::new(vec![false, false]) };
         col.push_value(&SqlValue::Integer(3)).unwrap();
         assert_eq!(col.len(), 3);
         assert_eq!(col.get(2), SqlValue::Integer(3));
@@ -593,8 +586,7 @@ mod tests {
             values: Arc::new(vec![Arc::from("hello")]),
             nulls: Arc::new(vec![false]),
         };
-        col.push_value(&SqlValue::Varchar(arcstr::ArcStr::from("world")))
-            .unwrap();
+        col.push_value(&SqlValue::Varchar(arcstr::ArcStr::from("world"))).unwrap();
         assert_eq!(col.len(), 2);
         assert_eq!(col.get(1), SqlValue::Varchar(arcstr::ArcStr::from("world")));
 
@@ -644,10 +636,7 @@ mod tests {
     #[test]
     fn test_snapshot_isolation_on_append() {
         // Create a columnar table and take a snapshot
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Integer(2)]),
-        ];
+        let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
         let column_names = vec!["id".to_string()];
         let mut columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
 
@@ -655,9 +644,7 @@ mod tests {
         let snapshot = columnar.clone();
 
         // Append to original
-        columnar
-            .append_row(&Row::new(vec![SqlValue::Integer(3)]))
-            .unwrap();
+        columnar.append_row(&Row::new(vec![SqlValue::Integer(3)])).unwrap();
 
         // Original should have 3 rows
         assert_eq!(columnar.row_count(), 3);

@@ -15,8 +15,8 @@
 //! 2. Skip auto-generated PK indexes (PK_*) to avoid duplicate index creation
 
 use std::fs;
-use tempfile::NamedTempFile;
 
+use tempfile::NamedTempFile;
 use vibesql_executor::{CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;

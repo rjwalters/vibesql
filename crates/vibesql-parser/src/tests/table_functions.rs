@@ -8,8 +8,7 @@
 use bumpalo::Bump;
 use vibesql_ast::{arena::Converter, Expression, FromClause, Statement};
 
-use crate::arena_parser::ArenaParser;
-use crate::Parser;
+use crate::{arena_parser::ArenaParser, Parser};
 
 /// Parse `sql` with the standard parser and return its FROM clause.
 fn std_from(sql: &str) -> FromClause {

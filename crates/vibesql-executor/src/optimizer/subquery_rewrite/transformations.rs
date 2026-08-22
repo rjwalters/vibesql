@@ -316,7 +316,8 @@ fn is_from_outer_tables(expr: &Expression, outer_tables: &[String], inner_table:
             match col_id.table_canonical() {
                 Some(t) => outer_tables.iter().any(|ot| ot.eq_ignore_ascii_case(t)),
                 None => {
-                    // Handle unqualified columns that use table prefix convention (e.g., o_orderkey for orders)
+                    // Handle unqualified columns that use table prefix convention (e.g., o_orderkey
+                    // for orders)
                     let column = col_id.column_canonical();
                     // Don't match if column starts with inner table's prefix
                     let inner_prefix =

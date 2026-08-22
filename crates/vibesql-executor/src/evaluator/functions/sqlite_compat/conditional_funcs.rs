@@ -11,11 +11,10 @@ use crate::errors::ExecutorError;
 /// IIF(...) - Inline if (SQLite ternary / 3.48+ variadic)
 ///
 /// Two supported forms:
-/// - `IIF(condition, true_value, false_value)` — equivalent to
-///   `CASE WHEN condition THEN true_value ELSE false_value END`.
-/// - `IIF(c1, v1, c2, v2, ..., else)` — CASE-chain form (odd argument count,
-///   `>= 3`); returns the value paired with the first truthy condition, or the
-///   trailing `else` argument if none match.
+/// - `IIF(condition, true_value, false_value)` — equivalent to `CASE WHEN condition THEN true_value
+///   ELSE false_value END`.
+/// - `IIF(c1, v1, c2, v2, ..., else)` — CASE-chain form (odd argument count, `>= 3`); returns the
+///   value paired with the first truthy condition, or the trailing `else` argument if none match.
 ///
 /// Conditions use SQLite truthiness rules
 /// (`crate::evaluator::operators::is_truthy`): `NULL` and numeric zero are

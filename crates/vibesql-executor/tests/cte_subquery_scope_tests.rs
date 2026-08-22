@@ -4,20 +4,18 @@
 //! conformance fixtures, both fixed together because they share a root cause —
 //! a nested query's CTE scope being computed without the enclosing scope:
 //!
-//! 1. A `WITH` clause declared *inside* an `IN` / `EXISTS` subquery was dropped
-//!    by the IN/EXISTS→semi/anti-join optimizer, which treated the subquery's
-//!    CTE name as a real base table and produced a bogus "no such table"
-//!    (with2.test 7.5:
-//!    `... WHERE y IN (WITH ss(x) AS (VALUES(7) UNION ALL SELECT x+7 FROM ss WHERE x<49) SELECT x FROM ss)`).
-//!    The fix bails the transform when the subquery carries its own `WITH`,
-//!    falling back to row-by-row evaluation which materializes it correctly.
+//! 1. A `WITH` clause declared *inside* an `IN` / `EXISTS` subquery was dropped by the
+//!    IN/EXISTS→semi/anti-join optimizer, which treated the subquery's CTE name as a real base
+//!    table and produced a bogus "no such table" (with2.test 7.5: `... WHERE y IN (WITH ss(x) AS
+//!    (VALUES(7) UNION ALL SELECT x+7 FROM ss WHERE x<49) SELECT x FROM ss)`). The fix bails the
+//!    transform when the subquery carries its own `WITH`, falling back to row-by-row evaluation
+//!    which materializes it correctly.
 //!
-//! 2. A subquery that declares its own `WITH` could not reference a CTE from the
-//!    enclosing query, because the inner CTE scope was seeded with an empty
-//!    outer scope (with3.test 2.1:
-//!    `WITH x1(a) AS (VALUES(100)) INSERT INTO t1(x) SELECT * FROM (WITH x2(y) AS (SELECT * FROM x1) SELECT y+a FROM x1, x2)`).
-//!    The fix threads the enclosing CTE scope into the inner WITH execution;
-//!    local names still shadow outer names.
+//! 2. A subquery that declares its own `WITH` could not reference a CTE from the enclosing query,
+//!    because the inner CTE scope was seeded with an empty outer scope (with3.test 2.1: `WITH x1(a)
+//!    AS (VALUES(100)) INSERT INTO t1(x) SELECT * FROM (WITH x2(y) AS (SELECT * FROM x1) SELECT y+a
+//!    FROM x1, x2)`). The fix threads the enclosing CTE scope into the inner WITH execution; local
+//!    names still shadow outer names.
 //!
 //! All expected values below were verified against sqlite3.
 
@@ -71,11 +69,7 @@ fn test_recursive_cte_in_in_subquery() {
     );
     assert_eq!(
         rows,
-        vec![
-            vec![SqlValue::Integer(14)],
-            vec![SqlValue::Integer(28)],
-            vec![SqlValue::Integer(42)],
-        ]
+        vec![vec![SqlValue::Integer(14)], vec![SqlValue::Integer(28)], vec![SqlValue::Integer(42)],]
     );
 }
 

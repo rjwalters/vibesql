@@ -26,16 +26,16 @@ impl SelectExecutor<'_> {
     /// like `a || ''`), while `Some(_)` means the expression *does* have a defined collation —
     /// which is a defined-ness signal, not just "an explicit COLLATE was written". Concretely:
     ///
-    /// 1. An explicit `COLLATE` clause in the SELECT expression (e.g., `a COLLATE NOCASE`)
-    ///    always yields `Some(<that collation>)`.
+    /// 1. An explicit `COLLATE` clause in the SELECT expression (e.g., `a COLLATE NOCASE`) always
+    ///    yields `Some(<that collation>)`.
     /// 2. A bare column reference **always** has a defined collating sequence — its schema
-    ///    `COLLATE` if the column was declared with one, otherwise the SQL default `BINARY` —
-    ///    so it always yields `Some(_)`, never `None`. This tri-state distinction is what lets
+    ///    `COLLATE` if the column was declared with one, otherwise the SQL default `BINARY` — so it
+    ///    always yields `Some(_)`, never `None`. This tri-state distinction is what lets
     ///    `extract_compound_collations` below implement SQLite's `multiSelectCollSeq()`
-    ///    leftmost-arm-with-a-defined-collation walk: only a `None` here allows the walk to
-    ///    fall through to a later compound arm.
-    /// 3. Anything else (function calls, concatenation, literals, arithmetic, ...) has no
-    ///    defined collation and yields `None`.
+    ///    leftmost-arm-with-a-defined-collation walk: only a `None` here allows the walk to fall
+    ///    through to a later compound arm.
+    /// 3. Anything else (function calls, concatenation, literals, arithmetic, ...) has no defined
+    ///    collation and yields `None`.
     ///
     /// The optional `database` and `from_clause` parameters enable schema-based collation lookup.
     pub(super) fn extract_collations_from_select_list_with_schema(
@@ -70,9 +70,9 @@ impl SelectExecutor<'_> {
                                     for col in &table.schema.columns {
                                         if col.name.eq_ignore_ascii_case(column_name) {
                                             return Some(
-                                                col.collation.clone().unwrap_or_else(|| {
-                                                    "BINARY".to_string()
-                                                }),
+                                                col.collation
+                                                    .clone()
+                                                    .unwrap_or_else(|| "BINARY".to_string()),
                                             );
                                         }
                                     }

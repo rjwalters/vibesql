@@ -51,6 +51,16 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
+use self::{
+    extended::{
+        handle_bind, handle_close, handle_describe, handle_execute, handle_flush, handle_parse,
+        handle_sync, ExtendedQueryState,
+    },
+    io::read_message,
+    protocol::{send_backend_key_data, send_parameter_status, send_ready_for_query},
+    query::execute_query,
+    subscription::{handle_cross_connection_notification, handle_subscribe},
+};
 use crate::{
     auth::PasswordStore,
     config::Config,
@@ -60,15 +70,6 @@ use crate::{
     session::Session,
     subscription::SubscriptionManager,
 };
-
-use self::extended::{
-    handle_bind, handle_close, handle_describe, handle_execute, handle_flush, handle_parse,
-    handle_sync, ExtendedQueryState,
-};
-use self::io::read_message;
-use self::protocol::{send_backend_key_data, send_parameter_status, send_ready_for_query};
-use self::query::execute_query;
-use self::subscription::{handle_cross_connection_notification, handle_subscribe};
 
 /// Notification sent when a mutation affects tables
 /// This is broadcast to all connections so they can notify their subscriptions

@@ -427,11 +427,10 @@ enum EmptyGroupBehavior {
     DefaultZero,
     /// The expression's empty-group value cannot be represented after the
     /// LEFT JOIN, so the transformation must be skipped. This covers:
-    /// - COUNT/TOTAL nested inside a larger expression (e.g. `COUNT(*) + 5`,
-    ///   whose empty-group value is 5 — neither NULL nor 0)
-    /// - NULL-absorbing constructs around the aggregate (e.g.
-    ///   `COALESCE(SUM(x), 0)`, `IFNULL(SUM(x), 0)`,
-    ///   `CASE WHEN SUM(x) IS NULL THEN 0 ELSE SUM(x) END`), whose
+    /// - COUNT/TOTAL nested inside a larger expression (e.g. `COUNT(*) + 5`, whose empty-group
+    ///   value is 5 — neither NULL nor 0)
+    /// - NULL-absorbing constructs around the aggregate (e.g. `COALESCE(SUM(x), 0)`,
+    ///   `IFNULL(SUM(x), 0)`, `CASE WHEN SUM(x) IS NULL THEN 0 ELSE SUM(x) END`), whose
     ///   empty-group value is non-NULL even though the aggregate is NULL
     /// - Any construct not proven strictly NULL-propagating
     Unsupported,
@@ -486,15 +485,13 @@ fn is_bare_zero_on_empty_aggregate(expr: &Expression) -> bool {
 /// to the expression root.
 ///
 /// Returns:
-/// - `Some(true)` — every construct in the expression is strictly
-///   NULL-propagating AND it contains at least one NULL-on-empty aggregate,
-///   so the whole expression is NULL whenever the group is empty
-/// - `Some(false)` — whitelisted constructs only, but no aggregate (e.g. a
-///   literal operand)
-/// - `None` — contains a construct outside the whitelist (COALESCE/IFNULL,
-///   CASE, COUNT/TOTAL, logical/comparison operators, arbitrary functions,
-///   column refs, or any unrecognized variant). NULL propagation cannot be
-///   proven, so the caller must not classify as `PropagateNull`.
+/// - `Some(true)` — every construct in the expression is strictly NULL-propagating AND it contains
+///   at least one NULL-on-empty aggregate, so the whole expression is NULL whenever the group is
+///   empty
+/// - `Some(false)` — whitelisted constructs only, but no aggregate (e.g. a literal operand)
+/// - `None` — contains a construct outside the whitelist (COALESCE/IFNULL, CASE, COUNT/TOTAL,
+///   logical/comparison operators, arbitrary functions, column refs, or any unrecognized variant).
+///   NULL propagation cannot be proven, so the caller must not classify as `PropagateNull`.
 fn strict_null_propagation(expr: &Expression) -> Option<bool> {
     match expr {
         // NULL-on-empty aggregates are NULL over an empty group regardless of
@@ -766,7 +763,8 @@ fn build_join_condition(
                 right: Box::new(Expression::ColumnRef(ColumnIdentifier::qualified(
                     subquery_alias,
                     false,
-                    col_alias, // Use the alias (__corr_0, __corr_1, etc.) not the original column name
+                    col_alias, /* Use the alias (__corr_0, __corr_1, etc.) not the original
+                                * column name */
                     false,
                 ))),
             }
@@ -778,8 +776,9 @@ fn build_join_condition(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::SelectItem;
+
+    use super::*;
 
     /// Build a Q20-style correlated scalar subquery:
     /// SELECT <select_expr> FROM lineitem WHERE l_partkey = ps_partkey

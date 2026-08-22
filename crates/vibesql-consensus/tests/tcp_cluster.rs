@@ -61,17 +61,22 @@
 //! converged history) is identical — only how long CI is allowed to take to
 //! reach it changes.
 
-use std::collections::BTreeMap;
-use std::net::TcpListener as StdTcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    net::TcpListener as StdTcpListener,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, LazyLock, Mutex,
+    },
+    time::Duration,
+};
 
 use tempfile::TempDir;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
-
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    task::JoinHandle,
+};
 use vibesql_consensus::{
     ClusterConfig, ConsensusBackend, ConsensusError, LogIndex, MvccRaftNode, OpenraftBackend,
     RaftTuning, Role,
@@ -98,8 +103,7 @@ const WAIT_TIMEOUT_CI: Duration = Duration::from_secs(30);
 /// assertions unchanged (they still require the *same* converged condition)
 /// while giving CI the headroom it needs, the ceiling is widened under CI:
 ///
-/// - `VIBESQL_TEST_WAIT_TIMEOUT_MS=<n>` — explicit override (any environment),
-///   takes precedence.
+/// - `VIBESQL_TEST_WAIT_TIMEOUT_MS=<n>` — explicit override (any environment), takes precedence.
 /// - `CI` set (GitHub Actions sets `CI=true`) — [`WAIT_TIMEOUT_CI`] (30s).
 /// - otherwise — [`WAIT_TIMEOUT_LOCAL`] (10s).
 ///
@@ -607,13 +611,12 @@ async fn restarted_node_rebinds_reconnects_and_catches_up() {
 /// the leader on the minority side:
 ///
 /// - the majority elects a new leader and keeps committing writes;
-/// - a write proposed on the partitioned old leader can never commit, and
-///   surfaces as the **typed** [`ConsensusError::NotLeader`] (with the new
-///   leader as hint) once the heal lets the old leader learn it was
-///   deposed — openraft fails the pending proposal when the new leader's
-///   log truncates the uncommitted entry;
-/// - after the heal, everyone converges on the majority history and the
-///   rejected write appears nowhere.
+/// - a write proposed on the partitioned old leader can never commit, and surfaces as the **typed**
+///   [`ConsensusError::NotLeader`] (with the new leader as hint) once the heal lets the old leader
+///   learn it was deposed — openraft fails the pending proposal when the new leader's log truncates
+///   the uncommitted entry;
+/// - after the heal, everyone converges on the majority history and the rejected write appears
+///   nowhere.
 #[tokio::test]
 async fn minority_partition_rejects_writes_while_the_majority_continues() {
     let cluster = TcpTestCluster::boot_partitionable(3).await;
@@ -751,13 +754,12 @@ fn aggressive_purge_tuning() -> RaftTuning {
 /// converged cluster:
 ///
 /// 1. 3 voters; a follower applies the first 3 entries and is killed.
-/// 2. The survivors commit `entries` total writes of `payload_bytes` each;
-///    the policy snapshots and purges the leader's log **past** everything
-///    the dead follower ever held (its log ended around raw index 5; we
-///    wait for the purge watermark to clear raw index 10).
-/// 3. The follower restores. Its gap is purged on the leader, so log
-///    replay cannot heal it — catch-up must go through openraft's chunked
-///    snapshot install over the TCP `InstallSnapshot` leg.
+/// 2. The survivors commit `entries` total writes of `payload_bytes` each; the policy snapshots and
+///    purges the leader's log **past** everything the dead follower ever held (its log ended around
+///    raw index 5; we wait for the purge watermark to clear raw index 10).
+/// 3. The follower restores. Its gap is purged on the leader, so log replay cannot heal it —
+///    catch-up must go through openraft's chunked snapshot install over the TCP `InstallSnapshot`
+///    leg.
 /// 4. The follower converges on the full history, byte-identical.
 async fn rejoin_lagging_follower_via_snapshot(
     tuning: RaftTuning,
