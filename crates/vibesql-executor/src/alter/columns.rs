@@ -248,7 +248,7 @@ pub(super) fn execute_add_column(
     // be persisted into `schema.check_constraints` below, using the same naming
     // convention CREATE TABLE's column-level CHECK uses (explicit name, else
     // the verbatim CHECK source text, else the re-rendered expression) --
-    // see `ConstraintValidator::process_constraints` in `constraint_validator.rs`.
+    // see `constraint_validator::process_constraints` in `constraint_validator.rs`.
     let added_checks: Vec<(String, Expression)> = stmt
         .column_def
         .constraints

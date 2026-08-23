@@ -6,8 +6,8 @@ use vibesql_storage::Database;
 use vibesql_types::{DataType, TypeAffinity};
 
 use crate::{
-    constraint_validator::ConstraintValidator, errors::ExecutorError,
-    privilege_checker::PrivilegeChecker, SelectExecutor,
+    constraint_validator, errors::ExecutorError, privilege_checker::PrivilegeChecker,
+    SelectExecutor,
 };
 
 /// Executor for CREATE TABLE statements
@@ -399,14 +399,14 @@ impl CreateTableExecutor {
             .collect();
 
         // Process constraints using the constraint validator
-        let constraint_result = ConstraintValidator::process_constraints(
+        let constraint_result = constraint_validator::process_constraints(
             &table_name,
             &stmt.columns,
             &stmt.table_constraints,
         )?;
 
         // Apply constraint results to columns (updates nullability)
-        ConstraintValidator::apply_to_columns(&mut columns, &constraint_result);
+        constraint_validator::apply_to_columns(&mut columns, &constraint_result);
 
         // Create TableSchema with unqualified name
         let mut table_schema = TableSchema::new(table_name.clone(), columns);
@@ -440,7 +440,7 @@ impl CreateTableExecutor {
         }
 
         // Apply constraint results to schema (sets PK, unique, and check constraints)
-        ConstraintValidator::apply_to_schema(&mut table_schema, &constraint_result);
+        constraint_validator::apply_to_schema(&mut table_schema, &constraint_result);
 
         // Resolve CHECK constraint column references against the new table.
         // SQLite rejects a CREATE TABLE whose CHECK names an unknown column

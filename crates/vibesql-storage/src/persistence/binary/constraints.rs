@@ -21,12 +21,12 @@
 //
 // The mapping below intentionally replicates the semantics of the CREATE
 // TABLE execution path (`vibesql-executor/src/create_table.rs` +
-// `ConstraintValidator::process_constraints`), which cannot be called from
+// `constraint_validator::process_constraints`), which cannot be called from
 // this crate (the executor depends on storage, not vice versa):
 //
 // - CHECK constraint names: explicit `CONSTRAINT <name>` when given, otherwise the expression's SQL
 //   text (SQLite-compatible error messages). Column-level CHECKs are collected first (in column
-//   order), then table-level CHECKs, matching `ConstraintValidator`.
+//   order), then table-level CHECKs, matching `constraint_validator::process_constraints`.
 // - FK ordering: table-level constraints in declaration order, then column-level `REFERENCES`
 //   constraints in REVERSE column order (SQLite's FK id assignment, mirrored from
 //   `create_table.rs`).
@@ -274,7 +274,7 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
     // duplicates were still caught only because the implicit
     // `sqlite_autoindex_*` metadata IS serialized.
     //
-    // Ordering must match `ConstraintValidator::process_constraints` exactly
+    // Ordering must match `constraint_validator::process_constraints` exactly
     // (column-level UNIQUE in column order, then table-level UNIQUE in
     // declaration order): the positions align with the implicit autoindex
     // ordinals from `create_implicit_indexes` and with `Table`'s positional
@@ -321,7 +321,7 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
     schema.unique_constraint_collations = unique_constraint_collations;
 
     // ---- CHECK constraints (column-level first, then table-level) ----
-    // Matches ConstraintValidator::process_constraints ordering and naming.
+    // Matches constraint_validator::process_constraints ordering and naming.
     let mut check_constraints: Vec<(String, vibesql_ast::Expression)> = Vec::new();
     for col_def in &create.columns {
         for constraint in &col_def.constraints {
@@ -506,7 +506,7 @@ mod tests {
         // Unnamed column-level CHECK gets the verbatim CHECK source text as
         // its name, preserving the original operator spacing (SQLite echoes
         // exactly this in "CHECK constraint failed: a > 0"). Same derivation
-        // as ConstraintValidator at CREATE time.
+        // as constraint_validator::process_constraints at CREATE time.
         assert_eq!(schema.check_constraints[0].0, "a > 0");
         // Named table-level CHECK keeps its explicit name.
         assert_eq!(schema.check_constraints[1].0, "b_pos");
