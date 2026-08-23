@@ -75,7 +75,6 @@ pub use cache::{
     PreparedStatement, PreparedStatementCache, PreparedStatementCacheStats, PreparedStatementError,
     QueryPlanCache, QuerySignature,
 };
-pub use constraint_validator::ConstraintValidator;
 pub use create_table::CreateTableExecutor;
 pub use cursor::{Cursor, CursorExecutor, CursorResult, CursorStore, FetchResult};
 pub use delete::DeleteExecutor;
