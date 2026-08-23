@@ -229,9 +229,9 @@ impl super::Catalog {
             // For unqualified identifiers: if resolution is restricted to a
             // single schema (trigger-body execution, #6477), look up ONLY
             // there — no fallback to any other schema.
-            if let Some(restrict_schema) = self.restriction_read_guard().as_ref() {
+            if let Some(restrict_schema) = self.unqualified_resolution_restricted_to() {
                 return self
-                    .get_schema_case_insensitive(restrict_schema)
+                    .get_schema_case_insensitive(&restrict_schema)
                     .and_then(|schema| schema.get_table_by_identifier(identifier));
             }
 
@@ -289,8 +289,8 @@ impl super::Catalog {
             // If resolution is restricted to a single schema (trigger-body
             // execution, #6477), look up ONLY there — no fallback to any
             // other schema.
-            if let Some(restrict_schema) = self.restriction_read_guard().as_ref() {
-                return self.get_schema_case_insensitive(restrict_schema).and_then(|schema| {
+            if let Some(restrict_schema) = self.unqualified_resolution_restricted_to() {
+                return self.get_schema_case_insensitive(&restrict_schema).and_then(|schema| {
                     schema.get_table(&normalized_table, self.case_sensitive_identifiers)
                 });
             }
@@ -566,8 +566,8 @@ impl super::Catalog {
         // If resolution is restricted to a single schema (trigger-body
         // execution, #6477), look up ONLY there — no fallback to any other
         // schema.
-        if let Some(restrict_schema) = self.restriction_read_guard().as_ref() {
-            return self.get_schema_case_insensitive(restrict_schema).and_then(|schema| {
+        if let Some(restrict_schema) = self.unqualified_resolution_restricted_to() {
+            return self.get_schema_case_insensitive(&restrict_schema).and_then(|schema| {
                 schema
                     .get_table(&normalized_table, self.case_sensitive_identifiers)
                     .map(|_| restrict_schema.clone())
@@ -631,9 +631,9 @@ impl super::Catalog {
             // For unqualified identifiers: if resolution is restricted to a
             // single schema (trigger-body execution, #6477), look up ONLY
             // there — no fallback to any other schema.
-            if let Some(restrict_schema) = self.restriction_read_guard().as_ref() {
+            if let Some(restrict_schema) = self.unqualified_resolution_restricted_to() {
                 return self
-                    .get_schema_case_insensitive(restrict_schema)
+                    .get_schema_case_insensitive(&restrict_schema)
                     .is_some_and(|schema| schema.table_exists_by_identifier(identifier));
             }
 

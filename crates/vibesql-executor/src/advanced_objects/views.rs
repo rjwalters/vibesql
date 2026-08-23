@@ -85,8 +85,13 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                 // view keeps ordinary temp-first resolution (temp shadows
                 // main), so it is left unrestricted. Mirrors the trigger-body
                 // restriction mechanism
-                // (`Catalog::set_restrict_unqualified_resolution_to_schema`,
+                // (`Catalog::scoped_unqualified_resolution_restriction`,
                 // trigger_execution.rs, #6477) rather than reinventing it.
+                //
+                // The restriction is thread-local and established through an
+                // RAII guard, so concurrent executions never share it and the
+                // previous value is restored even on the early `return Err`
+                // paths in the `match` below (#6506).
                 let restriction = if stmt.temporary {
                     None
                 } else {
@@ -96,11 +101,11 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                         .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
                     Some(owning_schema)
                 };
-                let prev_restriction =
-                    db.catalog.set_restrict_unqualified_resolution_to_schema(restriction);
+                let restriction_guard =
+                    db.catalog.scoped_unqualified_resolution_restriction(restriction);
                 let executor = SelectExecutor::new(db);
                 let result = executor.execute_with_simple_columns(&stmt.query);
-                db.catalog.set_restrict_unqualified_resolution_to_schema(prev_restriction);
+                drop(restriction_guard);
                 match result {
                     Ok(result) => Some(result.columns),
                     Err(e @ ExecutorError::OrderByTermNotInResultSet { .. }) => {

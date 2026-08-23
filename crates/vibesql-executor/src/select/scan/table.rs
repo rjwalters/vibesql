@@ -566,10 +566,15 @@ pub(crate) fn execute_table_scan(
         // view bodies (#6485). Mirrors the CREATE-time restriction applied in
         // `advanced_objects::views::execute_create_view` and the trigger-body
         // mechanism it was itself modeled on (#6477).
-        // `Catalog::set_restrict_unqualified_resolution_to_schema` takes
-        // `&self` (interior mutability) precisely so it can be toggled here,
-        // deep inside an already in-flight read-only `SelectExecutor` that
-        // only holds `&Database`.
+        // `Catalog::scoped_unqualified_resolution_restriction` takes `&self`
+        // (the restriction is thread-local, not a `Catalog` field) precisely
+        // so it can be established here, deep inside an already in-flight
+        // read-only `SelectExecutor` that only holds `&Database` — and
+        // *because* it is thread-local, concurrent readers sharing this
+        // `Database` (`SharedDatabase`, the HTTP server's per-request reads)
+        // each get their own restriction instead of racing on one shared cell
+        // (#6506). The guard restores the previous restriction when the block
+        // below ends, including on unwind.
         let is_temp_view = view.is_temp();
         let restriction = if is_temp_view {
             None
@@ -581,10 +586,11 @@ pub(crate) fn execute_table_scan(
                 .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
             Some(owning_schema)
         };
-        let prev_restriction =
-            database.catalog.set_restrict_unqualified_resolution_to_schema(restriction);
-        let result = executor.execute_with_columns(&view.query);
-        database.catalog.set_restrict_unqualified_resolution_to_schema(prev_restriction);
+        let result = {
+            let _restriction_guard =
+                database.catalog.scoped_unqualified_resolution_restriction(restriction);
+            executor.execute_with_columns(&view.query)
+        };
         let select_result = if is_temp_view {
             result?
         } else {
