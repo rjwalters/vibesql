@@ -15,11 +15,11 @@
         "LIMIT"
       ],
       "expectedRows": [
-        ["1", "Chai", "1", "18"],
-        ["2", "Chang", "1", "19"],
-        ["3", "Aniseed Syrup", "2", "10"],
-        ["4", "Chef Antons Cajun Seasoning", "2", "22"],
-        ["5", "Chef Antons Gumbo Mix", "2", "21.35"]
+        ["1", "Chai", "1", "18", "39", "0"],
+        ["2", "Chang", "1", "19", "17", "40"],
+        ["3", "Aniseed Syrup", "2", "10", "13", "70"],
+        ["4", "Chef Anton's Cajun Seasoning", "2", "22", "53", "0"],
+        ["5", "Chef Anton's Gumbo Mix", "2", "21.35", "0", "0"]
       ],
       "expectedCount": 5
     },
@@ -33,7 +33,7 @@
         "WHERE",
         "ORDER BY"
       ],
-      "expectedCount": 14
+      "expectedCount": 12
     },
     "basic-3": {
       "title": "Column aliases",
@@ -49,13 +49,13 @@
         ["Chai", "18", "21.6"],
         ["Chang", "19", "22.8"],
         ["Aniseed Syrup", "10", "12.0"],
-        ["Chef Antons Cajun Seasoning", "22", "26.4"],
-        ["Chef Antons Gumbo Mix", "21.35", "25.62"],
-        ["Grandmas Boysenberry Spread", "25", "30.0"],
-        ["Uncle Bobs Organic Dried Pears", "30", "36.0"],
-        ["Northwoods Cranberry Sauce", "40", "48.0"],
+        ["Chef Anton's Cajun Seasoning", "22", "26.4"],
+        ["Chef Anton's Gumbo Mix", "21.35", "25.62"],
         ["Mishi Kobe Niku", "97", "116.4"],
-        ["Ikura", "31", "37.2"]
+        ["Sir Rodney's Marmalade", "81", "97.2"],
+        ["Carnarvon Tigers", "62.5", "75.0"],
+        ["Northwoods Cranberry Sauce", "40", "48.0"],
+        ["Alice Mutton", "39", "46.8"]
       ],
       "expectedCount": 10
     },
@@ -74,12 +74,11 @@
         ["2"],
         ["3"],
         ["4"],
-        ["5"],
         ["6"],
         ["7"],
         ["8"]
       ],
-      "expectedCount": 8
+      "expectedCount": 7
     }
   }
 }

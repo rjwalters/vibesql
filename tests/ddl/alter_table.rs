@@ -161,17 +161,15 @@ fn test_drop_column_if_exists() {
         assert!(result.is_ok(), "DROP COLUMN IF EXISTS should succeed");
     }
 
-    // Drop nonexistent column with IF EXISTS
-    // Note: Current implementation has a bug - IF EXISTS doesn't properly handle
-    // nonexistent columns (tries to get column index and fails)
+    // Drop nonexistent column with IF EXISTS: a missing column is a no-op
+    // under IF EXISTS, matching SQLite (see `execute_drop_column` in
+    // `crates/vibesql-executor/src/alter/columns.rs`).
     let sql = "ALTER TABLE users DROP COLUMN IF EXISTS nonexistent";
     let stmt = Parser::parse_sql(sql).expect("Failed to parse");
 
     if let Statement::AlterTable(alter_stmt) = stmt {
         let result = AlterTableExecutor::execute(&alter_stmt, &mut db);
-        // Current behavior: still fails even with IF EXISTS
-        // Ideally should succeed, but there's a bug in the implementation
-        assert!(result.is_err(), "Current implementation fails even with IF EXISTS (known bug)");
+        assert!(result.is_ok(), "DROP COLUMN IF EXISTS on a missing column should be a no-op");
     }
 }
 
@@ -186,7 +184,9 @@ fn test_drop_column_not_found() {
     if let Statement::AlterTable(alter_stmt) = stmt {
         let result = AlterTableExecutor::execute(&alter_stmt, &mut db);
         assert!(result.is_err(), "Should fail when column doesn't exist");
-        assert!(result.unwrap_err().to_string().contains("not found"));
+        // SQLite-compatible wording: "no such column: <name>" (see
+        // `execute_drop_column` in `crates/vibesql-executor/src/alter/columns.rs`).
+        assert!(result.unwrap_err().to_string().contains("no such column"));
     }
 }
 

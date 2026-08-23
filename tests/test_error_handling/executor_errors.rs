@@ -150,14 +150,16 @@ fn test_constraint_violation_error() {
     let stmt = Parser::parse_sql(sql).expect("Failed to parse");
     if let Statement::Insert(insert_stmt) = stmt {
         let result = InsertExecutor::execute(&mut db, &insert_stmt);
-        assert!(result.is_err(), "Should fail with ConstraintViolation");
+        assert!(result.is_err(), "Should fail with a NOT NULL constraint error");
 
+        // NOT NULL violations report SQLite's exact wording via
+        // `ExecutorError::SqliteCompatError` (see `row_validator.rs`), not the
+        // generic `ConstraintViolation` variant.
         match result {
-            Err(ExecutorError::ConstraintViolation(msg)) => {
-                let error_msg = format!("{}", ExecutorError::ConstraintViolation(msg.clone()));
-                assert!(error_msg.contains("Constraint violation"));
+            Err(ExecutorError::SqliteCompatError(msg)) => {
+                assert!(msg.contains("NOT NULL constraint failed"));
             }
-            other => panic!("Expected ConstraintViolation error, got: {:?}", other),
+            other => panic!("Expected SqliteCompatError(NOT NULL ...), got: {:?}", other),
         }
     }
 }
@@ -178,14 +180,18 @@ fn test_cannot_drop_column_error() {
     let stmt = Parser::parse_sql(sql).expect("Failed to parse");
     if let Statement::AlterTable(alter_stmt) = stmt {
         let result = AlterTableExecutor::execute(&alter_stmt, &mut db);
-        assert!(result.is_err(), "Should fail with CannotDropColumn");
+        assert!(result.is_err(), "Should fail when dropping the only remaining column");
 
+        // Dropping the last column reports SQLite-style wording via
+        // `ExecutorError::Other` (see `execute_drop_column` in
+        // `crates/vibesql-executor/src/alter/columns.rs`); the `CannotDropColumn`
+        // variant is not constructed on this path.
         match result {
-            Err(ExecutorError::CannotDropColumn(msg)) => {
-                let error_msg = format!("{}", ExecutorError::CannotDropColumn(msg.clone()));
-                assert!(error_msg.contains("Cannot drop column"));
+            Err(ExecutorError::Other(msg)) => {
+                assert!(msg.contains("cannot drop column"));
+                assert!(msg.contains("no other columns exist"));
             }
-            other => panic!("Expected CannotDropColumn error, got: {:?}", other),
+            other => panic!("Expected Other(\"cannot drop column ...\"), got: {:?}", other),
         }
     }
 }

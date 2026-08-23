@@ -1,13 +1,19 @@
 //! End-to-end tests for delimited identifier behavior
 //!
-//! Per SQL:1999 Section 5.2:
-//! - Regular identifiers (unquoted) are case-insensitive and normalized to lowercase
-//! - Delimited identifiers (quoted with double quotes) are case-sensitive and preserve exact case
+//! VibeSQL follows SQLite's identifier semantics (issue #5553), which differ
+//! from the plain SQL:1999 model: identifiers are ASCII case-folded for
+//! *lookup/equality* regardless of quoting — `"MyTable"` collides with
+//! `mytable` — while the exact spelling as written is preserved only for
+//! *display* (error messages, `sqlite_master`, column headers). This is a
+//! deliberate SQLite-compatibility choice, not a `SELECT`-time quirk: it
+//! governs `CREATE`-time duplicate detection for tables, columns, and
+//! schemas too, so two objects that differ only in case (quoted or not)
+//! cannot coexist.
 //!
 //! These tests verify that:
-//! 1. `users` and `"USERS"` refer to different tables (lowercase vs uppercase)
-//! 2. Quoted identifiers preserve case exactly
-//! 3. Unquoted identifiers are normalized to lowercase
+//! 1. `users` and `"USERS"` refer to the *same* table (case-folded for lookup)
+//! 2. Quoting only preserves the original spelling for display, not distinctness
+//! 3. Unquoted identifiers are normalized to lowercase for display too
 //! 4. Reserved words can be used as identifiers when quoted
 //! 5. Special characters (spaces, etc.) work in delimited identifiers
 
@@ -65,21 +71,23 @@ fn test_quoted_vs_unquoted_table_names() {
     // SQL INSERT with unquoted table name - uses case-insensitive lookup
     execute_insert_sql(&mut db, "INSERT INTO users VALUES (1)").unwrap();
 
-    // Create DIFFERENT table with quoted uppercase name "USERS"
-    execute_create_table(&mut db, r#"CREATE TABLE "USERS" (id INT)"#).unwrap();
-    // SQL INSERT with quoted table name - uses case-sensitive lookup
+    // A second CREATE TABLE for the SAME name, only quoted and uppercase,
+    // must fail: SQLite case-folds table names for lookup regardless of
+    // quoting (#5553), so `"USERS"` collides with the `users` created above.
+    let err = execute_create_table(&mut db, r#"CREATE TABLE "USERS" (id INT)"#).unwrap_err();
+    assert!(err.contains("already exists") || err.contains("TableAlreadyExists"), "{}", err);
+
+    // SQL INSERT with quoted table name - uses the SAME case-folded lookup
+    // as the unquoted name, so it targets the one `users` table created above.
     execute_insert_sql(&mut db, r#"INSERT INTO "USERS" VALUES (2)"#).unwrap();
 
-    // Verify they are DIFFERENT tables
-    // Unquoted 'users' in query → normalized to lowercase 'users' → retrieves id=1
+    // Both the unquoted and quoted-uppercase references resolve to the same
+    // table, so both inserted rows are visible either way.
     let result1 = execute_select(&db, "SELECT * FROM users").unwrap();
-    assert_eq!(result1.len(), 1);
-    assert_eq!(result1[0].values[0], SqlValue::Integer(1));
+    assert_eq!(result1.len(), 2);
 
-    // Quoted "USERS" in query → exact match to 'USERS' table → retrieves id=2
     let result2 = execute_select(&db, r#"SELECT * FROM "USERS""#).unwrap();
-    assert_eq!(result2.len(), 1);
-    assert_eq!(result2[0].values[0], SqlValue::Integer(2));
+    assert_eq!(result2.len(), 2);
 }
 
 #[test]
@@ -109,24 +117,30 @@ fn test_unquoted_identifier_normalization() {
 fn test_quoted_identifier_case_sensitivity() {
     let mut db = Database::new();
 
-    // Create three DIFFERENT tables with different cases
+    // Only the FIRST quoted spelling creates a table: SQLite case-folds
+    // table names for lookup regardless of quoting (#5553), so "PRODUCTS"
+    // and "products" both collide with the already-created "Products".
     execute_create_table(&mut db, r#"CREATE TABLE "Products" (id INT)"#).unwrap();
-    execute_create_table(&mut db, r#"CREATE TABLE "PRODUCTS" (id INT)"#).unwrap();
-    execute_create_table(&mut db, r#"CREATE TABLE "products" (id INT)"#).unwrap();
+    let err1 = execute_create_table(&mut db, r#"CREATE TABLE "PRODUCTS" (id INT)"#).unwrap_err();
+    assert!(err1.contains("TableAlreadyExists"), "{}", err1);
+    let err2 = execute_create_table(&mut db, r#"CREATE TABLE "products" (id INT)"#).unwrap_err();
+    assert!(err2.contains("TableAlreadyExists"), "{}", err2);
 
-    // Insert different values in each - note the exact case matters!
+    // Insert through each differently-cased spelling — all resolve to the
+    // single "Products" table via the same case-folded lookup.
     execute_insert_sql(&mut db, r#"INSERT INTO "Products" VALUES (1)"#).unwrap();
     execute_insert_sql(&mut db, r#"INSERT INTO "PRODUCTS" VALUES (2)"#).unwrap();
     execute_insert_sql(&mut db, r#"INSERT INTO "products" VALUES (3)"#).unwrap();
 
-    // Each quoted identifier retrieves its specific table
+    // Every spelling now sees all three inserted rows, since they all name
+    // the same underlying table.
     let result1 = execute_select(&db, r#"SELECT * FROM "Products""#).unwrap();
     let result2 = execute_select(&db, r#"SELECT * FROM "PRODUCTS""#).unwrap();
     let result3 = execute_select(&db, r#"SELECT * FROM "products""#).unwrap();
 
-    assert_eq!(result1[0].values[0], SqlValue::Integer(1));
-    assert_eq!(result2[0].values[0], SqlValue::Integer(2));
-    assert_eq!(result3[0].values[0], SqlValue::Integer(3));
+    assert_eq!(result1.len(), 3);
+    assert_eq!(result2.len(), 3);
+    assert_eq!(result3.len(), 3);
 }
 
 // ========================================================================
@@ -171,24 +185,28 @@ fn test_case_sensitive_column_names() {
 fn test_different_case_columns_are_distinct() {
     let mut db = Database::new();
 
-    // Create table with two different columns that differ only in case
-    execute_create_table(&mut db, r#"CREATE TABLE data ("value" INT, "VALUE" INT, "Value" INT)"#)
-        .unwrap();
-
-    // All three are distinct columns
-    db.insert_row(
-        "DATA",
-        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)]),
+    // SQLite compares column names case-insensitively regardless of quoting
+    // (#5553), so three columns differing only in case are a duplicate-column
+    // error, not three distinct columns — matching `CREATE TABLE t(a, A)`.
+    let err = execute_create_table(
+        &mut db,
+        r#"CREATE TABLE data ("value" INT, "VALUE" INT, "Value" INT)"#,
     )
-    .unwrap();
+    .unwrap_err();
+    assert!(err.contains("duplicate column name"), "{}", err);
+
+    // A single quoted column name still works, and is reachable through any
+    // case-folded spelling of the same name.
+    execute_create_table(&mut db, r#"CREATE TABLE data ("value" INT)"#).unwrap();
+    db.insert_row("DATA", Row::new(vec![SqlValue::Integer(1)])).unwrap();
 
     let result1 = execute_select(&db, r#"SELECT "value" FROM data"#).unwrap();
     let result2 = execute_select(&db, r#"SELECT "VALUE" FROM data"#).unwrap();
     let result3 = execute_select(&db, r#"SELECT "Value" FROM data"#).unwrap();
 
     assert_eq!(result1[0].values[0], SqlValue::Integer(1));
-    assert_eq!(result2[0].values[0], SqlValue::Integer(2));
-    assert_eq!(result3[0].values[0], SqlValue::Integer(3));
+    assert_eq!(result2[0].values[0], SqlValue::Integer(1));
+    assert_eq!(result3[0].values[0], SqlValue::Integer(1));
 }
 
 // ========================================================================
@@ -340,15 +358,16 @@ fn test_error_on_nonexistent_quoted_table() {
 }
 
 #[test]
-fn test_error_on_case_mismatch_quoted_table() {
+fn test_case_mismatch_quoted_table_still_resolves() {
     let mut db = Database::new();
 
-    // Create table "Products" (exact case)
+    // Create table "Products" (as originally spelled)
     execute_create_table(&mut db, r#"CREATE TABLE "Products" (id INT)"#).unwrap();
 
-    // Try to query with different case - should fail
+    // A differently-cased quoted reference still resolves to the same table:
+    // SQLite case-folds table names for lookup regardless of quoting (#5553).
     let result = execute_select(&db, r#"SELECT * FROM "products""#);
-    assert!(result.is_err(), "Expected error when case doesn't match quoted identifier");
+    assert!(result.is_ok(), "Case-folded quoted table reference should resolve: {:?}", result);
 }
 
 // ========================================================================
@@ -359,7 +378,9 @@ fn test_error_on_case_mismatch_quoted_table() {
 fn test_quoted_schema_and_table_names() {
     let mut db = Database::new();
 
-    // Create schemas with different cases
+    // Schema names are case-folded for lookup regardless of quoting, exactly
+    // like table names (#5553), so a second CREATE SCHEMA that differs only
+    // in case collides with the first.
     let stmt1 = Parser::parse_sql(r#"CREATE SCHEMA "mySchema""#).unwrap();
     if let Statement::CreateSchema(create_schema) = stmt1 {
         vibesql_executor::SchemaExecutor::execute_create_schema(&create_schema, &mut db).unwrap();
@@ -367,23 +388,22 @@ fn test_quoted_schema_and_table_names() {
 
     let stmt2 = Parser::parse_sql(r#"CREATE SCHEMA "MYSCHEMA""#).unwrap();
     if let Statement::CreateSchema(create_schema) = stmt2 {
-        vibesql_executor::SchemaExecutor::execute_create_schema(&create_schema, &mut db).unwrap();
+        let err = vibesql_executor::SchemaExecutor::execute_create_schema(&create_schema, &mut db)
+            .unwrap_err();
+        assert!(format!("{:?}", err).contains("SchemaAlreadyExists"), "{:?}", err);
     }
 
-    // Create tables in each schema
+    // A table created via one case-folded spelling of the schema is
+    // reachable through any other spelling of the same schema.
     execute_create_table(&mut db, r#"CREATE TABLE "mySchema"."users" (id INT)"#).unwrap();
-    execute_create_table(&mut db, r#"CREATE TABLE "MYSCHEMA"."users" (id INT)"#).unwrap();
-
-    // Insert different data using SQL INSERT with schema-qualified names
     execute_insert_sql(&mut db, r#"INSERT INTO "mySchema"."users" VALUES (1)"#).unwrap();
     execute_insert_sql(&mut db, r#"INSERT INTO "MYSCHEMA"."users" VALUES (2)"#).unwrap();
 
-    // Query each separately
     let result1 = execute_select(&db, r#"SELECT * FROM "mySchema"."users""#).unwrap();
     let result2 = execute_select(&db, r#"SELECT * FROM "MYSCHEMA"."users""#).unwrap();
 
-    assert_eq!(result1[0].values[0], SqlValue::Integer(1));
-    assert_eq!(result2[0].values[0], SqlValue::Integer(2));
+    assert_eq!(result1.len(), 2);
+    assert_eq!(result2.len(), 2);
 }
 
 #[test]
