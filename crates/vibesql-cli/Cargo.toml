@@ -37,5 +37,8 @@ regex = "1.10"
 rusqlite = { workspace = true }
 log = "0.4"
 
+[package.metadata.cargo-machete]
+ignored = ["prettytable-rs"]
+
 [dev-dependencies]
 tempfile = "3"

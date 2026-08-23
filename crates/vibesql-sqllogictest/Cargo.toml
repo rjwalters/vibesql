@@ -31,4 +31,7 @@ thiserror = "2"
 tracing = "0.1"
 rand = "0.10.1"
 
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [dev-dependencies]
