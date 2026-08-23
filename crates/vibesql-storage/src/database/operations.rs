@@ -1211,6 +1211,21 @@ impl Operations {
     ///
     /// Extracts vectors from the specified table and builds an IVFFlat index
     /// using k-means clustering.
+    ///
+    /// `table_lookup_name` is used ONLY to resolve the physical [`crate::Table`]
+    /// the vectors are extracted from — it may be schema-qualified (e.g.
+    /// `aux.t`) when the caller already knows the exact owning schema
+    /// (CREATE INDEX's validator always does). `table_name` is what gets
+    /// persisted as the index's table identity and is left exactly as the
+    /// caller passed it (historically bare): index maintenance matches DML
+    /// probes against that bare form, so promoting it to
+    /// `table_lookup_name` here would desync subsequent INSERT/UPDATE/DELETE
+    /// from this index. Passing a `table_lookup_name` distinct from
+    /// `table_name` is what fixes issue #6502 (the IVFFlat/HNSW analogue of
+    /// #6487) — a bare `table_name` resolved via this function's own
+    /// temp-then-current-then-attached search order could otherwise land on
+    /// an unrelated same-named table instead of the one the caller (and the
+    /// catalog) already resolved the index against.
     #[allow(clippy::too_many_arguments)]
     pub fn create_ivfflat_index(
         &mut self,
@@ -1218,6 +1233,7 @@ impl Operations {
         tables: &std::collections::HashMap<String, crate::Table>,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         column_name: String,
         col_idx: usize,
         dimensions: usize,
@@ -1226,9 +1242,9 @@ impl Operations {
     ) -> Result<(), StorageError> {
         // Normalize table name for lookup (matches catalog normalization)
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
-            table_name.clone()
+            table_lookup_name.to_string()
         } else {
-            table_name.to_lowercase()
+            table_lookup_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name.
@@ -1241,7 +1257,7 @@ impl Operations {
         // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
-        } else if !table_name.contains('.') {
+        } else if !table_lookup_name.contains('.') {
             // Temp schema first (temp tables shadow main).
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if let Some(tbl) = tables.get(&temp_qualified) {
@@ -1260,11 +1276,11 @@ impl Operations {
                         .find_map(|attached| {
                             tables.get(&format!("{}.{}", attached.name, normalized_name))
                         })
-                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                        .ok_or_else(|| StorageError::TableNotFound(table_lookup_name.to_string()))?
                 }
             }
         } else {
-            return Err(StorageError::TableNotFound(table_name.clone()));
+            return Err(StorageError::TableNotFound(table_lookup_name.to_string()));
         };
 
         // Extract vectors from the table
@@ -1344,6 +1360,14 @@ impl Operations {
     ///
     /// Extracts vectors from the specified table and builds an HNSW index
     /// using the hierarchical navigable small world algorithm.
+    ///
+    /// `table_lookup_name` is used ONLY to resolve the physical [`crate::Table`]
+    /// the vectors are extracted from — it may be schema-qualified (e.g.
+    /// `aux.t`) when the caller already knows the exact owning schema
+    /// (CREATE INDEX's validator always does). `table_name` is what gets
+    /// persisted as the index's table identity and is left exactly as the
+    /// caller passed it (historically bare); see [`Self::create_ivfflat_index`]
+    /// for why this split matters (issue #6502).
     #[allow(clippy::too_many_arguments)]
     pub fn create_hnsw_index(
         &mut self,
@@ -1351,6 +1375,7 @@ impl Operations {
         tables: &std::collections::HashMap<String, crate::Table>,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         column_name: String,
         col_idx: usize,
         dimensions: usize,
@@ -1360,9 +1385,9 @@ impl Operations {
     ) -> Result<(), StorageError> {
         // Normalize table name for lookup (matches catalog normalization)
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
-            table_name.clone()
+            table_lookup_name.to_string()
         } else {
-            table_name.to_lowercase()
+            table_lookup_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name.
@@ -1375,7 +1400,7 @@ impl Operations {
         // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
-        } else if !table_name.contains('.') {
+        } else if !table_lookup_name.contains('.') {
             // Temp schema first (temp tables shadow main).
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if let Some(tbl) = tables.get(&temp_qualified) {
@@ -1394,11 +1419,11 @@ impl Operations {
                         .find_map(|attached| {
                             tables.get(&format!("{}.{}", attached.name, normalized_name))
                         })
-                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                        .ok_or_else(|| StorageError::TableNotFound(table_lookup_name.to_string()))?
                 }
             }
         } else {
-            return Err(StorageError::TableNotFound(table_name.clone()));
+            return Err(StorageError::TableNotFound(table_lookup_name.to_string()));
         };
 
         // Extract vectors from the table

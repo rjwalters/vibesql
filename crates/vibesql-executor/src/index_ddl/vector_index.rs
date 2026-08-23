@@ -76,10 +76,15 @@ pub fn create_ivfflat_index(
     .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
-    // Create the IVFFlat index in storage
+    // Create the IVFFlat index in storage. `qualified_table_name` resolves
+    // the physical table the vectors are extracted from; `table_name` (bare)
+    // is stored separately as the index's table identity, since storage's
+    // DML maintenance matches probes against that bare form (issue #6502,
+    // the vector-index analogue of #6487).
     database.create_ivfflat_index(
         index_name.clone(),
         table_name.to_string(),
+        qualified_table_name,
         column_name.to_string(),
         col_idx,
         dimensions,
@@ -167,10 +172,15 @@ pub fn create_hnsw_index(
     .with_schema(super::schema_of_qualified(qualified_table_name));
     database.catalog.add_index(index_metadata)?;
 
-    // Create the HNSW index in storage
+    // Create the HNSW index in storage. `qualified_table_name` resolves the
+    // physical table the vectors are extracted from; `table_name` (bare) is
+    // stored separately as the index's table identity, since storage's DML
+    // maintenance matches probes against that bare form (issue #6502, the
+    // vector-index analogue of #6487).
     database.create_hnsw_index(
         index_name.clone(),
         table_name.to_string(),
+        qualified_table_name,
         column_name.to_string(),
         col_idx,
         dimensions,
