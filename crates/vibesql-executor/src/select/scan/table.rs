@@ -35,8 +35,9 @@ use crate::{
         cte::CteResult,
     },
     sqlite_schema::{
-        execute_sqlite_schema_query, execute_sqlite_temp_schema_query,
-        get_sqlite_schema_table_schema, is_sqlite_schema_table, is_sqlite_temp_schema_table,
+        execute_sqlite_schema_query_for_schema, execute_sqlite_temp_schema_query,
+        get_sqlite_schema_table_schema, is_sqlite_temp_schema_table,
+        resolve_sqlite_schema_query_scope,
     },
     sqlite_stat::{
         execute_sqlite_stat1_query, get_sqlite_stat1_table_schema, is_sqlite_stat_table,
@@ -292,8 +293,7 @@ fn sort_rows_by_without_rowid_pk(
 ///
 /// SQLite returns table-scan rows in physical btree order:
 /// - INTEGER PRIMARY KEY (rowid-alias) tables → ascending rowid order (#4926).
-/// - `WITHOUT ROWID` tables → ascending PRIMARY KEY order, since the PK is the
-///   table btree (#6171).
+/// - `WITHOUT ROWID` tables → ascending PRIMARY KEY order, since the PK is the table btree (#6171).
 ///
 /// Ordinary rowid tables keep physical/insertion order and are left untouched.
 /// The caller is responsible for only invoking this when `order_by.is_none()`.
@@ -327,6 +327,8 @@ fn apply_implicit_scan_order(
 /// * `limit` - Optional LIMIT value for early termination optimization (#3253)
 /// * `outer_row` - Outer row for correlated subqueries
 /// * `outer_schema` - Outer schema for correlated subqueries
+/// * `index_hint` - Optional validated SQLite `INDEXED BY` / `NOT INDEXED` hint (issue #6405).
+///   `INDEXED BY` forces use of the named index; `NOT INDEXED` remains a no-op.
 pub(crate) fn execute_table_scan_with_identifier(
     identifier: &TableIdentifier,
     alias: Option<&String>,
@@ -338,6 +340,7 @@ pub(crate) fn execute_table_scan_with_identifier(
     limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    index_hint: Option<&vibesql_ast::IndexHint>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Use the canonical form for table lookup (lowercase for unquoted, exact for quoted)
     // CTE lookup in execute_table_scan is already case-insensitive
@@ -352,6 +355,7 @@ pub(crate) fn execute_table_scan_with_identifier(
         limit,
         outer_row,
         outer_schema,
+        index_hint,
     )
 }
 
@@ -368,6 +372,8 @@ pub(crate) fn execute_table_scan_with_identifier(
 /// * `limit` - Optional LIMIT value for early termination optimization (#3253)
 /// * `outer_row` - Outer row for correlated subqueries
 /// * `outer_schema` - Outer schema for correlated subqueries
+/// * `index_hint` - Optional validated SQLite `INDEXED BY` / `NOT INDEXED` hint (issue #6405).
+///   `INDEXED BY` forces use of the named index; `NOT INDEXED` remains a no-op.
 pub(crate) fn execute_table_scan(
     table_name: &str,
     alias: Option<&String>,
@@ -379,6 +385,7 @@ pub(crate) fn execute_table_scan(
     limit: Option<usize>,
     outer_row: Option<&vibesql_storage::Row>,
     outer_schema: Option<&CombinedSchema>,
+    index_hint: Option<&vibesql_ast::IndexHint>,
 ) -> Result<super::FromResult, ExecutorError> {
     // Check if table is a CTE first (with case-insensitive lookup)
     let cte_result = cte_results.get(table_name).or_else(|| {
@@ -428,10 +435,13 @@ pub(crate) fn execute_table_scan(
         return Ok(super::FromResult::from_shared_rows(schema, cte_rows.clone()));
     }
 
-    // Check if it's sqlite_master or sqlite_schema (SQLite compatibility)
-    if is_sqlite_schema_table(table_name) {
-        // Execute sqlite_master query
-        let result = execute_sqlite_schema_query(&database.catalog)?;
+    // Check if it's sqlite_master or sqlite_schema (SQLite compatibility),
+    // including a schema-qualified reference to an attached database's own
+    // schema table (`<alias>.sqlite_master` / `<alias>.sqlite_schema`, #6436).
+    if let Some(schema_name) = resolve_sqlite_schema_query_scope(&database.catalog, table_name) {
+        // Execute sqlite_master query, scoped to the resolved schema (`main`
+        // or an attached alias).
+        let result = execute_sqlite_schema_query_for_schema(&database.catalog, &schema_name)?;
 
         // Get the schema for sqlite_master
         let table_schema = get_sqlite_schema_table_schema();
@@ -703,10 +713,18 @@ pub(crate) fn execute_table_scan(
     }
 
     // Check if we should use an index scan (with cost-based selection)
-    // This now includes skip-scan as a fallback option when regular index scan isn't available
-    if let Some(scan_choice) =
-        super::index_scan::select_index_scan_method(table_name, where_clause, order_by, database)
-    {
+    // This now includes skip-scan as a fallback option when regular index scan isn't available.
+    // `index_hint` carries a validated `INDEXED BY <name>` (issue #6405): when
+    // present, it forces use of the named index instead of letting the cost
+    // model choose, matching SQLite's INDEXED BY precedence. `NOT INDEXED`
+    // remains a no-op (unaffected — see index_hint's doc comment).
+    if let Some(scan_choice) = super::index_scan::select_index_scan_method(
+        table_name,
+        where_clause,
+        order_by,
+        database,
+        index_hint,
+    )? {
         match scan_choice {
             super::index_scan::IndexScanChoice::Regular { index_name, sorted_columns } => {
                 // Use regular index scan for potentially better performance

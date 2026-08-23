@@ -168,8 +168,9 @@ impl Parser {
 
         // Check for base window name (inheriting from a named window)
         // This handles: OVER (win ...) or OVER (win)
-        // The identifier must be followed by a clause keyword (PARTITION, ORDER, ROWS, RANGE, GROUPS)
-        // or closing paren - not followed by something that would make it an expression
+        // The identifier must be followed by a clause keyword (PARTITION, ORDER, ROWS, RANGE,
+        // GROUPS) or closing paren - not followed by something that would make it an
+        // expression
         if let Token::Identifier(name) = self.peek() {
             // Peek ahead to see what follows
             let name_clone = name.clone();

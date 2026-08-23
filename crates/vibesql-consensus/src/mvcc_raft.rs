@@ -73,42 +73,33 @@
 //!
 //! Four read modes, one guarantee each:
 //!
-//! - [`MvccRaftNode::query`] — **local, stale-allowed**: runs against
-//!   whatever this node has applied, with no leadership check or network
-//!   round. Available on every node — including a leader partitioned
-//!   into a minority — and may therefore trail the cluster's committed
-//!   state arbitrarily.
-//! - [`MvccRaftNode::query_linearizable`] — **linearizable**: confirms
-//!   this node's leadership through openraft's ReadIndex protocol
-//!   ([`Raft::ensure_linearizable`]: one empty-AppendEntries heartbeat
-//!   round acknowledged by a quorum, then a wait until the local state
-//!   machine reaches the confirmed read index) before running the same
-//!   local query. A node that knows it is not the leader fails with
-//!   [`ConsensusError::NotLeader`] and a leader hint; a node that still
-//!   believes it leads but cannot confirm a quorum (partitioned into a
-//!   minority, deposed but not yet aware) fails with
-//!   [`ConsensusError::NotLeader`] carrying **no** hint — its own view
-//!   is exactly what could not be confirmed, so hinting at itself would
-//!   route callers straight back to a possibly-stale node.
-//! - [`MvccRaftNode::query_at_least`] — **read-your-writes** (PR 2 of 2,
-//!   clock-free): a session carries the **dense application index** its
-//!   last write's propose returned as a token; any node — leader or
-//!   follower — serves the read once its locally applied dense index
-//!   reaches the token (waiting up to the caller's bound, then failing
-//!   with [`ConsensusError::ReadTimeout`]). Dense indices are identical
-//!   on every replica (see *Index mapping* above) and
-//!   [`execute_replicated`](MvccRaftNode::execute_replicated) returns
-//!   exactly the dense index its entry consumed, so a token minted by a
-//!   leader propose compares like-with-like against any follower's
-//!   applied cursor. Exact, no clocks involved.
-//! - [`MvccRaftNode::query_bounded_staleness`] — **bounded staleness**
-//!   (PR 2 of 2): serves locally iff this node can prove its applied
-//!   state is no staler than the caller's bound, refusing otherwise
-//!   with [`ConsensusError::StalenessExceeded`] (route to the leader or
-//!   retry with a larger bound). A bound of **zero** delegates to
-//!   [`query_linearizable`](MvccRaftNode::query_linearizable) — on a
-//!   follower that is exactly the "staleness 0 redirects to the leader"
-//!   contract.
+//! - [`MvccRaftNode::query`] — **local, stale-allowed**: runs against whatever this node has
+//!   applied, with no leadership check or network round. Available on every node — including a
+//!   leader partitioned into a minority — and may therefore trail the cluster's committed state
+//!   arbitrarily.
+//! - [`MvccRaftNode::query_linearizable`] — **linearizable**: confirms this node's leadership
+//!   through openraft's ReadIndex protocol ([`Raft::ensure_linearizable`]: one empty-AppendEntries
+//!   heartbeat round acknowledged by a quorum, then a wait until the local state machine reaches
+//!   the confirmed read index) before running the same local query. A node that knows it is not the
+//!   leader fails with [`ConsensusError::NotLeader`] and a leader hint; a node that still believes
+//!   it leads but cannot confirm a quorum (partitioned into a minority, deposed but not yet aware)
+//!   fails with [`ConsensusError::NotLeader`] carrying **no** hint — its own view is exactly what
+//!   could not be confirmed, so hinting at itself would route callers straight back to a
+//!   possibly-stale node.
+//! - [`MvccRaftNode::query_at_least`] — **read-your-writes** (PR 2 of 2, clock-free): a session
+//!   carries the **dense application index** its last write's propose returned as a token; any node
+//!   — leader or follower — serves the read once its locally applied dense index reaches the token
+//!   (waiting up to the caller's bound, then failing with [`ConsensusError::ReadTimeout`]). Dense
+//!   indices are identical on every replica (see *Index mapping* above) and
+//!   [`execute_replicated`](MvccRaftNode::execute_replicated) returns exactly the dense index its
+//!   entry consumed, so a token minted by a leader propose compares like-with-like against any
+//!   follower's applied cursor. Exact, no clocks involved.
+//! - [`MvccRaftNode::query_bounded_staleness`] — **bounded staleness** (PR 2 of 2): serves locally
+//!   iff this node can prove its applied state is no staler than the caller's bound, refusing
+//!   otherwise with [`ConsensusError::StalenessExceeded`] (route to the leader or retry with a
+//!   larger bound). A bound of **zero** delegates to
+//!   [`query_linearizable`](MvccRaftNode::query_linearizable) — on a follower that is exactly the
+//!   "staleness 0 redirects to the leader" contract.
 //!
 //! ## Bounded staleness: the leader wall-clock piggyback (PR 2 of 2)
 //!
@@ -205,34 +196,36 @@
 
 #[cfg(test)]
 use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::{
+    fmt::Debug,
+    io::Cursor,
+    path::Path,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
 
-use openraft::error::{CheckIsLeaderError, ClientWriteError, RaftError};
-use openraft::storage::{RaftLogStorage, RaftStateMachine};
 #[cfg(test)]
 use openraft::ServerState;
 use openraft::{
+    error::{CheckIsLeaderError, ClientWriteError, RaftError},
+    storage::{RaftLogStorage, RaftStateMachine},
     BasicNode, Entry, EntryPayload, LogId, Raft, RaftSnapshotBuilder, SnapshotMeta, StorageError,
     StorageIOError, StoredMembership,
 };
 use tokio::sync::watch;
 
-use crate::snapshot::SnapshotHorizonPin as _;
-
-use crate::backend::{ConsensusError, LogIndex, Result, Role, Snapshot};
-use crate::cluster_config::ClusterConfig;
-use crate::durable::DurableLogStore;
-use crate::openraft_backend::{
-    current_timestamp_ms, initialize_membership, role_from_state, AppResponse, Bootstrap,
-    InMemoryLogStore, RaftTuning, RecoveredDurable, TypeConfig,
-};
-use crate::snapshot::SnapshotStore;
-use crate::state_machine::{
-    deserialize_database, ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine,
+use crate::{
+    backend::{ConsensusError, LogIndex, Result, Role, Snapshot},
+    cluster_config::ClusterConfig,
+    durable::DurableLogStore,
+    openraft_backend::{
+        current_timestamp_ms, initialize_membership, role_from_state, AppResponse, Bootstrap,
+        InMemoryLogStore, RaftTuning, RecoveredDurable, TypeConfig,
+    },
+    snapshot::{SnapshotHorizonPin as _, SnapshotStore},
+    state_machine::{
+        deserialize_database, ApplyOutcome, QueryResult, TxnEntry, VibesqlStateMachine,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -806,7 +799,8 @@ impl MvccRaftNode {
                 "failed to bind consensus listener on {listen_addr}: {e}"
             ))
         })?;
-        Self::join_tcp_on_listener(node_id, config, listener, log_store, sm, bootstrap, tuning).await
+        Self::join_tcp_on_listener(node_id, config, listener, log_store, sm, bootstrap, tuning)
+            .await
     }
 
     /// The shared tail of every TCP join, given an **already-bound**
@@ -970,10 +964,8 @@ impl MvccRaftNode {
             frozen.push(values);
             frozen_defaults.push(defaults);
         }
-        Ok(
-            TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen)
-                .with_frozen_defaults(frozen_defaults),
-        )
+        Ok(TxnEntry::frozen_batch(statements.iter().map(|s| s.to_string()).collect(), frozen)
+            .with_frozen_defaults(frozen_defaults))
     }
 
     /// Speculatively read inside an open replicated transaction so the
@@ -983,11 +975,7 @@ impl MvccRaftNode {
     /// state, runs `select_sql`, and rolls the scratch transaction back;
     /// see [`VibesqlStateMachine::speculative_query`] for the no-double-apply
     /// argument. Leader-only (it replays writes).
-    pub fn speculative_query(
-        &self,
-        entry: &TxnEntry,
-        select_sql: &str,
-    ) -> Result<QueryResult> {
+    pub fn speculative_query(&self, entry: &TxnEntry, select_sql: &str) -> Result<QueryResult> {
         if self.role() != Role::Leader {
             return Err(ConsensusError::NotLeader { leader_hint: self.current_leader() });
         }
@@ -1133,12 +1121,10 @@ impl MvccRaftNode {
     /// the full log-append round a replicated write pays.
     ///
     /// Fails with [`ConsensusError::NotLeader`]:
-    /// - carrying a leader hint when this node knows it is not the
-    ///   leader (route the read there);
-    /// - carrying **no** hint when this node still believes it leads but
-    ///   could not confirm a quorum (e.g. partitioned into a minority) —
-    ///   its own view is exactly what could not be confirmed, so hinting
-    ///   at itself would route callers back to a possibly-stale node.
+    /// - carrying a leader hint when this node knows it is not the leader (route the read there);
+    /// - carrying **no** hint when this node still believes it leads but could not confirm a quorum
+    ///   (e.g. partitioned into a minority) — its own view is exactly what could not be confirmed,
+    ///   so hinting at itself would route callers back to a possibly-stale node.
     pub async fn query_linearizable(&self, sql: &str) -> Result<QueryResult> {
         self.raft.ensure_linearizable().await.map_err(|e| self.map_read_error(e))?;
         self.sm.machine.query(sql)
@@ -1477,11 +1463,10 @@ impl MvccRaftNode {
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
+    use vibesql_types::SqlValue;
 
     use super::*;
-    use crate::freeze::FrozenValue;
-    use crate::network::ChannelRouter;
-    use vibesql_types::SqlValue;
+    use crate::{freeze::FrozenValue, network::ChannelRouter};
 
     /// Upper bound for any single cluster-level wait (election, catch-up,
     /// purge). Bounded polls only — every wait fails loudly, never hangs.
@@ -2188,7 +2173,10 @@ mod tests {
                 .query_at_least(token, "SELECT id, v FROM t", WAIT_TIMEOUT)
                 .await
                 .unwrap_or_else(|e| panic!("node {id} must serve the token read: {e:?}"));
-            assert_eq!(rows.rows, vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]);
+            assert_eq!(
+                rows.rows,
+                vec![vec![SqlValue::Integer(1), SqlValue::Varchar("one".into())]]
+            );
         }
     }
 

@@ -13,8 +13,8 @@
 //! These tests assert the #5329 semantics on full scans (no index):
 //! - Timestamp/Time vs string: compare TEXT renderings lexicographically
 //! - Timestamp vs Timestamp: ordinary temporal comparison
-//! - Date vs parseable string: parse-first; unparseable string: type-mismatch
-//!   error (same as the expression evaluator)
+//! - Date vs parseable string: parse-first; unparseable string: type-mismatch error (same as the
+//!   expression evaluator)
 //!
 //! Every WHERE result is also cross-checked against a per-row projection of
 //! the same predicate (`SELECT id, <pred> FROM t`), which exercises the

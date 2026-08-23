@@ -2,8 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::cell::RefCell;
-use std::collections::HashSet;
+use std::{cell::RefCell, collections::HashSet};
 
 use super::RowIterator;
 use crate::{

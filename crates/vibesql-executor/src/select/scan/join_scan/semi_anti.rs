@@ -5,9 +5,8 @@
 
 use std::collections::HashSet;
 
-use crate::optimizer::where_pushdown::flatten_conjuncts;
-
 use super::{INL_BASE_THRESHOLD, INL_MAX_THRESHOLD, INL_SIZE_RATIO_THRESHOLD};
+use crate::optimizer::where_pushdown::flatten_conjuncts;
 
 /// Determine whether to use Index Nested Loop (INL) for a semi-join.
 ///

@@ -13,15 +13,14 @@
 //! ## SQL semantics (SQL:1999 §7.1, matching SQLite)
 //!
 //! Comparison is lexicographic with three-valued NULL logic:
-//! - `=`  : TRUE iff every element compares equal; FALSE as soon as one element
-//!   is definitively unequal; otherwise (some element comparison UNKNOWN and no
-//!   definitive inequality) UNKNOWN (NULL).
-//! - `<>` : the negation of `=` (TRUE as soon as one element is definitively
-//!   unequal; FALSE if all equal; otherwise UNKNOWN).
-//! - `<`, `<=`, `>`, `>=` : compare element by element; a NULL at the first
-//!   differing position makes the ordering UNKNOWN (NULL) immediately, while a
-//!   definite strict inequality settles the result even if later elements are
-//!   NULL.
+//! - `=`  : TRUE iff every element compares equal; FALSE as soon as one element is definitively
+//!   unequal; otherwise (some element comparison UNKNOWN and no definitive inequality) UNKNOWN
+//!   (NULL).
+//! - `<>` : the negation of `=` (TRUE as soon as one element is definitively unequal; FALSE if all
+//!   equal; otherwise UNKNOWN).
+//! - `<`, `<=`, `>`, `>=` : compare element by element; a NULL at the first differing position
+//!   makes the ordering UNKNOWN (NULL) immediately, while a definite strict inequality settles the
+//!   result even if later elements are NULL.
 
 use vibesql_types::SqlValue;
 
@@ -159,10 +158,9 @@ where
         //  - a definite strict inequality settles the result (TRUE),
         //  - a definite equality moves on to the next element,
         //  - a definite non-equality (with strict FALSE) settles it (FALSE),
-        //  - a NULL on either side makes this first differing position
-        //    undetermined, so the whole comparison is UNKNOWN. It must return
-        //    NULL *immediately* — a later element must not be allowed to force a
-        //    definite result once the ordering is already undetermined here.
+        //  - a NULL on either side makes this first differing position undetermined, so the whole
+        //    comparison is UNKNOWN. It must return NULL *immediately* — a later element must not be
+        //    allowed to force a definite result once the ordering is already undetermined here.
         match eval_op(left_val, &strict_op, right_val)? {
             SqlValue::Boolean(true) => return Ok(SqlValue::Boolean(true)),
             SqlValue::Null => return Ok(SqlValue::Null),

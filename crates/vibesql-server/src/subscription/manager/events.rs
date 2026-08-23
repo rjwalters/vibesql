@@ -1,15 +1,15 @@
 //! Change event handling and notification for subscriptions.
 
-use std::{
-    collections::HashMap,
-    sync::{atomic::Ordering, Arc},
-};
+use std::{collections::HashMap, sync::atomic::Ordering};
 
 use tracing::{debug, trace, warn};
 use vibesql_storage::{change_events::RecvError, Database};
 
 use super::SubscriptionManager;
-use crate::subscription::{pk_prune::PkPruner, SubscriptionId};
+use crate::{
+    registry::SharedDatabase,
+    subscription::{pk_prune::PkPruner, SubscriptionId},
+};
 
 impl SubscriptionManager {
     /// Find all subscriptions affected by a change to a given table
@@ -36,15 +36,13 @@ impl SubscriptionManager {
     /// unless it can *prove* that **every** event's primary key cannot satisfy
     /// the subscription's `WHERE` filter:
     ///
-    /// - If any event lacks a PK identity (`pk() == None` — e.g. composite keys
-    ///   or emission sites without row data), we cannot reason and re-query.
-    /// - The filter is analyzed (once) against the PK column name carried by the
-    ///   events; if it is not a pure single-PK-column predicate the analyzer
-    ///   reports `Unanalyzable` and we re-query.
-    /// - For an `Insert`, the new PK must be unable to match; for a `Delete`, the
-    ///   old PK; for an `Update`, **both** the old and new PK (a row moving into
-    ///   or out of the set is a real change). If any of these *could* match, we
-    ///   re-query.
+    /// - If any event lacks a PK identity (`pk() == None` — e.g. composite keys or emission sites
+    ///   without row data), we cannot reason and re-query.
+    /// - The filter is analyzed (once) against the PK column name carried by the events; if it is
+    ///   not a pure single-PK-column predicate the analyzer reports `Unanalyzable` and we re-query.
+    /// - For an `Insert`, the new PK must be unable to match; for a `Delete`, the old PK; for an
+    ///   `Update`, **both** the old and new PK (a row moving into or out of the set is a real
+    ///   change). If any of these *could* match, we re-query.
     ///
     /// Returns `true` to re-query, `false` to safely skip. The caller increments
     /// the prune metric on a `false` result.
@@ -158,8 +156,11 @@ impl SubscriptionManager {
     /// (sync) notification — delta computation, selective-column handling,
     /// slow-consumer detection — is shared with the standalone path via
     /// [`notify_with_rows`](Self::notify_with_rows).
-    pub async fn handle_change_replicated<F>(&self, event: vibesql_storage::ChangeEvent, query_fn: &F)
-    where
+    pub async fn handle_change_replicated<F>(
+        &self,
+        event: vibesql_storage::ChangeEvent,
+        query_fn: &F,
+    ) where
         F: Fn(&str) -> Result<Vec<vibesql_storage::Row>, String>,
     {
         let table = event.table_name();
@@ -394,7 +395,9 @@ impl SubscriptionManager {
     ///
     /// # Arguments
     ///
-    /// * `db` - Database reference for re-executing subscription queries
+    /// * `db` - Shared, lock-guarded database handle to re-execute subscription queries against.
+    ///   Acquires a fresh read lock per event (dropped before the next `try_recv`), rather than
+    ///   holding one for the loop's lifetime, so this never blocks a concurrent writer (#6448).
     ///
     /// # Note
     ///
@@ -403,12 +406,13 @@ impl SubscriptionManager {
     pub async fn run_event_loop(
         &self,
         mut change_rx: vibesql_storage::ChangeEventReceiver,
-        db: Arc<Database>,
+        db: SharedDatabase,
     ) {
         loop {
             match change_rx.try_recv() {
                 Ok(event) => {
-                    self.handle_change(event, &db).await;
+                    let guard = db.read().await;
+                    self.handle_change(event, &guard).await;
                 }
                 Err(RecvError::Lagged(n)) => {
                     warn!(lagged_count = n, "SubscriptionManager lagged behind change events");

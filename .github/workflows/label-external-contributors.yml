@@ -20,6 +20,22 @@ jobs:
             const { owner, repo } = context.repo;
             const username = context.payload.issue.user.login;
 
+            // This repo's own Loom automation files issues as a GitHub App bot
+            // identity. `checkCollaborator` is a traditional-user-account API and
+            // always throws for a bot login regardless of the App installation's
+            // actual permissions, so without this allowlist every issue the bot
+            // files gets mislabeled `external` (see #6445). Keep this list scoped
+            // to exactly the bot logins this repo's own automation uses — a bot
+            // account is not inherently trustworthy, so any login not on this list
+            // (dependabot, other third-party App bots, etc.) still goes through the
+            // normal collaborator check below.
+            const TRUSTED_BOT_LOGINS = ['loom-fleet-dispatch[bot]'];
+
+            if (context.payload.issue.user.type === 'Bot' && TRUSTED_BOT_LOGINS.includes(username)) {
+              console.log(`${username} is a trusted automation bot — skipping external label`);
+              return;
+            }
+
             try {
               await github.rest.repos.checkCollaborator({
                 owner,

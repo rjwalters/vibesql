@@ -13,12 +13,11 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
-use vibesql_storage::Database;
 
 use super::{graphql, types::*};
 use crate::{
     observability::ServerMetrics,
-    registry::DatabaseRegistry,
+    registry::{DatabaseRegistry, SharedDatabase},
     replication::{
         role_str, ReplicationHandle, SqlError, SQLSTATE_FATAL, SQLSTATE_NOT_LEADER, SQLSTATE_RETRY,
     },
@@ -66,8 +65,15 @@ pub const DATABASE_HEADER: &str = "X-Database-Name";
 pub struct HttpState {
     /// Database registry for shared database access
     pub registry: DatabaseRegistry,
-    /// Legacy database reference for backwards compatibility (e.g., subscriptions, table listing)
-    pub db: Arc<Database>,
+    /// Shared, lock-guarded handle to the standalone HTTP database — the
+    /// **same** registry entry (see [`DEFAULT_DATABASE_NAME`]) that
+    /// `/api/query`, `/api/tables`, GraphQL, and the storage/blob router all
+    /// read and write through (#6448). Used directly by the (synchronous,
+    /// list-only) `list_tables`/`get_table_info` handlers and by the
+    /// subscription event loop; every other handler resolves its own
+    /// [`SharedDatabase`] per-request via `registry.get_or_create` (which
+    /// returns a clone of this same handle for [`DEFAULT_DATABASE_NAME`]).
+    pub db: SharedDatabase,
     /// Subscription manager for real-time updates
     pub subscription_manager: Arc<SubscriptionManager>,
     /// Optional server metrics for observability
@@ -162,7 +168,6 @@ impl HttpState {
             }
         }
     }
-
 }
 
 /// Map an execution error to an HTTP response, translating a structured
@@ -170,19 +175,18 @@ impl HttpState {
 /// / FATAL surface) onto idiomatic HTTP semantics (#5410). The mapping mirrors
 /// the wire path's SQLSTATEs:
 ///
-/// - **NotLeader** (`25006`) → **421 Misdirected Request** with the leader hint
-///   in the [`LEADER_HINT_HEADER`] response header (and the detail/hint in the
-///   body). 421 is the HTTP "you reached the wrong node, retarget" status — the
-///   HTTP-shaped equivalent of the wire redirect contract. The leader address
-///   lets a client redirect without re-probing the cluster.
-/// - **StalenessExceeded / ReadTimeout** (`57P03`) → **503 Service Unavailable**
-///   with `Retry-After: 1` — a retryable "can't serve this right now".
-/// - **FatalApply** (`58000`) → **503 Service Unavailable** — this node halted
-///   and must be restarted to resync.
+/// - **NotLeader** (`25006`) → **421 Misdirected Request** with the leader hint in the
+///   [`LEADER_HINT_HEADER`] response header (and the detail/hint in the body). 421 is the HTTP "you
+///   reached the wrong node, retarget" status — the HTTP-shaped equivalent of the wire redirect
+///   contract. The leader address lets a client redirect without re-probing the cluster.
+/// - **StalenessExceeded / ReadTimeout** (`57P03`) → **503 Service Unavailable** with `Retry-After:
+///   1` — a retryable "can't serve this right now".
+/// - **FatalApply** (`58000`) → **503 Service Unavailable** — this node halted and must be
+///   restarted to resync.
 /// - **Any other structured SqlError** → **500 Internal Server Error**.
-/// - **A plain (non-structured) executor error** — e.g. a deterministic
-///   constraint/SQL rejection, identical on every replica — → **400 Bad
-///   Request** with the SQL error message, the same status standalone uses.
+/// - **A plain (non-structured) executor error** — e.g. a deterministic constraint/SQL rejection,
+///   identical on every replica — → **400 Bad Request** with the SQL error message, the same status
+///   standalone uses.
 pub(crate) fn execution_error_response(err: &anyhow::Error) -> axum::response::Response {
     use axum::http::HeaderValue;
 
@@ -240,20 +244,51 @@ fn sql_error_message(e: &SqlError) -> String {
 /// Create the HTTP API router
 ///
 /// # Arguments
-/// * `db` - Legacy database reference for backwards compatibility (subscriptions, table listing)
+/// * `db` - Shared, lock-guarded handle to the standalone HTTP database — the same registry entry
+///   (`DEFAULT_DATABASE_NAME`) queries execute against (#6448); used directly by
+///   `list_tables`/`get_table_info` and the subscription event loop
 /// * `registry` - Database registry for shared database access
 /// * `subscription_manager` - Subscription manager for real-time updates
 /// * `metrics` - Optional server metrics for observability
-/// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"`
-///   escape hatch (default off; see
-///   [`crate::config::ServerConfig::graphql_allow_raw_where`])
+/// * `graphql_allow_raw_where` - Enable the legacy GraphQL `where: "<raw sql>"` escape hatch
+///   (default off; see [`crate::config::ServerConfig::graphql_allow_raw_where`])
 pub fn create_http_router(
-    db: Arc<Database>,
+    db: SharedDatabase,
     registry: DatabaseRegistry,
     subscription_manager: Arc<SubscriptionManager>,
     metrics: Option<ServerMetrics>,
     replication: Option<StdArc<ReplicationHandle>>,
     graphql_allow_raw_where: bool,
+) -> Router {
+    create_http_router_with_storage_config(
+        db,
+        registry,
+        subscription_manager,
+        metrics,
+        replication,
+        graphql_allow_raw_where,
+        vibesql_storage::BlobStorageConfig::default(),
+    )
+}
+
+/// Same as [`create_http_router`], but takes an explicit standalone blob
+/// storage backend config instead of always defaulting to the filesystem
+/// backend rooted at `/var/vibesql/storage`.
+///
+/// `create_http_router` is the production entry point (used by `main.rs` and
+/// every other caller) and always defaults to the filesystem backend, matching
+/// its previous behavior exactly. This variant exists so a test can build the
+/// **same** composite router (`/api/query` and `/api/storage/*` sharing one
+/// registry-backed database, per #6448) with an in-memory backend instead —
+/// without hand-duplicating the route list above and risking drift from it.
+pub(crate) fn create_http_router_with_storage_config(
+    db: SharedDatabase,
+    registry: DatabaseRegistry,
+    subscription_manager: Arc<SubscriptionManager>,
+    metrics: Option<ServerMetrics>,
+    replication: Option<StdArc<ReplicationHandle>>,
+    graphql_allow_raw_where: bool,
+    storage_config: vibesql_storage::BlobStorageConfig,
 ) -> Router {
     let state = HttpState {
         registry: registry.clone(),
@@ -303,7 +338,8 @@ pub fn create_http_router(
         let storage_router = super::storage::create_replicated_storage_router(storage_state);
         main_router.nest("/api/storage", storage_router)
     } else {
-        let storage_router = super::storage::create_storage_router(db, registry);
+        let storage_router =
+            super::storage::create_storage_router_with_config(storage_config, db, registry);
         main_router.nest("/api/storage", storage_router)
     }
 }
@@ -827,7 +863,8 @@ async fn execute_query(
 
 /// List all tables in the database
 async fn list_tables(State(state): State<HttpState>) -> impl IntoResponse {
-    let table_names = state.db.list_tables();
+    let db = state.db.read().await;
+    let table_names = db.list_tables();
 
     Json(json!({
         "tables": table_names,
@@ -840,12 +877,14 @@ async fn get_table_info(
     State(state): State<HttpState>,
     Path(table_name): Path<String>,
 ) -> impl IntoResponse {
+    let db = state.db.read().await;
+
     // Try to get the table (with case-insensitive lookup)
-    let table = state.db.get_table(&table_name);
+    let table = db.get_table(&table_name);
 
     if table.is_none() {
         // Try case-insensitive lookup
-        let table_names = state.db.list_tables();
+        let table_names = db.list_tables();
         if !table_names.iter().any(|t| t.eq_ignore_ascii_case(&table_name)) {
             return (
                 StatusCode::NOT_FOUND,
@@ -856,7 +895,7 @@ async fn get_table_info(
     }
 
     // Get schema information
-    if let Some(table) = state.db.get_table(&table_name) {
+    if let Some(table) = db.get_table(&table_name) {
         let schema = &table.schema;
         let pk_columns: Vec<&String> =
             schema.primary_key.as_ref().map(|pk| pk.iter().collect()).unwrap_or_default();
@@ -951,9 +990,9 @@ async fn subscribe_stream(
 
     // Subscriptions are coherent in both modes (#5422):
     //   * Standalone: fed by the local HTTP `Database`'s change stream.
-    //   * Replicated: fed by the consensus **apply-path** change feed — every
-    //     node emits a change event as it applies a committed entry, so a
-    //     subscriber on any node (leader or follower) observes committed writes.
+    //   * Replicated: fed by the consensus **apply-path** change feed — every node emits a change
+    //     event as it applies a committed entry, so a subscriber on any node (leader or follower)
+    //     observes committed writes.
     // The initial snapshot, PK detection, and initial result below therefore
     // read from the replicated state machine (not the empty local registry DB)
     // when in replicated mode, keeping the snapshot consistent with the feed.

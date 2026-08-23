@@ -5,8 +5,10 @@
 
 use anyhow::Result;
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+};
 
 /// Read data from the connection into the buffer
 pub async fn read_message(read_half: &mut OwnedReadHalf, read_buf: &mut BytesMut) -> Result<()> {

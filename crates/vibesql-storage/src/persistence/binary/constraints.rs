@@ -21,21 +21,20 @@
 //
 // The mapping below intentionally replicates the semantics of the CREATE
 // TABLE execution path (`vibesql-executor/src/create_table.rs` +
-// `ConstraintValidator::process_constraints`), which cannot be called from
+// `constraint_validator::process_constraints`), which cannot be called from
 // this crate (the executor depends on storage, not vice versa):
 //
-// - CHECK constraint names: explicit `CONSTRAINT <name>` when given,
-//   otherwise the expression's SQL text (SQLite-compatible error messages).
-//   Column-level CHECKs are collected first (in column order), then
-//   table-level CHECKs, matching `ConstraintValidator`.
-// - FK ordering: table-level constraints in declaration order, then
-//   column-level `REFERENCES` constraints in REVERSE column order (SQLite's
-//   FK id assignment, mirrored from `create_table.rs`).
-// - Implicit parent keys (`REFERENCES p` with no column list): parent column
-//   names are stored as empty strings and indices as 0, exactly like the
-//   CREATE path; enforcement resolves the parent's PK by name at runtime.
-// - Unknown parent tables keep placeholder indices (SQLite stores FK
-//   metadata even when the parent doesn't exist yet).
+// - CHECK constraint names: explicit `CONSTRAINT <name>` when given, otherwise the expression's SQL
+//   text (SQLite-compatible error messages). Column-level CHECKs are collected first (in column
+//   order), then table-level CHECKs, matching `constraint_validator::process_constraints`.
+// - FK ordering: table-level constraints in declaration order, then column-level `REFERENCES`
+//   constraints in REVERSE column order (SQLite's FK id assignment, mirrored from
+//   `create_table.rs`).
+// - Implicit parent keys (`REFERENCES p` with no column list): parent column names are stored as
+//   empty strings and indices as 0, exactly like the CREATE path; enforcement resolves the parent's
+//   PK by name at runtime.
+// - Unknown parent tables keep placeholder indices (SQLite stores FK metadata even when the parent
+//   doesn't exist yet).
 //
 // A `sql_source` that fails to re-parse, or that is not a CREATE TABLE
 // statement, is a hard load error — never a silently-unenforced constraint —
@@ -226,9 +225,10 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
         let col_name = &schema.columns[col_idx].name;
         let is_autoincrement = create.columns.iter().any(|col_def| {
             col_def.name.eq_ignore_ascii_case(col_name)
-                && col_def.constraints.iter().any(|c| {
-                    matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement)
-                })
+                && col_def
+                    .constraints
+                    .iter()
+                    .any(|c| matches!(c.kind, vibesql_ast::ColumnConstraintKind::AutoIncrement))
         });
         if is_autoincrement {
             schema.is_autoincrement = true;
@@ -274,7 +274,7 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
     // duplicates were still caught only because the implicit
     // `sqlite_autoindex_*` metadata IS serialized.
     //
-    // Ordering must match `ConstraintValidator::process_constraints` exactly
+    // Ordering must match `constraint_validator::process_constraints` exactly
     // (column-level UNIQUE in column order, then table-level UNIQUE in
     // declaration order): the positions align with the implicit autoindex
     // ordinals from `create_implicit_indexes` and with `Table`'s positional
@@ -321,7 +321,7 @@ pub(crate) fn rehydrate_constraints_from_sql_source(
     schema.unique_constraint_collations = unique_constraint_collations;
 
     // ---- CHECK constraints (column-level first, then table-level) ----
-    // Matches ConstraintValidator::process_constraints ordering and naming.
+    // Matches constraint_validator::process_constraints ordering and naming.
     let mut check_constraints: Vec<(String, vibesql_ast::Expression)> = Vec::new();
     for col_def in &create.columns {
         for constraint in &col_def.constraints {
@@ -506,7 +506,7 @@ mod tests {
         // Unnamed column-level CHECK gets the verbatim CHECK source text as
         // its name, preserving the original operator spacing (SQLite echoes
         // exactly this in "CHECK constraint failed: a > 0"). Same derivation
-        // as ConstraintValidator at CREATE time.
+        // as constraint_validator::process_constraints at CREATE time.
         assert_eq!(schema.check_constraints[0].0, "a > 0");
         // Named table-level CHECK keeps its explicit name.
         assert_eq!(schema.check_constraints[1].0, "b_pos");

@@ -793,8 +793,7 @@ fn test_create_index_temp_schema_qualified() {
 
 #[test]
 fn test_create_index_schema_qualified_if_not_exists() {
-    let stmt =
-        Parser::parse_sql("CREATE INDEX IF NOT EXISTS main.i1 ON t(x)").expect("parse");
+    let stmt = Parser::parse_sql("CREATE INDEX IF NOT EXISTS main.i1 ON t(x)").expect("parse");
     match stmt {
         Statement::CreateIndex(stmt) => {
             assert!(stmt.if_not_exists);

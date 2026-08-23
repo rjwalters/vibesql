@@ -6,13 +6,13 @@
 //! that behavior: it flags row values that appear anywhere other than the
 //! positions where SQLite accepts them:
 //!
-//! - both sides of a comparison / `IS` (`(a,b) = (c,d)`, arity must match;
-//!   nested row values pair up recursively);
-//! - one side of a comparison / `IS` when the other side is a scalar subquery
-//!   (`(a,b) = (SELECT x,y)`);
+//! - both sides of a comparison / `IS` (`(a,b) = (c,d)`, arity must match; nested row values pair
+//!   up recursively);
+//! - one side of a comparison / `IS` when the other side is a scalar subquery (`(a,b) = (SELECT
+//!   x,y)`);
 //! - all three operands of BETWEEN (row values or scalar subqueries);
-//! - the left-hand side of `IN (SELECT ...)` and `IN (list)` (where every list
-//!   element must be a row value of the same arity);
+//! - the left-hand side of `IN (SELECT ...)` and `IN (list)` (where every list element must be a
+//!   row value of the same arity);
 //! - the operand / WHEN values of a simple CASE.
 //!
 //! Runtime checks in the evaluators cover the same shapes for non-SELECT

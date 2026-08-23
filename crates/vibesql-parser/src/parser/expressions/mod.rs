@@ -40,6 +40,22 @@ impl Parser {
             return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
         }
 
+        // Try to parse as an "at" named placeholder (@name). SQLite documents
+        // `@AAAA` as working "exactly like a colon [`:AAAA`]" parameter
+        // (R-49783-61279): the lexer already tokenizes `@name` as
+        // `Token::UserVariable` (shared with the MySQL-style `SELECT ... INTO
+        // @var` procedural clause), but until now nothing consumed that token
+        // in ordinary expression position, so `SELECT @hello` failed with a
+        // generic `near "@hello": syntax error` instead of being treated as a
+        // bind parameter. `CREATE VIEW`/`CREATE TRIGGER` bodies still reject
+        // `@name` via their own raw-token scan (`token_is_variable`), which is
+        // unaffected by this change since it runs before expression parsing.
+        if let Token::UserVariable(name) = self.peek() {
+            let param_name = name.clone();
+            self.advance();
+            return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
+        }
+
         // Try to parse as a literal
         if let Some(expr) = self.parse_literal()? {
             return Ok(expr);

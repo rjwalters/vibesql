@@ -112,9 +112,7 @@ impl TriggerDefinition {
 
     /// Returns true if this trigger lives in the temp schema.
     pub fn is_temp(&self) -> bool {
-        self.schema
-            .as_deref()
-            .is_some_and(|s| s.eq_ignore_ascii_case("temp"))
+        self.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("temp"))
     }
 
     /// Check if the trigger is enabled

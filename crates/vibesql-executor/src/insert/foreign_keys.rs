@@ -1,7 +1,9 @@
 use vibesql_storage::DeferredFkViolation;
 
-use crate::errors::ExecutorError;
-use crate::foreign_key_check::{check_fk_row_existence, FkRowCheck};
+use crate::{
+    errors::ExecutorError,
+    foreign_key_check::{check_fk_row_existence, FkRowCheck},
+};
 
 /// Validate FOREIGN KEY constraints for a new row.
 ///

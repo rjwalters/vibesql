@@ -10,8 +10,7 @@
 
 use vibesql_types::{MySqlModeFlags, SqlMode, SqlValue};
 
-use crate::change_events::ChangeEvent;
-use crate::database::Database;
+use crate::{change_events::ChangeEvent, database::Database};
 
 // ============================================================================
 // SQL Mode Tests
@@ -963,9 +962,6 @@ fn mutating_transaction_clones_operations_snapshot_once_and_rolls_back() {
         !db.index_exists("idx_t_id2"),
         "ROLLBACK must restore Operations: index created in the txn is removed (#5413 preserved)"
     );
-    assert!(
-        db.index_exists("idx_t_id"),
-        "the pre-transaction index must survive ROLLBACK"
-    );
+    assert!(db.index_exists("idx_t_id"), "the pre-transaction index must survive ROLLBACK");
     assert_eq!(db.get_table("t").map(|t| t.row_count()), Some(0), "rolled-back rows are gone");
 }

@@ -2,8 +2,7 @@
 //!
 //! SQL:1999 Section 6.29: String value functions
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::coerce_to_string;
+use crate::{errors::ExecutorError, evaluator::functions::coercion::coerce_to_string};
 
 /// CHAR_LENGTH(string [USING unit]) / CHARACTER_LENGTH(string [USING unit])
 /// Return string length in characters or octets
@@ -148,8 +147,9 @@ pub(in crate::evaluator::functions) fn length(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn len_of(v: SqlValue) -> i64 {
         match length(&[v]).unwrap() {

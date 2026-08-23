@@ -18,8 +18,7 @@
 use vibesql_ast::AnalyzeStmt;
 use vibesql_storage::Database;
 
-use crate::errors::ExecutorError;
-use crate::sqlite_schema::is_sqlite_schema_table;
+use crate::{errors::ExecutorError, sqlite_schema::is_sqlite_schema_table_ref};
 
 /// Executor for ANALYZE statements
 pub struct AnalyzeExecutor;
@@ -66,7 +65,7 @@ impl AnalyzeExecutor {
                 // Special case: ANALYZE sqlite_master or sqlite_schema
                 // This is used in SQLite to rebuild sqlite_stat tables
                 // For VibeSQL, it's a no-op since sqlite_stat1 is virtual
-                if is_sqlite_schema_table(table_name) {
+                if is_sqlite_schema_table_ref(&database.catalog, table_name) {
                     return Ok("ANALYZE sqlite_master completed - sqlite_stat1 ready for queries"
                         .to_string());
                 }

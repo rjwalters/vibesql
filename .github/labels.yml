@@ -65,6 +65,20 @@
   description: Implementation blocked, needs help or clarification
   color: "EF4444"  # red-500
 
+- name: blocked-upstream
+  description: "Parked: waiting on an upstream dependency release, not on us"
+  color: "FBCA04"  # yellow (matches tier:goal-supporting)
+  # IMPORTANT: always apply this label TOGETHER WITH loom:blocked, never alone.
+  # loom-daemon's SKIP_LABELS re-dispatch exclusion only recognizes
+  # loom:blocked, loom:operator-only, and loom:needs-capability — it has no
+  # knowledge of this repo-local label. An issue carrying only
+  # blocked-upstream is invisible to that exclusion and WILL be re-dispatched
+  # by the daemon on its normal polling cadence (confirmed incident: #5389
+  # was re-dispatched 3x in <30min while it carried blocked-upstream alone,
+  # per #6399). Daemon-side recognition of repo-local skip-labels is tracked
+  # upstream in rjwalters/loom#6685 and rjwalters/loom#6670; until either
+  # lands, the loom:blocked pairing above is the only mitigation.
+
 - name: loom:urgent
   description: Critical/blocking issue requiring immediate attention
   color: "DC2626"  # red-600

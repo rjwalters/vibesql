@@ -95,12 +95,35 @@ jobs:
 
   # ============================================================================
   # Fast CI for branches/PRs - optimized for speed
+  #
+  # History (do not let a third occurrence get debugged from scratch):
+  #   - #5342 raised this job's timeout-minutes from 25 to 35 after the suite
+  #     grew into the previous cap.
+  #   - #6479 found the cap being brushed again (~40% timeout-kill rate on
+  #     unrelated branches, always killed mid "Run integration tests") and
+  #     diagnosed the real cause: this used to be a single `test` job that ran
+  #     unit tests, then `cargo clean` + `rm -rf target/release/deps` to save
+  #     disk, then integration tests — forcing the integration step to pay for
+  #     a *second full release rebuild* under the same clock as the first.
+  #     Fixed by splitting into the two independent jobs below (test-unit /
+  #     test-integration), each getting its own dedicated timeout budget and
+  #     its own from-scratch build, running in parallel instead of serialized
+  #     behind one shared 35-minute cap. This also means a timeout-kill (or a
+  #     genuine failure) in one phase no longer masks whether the other phase
+  #     ever got a fair share of the clock — check `gh run view <run-id>
+  #     --json jobs` for the per-job `conclusion` field (`cancelled` = timeout
+  #     kill, `failure` = genuine test failure) without opening either job's
+  #     step list.
+  #   - If this pattern (cap creeping back up against real run times) recurs a
+  #     third time, look for the same shape: redundant rebuilds sharing one
+  #     clock, not just "raise the cap again".
   # ============================================================================
-  test:
+  test-unit:
     runs-on: ubuntu-latest
-    # Recent successful runs take 18-23 min (growing with the test suite); 25 min
-    # left too little headroom and caused timeout-kill flakes (see issue #5342).
-    timeout-minutes: 35
+    # Provisional estimate for a single from-scratch release build + unit test
+    # run (no more back-to-back double build — see history above). Revisit
+    # once several real runs establish an actual measured range.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -116,20 +139,122 @@ jobs:
       - name: Run unit tests
         run: cargo test --release --no-default-features --features parallel,spatial -- --skip run_sqllogictest_suite
 
-      - name: Clean build artifacts to save disk space
-        run: |
-          cargo clean
-          rm -rf target/release/deps
-          df -h
+  test-integration:
+    runs-on: ubuntu-latest
+    # See test-unit above: same provisional budget, independent clock. Runs
+    # on its own runner in parallel with test-unit, so no shared disk/clock
+    # pressure and no need for the old mid-job `cargo clean` workaround.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
 
       - name: Run integration tests
         run: cargo test --release --no-default-features --features parallel,spatial --test '*' -- --skip run_sqllogictest_suite
         continue-on-error: false
 
-      - name: Final cleanup
+  # ============================================================================
+  # Root `vibesql` package's own integration tests (#6480).
+  #
+  # Why this job exists: root Cargo.toml is BOTH the workspace root AND a real
+  # package (`[package] name = "vibesql"`), and its `[workspace]` table sets
+  # `default-members` EXPLICITLY to the crates/* library/binary crates only —
+  # the root `vibesql` package itself is deliberately left out of that list (to
+  # keep everyday `cargo build`/`cargo test` fast). Cargo's package-selection
+  # rules mean an explicit `default-members` list overrides the usual "select
+  # the current directory's own package" default, even though that package IS
+  # the workspace root. Consequence: the two bare `cargo test` invocations
+  # above (test-unit / test-integration — no `-p`, no `--workspace`) already
+  # cover every crates/* member (confirmed: vibesql-cli's `--bin vibesql`
+  # executor test suite already runs there), but they silently never compile
+  # or run ANY of the ~90 `[[test]]` integration-test targets declared directly
+  # in the root Cargo.toml (tests/executor, tests/storage, tests/security,
+  # tests/regression, tests/integration, ...) — a much larger gap than the
+  # "vibesql-cli tests never run in CI" framing #6480 opened with.
+  #
+  # We deliberately do NOT switch the invocation to `--workspace`: that would
+  # pull in every `[[test]]` target unconditionally, including
+  # tests/z_compliance/sqltest_conformance.rs, which fails to compile today
+  # with an unrelated pre-existing bug (#6412, a non-exhaustive match over
+  # `Statement` missing the ATTACH/DETACH variants) — turning this whole gate
+  # permanently red for a reason outside this job's purview. Root's
+  # tests/z_compliance/* suite (SQLLogicTest, PostgreSQL regression,
+  # sqltest_conformance) is *already* intentionally excluded from fast per-PR
+  # CI — see the ci-extended.yml note at the bottom of this file — so this job
+  # explicitly selects `-p vibesql` and enumerates every OTHER root-package
+  # `[[test]]` target (derived at run time from Cargo.toml, via its `name`/
+  # `path` pairs, so newly-added tests are picked up automatically without
+  # editing this file) rather than fighting that existing split.
+  #
+  # SKIP_TESTS below additionally excludes four targets — benchmark_example,
+  # dialect_tests, select5_verification, metrics — that do NOT live under
+  # tests/z_compliance/ but transitively `#[path = "../sqllogictest/mod.rs"]`-
+  # include the same broken db_adapter/executor.rs match statement, so they
+  # hit the identical #6412 compile error. Verified empirically (2026-08-22,
+  # `cargo check -p vibesql --keep-going` over the full non-z_compliance
+  # target list): exactly these four fail, all with the same E0004. Once
+  # #6412 lands, drop these four names from SKIP_TESTS to restore their
+  # coverage too.
+  #
+  # SKIP_TESTS also excludes six targets with genuine pre-existing test
+  # *failures* (not compile errors), discovered by actually running the full
+  # ~83-target set with `--no-fail-fast` (2026-08-22, since none of these
+  # have ever run in CI before, there was no prior signal): alter_table (a
+  # DROP COLUMN IF EXISTS bug, one test's own comment reads "known bug"),
+  # delimited_identifiers, error_handling, sqlite_roundtrip, web_demo_basic
+  # (a data-generation/escaping bug — see #6497), and update_pk_performance
+  # (a wall-clock performance-threshold assertion, unsuitable for a shared CI
+  # runner's variable load regardless of correctness). Landing this job with
+  # any of these included would turn it red on the very first run for
+  # reasons this CI-wiring PR did not introduce. Tracked for a follow-up fix
+  # + re-inclusion in #6497.
+  # ============================================================================
+  test-root-package:
+    runs-on: ubuntu-latest
+    # Provisional — this job (and its ~77 previously-never-run integration
+    # test targets) has no measured CI runtime history yet. Revisit once
+    # several real runs establish an actual range; the sibling jobs above
+    # started at the same 25-minute provisional budget (see their History
+    # comment) before being tuned against real data.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/free-disk-space
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key-suffix: ci
+
+      - name: Run root vibesql package's integration tests (excludes tests/z_compliance/*, #6412-affected targets, and #6497 pre-existing failures)
         run: |
-          cargo clean
-          df -h
+          SKIP_TESTS='^(sqllogictest_basic|sqllogictest_benchmark|sqllogictest_runner|sqllogictest_sqlite|sqllogictest_suite|sqltest_conformance|pgsql_regress|benchmark_example|dialect_tests|select5_verification|metrics|alter_table|delimited_identifiers|error_handling|sqlite_roundtrip|web_demo_basic|update_pk_performance)$'
+          TESTS=$(awk '
+            /^\[\[test\]\]$/ { name=""; path="" }
+            /^name = "/ { name=$0; sub(/^name = "/,"",name); sub(/"$/,"",name) }
+            /^path = "/ { path=$0; sub(/^path = "/,"",path); sub(/"$/,"",path)
+              if (path !~ /^tests\/z_compliance\//) print name
+            }
+          ' Cargo.toml)
+          ARGS=()
+          while IFS= read -r t; do
+            if [ -n "$t" ] && ! [[ "$t" =~ $SKIP_TESTS ]]; then
+              ARGS+=(--test "$t")
+            fi
+          done <<< "$TESTS"
+          echo "Running ${#ARGS[@]} root-package integration test targets"
+          cargo test -p vibesql --release "${ARGS[@]}" -- --skip run_sqllogictest_suite
 
   # ============================================================================
   # WASM build check - catches wasm32-only breakage (e.g., getrandom backend

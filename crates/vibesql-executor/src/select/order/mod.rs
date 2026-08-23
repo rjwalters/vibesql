@@ -13,10 +13,6 @@ mod resolution;
 
 // Re-export the compare_sql_values function from the grouping module
 // for use in comparison.rs
-use super::grouping;
-
-use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
-
 // Re-export public API
 pub(in crate::select) use comparison::compare_rows_by_sort_keys;
 pub(crate) use position::{
@@ -27,6 +23,9 @@ pub(crate) use resolution::{
     resolve_order_by_alias, resolve_order_by_for_aggregates, resolve_where_aliases,
     resolve_where_aliases_with_schema, select_list_has_aliases,
 };
+
+use super::grouping;
+use crate::{errors::ExecutorError, evaluator::CombinedExpressionEvaluator};
 
 /// Sort key for ORDER BY: (value, direction, nulls_order, collation)
 pub(in crate::select) type SortKey = (
@@ -140,16 +139,14 @@ pub(crate) fn apply_order_by_on_projected_output(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "parallel")]
+    use rayon::slice::ParallelSliceMut;
     use vibesql_storage::Row;
     use vibesql_types::SqlValue;
 
-    use super::comparison::compare_rows_by_sort_keys;
-    use super::*;
-
     #[cfg(feature = "parallel")]
     use super::super::parallel::ParallelConfig;
-    #[cfg(feature = "parallel")]
-    use rayon::slice::ParallelSliceMut;
+    use super::{comparison::compare_rows_by_sort_keys, *};
 
     /// Test the comparison function logic with pre-evaluated sort keys
     /// This tests the parallel/sequential sorting logic without needing full evaluator setup

@@ -6,10 +6,10 @@
 //! if intermediate states transiently duplicate keys.
 //!
 //! These tests verify both:
-//! 1. Statements that previously produced spurious "UNIQUE constraint failed" errors
-//!    now succeed and produce the expected final state.
-//! 2. Statements that produce a genuine final-state duplicate still fail, with the
-//!    error reported at the end of the statement (post-statement deferred check).
+//! 1. Statements that previously produced spurious "UNIQUE constraint failed" errors now succeed
+//!    and produce the expected final state.
+//! 2. Statements that produce a genuine final-state duplicate still fail, with the error reported
+//!    at the end of the statement (post-statement deferred check).
 
 use vibesql_executor::{
     CreateTableExecutor, DeleteExecutor, ExecutorError, InsertExecutor, UpdateExecutor,

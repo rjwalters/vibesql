@@ -684,10 +684,9 @@ fn test_create_trigger_temporary_qualifier_parses_with_verbatim_schema() {
     // so the parser accepts it and carries the schema spelling verbatim; the
     // executor then rejects it with SQLite's `unknown database temporary`
     // (trigger7-1.2) unless a database of that name is attached.
-    let stmt = Parser::parse_sql(
-        "CREATE TRIGGER temporary.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;",
-    )
-    .expect("CREATE TRIGGER temporary.r1 must parse (validated at execution)");
+    let stmt =
+        Parser::parse_sql("CREATE TRIGGER temporary.r1 AFTER INSERT ON t1 BEGIN SELECT 1; END;")
+            .expect("CREATE TRIGGER temporary.r1 must parse (validated at execution)");
     match stmt {
         Statement::CreateTrigger(trigger) => {
             // Verbatim source spelling preserved for the executor's

@@ -5,28 +5,23 @@
 //! This module is the second of four sequential PRs decomposing MVCC
 //! Phase 1 from the umbrella issue #5136:
 //!
-//! - **Phase 1a** ([PR #5142]) — added `xmin`/`xmax` fields to [`Row`] and
-//!   the v6→v7 persistence shim. Inert at the executor level.
-//! - **Phase 1b** (this PR, #5149) — introduces [`TxnSnapshot`] and the
-//!   [`Row::visible_to`] predicate. Snapshot capture is wired into
-//!   `TransactionState::Active`, but **nothing reads it yet**. The
-//!   predicate is pure-function and has no callers in this PR; Phase 1c
-//!   and Phase 1d wire up the writer and reader respectively.
-//! - **Phase 1c** (#5150, future) — write-path `xmin`/`xmax` stamping on
-//!   INSERT/UPDATE/DELETE.
-//! - **Phase 1d** (#5151, future) — read-path visibility filtering on
-//!   SELECT scans; cross-snapshot FK deferred-replay coordination; flips
-//!   the `mvcc_enabled` feature flag on.
+//! - **Phase 1a** ([PR #5142]) — added `xmin`/`xmax` fields to [`Row`] and the v6→v7 persistence
+//!   shim. Inert at the executor level.
+//! - **Phase 1b** (this PR, #5149) — introduces [`TxnSnapshot`] and the [`Row::visible_to`]
+//!   predicate. Snapshot capture is wired into `TransactionState::Active`, but **nothing reads it
+//!   yet**. The predicate is pure-function and has no callers in this PR; Phase 1c and Phase 1d
+//!   wire up the writer and reader respectively.
+//! - **Phase 1c** (#5150, future) — write-path `xmin`/`xmax` stamping on INSERT/UPDATE/DELETE.
+//! - **Phase 1d** (#5151, future) — read-path visibility filtering on SELECT scans; cross-snapshot
+//!   FK deferred-replay coordination; flips the `mvcc_enabled` feature flag on.
 //!
 //! # API surface (kept minimal on purpose)
 //!
-//! - [`TxnSnapshot`] — a captured view of which transactions are
-//!   committed-as-of-then. Plain data, `Clone + Debug`.
-//! - [`TxnSnapshot::empty`] — the "everything pre-MVCC is visible, nothing
-//!   else is" snapshot used by non-transactional reads and as the default
-//!   in transactions that haven't yet captured one.
-//! - [`Row::visible_to`] — `&self, &TxnSnapshot -> bool`. The single
-//!   visibility predicate.
+//! - [`TxnSnapshot`] — a captured view of which transactions are committed-as-of-then. Plain data,
+//!   `Clone + Debug`.
+//! - [`TxnSnapshot::empty`] — the "everything pre-MVCC is visible, nothing else is" snapshot used
+//!   by non-transactional reads and as the default in transactions that haven't yet captured one.
+//! - [`Row::visible_to`] — `&self, &TxnSnapshot -> bool`. The single visibility predicate.
 //!
 //! Phase 1c/1d should not need to expand this surface — they only need to
 //! call `Row::visible_to(snapshot)` from the scan boundary and to pass the
@@ -37,17 +32,15 @@
 //! A row `r` with `(r.xmin, r.xmax)` is **visible to** a snapshot `s`
 //! iff all three of these hold:
 //!
-//! 1. `r.xmin <= s.xmax_committed` — the row's creator committed before
-//!    our snapshot was taken (or `r.xmin` is the pre-MVCC sentinel `0`,
-//!    which is `<= s.xmax_committed` for any non-zero snapshot).
-//! 2. `r.xmin` is **not** in `s.in_progress` — the row's creator was
-//!    still mid-flight when our snapshot was taken, so under snapshot
-//!    isolation we don't see it.
-//! 3. Either `r.xmax` is `None` (still live), OR `r.xmax > s.xmin_active`
-//!    (deletion happened after the oldest still-running txn at snapshot
-//!    time, so it can't have been committed before our snapshot), OR
-//!    `r.xmax` is in `s.in_progress` (the deleter was still mid-flight,
-//!    so the delete isn't yet visible to us).
+//! 1. `r.xmin <= s.xmax_committed` — the row's creator committed before our snapshot was taken (or
+//!    `r.xmin` is the pre-MVCC sentinel `0`, which is `<= s.xmax_committed` for any non-zero
+//!    snapshot).
+//! 2. `r.xmin` is **not** in `s.in_progress` — the row's creator was still mid-flight when our
+//!    snapshot was taken, so under snapshot isolation we don't see it.
+//! 3. Either `r.xmax` is `None` (still live), OR `r.xmax > s.xmin_active` (deletion happened after
+//!    the oldest still-running txn at snapshot time, so it can't have been committed before our
+//!    snapshot), OR `r.xmax` is in `s.in_progress` (the deleter was still mid-flight, so the delete
+//!    isn't yet visible to us).
 //!
 //! The third clause is intentionally optimistic: it errs on the side of
 //! **showing** rows that *might* have been deleted by a concurrent
@@ -64,12 +57,10 @@
 //! committed-or-still-running transactions. If a transaction aborts,
 //! Phase 1c is responsible for either:
 //!
-//! - Reverting the `xmin`/`xmax` stamps it made (current `rollback_transaction`
-//!   already restores `original_tables` from snapshot, which discards
-//!   any stamping), OR
-//! - Adding an `aborted: HashSet<TxnId>` field to [`TxnSnapshot`] and
-//!   extending the predicate with an "ignore writes from aborted txns"
-//!   clause.
+//! - Reverting the `xmin`/`xmax` stamps it made (current `rollback_transaction` already restores
+//!   `original_tables` from snapshot, which discards any stamping), OR
+//! - Adding an `aborted: HashSet<TxnId>` field to [`TxnSnapshot`] and extending the predicate with
+//!   an "ignore writes from aborted txns" clause.
 //!
 //! The current snapshot-isolation semantics — combined with
 //! `TransactionManager::rollback_transaction` restoring full table
@@ -95,19 +86,16 @@ use crate::row::TxnId;
 ///
 /// # Fields
 ///
-/// - [`xmin_active`](Self::xmin_active) — the lowest [`TxnId`] that was
-///   **still running** at snapshot time. Any row whose `xmax > xmin_active`
-///   was deleted by a transaction that started after our snapshot's
-///   oldest concurrent peer, and thus may not yet have been committed
-///   when we took our snapshot.
-/// - [`xmax_committed`](Self::xmax_committed) — the largest [`TxnId`]
-///   that had **already committed** at snapshot time. Rows whose
-///   `xmin > xmax_committed` were definitely created after our snapshot
-///   and are invisible.
-/// - [`in_progress`](Self::in_progress) — the set of transactions that
-///   were still running at snapshot time. Writes by these transactions
-///   are invisible to us regardless of where their `TxnId` falls
-///   relative to `xmin_active` / `xmax_committed`.
+/// - [`xmin_active`](Self::xmin_active) — the lowest [`TxnId`] that was **still running** at
+///   snapshot time. Any row whose `xmax > xmin_active` was deleted by a transaction that started
+///   after our snapshot's oldest concurrent peer, and thus may not yet have been committed when we
+///   took our snapshot.
+/// - [`xmax_committed`](Self::xmax_committed) — the largest [`TxnId`] that had **already
+///   committed** at snapshot time. Rows whose `xmin > xmax_committed` were definitely created after
+///   our snapshot and are invisible.
+/// - [`in_progress`](Self::in_progress) — the set of transactions that were still running at
+///   snapshot time. Writes by these transactions are invisible to us regardless of where their
+///   `TxnId` falls relative to `xmin_active` / `xmax_committed`.
 ///
 /// # Phase 1b note
 ///
@@ -171,11 +159,7 @@ impl TxnSnapshot {
     /// safe-by-default — code that hasn't been migrated to capture real
     /// snapshots will see exactly the rows it saw before Phase 1.
     pub fn empty() -> Self {
-        TxnSnapshot {
-            xmin_active: 0,
-            xmax_committed: 0,
-            in_progress: HashSet::new(),
-        }
+        TxnSnapshot { xmin_active: 0, xmax_committed: 0, in_progress: HashSet::new() }
     }
 
     /// Create a snapshot from the explicit components.
@@ -183,11 +167,7 @@ impl TxnSnapshot {
     /// Intended for tests and for the transaction manager's capture
     /// logic; production code should prefer the manager-driven helpers
     /// in `database::transactions`.
-    pub fn new(
-        xmin_active: TxnId,
-        xmax_committed: TxnId,
-        in_progress: HashSet<TxnId>,
-    ) -> Self {
+    pub fn new(xmin_active: TxnId, xmax_committed: TxnId, in_progress: HashSet<TxnId>) -> Self {
         TxnSnapshot { xmin_active, xmax_committed, in_progress }
     }
 
@@ -222,14 +202,12 @@ impl TxnSnapshot {
 // xmin/xmax with the current transaction id?". The decision is gated on the
 // `mvcc_enabled` feature flag:
 //
-// - Feature OFF (default): all helpers are no-ops. Rows pass through with
-//   their constructor defaults (xmin = PRE_MVCC_TXN_ID, xmax = None). This
-//   preserves bit-for-bit pre-MVCC behavior.
-// - Feature ON: when called with `Some(txn_id)`, the helpers stamp the
-//   row with the active transaction id. When called with `None` (autocommit
-//   path with no active transaction), the row keeps the pre-MVCC sentinel.
-//   Phase 1d will revisit autocommit semantics; this is the conservative
-//   choice for Phase 1c.
+// - Feature OFF (default): all helpers are no-ops. Rows pass through with their constructor
+//   defaults (xmin = PRE_MVCC_TXN_ID, xmax = None). This preserves bit-for-bit pre-MVCC behavior.
+// - Feature ON: when called with `Some(txn_id)`, the helpers stamp the row with the active
+//   transaction id. When called with `None` (autocommit path with no active transaction), the row
+//   keeps the pre-MVCC sentinel. Phase 1d will revisit autocommit semantics; this is the
+//   conservative choice for Phase 1c.
 //
 // The helpers operate by `&mut Row` so the caller can choose where they
 // fit into the write pipeline (validators may run before or after

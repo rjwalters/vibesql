@@ -1,7 +1,8 @@
 //! Tests for schema-qualified table names in DML statements
 
-use crate::Parser;
 use vibesql_ast::Statement;
+
+use crate::Parser;
 
 #[test]
 fn test_insert_schema_qualified_quoted() {

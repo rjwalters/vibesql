@@ -88,7 +88,8 @@ fn resolve_order_by_for_aggregates_inner(
     select_list: &[vibesql_ast::SelectItem],
 ) -> vibesql_ast::Expression {
     // Check for numeric column position (ORDER BY 1, 2, 3, etc.)
-    // NOTE: At this point we're in a nested expression, so integer literals are NOT column positions
+    // NOTE: At this point we're in a nested expression, so integer literals are NOT column
+    // positions
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(pos)) = order_expr {
         if *pos > 0 && (*pos as usize) <= select_list.len() {
             let idx = (*pos as usize) - 1;
@@ -496,11 +497,9 @@ pub(crate) fn resolve_order_by_alias<'a>(
     if let vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(b)) = order_expr {
         let synthetic_name = if *b { "true" } else { "false" };
         let column_exists_in_schema = schema.is_some_and(|s| {
-            s.table_schemas
-                .values()
-                .any(|(_start_idx, table_schema)| {
-                    table_schema.get_column_index(synthetic_name).is_some()
-                })
+            s.table_schemas.values().any(|(_start_idx, table_schema)| {
+                table_schema.get_column_index(synthetic_name).is_some()
+            })
         });
         if column_exists_in_schema {
             return Ok(Cow::Owned(vibesql_ast::Expression::ColumnRef(
@@ -531,11 +530,13 @@ pub(crate) fn resolve_order_by_alias<'a>(
             // HOWEVER: If the column exists in the FROM schema, we should NOT transform it
             // to the alias. The ORDER BY should reference the actual column from the schema.
             //
-            // Example: SELECT cnt as tests_affected FROM (SELECT COUNT(*) as cnt ...) sub ORDER BY cnt
-            // Here, 'cnt' exists in the subquery schema, so ORDER BY cnt should evaluate 'cnt' directly,
-            // not be transformed to 'tests_affected' (which doesn't exist in the schema).
+            // Example: SELECT cnt as tests_affected FROM (SELECT COUNT(*) as cnt ...) sub ORDER BY
+            // cnt Here, 'cnt' exists in the subquery schema, so ORDER BY cnt should
+            // evaluate 'cnt' directly, not be transformed to 'tests_affected' (which
+            // doesn't exist in the schema).
             //
-            // Only transform to alias when the column does NOT exist in the FROM schema (rare case).
+            // Only transform to alias when the column does NOT exist in the FROM schema (rare
+            // case).
             let column_exists_in_schema = schema.is_some_and(|s| {
                 // Check if column exists in any table in the schema
                 s.table_schemas.values().any(|(_start_idx, table_schema)| {
@@ -1231,7 +1232,8 @@ fn resolve_where_expression_with_schema(
                     {
                         let col_name = sel_col_id.column_canonical();
                         if col_name.eq_ignore_ascii_case(column) {
-                            // The name matches a column reference in SELECT - don't resolve to alias
+                            // The name matches a column reference in SELECT - don't resolve to
+                            // alias
                             return expr.clone();
                         }
                     }
@@ -1241,7 +1243,8 @@ fn resolve_where_expression_with_schema(
                     {
                         let col_name = sel_col_id.column_canonical();
                         if col_name.eq_ignore_ascii_case(column) {
-                            // The name matches a column reference in SELECT - don't resolve to alias
+                            // The name matches a column reference in SELECT - don't resolve to
+                            // alias
                             return expr.clone();
                         }
                     }

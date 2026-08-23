@@ -162,7 +162,7 @@ fn add_generated_not_null_check_reports_check_first() {
     let mut db = Database::new();
     exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
     exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2), ('null!', NULL), (3, 4)").unwrap();
-    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d AS (b+1) NOT NULL CHECK(a!=1)")
-        .unwrap_err();
+    let err =
+        exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d AS (b+1) NOT NULL CHECK(a!=1)").unwrap_err();
     assert_eq!(err, "CHECK constraint failed");
 }

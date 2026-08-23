@@ -95,18 +95,16 @@ pub fn acquire_exclusive(db_path: &Path, timeout: Duration) -> Result<DatabaseLo
     // `truncate(false)`: the lock file's contents are irrelevant (it is a pure
     // flock target), but truncating another process's open lock file would be
     // needless churn.
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| {
-            StorageError::IoError(format!(
-                "Failed to open lock file {}: {}",
-                lock_path.display(),
-                e
-            ))
-        })?;
+    let file =
+        OpenOptions::new().create(true).write(true).truncate(false).open(&lock_path).map_err(
+            |e| {
+                StorageError::IoError(format!(
+                    "Failed to open lock file {}: {}",
+                    lock_path.display(),
+                    e
+                ))
+            },
+        )?;
 
     let deadline = Instant::now() + timeout;
     loop {

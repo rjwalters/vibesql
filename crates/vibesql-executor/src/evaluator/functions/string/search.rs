@@ -3,8 +3,10 @@
 //! Functions for finding substrings within strings
 //! Includes POSITION (SQL standard), INSTR and LOCATE (MySQL/Oracle)
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_string};
+use crate::{
+    errors::ExecutorError,
+    evaluator::functions::coercion::{coerce_to_integer, coerce_to_string},
+};
 
 /// POSITION(substring IN string) - Find position (1-indexed)
 /// SQL:1999 Section 6.29: String value functions

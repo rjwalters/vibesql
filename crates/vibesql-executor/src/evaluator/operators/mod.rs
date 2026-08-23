@@ -16,11 +16,10 @@ use arithmetic::ArithmeticOps;
 use bitwise::BitwiseOps;
 use comparison::ComparisonOps;
 use logical::LogicalOps;
-use string::StringOps;
-use vector::VectorOps;
-
 // Re-export truthiness helpers for use in CASE evaluation and row selection
 pub use logical::{check_constraint_violated, is_truthy, is_truthy_string};
+use string::StringOps;
+use vector::VectorOps;
 use vibesql_types::SqlValue;
 
 use crate::errors::ExecutorError;

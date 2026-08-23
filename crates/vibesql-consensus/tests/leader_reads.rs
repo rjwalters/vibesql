@@ -7,14 +7,12 @@
 //! partition test), and proves the B2 PR 1 read-path contract end-to-end:
 //!
 //! - a leader serves `query_linearizable` and sees its own writes;
-//! - a follower redirects linearizable reads with a leader hint while its
-//!   plain `query` keeps serving (stale-allowed by contract);
-//! - **fencing**: a leader partitioned into the minority FAILS
-//!   `query_linearizable` (it cannot confirm a quorum) while the
-//!   majority's new leader serves both writes and linearizable reads; the
-//!   minority leader's plain local read stays available but stale; after
-//!   the heal the deposed leader steps down and redirects at the real
-//!   leader.
+//! - a follower redirects linearizable reads with a leader hint while its plain `query` keeps
+//!   serving (stale-allowed by contract);
+//! - **fencing**: a leader partitioned into the minority FAILS `query_linearizable` (it cannot
+//!   confirm a quorum) while the majority's new leader serves both writes and linearizable reads;
+//!   the minority leader's plain local read stays available but stale; after the heal the deposed
+//!   leader steps down and redirects at the real leader.
 //!
 //! The `Proxy` here intentionally duplicates the one in
 //! `tests/tcp_cluster.rs`: integration-test binaries are separate crates,
@@ -24,15 +22,20 @@
 //! All synchronization is bounded polling (10s deadline) — no bare
 //! sleeps; every wait fails loudly instead of hanging.
 
-use std::collections::BTreeMap;
-use std::net::TcpListener as StdTcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    net::TcpListener as StdTcpListener,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
 
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
-
+use tokio::{
+    net::{TcpListener, TcpStream},
+    task::JoinHandle,
+};
 use vibesql_consensus::{
     ApplyOutcome, ClusterConfig, ConsensusError, LogIndex, MvccRaftNode, QueryResult, RaftTuning,
     Role,
@@ -436,7 +439,10 @@ async fn partitioned_stale_leader_is_fenced_from_linearizable_reads() {
     // The minority leader is provably stale now (it cannot have applied
     // the majority write) — its local read still shows only the prefix,
     // and the linearizable path still refuses to serve it.
-    assert_eq!(cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap().rows, seeded);
+    assert_eq!(
+        cluster.node(old_leader).query("SELECT id, v FROM t ORDER BY id").unwrap().rows,
+        seeded
+    );
     assert!(
         matches!(
             linearizable(&cluster, old_leader, "SELECT id, v FROM t").await,

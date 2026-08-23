@@ -46,17 +46,16 @@ mod tests;
 
 use std::sync::{Arc, Mutex};
 
-use crossbeam_deque::{Injector, Steal, Worker};
-use vibesql_storage::Row;
-
 // Re-export public API
 pub use config::{global_config, MorselConfig};
+use crossbeam_deque::{Injector, Steal, Worker};
 pub use join::morsel_parallel_probe_sqlvalue;
 pub use parallel::{
     morsel_filter, morsel_map, morsel_parallel_filter, morsel_parallel_filter_map,
     morsel_parallel_group, morsel_parallel_map, morsel_parallel_reduce,
 };
 pub use sort::{morsel_parallel_sort, morsel_sort_by};
+use vibesql_storage::Row;
 
 /// Thread-safe container for collecting morsel results with ordering info
 pub(crate) type MorselResultsOrdered = Arc<Mutex<Vec<(usize, Vec<Row>)>>>;

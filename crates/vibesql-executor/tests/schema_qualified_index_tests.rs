@@ -15,9 +15,14 @@
 //! DROP INDEX bogus.i1;            -- "no such index: bogus.i1"
 //! ```
 
-use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, DropIndexExecutor};
+use std::collections::BTreeMap;
+
+use vibesql_executor::{
+    CreateIndexExecutor, CreateTableExecutor, DropIndexExecutor, InsertExecutor,
+};
 use vibesql_parser::Parser;
-use vibesql_storage::Database;
+use vibesql_storage::{database::indexes::IndexData, Database};
+use vibesql_types::SqlValue;
 
 fn exec_create_table(db: &mut Database, sql: &str) {
     let stmt = Parser::parse_sql(sql).expect("parse CREATE TABLE");
@@ -27,6 +32,49 @@ fn exec_create_table(db: &mut Database, sql: &str) {
         }
         other => panic!("expected CREATE TABLE, got {other:?}"),
     };
+}
+
+fn exec_insert(db: &mut Database, sql: &str) {
+    let stmt = Parser::parse_sql(sql).expect("parse INSERT");
+    match stmt {
+        vibesql_ast::Statement::Insert(s) => {
+            InsertExecutor::execute(db, &s).expect("INSERT failed");
+        }
+        other => panic!("expected INSERT, got {other:?}"),
+    };
+}
+
+/// Collect the contents of an index body as a sorted (key, row_indices) map,
+/// bypassing the planner to inspect the storage layer's index body directly
+/// (matches the approach in `partial_index_tests.rs`).
+fn index_body(db: &Database, index_name: &str) -> BTreeMap<Vec<SqlValue>, Vec<usize>> {
+    let data = db.get_index_data(index_name).expect("index not found");
+    match data {
+        IndexData::InMemory { data, .. } => {
+            data.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        }
+        _ => panic!("expected InMemory index body for this test"),
+    }
+}
+
+/// Extract the single-column integer keys of an index body, sorted.
+///
+/// Index bodies normalize all numeric key types to `SqlValue::Double` at
+/// insertion time (`normalize_for_comparison`, so range scans can compare
+/// mixed numeric types uniformly) — an integer column's stored key is never
+/// `SqlValue::Integer`, so this accepts `Double` (the actual on-disk form)
+/// alongside `Integer` for robustness.
+fn index_int_keys(db: &Database, index_name: &str) -> Vec<i64> {
+    let mut keys: Vec<i64> = index_body(db, index_name)
+        .into_keys()
+        .map(|k| match &k[0] {
+            SqlValue::Integer(i) => *i,
+            SqlValue::Double(d) => *d as i64,
+            other => panic!("unexpected key value: {other:?}"),
+        })
+        .collect();
+    keys.sort_unstable();
+    keys
 }
 
 /// Parse + execute a CREATE INDEX statement, returning the executor result
@@ -211,8 +259,127 @@ fn create_index_schema_qualified_missing_table() {
 
     let result = exec_create_index(&mut db, "CREATE INDEX main.i1 ON nonexistent(x)");
     assert!(result.is_err(), "CREATE INDEX main.i1 ON nonexistent(x) should fail");
-    assert!(matches!(
-        result.unwrap_err(),
-        vibesql_executor::ExecutorError::TableNotFound(_)
-    ));
+    assert!(matches!(result.unwrap_err(), vibesql_executor::ExecutorError::TableNotFound(_)));
+}
+
+// ============================================================================
+// Regression tests for issue #6487: `CREATE INDEX <schema>.<idx> ON <t>(...)`
+// must build the physical index body against the schema-qualified table the
+// validator resolved, not a bare-name-resolved (and possibly same-named
+// `main`) table.
+// ============================================================================
+
+/// Shape 1 (previously a hard error): `main.t` lacks the indexed column but
+/// `aux.t` has it. Before the fix, `build_btree_index_body` resolved the
+/// bare name `t` through storage's own search order and landed on `main.t`,
+/// producing `Column 'z' not found in table 't'` even though the validator
+/// correctly resolved the index against `aux.t`.
+#[test]
+fn create_btree_index_attached_schema_missing_column_in_main_builds_against_attached_table() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(x TEXT)"); // main.t: no z column
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(x TEXT, z INTEGER)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('a', 1)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('b', 2)");
+
+    let result = exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t(z)");
+    assert!(
+        result.is_ok(),
+        "CREATE INDEX aux.i1 ON t(z) should succeed against aux.t despite main.t lacking \
+         column 'z': {:?}",
+        result.err()
+    );
+
+    let keys = index_int_keys(&db, "aux.i1");
+    assert_eq!(keys, vec![1, 2], "index body should reflect aux.t's z values (1, 2)");
+}
+
+/// Shape 2 (previously a silently wrong body): both `main.t` and `aux.t`
+/// have the indexed column, so the pre-fix code built a body from `main.t`'s
+/// row instead of erroring — the bug was invisible without inspecting the
+/// index body directly. Verifies the body reflects `aux.t`'s rows only.
+#[test]
+fn create_btree_index_attached_schema_colliding_column_builds_against_attached_table_not_main() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(x TEXT, z INTEGER)"); // main.t HAS z too
+    exec_insert(&mut db, "INSERT INTO t VALUES ('main-row', 100)");
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(x TEXT, z INTEGER)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('a', 1)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('b', 2)");
+
+    let result = exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t(z)");
+    assert!(result.is_ok(), "CREATE INDEX aux.i1 ON t(z) should succeed: {:?}", result.err());
+
+    let keys = index_int_keys(&db, "aux.i1");
+    assert_eq!(
+        keys,
+        vec![1, 2],
+        "index body must reflect aux.t's rows (1, 2), not main.t's colliding row (100)"
+    );
+}
+
+/// Expression-index counterpart of Shape 1: `create_expression_index` /
+/// `compute_expression_index_keys` (expression_index.rs) had the identical
+/// bare-name bug.
+#[test]
+fn create_expression_index_attached_schema_missing_column_in_main_builds_against_attached_table() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(x TEXT)"); // main.t: no z column
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(x TEXT, z INTEGER)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('a', 1)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('b', 2)");
+
+    let result = exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t(z + 0)");
+    assert!(
+        result.is_ok(),
+        "CREATE INDEX aux.i1 ON t(z + 0) should succeed against aux.t despite main.t lacking \
+         column 'z': {:?}",
+        result.err()
+    );
+
+    let keys = index_int_keys(&db, "aux.i1");
+    assert_eq!(keys, vec![1, 2], "expression index body should reflect aux.t's z values (1, 2)");
+}
+
+/// Expression-index counterpart of Shape 2.
+#[test]
+fn create_expression_index_attached_schema_colliding_column_builds_against_attached_table_not_main()
+{
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(x TEXT, z INTEGER)"); // main.t HAS z too
+    exec_insert(&mut db, "INSERT INTO t VALUES ('main-row', 100)");
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(x TEXT, z INTEGER)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('a', 1)");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES ('b', 2)");
+
+    let result = exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t(z + 0)");
+    assert!(result.is_ok(), "CREATE INDEX aux.i1 ON t(z + 0) should succeed: {:?}", result.err());
+
+    let keys = index_int_keys(&db, "aux.i1");
+    assert_eq!(
+        keys,
+        vec![1, 2],
+        "expression index body must reflect aux.t's rows (1, 2), not main.t's colliding row (100)"
+    );
+}
+
+/// Control case: an ordinary, non-attached schema-qualified table
+/// (`main.t`, explicitly qualified) is unaffected by the fix — the index
+/// body still reflects `main.t`'s own rows.
+#[test]
+fn create_btree_index_main_schema_qualified_body_reflects_main_table_rows() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(x INTEGER)");
+    exec_insert(&mut db, "INSERT INTO t VALUES (1)");
+    exec_insert(&mut db, "INSERT INTO t VALUES (2)");
+
+    let result = exec_create_index(&mut db, "CREATE INDEX main.i1 ON t(x)");
+    assert!(result.is_ok(), "CREATE INDEX main.i1 ON t(x) should succeed: {:?}", result.err());
+
+    let keys = index_int_keys(&db, "i1");
+    assert_eq!(keys, vec![1, 2], "index body should reflect main.t's own rows (1, 2)");
 }

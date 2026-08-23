@@ -6,5 +6,5 @@ pub mod rest;
 pub mod storage;
 pub mod types;
 
-pub use rest::create_http_router;
+pub use rest::{create_http_router, DEFAULT_DATABASE_NAME};
 pub use storage::create_storage_router;

@@ -13,10 +13,10 @@ use vibesql_parser::Parser;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
-use crate::select::scan::index_scan::selection::{
-    expression_filters_index_expression, index_column_can_filter,
+use crate::select::{
+    scan::index_scan::selection::{expression_filters_index_expression, index_column_can_filter},
+    SelectExecutor,
 };
-use crate::select::SelectExecutor;
 
 /// Create a test database with users table
 fn create_test_db() -> Database {
@@ -309,10 +309,12 @@ fn test_expression_index_between() {
 fn test_expression_index_functional_after_binary_reload() {
     use vibesql_catalog::{ColumnSchema, TableSchema};
 
-    use crate::index_ddl::expression_index::{
-        create_expression_index, rebuild_pending_expression_indexes,
+    use crate::{
+        index_ddl::expression_index::{
+            create_expression_index, rebuild_pending_expression_indexes,
+        },
+        optimizer::index_planner::IndexPlanner,
     };
-    use crate::optimizer::index_planner::IndexPlanner;
 
     // Build a table t3(r, s) with a few rows.
     let mut db = Database::new();
@@ -335,7 +337,7 @@ fn test_expression_index_functional_after_binary_reload() {
     let expr = parse_index_expression("r + s");
     let columns =
         vec![IndexColumn::Expression { expr: Box::new(expr), direction: OrderDirection::Asc }];
-    create_expression_index(&mut db, "t3", "t3rs", &schema, &columns, false, None).unwrap();
+    create_expression_index(&mut db, "t3", "t3", "t3rs", &schema, &columns, false, None).unwrap();
 
     // Sanity: the index answers WHERE r+s = 3 with the two matching rows.
     let where_expr = parse_where_expression("r + s = 3");

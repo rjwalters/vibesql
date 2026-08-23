@@ -16,8 +16,9 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use crate::select::SelectExecutor;
-use crate::{CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor};
+use crate::{
+    select::SelectExecutor, CreateTableExecutor, DeleteExecutor, InsertExecutor, UpdateExecutor,
+};
 
 fn create_test_db() -> Database {
     let mut db = Database::new();

@@ -2,8 +2,6 @@
 
 pub mod insert_constraint_fixtures;
 
-use vibesql_executor::ExpressionEvaluator;
-
 // ---------------------------------------------------------------------------
 // Columnar path-assertion log-capture harness (shared by the `columnar_*`
 // path-assertion / parity test binaries).
@@ -17,11 +15,13 @@ use vibesql_executor::ExpressionEvaluator;
 // `SERIAL` mutex serializes the columnar-vs-row runs within a single binary so
 // env-var toggling and log capture do not race between that binary's tests.
 // ---------------------------------------------------------------------------
-
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex, OnceLock,
+};
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use vibesql_executor::ExpressionEvaluator;
 use vibesql_storage::Database;
 
 /// Serializes the columnar-vs-row runs across tests within a single binary.

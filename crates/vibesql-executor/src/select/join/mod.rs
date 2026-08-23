@@ -1546,7 +1546,8 @@ fn remove_duplicate_columns_for_natural_join(
                             // Find and update all replacements pointing to this column
                             for (source, target) in left_schema.column_replacement_map.iter() {
                                 if *target == *left_idx {
-                                    // Update the existing replacement to point to the new right column
+                                    // Update the existing replacement to point to the new right
+                                    // column
                                     result.schema.add_column_replacement(*source, right_idx);
                                 }
                             }
@@ -1561,10 +1562,11 @@ fn remove_duplicate_columns_for_natural_join(
                         result.schema.hide_column(*left_idx);
                     }
 
-                    // Add coalesce pair for COALESCE(left, right) semantics on unqualified references
-                    // Use the first left column entry for the coalesce pair
-                    // Issue #4906: For nested parenthesized JOINs, the right_schema may already have
-                    // a coalesce chain for this column. We need to extend the chain with ALL indices
+                    // Add coalesce pair for COALESCE(left, right) semantics on unqualified
+                    // references Use the first left column entry for the
+                    // coalesce pair Issue #4906: For nested parenthesized
+                    // JOINs, the right_schema may already have a coalesce chain
+                    // for this column. We need to extend the chain with ALL indices
                     // from the right side, not just the current right column.
                     if let Some((_, actual_name, left_idx)) = left_entries.first() {
                         // Check if right_schema already has a coalesce chain for this column
@@ -1616,7 +1618,8 @@ fn remove_duplicate_columns_for_natural_join(
                     result.schema.hide_column(hidden_idx);
 
                     // Also mark this column as a "joined column" so it won't be
-                    // considered ambiguous when referenced without table qualification (issue #4517)
+                    // considered ambiguous when referenced without table qualification (issue
+                    // #4517)
                     result.schema.add_joined_column(&col.name);
                 }
             }

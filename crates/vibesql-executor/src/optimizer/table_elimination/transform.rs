@@ -7,9 +7,11 @@ use std::collections::HashSet;
 
 use vibesql_ast::{Expression, FromClause, JoinType, SelectItem, SelectStmt};
 
-use super::predicate::{combine_predicates, flatten_and_chain};
-use super::select_analysis::{collect_unqualified_columns_from_expr, extract_tables_from_expr};
-use super::types::{EliminatedTable, TableInfo};
+use super::{
+    predicate::{combine_predicates, flatten_and_chain},
+    select_analysis::{collect_unqualified_columns_from_expr, extract_tables_from_expr},
+    types::{EliminatedTable, TableInfo},
+};
 
 /// Flatten FROM clause into list of tables (simple tables only, not subqueries)
 pub(super) fn flatten_from_clause(from: &FromClause, tables: &mut Vec<TableInfo>) {

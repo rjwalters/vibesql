@@ -1,15 +1,14 @@
 //! Trigger/DML semantics from the #5840 batch, verified against sqlite3 3.51.0:
 //!
-//! * Item 2 — REPLACE conflict-resolution DELETE triggers fire *iff*
-//!   `recursive_triggers` is ON (SQLite lang_conflict.html). With the default
-//!   (OFF) the implicit conflict-delete is silent; the row is still removed.
-//! * Item 5a — `changes()` immediately after an INSERT/UPDATE/DELETE on a view
-//!   is always 0 (SQLite R-09813-48563), because no physical table rows were
-//!   modified by the statement itself.
-//! * Item 5b — inside a trigger body each INSERT/UPDATE/DELETE sets `changes()`
-//!   to the rows *it* modified, and the value is saved before the body runs and
-//!   restored afterward, so a sub-trigger's nested DML never leaks into the
-//!   caller's `changes()` (SQLite R-32918-61474 / R-17146-37073).
+//! * Item 2 — REPLACE conflict-resolution DELETE triggers fire *iff* `recursive_triggers` is ON
+//!   (SQLite lang_conflict.html). With the default (OFF) the implicit conflict-delete is silent;
+//!   the row is still removed.
+//! * Item 5a — `changes()` immediately after an INSERT/UPDATE/DELETE on a view is always 0 (SQLite
+//!   R-09813-48563), because no physical table rows were modified by the statement itself.
+//! * Item 5b — inside a trigger body each INSERT/UPDATE/DELETE sets `changes()` to the rows *it*
+//!   modified, and the value is saved before the body runs and restored afterward, so a
+//!   sub-trigger's nested DML never leaks into the caller's `changes()` (SQLite R-32918-61474 /
+//!   R-17146-37073).
 
 use vibesql_executor::{
     CreateTableExecutor, DeleteExecutor, InsertExecutor, SelectExecutor, TriggerExecutor,

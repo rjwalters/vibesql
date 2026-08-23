@@ -5,9 +5,8 @@
 
 mod common;
 
-use tokio_postgres::NoTls;
-
 use common::start_test_server;
+use tokio_postgres::NoTls;
 
 /// Test basic extended query protocol flow: Parse -> Bind -> Execute -> Sync
 #[tokio::test]
@@ -223,8 +222,7 @@ async fn test_describe_resolves_wildcard_and_explicit_columns() {
     assert_eq!(names, vec!["a", "b", "c"], "SELECT t.* Describe column names");
 
     // Explicit columns and an alias.
-    let stmt =
-        client.prepare("SELECT a, b AS x FROM t").await.expect("prepare explicit+alias");
+    let stmt = client.prepare("SELECT a, b AS x FROM t").await.expect("prepare explicit+alias");
     let names: Vec<&str> = stmt.columns().iter().map(|c| c.name()).collect();
     assert_eq!(names, vec!["a", "x"], "explicit + aliased Describe column names");
 
@@ -275,23 +273,18 @@ async fn test_describe_matches_executed_columns() {
     ] {
         // Describe (Parse + Describe) column names.
         let stmt = client.prepare(sql).await.unwrap_or_else(|e| panic!("prepare {sql}: {e}"));
-        let described: Vec<String> =
-            stmt.columns().iter().map(|c| c.name().to_string()).collect();
+        let described: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
 
         // Executed result column names.
         let rows = client.query(sql, &[]).await.unwrap_or_else(|e| panic!("query {sql}: {e}"));
         let executed: Vec<String> =
             rows[0].columns().iter().map(|c| c.name().to_string()).collect();
 
-        assert_eq!(
-            described, executed,
-            "Describe vs executed column names disagree for `{sql}`"
-        );
+        assert_eq!(described, executed, "Describe vs executed column names disagree for `{sql}`");
 
         let is_placeholder = |n: &str| {
-            n.strip_prefix("col").is_some_and(|rest| {
-                !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
-            })
+            n.strip_prefix("col")
+                .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
         };
         assert!(
             !described.iter().any(|n| is_placeholder(n)),

@@ -8,42 +8,34 @@
 //! Every expected shape below was verified live against sqlite3 3.51.0
 //! (`.eqp on`); divergences are noted per test. Truthfulness (per the
 //! #5355/#5360/#5366 precedent):
-//! - GROUP BY always executes as hash aggregation followed by a sort of the
-//!   groups by key (select/grouping/hash.rs), so the GROUP BY line
-//!   truthfully describes the temp grouping structure. Its suppression when
-//!   an index delivers group order mirrors SQLite's EQP — the same
-//!   permissive EQP-level convention as the existing ORDER BY
-//!   stabilization-sort suppression (`needs_temp_btree_for_order_by_eqp`).
-//! - DISTINCT always executes as a hash dedup preserving input order
-//!   (select/helpers.rs `apply_distinct`); the DISTINCT line truthfully
-//!   describes that temp structure, suppressed like SQLite when an index
-//!   delivers SELECT-list order.
-//! - Compound dedup (UNION/INTERSECT/EXCEPT) executes via temp hash
-//!   structures (select/set_operations.rs), so `USING TEMP B-TREE` labels
-//!   are truthful.
-//! - Where a GROUP BY/DISTINCT/ORDER BY temp line is suppressed because an
-//!   index delivers the key order, the scan line shows that index like
-//!   sqlite3 (`SCAN t USING COVERING INDEX i` when it covers all read
-//!   columns) — the same permissive EQP-level convention (#5371).
-//! - A compound's statement-level ORDER BY renders as a trailing
-//!   `USE TEMP B-TREE FOR ORDER BY` line after the COMPOUND QUERY block:
-//!   the runtime materializes the combined result and sorts it in one pass
-//!   (`sort_set_operation_results`). sqlite3 3.51.0 instead renders a
-//!   `MERGE (<OP>)` block with per-branch ORDER BY lines (sorted branches
-//!   merged at read time, verified live) — a documented divergence, since
-//!   rendering MERGE would fabricate a plan VibeSQL never executes (#5371).
-//! - Partial-prefix shapes (#5373): when an index satisfies only a PREFIX
-//!   of the ordering work (partial GROUP BY/DISTINCT/ORDER BY key, mixed
-//!   ASC/DESC directions), sqlite3 still rides the index on the scan line —
-//!   its sorter benefits from partial order — and keeps the temp line
-//!   (`USE TEMP B-TREE FOR LAST TERM OF ORDER BY` for sorts). VibeSQL's
-//!   runtime gains nothing from partial order: the scan layer
-//!   (`cost_based_index_selection`) only accepts a full direction-uniform
-//!   structural match and otherwise seq-scans, and the GROUP BY/DISTINCT
-//!   paths pass no ordering hint to the scan at all. The bare `SCAN t` +
-//!   temp line is therefore the truthful rendering — a documented
-//!   divergence (see the #5373 section below); revisit if the runtime
-//!   learns to exploit partial index order.
+//! - GROUP BY always executes as hash aggregation followed by a sort of the groups by key
+//!   (select/grouping/hash.rs), so the GROUP BY line truthfully describes the temp grouping
+//!   structure. Its suppression when an index delivers group order mirrors SQLite's EQP — the same
+//!   permissive EQP-level convention as the existing ORDER BY stabilization-sort suppression
+//!   (`needs_temp_btree_for_order_by_eqp`).
+//! - DISTINCT always executes as a hash dedup preserving input order (select/helpers.rs
+//!   `apply_distinct`); the DISTINCT line truthfully describes that temp structure, suppressed like
+//!   SQLite when an index delivers SELECT-list order.
+//! - Compound dedup (UNION/INTERSECT/EXCEPT) executes via temp hash structures
+//!   (select/set_operations.rs), so `USING TEMP B-TREE` labels are truthful.
+//! - Where a GROUP BY/DISTINCT/ORDER BY temp line is suppressed because an index delivers the key
+//!   order, the scan line shows that index like sqlite3 (`SCAN t USING COVERING INDEX i` when it
+//!   covers all read columns) — the same permissive EQP-level convention (#5371).
+//! - A compound's statement-level ORDER BY renders as a trailing `USE TEMP B-TREE FOR ORDER BY`
+//!   line after the COMPOUND QUERY block: the runtime materializes the combined result and sorts it
+//!   in one pass (`sort_set_operation_results`). sqlite3 3.51.0 instead renders a `MERGE (<OP>)`
+//!   block with per-branch ORDER BY lines (sorted branches merged at read time, verified live) — a
+//!   documented divergence, since rendering MERGE would fabricate a plan VibeSQL never executes
+//!   (#5371).
+//! - Partial-prefix shapes (#5373): when an index satisfies only a PREFIX of the ordering work
+//!   (partial GROUP BY/DISTINCT/ORDER BY key, mixed ASC/DESC directions), sqlite3 still rides the
+//!   index on the scan line — its sorter benefits from partial order — and keeps the temp line
+//!   (`USE TEMP B-TREE FOR LAST TERM OF ORDER BY` for sorts). VibeSQL's runtime gains nothing from
+//!   partial order: the scan layer (`cost_based_index_selection`) only accepts a full
+//!   direction-uniform structural match and otherwise seq-scans, and the GROUP BY/DISTINCT paths
+//!   pass no ordering hint to the scan at all. The bare `SCAN t` + temp line is therefore the
+//!   truthful rendering — a documented divergence (see the #5373 section below); revisit if the
+//!   runtime learns to exploit partial index order.
 
 use vibesql_ast::Statement;
 use vibesql_executor::ExplainExecutor;
@@ -996,20 +988,16 @@ fn test_order_by_mixed_directions_keeps_bare_scan_and_temp_line() {
 //
 // VibeSQL splits on the storage scan-order guarantee (#5375 investigation):
 //
-// - Tables WITH a rowid alias (INTEGER PRIMARY KEY): the executor sorts
-//   every sequential scan's output by the IPK column (#4926,
-//   `sort_rows_by_integer_primary_key`), so rowid order IS the scan's
-//   guaranteed natural output order and the runtime ORDER BY sort is
-//   order-equivalent to it (its exact reverse for DESC — same convention as
-//   index reverse-traversal suppression). The temp line is suppressed,
-//   matching sqlite3 (`needs_temp_btree_for_order_by_eqp`).
+// - Tables WITH a rowid alias (INTEGER PRIMARY KEY): the executor sorts every sequential scan's
+//   output by the IPK column (#4926, `sort_rows_by_integer_primary_key`), so rowid order IS the
+//   scan's guaranteed natural output order and the runtime ORDER BY sort is order-equivalent to it
+//   (its exact reverse for DESC — same convention as index reverse-traversal suppression). The temp
+//   line is suppressed, matching sqlite3 (`needs_temp_btree_for_order_by_eqp`).
 //
-// - Plain tables (NO rowid alias): the sequential scan yields physical
-//   insertion order, which `INSERT INTO t(rowid, ...)` with out-of-order
-//   values and `UPDATE t SET rowid = ...` (both supported, verified by
-//   probe) decouple from rowid order. The ORDER BY sort genuinely reorders
-//   rows, so the temp line stays — a documented divergence from sqlite3's
-//   bare `SCAN t`.
+// - Plain tables (NO rowid alias): the sequential scan yields physical insertion order, which
+//   `INSERT INTO t(rowid, ...)` with out-of-order values and `UPDATE t SET rowid = ...` (both
+//   supported, verified by probe) decouple from rowid order. The ORDER BY sort genuinely reorders
+//   rows, so the temp line stays — a documented divergence from sqlite3's bare `SCAN t`.
 
 /// r1(id INTEGER PRIMARY KEY, y TEXT) — rowid-alias table, no other indexes.
 fn setup_rowid_alias_db() -> Database {

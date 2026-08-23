@@ -646,9 +646,7 @@ impl Parser {
     /// A single-element list `(a) = v` collapses to an ordinary `a = v`
     /// assignment; a list of two or more columns produces a tuple assignment
     /// whose single RHS `value` is unpacked positionally by the executor.
-    pub(crate) fn parse_tuple_assignment(
-        &mut self,
-    ) -> Result<vibesql_ast::Assignment, ParseError> {
+    pub(crate) fn parse_tuple_assignment(&mut self) -> Result<vibesql_ast::Assignment, ParseError> {
         self.expect_token(Token::LParen)?; // consume '('
         let mut columns = Vec::new();
         loop {
@@ -663,8 +661,7 @@ impl Parser {
                 }
                 _ => {
                     return Err(ParseError {
-                        message: "Expected column name in SET (column-list) assignment"
-                            .to_string(),
+                        message: "Expected column name in SET (column-list) assignment".to_string(),
                     })
                 }
             }

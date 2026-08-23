@@ -15,10 +15,10 @@
 //!
 //! Per the acceptance criteria, wall-clock timing is NOT used (the machine is
 //! loaded). Instead we capture `log` output and assert:
-//!   - the row-fallback marker *"Columnar join: some GROUP BY columns couldn't
-//!     be resolved"* must NOT appear;
-//!   - the positive info marker *"Columnar join execution succeeded"* proves the
-//!     columnar join path produced the result.
+//!   - the row-fallback marker *"Columnar join: some GROUP BY columns couldn't be resolved"* must
+//!     NOT appear;
+//!   - the positive info marker *"Columnar join execution succeeded"* proves the columnar join path
+//!     produced the result.
 //!
 //! Parity is checked by comparing the columnar-join result against the row path
 //! (`VIBESQL_DISABLE_COLUMNAR_JOIN=1`) for the same query, including NULL keys

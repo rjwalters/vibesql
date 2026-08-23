@@ -17,8 +17,8 @@ use crate::evaluator::casting::string_to_number;
 ///
 /// SQLite forces text aggregate inputs to a number instead of skipping them:
 /// - text that is entirely a valid integer → INTEGER (`sum('5') OVER()` → 5)
-/// - anything else → REAL from the parsed numeric prefix
-///   (`sum('seventeen') OVER()` → 0.0, `sum('5xyz') OVER()` → 5.0)
+/// - anything else → REAL from the parsed numeric prefix (`sum('seventeen') OVER()` → 0.0,
+///   `sum('5xyz') OVER()` → 5.0)
 ///
 /// Returns `(value, is_real)` where `is_real` indicates the REAL storage
 /// class was used (so sum() yields a real result).
@@ -134,7 +134,8 @@ where
 /// Supports FILTER clause for conditional aggregation.
 /// Supports EXCLUDE clause via frame_indices iterator.
 ///
-/// Example: SUM(amount) FILTER (WHERE status = 'paid') OVER (ORDER BY date) for filtered running totals
+/// Example: SUM(amount) FILTER (WHERE status = 'paid') OVER (ORDER BY date) for filtered running
+/// totals
 pub fn evaluate_sum_window<F, I>(
     partition: &Partition,
     frame_indices: I,
@@ -318,8 +319,8 @@ where
 /// Supports FILTER clause for conditional aggregation.
 /// Supports EXCLUDE clause via frame_indices iterator.
 ///
-/// Example: AVG(temperature) FILTER (WHERE valid = 1) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
-/// for 7-day moving average of valid readings
+/// Example: AVG(temperature) FILTER (WHERE valid = 1) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING
+/// AND CURRENT ROW) for 7-day moving average of valid readings
 pub fn evaluate_avg_window<F, I>(
     partition: &Partition,
     frame_indices: I,

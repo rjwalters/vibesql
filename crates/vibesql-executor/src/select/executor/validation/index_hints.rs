@@ -2,12 +2,16 @@
 //!
 //! SQLite validates `INDEXED BY <name>` at prepare time: the named index must
 //! exist and must be an index on the table it is attached to, otherwise the
-//! statement fails with `no such index: <name>`. VibeSQL's planner chooses
-//! indexes independently, so after validation the hint is simply ignored
-//! (matching the intent of PR #5234); this module only provides the
-//! SQLite-compatible error behavior (issue #5235).
+//! statement fails with `no such index: <name>`. This module provides that
+//! SQLite-compatible error behavior (issue #5235); `NOT INDEXED` never errors.
 //!
-//! `NOT INDEXED` never errors.
+//! Once validated, `INDEXED BY` forces the scan path to use the named index
+//! (see `select_index_scan_method` in
+//! `select/scan/index_scan/selection.rs`), matching SQLite's precedence —
+//! `INDEXED BY` wins even when VibeSQL's cost-based planner would otherwise
+//! pick a different index or no index at all (issue #6405). `NOT INDEXED`
+//! remains a no-op on plan selection: VibeSQL's planner still chooses
+//! indexes independently in that case (matching the intent of PR #5234).
 
 use vibesql_ast::{FromClause, IndexHint, SelectStmt};
 

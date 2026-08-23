@@ -53,7 +53,7 @@ wasm-bindgen-test = "0.3"
 
 # wasm-bindgen-futures is required by #[wasm_bindgen] macro even though not directly imported
 [package.metadata.cargo-machete]
-ignored = ["wasm-bindgen-futures"]
+ignored = ["wasm-bindgen-futures", "getrandom", "getrandom_03"]
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = [

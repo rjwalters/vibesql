@@ -11,12 +11,6 @@ use vibesql_catalog::TableIdentifier;
 use vibesql_storage::{statistics::CostEstimator, Database, Row};
 use vibesql_types::SqlValue;
 
-use crate::{
-    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
-    expression_index_maintenance, partial_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
-};
-
 use super::{
     constraints::ConstraintValidator,
     fast_path,
@@ -31,6 +25,11 @@ use super::{
     triggers,
     value_updater::ValueUpdater,
     PendingUpdate,
+};
+use crate::{
+    dml_cost::DmlOptimizer, errors::ExecutorError, evaluator::ExpressionEvaluator,
+    expression_index_maintenance, partial_index_maintenance, privilege_checker::PrivilegeChecker,
+    sqlite_schema::is_sqlite_schema_table_ref,
 };
 
 /// Internal implementation supporting both schema caching, procedural context, and trigger
@@ -48,13 +47,18 @@ pub(super) fn execute_internal(
     // Check if target is sqlite_master/sqlite_schema. Read-only by default;
     // under PRAGMA writable_schema=ON, a supported subset of UPDATEs rewrites
     // the stored CREATE TABLE source text (issue #5796; alterdropcol 8.x).
-    if is_sqlite_schema_table(&stmt.table_name) {
+    if is_sqlite_schema_table_ref(&database.catalog, &stmt.table_name) {
         if database.writable_schema() {
             let matched = crate::sqlite_schema::execute_sqlite_schema_update(stmt, database)?;
             return Ok((matched, None));
         }
+        // SQLite always reports the canonical `sqlite_master` name in this
+        // message regardless of which spelling (`sqlite_master`/`sqlite_schema`),
+        // case, or qualifier (bare, `main.`, or a currently-attached alias) the
+        // statement used — echoing `stmt.table_name` verbatim would leak the
+        // alias qualifier into the message (issue #6451).
         return Err(ExecutorError::SqliteSystemTableReadOnly {
-            table_name: stmt.table_name.clone(),
+            table_name: "sqlite_master".to_string(),
             operation: "modified".to_string(),
         });
     }
@@ -2762,10 +2766,11 @@ fn apply_order_by_and_limit(
 
 #[cfg(test)]
 mod alias_scope_tests {
-    use super::validate_alias_scoped_qualifiers;
-    use crate::errors::ExecutorError;
     use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
     use vibesql_types::SqlValue;
+
+    use super::validate_alias_scoped_qualifiers;
+    use crate::errors::ExecutorError;
 
     fn qualified_eq(table: &str, column: &str) -> Expression {
         Expression::BinaryOp {

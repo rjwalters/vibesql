@@ -5,12 +5,11 @@
 //! scan boundary via `Table::scan_visible_vec` / `Table::scan_visible`.
 //! These tests cover:
 //!
-//! - **Off-state** (no feature flag): the visibility filter is a no-op
-//!   and SELECT sees every live row, exactly as before Phase 1d.
-//! - **On-state** (`--features mvcc_enabled`): snapshot isolation —
-//!   a transaction sees the database as of its BEGIN snapshot, so a
-//!   concurrent autocommit write made after BEGIN is NOT visible until
-//!   the reader transaction restarts.
+//! - **Off-state** (no feature flag): the visibility filter is a no-op and SELECT sees every live
+//!   row, exactly as before Phase 1d.
+//! - **On-state** (`--features mvcc_enabled`): snapshot isolation — a transaction sees the database
+//!   as of its BEGIN snapshot, so a concurrent autocommit write made after BEGIN is NOT visible
+//!   until the reader transaction restarts.
 //!
 //! Why these tests pass under both feature states: every test verifies
 //! a specific behavior that's correct in both modes. The off-state
@@ -200,12 +199,11 @@ fn snapshot_isolation_select_in_txn_sees_pre_mvcc_data() {
 fn fk_deferred_replay_uses_commit_time_snapshot() {
     // Phase 1d FK coordination test:
     // - Create parent and child tables with a deferrable FK.
-    // - In one txn: insert a child row whose FK doesn't yet match
-    //   any parent (deferred violation queued).
+    // - In one txn: insert a child row whose FK doesn't yet match any parent (deferred violation
+    //   queued).
     // - In a later autocommit statement: insert the parent row.
-    // - Back in the original txn: COMMIT — the deferred FK replay
-    //   should consult the commit-time snapshot, which sees the
-    //   newly-inserted parent, so the commit must succeed.
+    // - Back in the original txn: COMMIT — the deferred FK replay should consult the commit-time
+    //   snapshot, which sees the newly-inserted parent, so the commit must succeed.
     //
     // This validates `capture_commit_time_snapshot` is wired in.
     let mut db = Database::new();

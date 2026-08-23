@@ -119,9 +119,7 @@ fn select_rows(result: ExecutionResult) -> Vec<vibesql_server::Row> {
 /// The resolved column names of a SELECT result (#5427 parity checks).
 fn select_columns(result: ExecutionResult) -> Vec<String> {
     match result {
-        ExecutionResult::Select { columns, .. } => {
-            columns.into_iter().map(|c| c.name).collect()
-        }
+        ExecutionResult::Select { columns, .. } => columns.into_iter().map(|c| c.name).collect(),
         other => panic!("expected Select result, got {other:?}"),
     }
 }
@@ -191,18 +189,21 @@ async fn replicated_select_column_names_match_standalone() {
     // The SELECTs whose column labels must match. Each exercises a
     // different name-resolution path.
     let selects = [
-        "SELECT a, b FROM t ORDER BY a",            // simple columns
-        "SELECT a AS x, b AS y FROM t ORDER BY a",  // aliases
-        "SELECT a + 1, b * 2 FROM t ORDER BY a",    // expressions
-        "SELECT * FROM t ORDER BY a",               // wildcard expansion
-        "SELECT count(*), sum(b) FROM t",           // aggregates
-        "SELECT count(*) AS n FROM t",              // aggregate + alias
+        "SELECT a, b FROM t ORDER BY a",           // simple columns
+        "SELECT a AS x, b AS y FROM t ORDER BY a", // aliases
+        "SELECT a + 1, b * 2 FROM t ORDER BY a",   // expressions
+        "SELECT * FROM t ORDER BY a",              // wildcard expansion
+        "SELECT count(*), sum(b) FROM t",          // aggregates
+        "SELECT count(*) AS n FROM t",             // aggregate + alias
         "SELECT t.a, u.c FROM t JOIN u ON t.a = u.a ORDER BY t.a", // join
     ];
 
     // Standalone session is the oracle.
-    let mut standalone =
-        Session::new("testdb".to_string(), "testuser".to_string(), SharedDatabase::new(Database::new()));
+    let mut standalone = Session::new(
+        "testdb".to_string(),
+        "testuser".to_string(),
+        SharedDatabase::new(Database::new()),
+    );
     for sql in setup {
         standalone.execute(sql).await.expect("standalone setup");
     }
@@ -242,8 +243,9 @@ async fn replicated_select_column_names_match_standalone() {
             .expect("replicated aliased select"),
     );
     assert_eq!(aliased, vec!["x".to_string(), "y".to_string()]);
-    let star =
-        select_columns(replicated.execute("SELECT * FROM t ORDER BY a").await.expect("star select"));
+    let star = select_columns(
+        replicated.execute("SELECT * FROM t ORDER BY a").await.expect("star select"),
+    );
     assert_eq!(star, vec!["a".to_string(), "b".to_string()]);
 }
 
@@ -268,12 +270,12 @@ async fn replicated_describe_columns_match_standalone() {
 
     // Describe targets: each query shape that must resolve identically.
     let selects = [
-        "SELECT a, b FROM t",                          // explicit columns
-        "SELECT a AS x, b AS y FROM t",                // aliases
-        "SELECT a + 1 FROM t",                         // derived expression
-        "SELECT * FROM t",                             // wildcard expansion
-        "SELECT t.* FROM t",                           // table wildcard
-        "SELECT t.*, u.c FROM t JOIN u ON t.a = u.a",  // join wildcard
+        "SELECT a, b FROM t",                         // explicit columns
+        "SELECT a AS x, b AS y FROM t",               // aliases
+        "SELECT a + 1 FROM t",                        // derived expression
+        "SELECT * FROM t",                            // wildcard expansion
+        "SELECT t.* FROM t",                          // table wildcard
+        "SELECT t.*, u.c FROM t JOIN u ON t.a = u.a", // join wildcard
     ];
 
     // Standalone oracle.
@@ -981,7 +983,8 @@ async fn replicated_txn_prepared_execute_buffers_into_batch() {
 
     // Read-your-own-writes: the buffered prepared INSERTs are visible mid-txn,
     // with the quoted string preserved (no quote-escaping breakage).
-    let rows = select_rows(session.execute("SELECT id, name FROM users ORDER BY id").await.unwrap());
+    let rows =
+        select_rows(session.execute("SELECT id, name FROM users ORDER BY id").await.unwrap());
     assert_eq!(rows.len(), 2, "read-your-own-writes: buffered prepared INSERTs visible");
     assert_eq!(rows[1].values[1].to_string(), "Bob");
 
@@ -1436,14 +1439,17 @@ async fn start_http_with_raw_where(
     handle: Option<Arc<ReplicationHandle>>,
     graphql_allow_raw_where: bool,
 ) -> (String, oneshot::Sender<()>) {
-    use vibesql_server::{http::create_http_router, registry::DatabaseRegistry};
+    use vibesql_server::{
+        http::create_http_router,
+        registry::{DatabaseRegistry, SharedDatabase},
+    };
     use vibesql_storage::Database;
 
     let listener = TokioTcpListener::bind("127.0.0.1:0").await.expect("bind http");
     let addr = listener.local_addr().unwrap();
     let (tx, rx) = oneshot::channel::<()>();
 
-    let db = Arc::new(Database::new());
+    let db = SharedDatabase::new(Database::new());
     let registry = DatabaseRegistry::new();
     let subs = Arc::new(SubscriptionManager::new());
     let app = create_http_router(db, registry, subs, None, handle, graphql_allow_raw_where);
@@ -2074,11 +2080,8 @@ async fn http_blob_put_replicates_and_reads_on_follower() {
     // the upload entry.
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     loop {
-        let resp = client
-            .get(format!("{follower_base}/api/storage/{blob_id}"))
-            .send()
-            .await
-            .unwrap();
+        let resp =
+            client.get(format!("{follower_base}/api/storage/{blob_id}")).send().await.unwrap();
         if resp.status() == reqwest::StatusCode::OK {
             let ct = resp
                 .headers()
@@ -2105,11 +2108,8 @@ async fn http_blob_put_replicates_and_reads_on_follower() {
     let mut delete_base = leader_base;
     let mut _delete_txs = Vec::new();
     loop {
-        let resp = client
-            .delete(format!("{delete_base}/api/storage/{blob_id}"))
-            .send()
-            .await
-            .unwrap();
+        let resp =
+            client.delete(format!("{delete_base}/api/storage/{blob_id}")).send().await.unwrap();
         if resp.status() == reqwest::StatusCode::NO_CONTENT {
             break;
         }
@@ -2127,11 +2127,8 @@ async fn http_blob_put_replicates_and_reads_on_follower() {
 
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     loop {
-        let resp = client
-            .get(format!("{follower_base}/api/storage/{blob_id}"))
-            .send()
-            .await
-            .unwrap();
+        let resp =
+            client.get(format!("{follower_base}/api/storage/{blob_id}")).send().await.unwrap();
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             break;
         }
@@ -2167,10 +2164,7 @@ async fn http_blob_upload_on_follower_redirects_with_leader_hint() {
         {
             Some(i) => i,
             None => {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "timed out waiting for a follower"
-                );
+                assert!(tokio::time::Instant::now() < deadline, "timed out waiting for a follower");
                 tokio::time::sleep(POLL_INTERVAL).await;
                 continue;
             }
@@ -2661,8 +2655,7 @@ async fn replicated_subscription_on_follower_sees_leader_write() {
     wait_all_applied(&handles, setup_idx).await;
 
     // Pick a follower and drive a subscription against ITS applied state.
-    let follower_pos =
-        (0..handles.len()).find(|i| *i != leader_idx).expect("a follower exists");
+    let follower_pos = (0..handles.len()).find(|i| *i != leader_idx).expect("a follower exists");
     let follower = Arc::clone(&handles[follower_pos]);
 
     let manager = Arc::new(SubscriptionManager::new());
@@ -2694,7 +2687,8 @@ async fn replicated_subscription_on_follower_sees_leader_write() {
     let follower_for_query = Arc::clone(&follower);
     let loop_task = tokio::spawn(async move {
         let query_fn = move |q: &str| {
-            follower_for_query.with_applied_db(|db| SubscriptionManager::execute_query_against(q, db))
+            follower_for_query
+                .with_applied_db(|db| SubscriptionManager::execute_query_against(q, db))
         };
         manager_for_loop.run_replicated_event_loop(change_rx, query_fn).await;
     });
@@ -2718,9 +2712,7 @@ async fn replicated_subscription_on_follower_sees_leader_write() {
                     }
                 }
                 Some(SubscriptionUpdate::Delta { inserts, .. }) => {
-                    if inserts.iter().any(|r| {
-                        r.values.first() == Some(&SqlValue::Integer(2))
-                    }) {
+                    if inserts.iter().any(|r| r.values.first() == Some(&SqlValue::Integer(2))) {
                         return true;
                     }
                 }
@@ -2779,17 +2771,15 @@ async fn replicated_subscription_coalesces_multi_row_write_on_follower() {
     let follower_for_query = Arc::clone(&follower);
     let loop_task = tokio::spawn(async move {
         let query_fn = move |q: &str| {
-            follower_for_query.with_applied_db(|db| SubscriptionManager::execute_query_against(q, db))
+            follower_for_query
+                .with_applied_db(|db| SubscriptionManager::execute_query_against(q, db))
         };
         manager_for_loop.run_replicated_event_loop(change_rx, query_fn).await;
     });
 
     // One committed statement inserting three rows -> three apply-path events
     // per follower, which the coalesced loop should collapse.
-    let res = leader
-        .execute("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
-        .await
-        .unwrap();
+    let res = leader.execute("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')").await.unwrap();
     assert!(matches!(res, ExecutionResult::Insert { rows_affected: 3 }));
     let write_idx = handles[leader_idx].node().last_applied();
     wait_all_applied(&handles, write_idx).await;

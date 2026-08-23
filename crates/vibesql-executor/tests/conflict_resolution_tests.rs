@@ -113,7 +113,7 @@ fn test_insert_or_ignore_unique_constraint_conflict() {
         columns: vec![],
         source: InsertSource::Values(vec![vec![
             Expression::Literal(SqlValue::Integer(2)), // Different id
-            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com"))), // Same email
+            Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("alice@test.com"))), /* Same email */
             Expression::Literal(SqlValue::Varchar(arcstr::ArcStr::from("Alice 2"))),
         ]]),
         conflict_clause: Some(ConflictClause::Ignore),

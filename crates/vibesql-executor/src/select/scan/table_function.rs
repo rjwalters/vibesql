@@ -14,10 +14,9 @@
 //! Both are resolvable by explicit reference (`jx.json`, `WHERE root = '$'`) but
 //! excluded from `SELECT *` / `pragma_table_info` (issue #6050).
 //!
-//! - `json_each` yields one row per *immediate* child of the (possibly
-//!   path-navigated) value; a scalar value yields exactly one row.
-//! - `json_tree` performs a depth-first walk emitting one row per node,
-//!   including the root.
+//! - `json_each` yields one row per *immediate* child of the (possibly path-navigated) value; a
+//!   scalar value yields exactly one row.
+//! - `json_tree` performs a depth-first walk emitting one row per node, including the root.
 //!
 //! This handler is modeled on [`super::values::execute_values`]: it evaluates
 //! the argument expression(s), materializes the resulting rows, attaches a
@@ -33,6 +32,8 @@
 //! and is *not* handled here.
 //!
 //! Reference: <https://www.sqlite.org/json1.html#jeach>
+
+use vibesql_types::{DataType, SqlValue};
 
 use crate::{
     errors::ExecutorError,
@@ -51,7 +52,6 @@ use crate::{
     },
     schema::CombinedSchema,
 };
-use vibesql_types::{DataType, SqlValue};
 
 /// The eight *visible* columns exposed by `json_each` / `json_tree`, in order.
 /// The two trailing hidden columns (`json`, `root`) are appended by
@@ -68,17 +68,16 @@ const TVF_HIDDEN_COLUMNS: [&str; 2] = ["json", "root"];
 ///
 /// # Arguments
 ///
-/// * `name` - The function name, already normalized to lowercase
-///   (`"json_each"` or `"json_tree"`).
-/// * `args` - The argument expressions: `args[0]` is the JSON value, optional
-///   `args[1]` is a JSON path.
-/// * `alias` - Optional table alias (`FROM json_each(x) AS je`). When absent the
-///   function name is used as the table name so `json_each.value` resolves.
+/// * `name` - The function name, already normalized to lowercase (`"json_each"` or `"json_tree"`).
+/// * `args` - The argument expressions: `args[0]` is the JSON value, optional `args[1]` is a JSON
+///   path.
+/// * `alias` - Optional table alias (`FROM json_each(x) AS je`). When absent the function name is
+///   used as the table name so `json_each.value` resolves.
 /// * `column_aliases` - Optional column renaming (`AS je(k, v)`).
 /// * `database` - Database reference for expression evaluation.
 /// * `cte_results` - CTE context so arguments can reference enclosing WITH names.
-/// * `outer_row` / `outer_schema` - Outer correlation context. When present the
-///   arguments resolve against the outer row (correlated-subquery-child form).
+/// * `outer_row` / `outer_schema` - Outer correlation context. When present the arguments resolve
+///   against the outer row (correlated-subquery-child form).
 pub(crate) fn execute_table_function(
     name: &str,
     args: &[vibesql_ast::Expression],
@@ -239,9 +238,9 @@ pub(crate) fn execute_table_function(
 
     // Append the two hidden columns to every emitted row. Both are loop-invariant
     // per TVF call (issue #6050):
-    // - `json`: the *original outer* input document, echoed verbatim on every row
-    //   regardless of any path navigation (SQLite echoes the outer input, not the
-    //   navigated subtree). Captured above so original whitespace is preserved.
+    // - `json`: the *original outer* input document, echoed verbatim on every row regardless of any
+    //   path navigation (SQLite echoes the outer input, not the navigated subtree). Captured above
+    //   so original whitespace is preserved.
     // - `root`: the path argument string as given (default `"$"` when omitted).
     let json_text = match json_column_text {
         Some(s) => SqlValue::Varchar(s.into()),
@@ -398,12 +397,10 @@ fn make_row(
 /// of the node navigated to by `segments`. Returns `(id_offset, value_offset)`,
 /// or `None` if the path does not resolve.
 ///
-/// - `id_offset` is the node's `id` as SQLite reports it: for an object member
-///   this is the *key* element's offset; for an array element or the bare root
-///   it is the *value* element's offset.
-/// - `value_offset` is the value element's offset (where the node's own children
-///   begin, after its header). For an object member this is `id_offset +
-///   key_len`; otherwise it equals `id_offset`.
+/// - `id_offset` is the node's `id` as SQLite reports it: for an object member this is the *key*
+///   element's offset; for an array element or the bare root it is the *value* element's offset.
+/// - `value_offset` is the value element's offset (where the node's own children begin, after its
+///   header). For an object member this is `id_offset + key_len`; otherwise it equals `id_offset`.
 ///
 /// SQLite's `json_each`/`json_tree` `id`/`parent` columns are these JSONB
 /// parse-tree offsets (`JsonParse.aNode[]` positions), measured against the full

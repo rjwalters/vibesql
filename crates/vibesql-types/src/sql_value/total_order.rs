@@ -17,21 +17,17 @@
 //!
 //! Design notes:
 //!
-//! * **Numerics compare exactly, never through lossy `as f64` casts.** All
-//!   integer variants (`Integer`, `Smallint`, `Bigint`, `Unsigned`) are
-//!   widened to `i128` (which holds both `i64::MIN` and `u64::MAX`) and
-//!   compared exactly. Integer-vs-float pairs use the same approach as
-//!   SQLite's `sqlite3IntFloatCompare`: handle NaN/infinities first, then
-//!   compare the integer against the float's exact integer part with a
-//!   fractional tiebreak. This is what makes the order transitive at the f64
-//!   precision boundary (2^53), where `x as f64` rounding previously produced
-//!   non-transitive triples that made `sort_by` panic.
-//! * **NaN has a fixed total position: less than every other numeric, and
-//!   NaN == NaN.** SQLite cannot store NaN (it becomes NULL), but VibeSQL
-//!   values can carry one, and the comparator must remain total. "Less than
-//!   all reals" mirrors NaN being the value closest to NULL.
-//! * `-0.0 == 0.0` (IEEE equality), which is a consistent equivalence class
-//!   and matches SQLite.
+//! * **Numerics compare exactly, never through lossy `as f64` casts.** All integer variants
+//!   (`Integer`, `Smallint`, `Bigint`, `Unsigned`) are widened to `i128` (which holds both
+//!   `i64::MIN` and `u64::MAX`) and compared exactly. Integer-vs-float pairs use the same approach
+//!   as SQLite's `sqlite3IntFloatCompare`: handle NaN/infinities first, then compare the integer
+//!   against the float's exact integer part with a fractional tiebreak. This is what makes the
+//!   order transitive at the f64 precision boundary (2^53), where `x as f64` rounding previously
+//!   produced non-transitive triples that made `sort_by` panic.
+//! * **NaN has a fixed total position: less than every other numeric, and NaN == NaN.** SQLite
+//!   cannot store NaN (it becomes NULL), but VibeSQL values can carry one, and the comparator must
+//!   remain total. "Less than all reals" mirrors NaN being the value closest to NULL.
+//! * `-0.0 == 0.0` (IEEE equality), which is a consistent equivalence class and matches SQLite.
 //! * Vectors compare elementwise via `f32::total_cmp`, then by length.
 //!
 //! NULL placement: this function orders NULL *first* (SQLite's native order).

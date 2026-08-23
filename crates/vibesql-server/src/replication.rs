@@ -366,10 +366,7 @@ impl ReplicationHandle {
     }
 
     /// Linearizable read (quorum-confirmed leadership).
-    pub async fn query_linearizable(
-        &self,
-        sql: &str,
-    ) -> Result<QueryResult, SqlError> {
+    pub async fn query_linearizable(&self, sql: &str) -> Result<QueryResult, SqlError> {
         self.node.query_linearizable(sql).await.map_err(|e| self.sql_error("the query", e))
     }
 

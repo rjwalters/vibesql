@@ -2,23 +2,20 @@
 //!
 //! Covers:
 //!
-//! 1. End-to-end savepoint queue truncation: a deferred violation is queued
-//!    inside a savepoint, then `ROLLBACK TO SAVEPOINT` discards it; the
-//!    outer COMMIT must succeed (Phase C2 wired the snapshot index;
-//!    Phase C3 verifies the integration end-to-end).
-//! 2. `DEFERRABLE INITIALLY IMMEDIATE` defers when the session pragma
-//!    `defer_foreign_keys=ON` is set, mirroring SQLite's documented
-//!    behaviour (the session pragma overrides per-constraint defaults).
-//! 3. `DEFERRABLE INITIALLY IMMEDIATE` enforces immediately when the
-//!    session pragma is OFF (the constraint default).
-//! 4. Self-referential FK INSERT (`fkey8-3.0`): a single row that
-//!    satisfies its own self-FK must succeed.
-//! 5. Self-referential FK DELETE (`fkey8-3.1`): deleting the last
-//!    surviving parent of a self-FK row must fail when the FK references
-//!    a non-PK key.
-//! 6. `SHOW CREATE TABLE` emits `DEFERRABLE INITIALLY {DEFERRED,IMMEDIATE}`
-//!    for FKs whose deferral state is non-default; omits the clause for
-//!    NOT-DEFERRABLE FKs.
+//! 1. End-to-end savepoint queue truncation: a deferred violation is queued inside a savepoint,
+//!    then `ROLLBACK TO SAVEPOINT` discards it; the outer COMMIT must succeed (Phase C2 wired the
+//!    snapshot index; Phase C3 verifies the integration end-to-end).
+//! 2. `DEFERRABLE INITIALLY IMMEDIATE` defers when the session pragma `defer_foreign_keys=ON` is
+//!    set, mirroring SQLite's documented behaviour (the session pragma overrides per-constraint
+//!    defaults).
+//! 3. `DEFERRABLE INITIALLY IMMEDIATE` enforces immediately when the session pragma is OFF (the
+//!    constraint default).
+//! 4. Self-referential FK INSERT (`fkey8-3.0`): a single row that satisfies its own self-FK must
+//!    succeed.
+//! 5. Self-referential FK DELETE (`fkey8-3.1`): deleting the last surviving parent of a self-FK row
+//!    must fail when the FK references a non-PK key.
+//! 6. `SHOW CREATE TABLE` emits `DEFERRABLE INITIALLY {DEFERRED,IMMEDIATE}` for FKs whose deferral
+//!    state is non-default; omits the clause for NOT-DEFERRABLE FKs.
 
 use vibesql_ast::Statement;
 use vibesql_executor::{
@@ -72,8 +69,7 @@ fn fresh_db() -> Database {
 }
 
 // ---------------------------------------------------------------------------
-// 1. End-to-end savepoint queue truncation (Phase C2 integration verified
-//    end-to-end here).
+// 1. End-to-end savepoint queue truncation (Phase C2 integration verified end-to-end here).
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -158,8 +154,7 @@ fn nested_savepoint_only_inner_violations_discarded() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. DEFERRABLE INITIALLY IMMEDIATE: session pragma overrides constraint
-//    default.
+// 2. DEFERRABLE INITIALLY IMMEDIATE: session pragma overrides constraint default.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -357,8 +352,8 @@ fn show_create_table_omits_deferral_for_non_deferrable_fk() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Resolution scenario from the issue body — deferred FK violation that
-//    becomes valid before COMMIT.
+// 6. Resolution scenario from the issue body — deferred FK violation that becomes valid before
+//    COMMIT.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -388,9 +383,8 @@ fn deferred_fk_violation_resolved_by_later_parent_insert_commits() {
 }
 
 // ---------------------------------------------------------------------------
-// 7. live_deferred_fk_violation_count semantics — backs the
-//    `PRAGMA deferred_fk_count` bridge for `sqlite3_db_status
-//    DBSTATUS_DEFERRED_FKS` (issue #5187 / fkey6-1.20 + fkey6-1.21).
+// 7. live_deferred_fk_violation_count semantics — backs the `PRAGMA deferred_fk_count` bridge for
+//    `sqlite3_db_status DBSTATUS_DEFERRED_FKS` (issue #5187 / fkey6-1.20 + fkey6-1.21).
 // ---------------------------------------------------------------------------
 
 #[test]

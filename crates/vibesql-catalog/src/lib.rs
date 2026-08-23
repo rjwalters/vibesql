@@ -40,9 +40,8 @@ mod type_definition;
 mod view;
 
 pub use advanced_objects::{
-    Assertion, CharacterSet, Collation, Domain, Function, FunctionBody, FunctionParam,
-    ParameterMode, Procedure, ProcedureBody, ProcedureParam, Sequence, SqlSecurity, Translation,
-    UserDefinedType,
+    Assertion, CharacterSet, Collation, Function, FunctionBody, FunctionParam, ParameterMode,
+    Procedure, ProcedureBody, ProcedureParam, Sequence, SqlSecurity, Translation,
 };
 pub use column::ColumnSchema;
 pub use domain::{DomainConstraintDef, DomainDefinition};

@@ -20,10 +20,10 @@ pub const DEFAULT_CHANNEL_CAPACITY: usize = 1024;
 /// key value(s) here.
 ///
 /// This is strictly optional and additive:
-/// - When absent (`None` on the event), consumers MUST fall back to re-querying
-///   — i.e. pruning is disabled and behavior is identical to before #5472.
-/// - Only **single-column** primary keys are carried; composite keys are left
-///   `None` so the conservative fallback applies.
+/// - When absent (`None` on the event), consumers MUST fall back to re-querying — i.e. pruning is
+///   disabled and behavior is identical to before #5472.
+/// - Only **single-column** primary keys are carried; composite keys are left `None` so the
+///   conservative fallback applies.
 ///
 /// For an `Update`, both the pre-image (`value`) and post-image (`new_value`)
 /// primary key are recorded, because an `UPDATE` may move a row *into* or *out

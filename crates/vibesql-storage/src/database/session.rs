@@ -200,10 +200,7 @@ impl Database {
     /// Stores the raw requested value; clamping into the stack-safe range is the
     /// executor's responsibility (see [`Self::trigger_depth_limit`]).
     pub fn set_trigger_depth_limit(&mut self, value: i64) {
-        self.set_session_variable(
-            "TRIGGER_DEPTH_LIMIT",
-            vibesql_types::SqlValue::Integer(value),
-        );
+        self.set_session_variable("TRIGGER_DEPTH_LIMIT", vibesql_types::SqlValue::Integer(value));
     }
 
     // ============================================================================
@@ -351,9 +348,8 @@ impl Database {
     /// # Arguments
     /// * `table_name` - The table name (case-insensitive)
     /// * `rowid` - The rowid to reserve
-    /// * `is_explicit` - True if the rowid comes from an explicit INTEGER PRIMARY KEY
-    ///   value, false if it's auto-allocated. This affects how conflicts are handled
-    ///   in AFTER DELETE triggers.
+    /// * `is_explicit` - True if the rowid comes from an explicit INTEGER PRIMARY KEY value, false
+    ///   if it's auto-allocated. This affects how conflicts are handled in AFTER DELETE triggers.
     pub fn reserve_rowid(&mut self, table_name: &str, rowid: u64, is_explicit: bool) {
         self.reserved_rowids.insert(table_name.to_lowercase(), (rowid, is_explicit));
     }

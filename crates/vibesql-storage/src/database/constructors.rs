@@ -4,6 +4,8 @@
 
 #![allow(clippy::clone_on_copy)]
 
+#[cfg(target_arch = "wasm32")]
+use std::sync::RwLock;
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -12,8 +14,6 @@ use std::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::RwLock;
-#[cfg(target_arch = "wasm32")]
-use std::sync::RwLock;
 
 use super::{
     config::{DatabaseConfig, DEFAULT_COLUMNAR_CACHE_BUDGET},

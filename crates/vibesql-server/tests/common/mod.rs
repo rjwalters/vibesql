@@ -117,24 +117,29 @@ pub async fn start_test_server_with_config(mut config: Config) -> TestServer {
 
     // Start HTTP server if enabled
     let http_server_addr = if let Some((http_socket_addr, http_listener)) = http_addr {
-        // Create a shared database for HTTP API (like main.rs does)
-        let mut db = Database::new();
-        let change_rx = db.enable_change_events(1024);
-        let db = Arc::new(db);
+        // Create the shared database for HTTP API (like main.rs does): register
+        // it in the registry under `DEFAULT_DATABASE_NAME` so it's the same
+        // instance `/api/query` resolves (#6448).
+        let mut initial_http_db = Database::new();
+        let change_rx = initial_http_db.enable_change_events(1024);
+        database_registry
+            .register_database(vibesql_server::http::DEFAULT_DATABASE_NAME, initial_http_db)
+            .await;
+        let db = database_registry.get_or_create(vibesql_server::http::DEFAULT_DATABASE_NAME).await;
 
         // Clone subscription manager for HTTP
         let subscription_manager_for_http = Arc::clone(&subscription_manager);
         let registry_for_http = database_registry.clone();
 
         // Spawn the subscription manager event loop
-        let db_for_subscription_task = Arc::clone(&db);
+        let db_for_subscription_task = db.clone();
         let subscription_manager_for_loop = Arc::clone(&subscription_manager);
         tokio::spawn(async move {
             subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
         });
 
         // Spawn HTTP server
-        let db_for_http = Arc::clone(&db);
+        let db_for_http = db.clone();
         let metrics_for_http = observability.metrics().cloned();
         tokio::spawn(async move {
             let app = create_http_router(
@@ -322,24 +327,29 @@ pub async fn start_test_server_with_metrics(mut config: Config) -> TestServerWit
 
     // Start HTTP server if enabled
     let http_server_addr = if let Some((http_socket_addr, http_listener)) = http_addr {
-        // Create a shared database for HTTP API (like main.rs does)
-        let mut db = Database::new();
-        let change_rx = db.enable_change_events(1024);
-        let db = Arc::new(db);
+        // Create the shared database for HTTP API (like main.rs does): register
+        // it in the registry under `DEFAULT_DATABASE_NAME` so it's the same
+        // instance `/api/query` resolves (#6448).
+        let mut initial_http_db = Database::new();
+        let change_rx = initial_http_db.enable_change_events(1024);
+        database_registry
+            .register_database(vibesql_server::http::DEFAULT_DATABASE_NAME, initial_http_db)
+            .await;
+        let db = database_registry.get_or_create(vibesql_server::http::DEFAULT_DATABASE_NAME).await;
 
         // Clone subscription manager for HTTP
         let subscription_manager_for_http = Arc::clone(&subscription_manager);
         let registry_for_http = database_registry.clone();
 
         // Spawn the subscription manager event loop
-        let db_for_subscription_task = Arc::clone(&db);
+        let db_for_subscription_task = db.clone();
         let subscription_manager_for_loop = Arc::clone(&subscription_manager);
         tokio::spawn(async move {
             subscription_manager_for_loop.run_event_loop(change_rx, db_for_subscription_task).await;
         });
 
         // Spawn HTTP server with our test metrics
-        let db_for_http = Arc::clone(&db);
+        let db_for_http = db.clone();
         let metrics_for_http = Some(metrics.clone());
         tokio::spawn(async move {
             let app = create_http_router(

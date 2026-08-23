@@ -131,7 +131,8 @@ fn test_round_numeric_negative_precision() {
     let result = evaluator.eval(&expr, &row).unwrap();
     match result {
         SqlValue::Double(n) => {
-            assert!((n - 123.0).abs() < 0.001, "Expected 123.0, got {}", n); // SQLite clamps -1 to 0
+            assert!((n - 123.0).abs() < 0.001, "Expected 123.0, got {}", n); // SQLite clamps -1 to
+                                                                             // 0
         }
         _ => panic!("Expected Double result (SQLite REAL), got {:?}", result),
     }

@@ -19,15 +19,14 @@ use crate::{
 /// * `rows` - The VALUE rows, each containing expressions for columns
 /// * `alias` - The table alias (required)
 /// * `column_aliases` - Optional column name overrides
-/// * `database` - Optional database reference for expression evaluation (enables
-///   function calls, subqueries, etc.)
-/// * `cte_results` - Optional CTE context so subqueries inside VALUES rows can
-///   reference names bound by an enclosing WITH clause (issue #5353)
-/// * `outer_row` / `outer_schema` - Optional outer-query context so a VALUES row
-///   used as a correlated row-value LHS (`(VALUES(b3.a, b3.b)) IN (...)`) can
-///   resolve outer column references. Without this the VALUES expressions are
-///   evaluated against an empty schema and `b3.a` raises "no such column"
-///   (rowvalue §18.2/§18.5, issue #6089).
+/// * `database` - Optional database reference for expression evaluation (enables function calls,
+///   subqueries, etc.)
+/// * `cte_results` - Optional CTE context so subqueries inside VALUES rows can reference names
+///   bound by an enclosing WITH clause (issue #5353)
+/// * `outer_row` / `outer_schema` - Optional outer-query context so a VALUES row used as a
+///   correlated row-value LHS (`(VALUES(b3.a, b3.b)) IN (...)`) can resolve outer column
+///   references. Without this the VALUES expressions are evaluated against an empty schema and
+///   `b3.a` raises "no such column" (rowvalue §18.2/§18.5, issue #6089).
 pub(crate) fn execute_values(
     rows: &[Vec<vibesql_ast::Expression>],
     alias: &str,

@@ -23,10 +23,10 @@
 //!   1. recursion well past the old cap of 16 SUCCEEDS,
 //!   2. recursion at ~500 levels (the SQLite triggerC-2.x depth) SUCCEEDS,
 //!   3. recursion at exactly the 1000 cap SUCCEEDS (triggerC-3.3.x depth),
-//!   4. recursion that exceeds the 1000 cap errors with SQLite's exact wording,
-//!      `too many levels of trigger recursion`, instead of overflowing,
-//!   5. the cap is reached cleanly even on a stack far too small to hold 1000
-//!      native frames, proving the on-demand stack growth (no overflow / DoS).
+//!   4. recursion that exceeds the 1000 cap errors with SQLite's exact wording, `too many levels of
+//!      trigger recursion`, instead of overflowing,
+//!   5. the cap is reached cleanly even on a stack far too small to hold 1000 native frames,
+//!      proving the on-demand stack growth (no overflow / DoS).
 
 use vibesql_executor::{InsertExecutor, SelectExecutor, TriggerExecutor};
 use vibesql_parser::Parser;
@@ -190,8 +190,7 @@ fn recursion_over_cap_errors_with_sqlite_wording_not_overflow() {
 /// `stacker::maybe_grow` at the recursion entry point, the executor allocates
 /// fresh heap-backed stack segments on demand, so:
 ///   - depth exactly 1000 SUCCEEDS, and
-///   - depth beyond 1000 errors cleanly with SQLite's wording — never a SIGABRT
-///     stack overflow.
+///   - depth beyond 1000 errors cleanly with SQLite's wording — never a SIGABRT stack overflow.
 /// If on-demand growth regressed (or were removed), this thread would overflow
 /// and the harness would report the join failure rather than a clean error.
 ///

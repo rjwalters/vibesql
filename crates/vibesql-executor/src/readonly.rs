@@ -1,10 +1,10 @@
 //! Read-only query execution for concurrent access.
 //!
 //! This module provides:
-//! - `ReadOnlyQuery` trait: A `query(&self)` method that enables read-only SQL queries
-//!   on an immutable database reference
-//! - `SharedDatabase` wrapper: A thread-safe wrapper around `Database` that manages
-//!   concurrent read/write access
+//! - `ReadOnlyQuery` trait: A `query(&self)` method that enables read-only SQL queries on an
+//!   immutable database reference
+//! - `SharedDatabase` wrapper: A thread-safe wrapper around `Database` that manages concurrent
+//!   read/write access
 //!
 //! ## Usage
 //!
@@ -540,10 +540,11 @@ impl std::fmt::Debug for SharedDatabase {
 
 #[cfg(test)]
 mod shared_database_tests {
-    use super::*;
     use vibesql_catalog::{ColumnSchema, TableSchema};
     use vibesql_storage::Row;
     use vibesql_types::{DataType, SqlValue};
+
+    use super::*;
 
     async fn create_shared_test_db() -> SharedDatabase {
         let mut db = Database::new();

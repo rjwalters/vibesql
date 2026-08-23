@@ -7,12 +7,11 @@ use std::collections::{HashMap, HashSet};
 
 use ahash::AHashSet;
 
+use super::semi_anti::parse_semi_join_condition;
 use crate::{
     errors::ExecutorError, evaluator::CombinedExpressionEvaluator,
     optimizer::where_pushdown::flatten_conjuncts, schema::CombinedSchema,
 };
-
-use super::semi_anti::parse_semi_join_condition;
 
 /// Slot in a lookup key template
 #[derive(Debug, Clone)]

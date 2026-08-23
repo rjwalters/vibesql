@@ -9,9 +9,12 @@
 //! - `session` - Session configuration (SQL:1999)
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
     advanced_objects::{
@@ -87,14 +90,21 @@ pub struct Catalog {
     /// When true, identifier lookups are case-sensitive (SQL standard).
     /// When false (default), identifier lookups are case-insensitive (MySQL compatible).
     pub(crate) case_sensitive_identifiers: bool,
-    /// When true, unqualified table-name resolution does NOT consult the session
-    /// temp schema — it resolves against the main schema only. This models
-    /// SQLite's rule that a trigger created in the `main` (or an attached)
-    /// database resolves the unqualified table names in its body against its own
-    /// database, ignoring temp tables (trigger1-3.2..3.5). It is toggled on only
-    /// for the duration of a non-temp trigger body's execution and restored
-    /// afterward. Default `false` (temp shadows main) everywhere else.
-    pub(crate) suppress_temp_shadowing: bool,
+    /// When set, unqualified table-name resolution is restricted to exactly
+    /// this internal schema name, bypassing the ordinary
+    /// temp -> current -> attached search order entirely. This models
+    /// SQLite's rule that an unqualified table name inside a trigger body
+    /// resolves *only* within the schema that owns the trigger, never
+    /// falling back to another schema: a `main` trigger cannot see a
+    /// same-named TEMP table (trigger1-3.2..3.5), a `temp` trigger keeps its
+    /// normal temp-first resolution (the value here is the session's own
+    /// temp schema name), and — the fix for #6477 — a trigger owned by an
+    /// ATTACHed schema resolves its body's unqualified names only within
+    /// that attachment, never `main` or any other attachment. It is toggled
+    /// on only for the duration of a trigger body's execution and restored
+    /// afterward (nested trigger bodies restore the prior value on unwind).
+    /// Default `None` (full search order) everywhere else.
+    pub(crate) restrict_unqualified_resolution_to_schema: Option<String>,
     /// Monotonic creation-order sequence for schema objects (tables, indexes,
     /// views, triggers), keyed by `"{schema}\u{1}{name}"` (both lowercased).
     ///
@@ -173,9 +183,9 @@ impl Catalog {
             // The parser preserves original case from SQL text. We use case-insensitive
             // mode so lookups work regardless of case in queries.
             case_sensitive_identifiers: false,
-            // Temp shadowing is active by default; only a non-temp trigger body
-            // suppresses it (see field docs).
-            suppress_temp_shadowing: false,
+            // Full search order is active by default; only a trigger body's
+            // execution restricts it (see field docs).
+            restrict_unqualified_resolution_to_schema: None,
             creation_seq: HashMap::new(),
             next_creation_seq: 0,
             temp_touched: false,
@@ -310,22 +320,63 @@ impl Catalog {
         self.case_sensitive_identifiers
     }
 
-    /// Suppress (or restore) temp-schema shadowing for unqualified table lookups.
+    /// Restrict (or unrestrict) unqualified table-name resolution to a single
+    /// named internal schema.
     ///
-    /// When enabled, unqualified table-name resolution ignores the session temp
-    /// schema and resolves against the main schema only. Used to model SQLite's
-    /// rule that a non-temp trigger's body resolves unqualified names against the
-    /// trigger's own (main) database — a `main` trigger cannot see a TEMP table
-    /// of the same name (trigger1-3.2..3.5). Returns the previous value so the
-    /// caller can restore it (correct nesting of trigger bodies).
-    pub fn set_suppress_temp_shadowing(&mut self, suppress: bool) -> bool {
-        std::mem::replace(&mut self.suppress_temp_shadowing, suppress)
+    /// `Some(schema)` makes unqualified lookups resolve *only* within
+    /// `schema`, bypassing the temp -> current -> attached search order
+    /// entirely. Used to scope a trigger body's unqualified names to the
+    /// trigger's own schema (#6477) — pass `"main"` for a `main` trigger
+    /// (matching the earlier main-only "suppress temp shadowing" behavior),
+    /// the session's temp schema name for a `temp` trigger (preserving
+    /// temp-first resolution), or an attached schema's name for a trigger
+    /// owned by that attachment. `None` restores the ordinary search order.
+    /// Returns the previous value so the caller can restore it (correct
+    /// nesting of trigger bodies).
+    pub fn set_restrict_unqualified_resolution_to_schema(
+        &mut self,
+        schema: Option<String>,
+    ) -> Option<String> {
+        std::mem::replace(&mut self.restrict_unqualified_resolution_to_schema, schema)
     }
 
-    /// Whether temp-schema shadowing is currently suppressed for unqualified
-    /// table lookups (see [`Self::set_suppress_temp_shadowing`]).
-    pub fn is_temp_shadowing_suppressed(&self) -> bool {
-        self.suppress_temp_shadowing
+    /// The schema unqualified table-name resolution is currently restricted
+    /// to, if any (see [`Self::set_restrict_unqualified_resolution_to_schema`]).
+    pub fn unqualified_resolution_restricted_to(&self) -> Option<&str> {
+        self.restrict_unqualified_resolution_to_schema.as_deref()
+    }
+
+    /// Resolve a schema name written by the user to the **canonical** internal
+    /// schema name it refers to.
+    ///
+    /// Schema qualifiers are kept verbatim as written (e.g. the parser stores
+    /// `CREATE TRIGGER MAIN.tr`'s qualifier as `"MAIN"`) precisely because
+    /// schema comparisons downstream are case-insensitive. Anything that uses
+    /// a schema name as a **lookup key** rather than a comparison operand must
+    /// canonicalize it first — notably the storage layer, whose `tables` map is
+    /// keyed by `"<canonical schema>.<table>"` (see #6477's storage mirror).
+    ///
+    /// `"temp"` (in any case) resolves to this session's temp schema name;
+    /// every other name is matched case-insensitively against the known
+    /// schemas unless case-sensitive identifiers are enabled. A name matching
+    /// no known schema is returned unchanged (after temp resolution) so the
+    /// caller still reports the user's own spelling.
+    pub fn canonical_schema_name(&self, schema_name: &str) -> String {
+        let effective_schema_name = if schema_name.eq_ignore_ascii_case(crate::TEMP_SCHEMA) {
+            self.temp_schema_name.clone()
+        } else {
+            schema_name.to_string()
+        };
+
+        if self.case_sensitive_identifiers {
+            return effective_schema_name;
+        }
+
+        self.schemas
+            .keys()
+            .find(|key| key.eq_ignore_ascii_case(&effective_schema_name))
+            .cloned()
+            .unwrap_or(effective_schema_name)
     }
 
     /// Normalize an identifier for lookup (applies case folding if case-insensitive mode)

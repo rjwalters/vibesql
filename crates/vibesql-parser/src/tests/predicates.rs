@@ -447,6 +447,136 @@ fn test_like_escape_shift_parses() {
     }
 }
 
+// ============================================================================
+// MATCH / REGEXP with an ESCAPE clause (issue #6172, e_expr-12.3.59/.61/.67/.69)
+//
+// SQLite's grammar shares a single `likeop` production across
+// LIKE/GLOB/REGEXP/MATCH, so an ESCAPE clause is *syntactically* legal after
+// MATCH/REGEXP too, even though neither has a semantic use for an escape
+// character. `X MATCH Y` desugars to the function call `match(Y, X)` (note the
+// swapped argument order), and the ESCAPE expression is appended as a third
+// positional argument: `match(Y, X, Z)`. These tests are parse-level only —
+// the resulting 3-argument call errors at runtime like any other wrong-arity
+// call, exactly as it does in stock SQLite.
+// ============================================================================
+
+/// Assert `expr` is a `fn_name(...)` call and return its argument list.
+fn assert_match_regexp_call<'a>(
+    expr: &'a vibesql_ast::Expression,
+    fn_name: &str,
+    context: &str,
+) -> &'a [vibesql_ast::Expression] {
+    match expr {
+        vibesql_ast::Expression::Function { name, args, .. } => {
+            assert_eq!(
+                name.canonical(),
+                fn_name.to_lowercase(),
+                "{}: unexpected function name (display form {:?})",
+                context,
+                name
+            );
+            args
+        }
+        other => panic!("{}: expected a Function call, got {:?}", context, other),
+    }
+}
+
+/// Assert `expr` is the string literal `expected`.
+fn assert_varchar_literal(expr: &vibesql_ast::Expression, expected: &str, context: &str) {
+    match expr {
+        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Varchar(s)) => {
+            assert_eq!(s, expected, "{}: unexpected literal", context);
+        }
+        other => panic!("{}: expected Varchar literal {:?}, got {:?}", context, expected, other),
+    }
+}
+
+/// Shared shape assertion: `<fn>(pattern, operand, escape)` in that order.
+fn assert_escape_call(expr: &vibesql_ast::Expression, fn_name: &str, context: &str) {
+    let args = assert_match_regexp_call(expr, fn_name, context);
+    assert_eq!(args.len(), 3, "{}: ESCAPE should add a third argument, got {:?}", context, args);
+    // Argument order is (pattern, operand) — swapped relative to the operator
+    // — with the ESCAPE expression appended last.
+    assert_varchar_literal(&args[0], "pat", &format!("{} arg0 (pattern)", context));
+    assert_varchar_literal(&args[1], "abc", &format!("{} arg1 (operand)", context));
+    assert_varchar_literal(&args[2], "x", &format!("{} arg2 (escape)", context));
+}
+
+/// Unwrap the `NOT` wrapper the negated operator forms produce.
+fn assert_not_wrapper<'a>(
+    expr: &'a vibesql_ast::Expression,
+    context: &str,
+) -> &'a vibesql_ast::Expression {
+    match expr {
+        vibesql_ast::Expression::UnaryOp { op: vibesql_ast::UnaryOperator::Not, expr } => expr,
+        other => panic!("{}: expected NOT UnaryOp, got {:?}", context, other),
+    }
+}
+
+#[test]
+fn test_regexp_escape_parses_as_three_arg_call(/* issue #6172 */) {
+    // e_expr-12.3.59: `EXPR1 REGEXP EXPR2 ESCAPE EXPR` was a hard parse error
+    // ("near \"ESCAPE\": syntax error") before the fix.
+    let expr = parse_select_expr("SELECT 'abc' REGEXP 'pat' ESCAPE 'x';");
+    assert_escape_call(&expr, "REGEXP", "REGEXP ... ESCAPE");
+}
+
+#[test]
+fn test_not_regexp_escape_parses_as_three_arg_call(/* issue #6172 */) {
+    // e_expr-12.3.61: the negated form wraps the same 3-arg call in NOT.
+    let expr = parse_select_expr("SELECT 'abc' NOT REGEXP 'pat' ESCAPE 'x';");
+    let inner = assert_not_wrapper(&expr, "NOT REGEXP ... ESCAPE");
+    assert_escape_call(inner, "REGEXP", "NOT REGEXP ... ESCAPE inner call");
+}
+
+#[test]
+fn test_match_escape_parses_as_three_arg_call(/* issue #6172 */) {
+    // e_expr-12.3.67.
+    let expr = parse_select_expr("SELECT 'abc' MATCH 'pat' ESCAPE 'x';");
+    assert_escape_call(&expr, "MATCH", "MATCH ... ESCAPE");
+}
+
+#[test]
+fn test_not_match_escape_parses_as_three_arg_call(/* issue #6172 */) {
+    // e_expr-12.3.69.
+    let expr = parse_select_expr("SELECT 'abc' NOT MATCH 'pat' ESCAPE 'x';");
+    let inner = assert_not_wrapper(&expr, "NOT MATCH ... ESCAPE");
+    assert_escape_call(inner, "MATCH", "NOT MATCH ... ESCAPE inner call");
+}
+
+#[test]
+fn test_match_regexp_without_escape_stay_two_arg_calls(/* issue #6172 */) {
+    // Guard against the ESCAPE plumbing changing the no-ESCAPE shape: without
+    // an ESCAPE clause the call must still be exactly `fn(pattern, operand)`.
+    for (sql, fn_name) in
+        [("SELECT 'abc' REGEXP 'pat';", "REGEXP"), ("SELECT 'abc' MATCH 'pat';", "MATCH")]
+    {
+        let expr = parse_select_expr(sql);
+        let args = assert_match_regexp_call(&expr, fn_name, sql);
+        assert_eq!(args.len(), 2, "{}: no ESCAPE means a 2-arg call, got {:?}", sql, args);
+        assert_varchar_literal(&args[0], "pat", &format!("{} arg0 (pattern)", sql));
+        assert_varchar_literal(&args[1], "abc", &format!("{} arg1 (operand)", sql));
+    }
+    for (sql, fn_name) in
+        [("SELECT 'abc' NOT REGEXP 'pat';", "REGEXP"), ("SELECT 'abc' NOT MATCH 'pat';", "MATCH")]
+    {
+        let expr = parse_select_expr(sql);
+        let inner = assert_not_wrapper(&expr, sql);
+        let args = assert_match_regexp_call(inner, fn_name, sql);
+        assert_eq!(args.len(), 2, "{}: no ESCAPE means a 2-arg call, got {:?}", sql, args);
+    }
+}
+
+#[test]
+fn test_match_regexp_escape_expression_operand(/* issue #6172 */) {
+    // The ESCAPE operand parses at the same tier as LIKE/GLOB's (see
+    // `test_like_escape_shift_parses`), so a non-literal expression is legal.
+    let expr = parse_select_expr("SELECT 'abc' REGEXP 'pat' ESCAPE 1<<1;");
+    let args = assert_match_regexp_call(&expr, "REGEXP", "REGEXP ... ESCAPE 1<<1");
+    assert_eq!(args.len(), 3, "ESCAPE should add a third argument, got {:?}", args);
+    assert_left_shift(&args[2], "REGEXP ESCAPE expression");
+}
+
 #[test]
 fn test_glob_shift_pattern() {
     // sqlite3: SELECT 2 GLOB 1<<1; -- 1  (pattern is 1<<1 = 2)

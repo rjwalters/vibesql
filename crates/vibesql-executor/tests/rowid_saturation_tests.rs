@@ -3,15 +3,13 @@
 //!
 //! Two allocation paths previously diverged from sqlite3 3.51.0:
 //!
-//!  1. Plain-rowid saturation: `Table::next_rowid_signed()` saturated at
-//!     `i64::MAX`, so a table whose max rowid was `i64::MAX` silently allocated
-//!     `i64::MAX` again — a *duplicate* rowid. sqlite3 instead picks a random
-//!     unused rowid (returning SQLITE_FULL only if probing fails).
+//!  1. Plain-rowid saturation: `Table::next_rowid_signed()` saturated at `i64::MAX`, so a table
+//!     whose max rowid was `i64::MAX` silently allocated `i64::MAX` again — a *duplicate* rowid.
+//!     sqlite3 instead picks a random unused rowid (returning SQLITE_FULL only if probing fails).
 //!
-//!  2. INTEGER PRIMARY KEY NULL auto-assign (`compute_next_integer_pk_value`)
-//!     floored the max at 0 (ignoring negative IPKs → allocated `1` instead of
-//!     `max + 1`) and did an unchecked `max + 1` that panicked in debug / wrapped
-//!     to `i64::MIN` in release when the max was `i64::MAX`.
+//!  2. INTEGER PRIMARY KEY NULL auto-assign (`compute_next_integer_pk_value`) floored the max at 0
+//!     (ignoring negative IPKs → allocated `1` instead of `max + 1`) and did an unchecked `max + 1`
+//!     that panicked in debug / wrapped to `i64::MIN` in release when the max was `i64::MAX`.
 //!
 //! Both now delegate to `Table::allocate_rowid`, matching sqlite3 exactly. The
 //! random-probe fallback is inherently nondeterministic, so the saturation tests

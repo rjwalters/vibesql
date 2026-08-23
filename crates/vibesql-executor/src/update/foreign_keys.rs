@@ -32,19 +32,16 @@ impl ForeignKeyValidator {
     /// this, both of which the plain (`old_row_values = None`) path gets
     /// wrong for a self-referential constraint:
     ///
-    /// 1. **Self-rescue** — an UPDATE that sets a row's own parent-key equal
-    ///    to its FK value (e.g. `UPDATE self SET a=14, b=14` on a
-    ///    `b REFERENCES self(a)` table) satisfies the constraint via the
-    ///    row itself. Without the OLD row we still scan for the new parent
-    ///    key, which does not yet exist in the stored (pre-update) table,
-    ///    and raise a spurious violation (fkey2-16.1.*.6 false positive).
+    /// 1. **Self-rescue** — an UPDATE that sets a row's own parent-key equal to its FK value (e.g.
+    ///    `UPDATE self SET a=14, b=14` on a `b REFERENCES self(a)` table) satisfies the constraint
+    ///    via the row itself. Without the OLD row we still scan for the new parent key, which does
+    ///    not yet exist in the stored (pre-update) table, and raise a spurious violation
+    ///    (fkey2-16.1.*.6 false positive).
     ///
-    /// 2. **Old-row exclusion** — an UPDATE that moves a row's parent-key
-    ///    away (e.g. `UPDATE self SET a=15` where the row was `(14, 14)`)
-    ///    must *not* be rescued by its own stale OLD parent-key still sitting
-    ///    in the table during the scan; that OLD row is about to be
-    ///    overwritten. Excluding it exposes the real violation
-    ///    (fkey2-16.1.*.4 false negative).
+    /// 2. **Old-row exclusion** — an UPDATE that moves a row's parent-key away (e.g. `UPDATE self
+    ///    SET a=15` where the row was `(14, 14)`) must *not* be rescued by its own stale OLD
+    ///    parent-key still sitting in the table during the scan; that OLD row is about to be
+    ///    overwritten. Excluding it exposes the real violation (fkey2-16.1.*.4 false negative).
     ///
     /// Non-self-referential FKs are unaffected: the parent table is a
     /// different table, so neither the self-rescue nor the exclusion applies.

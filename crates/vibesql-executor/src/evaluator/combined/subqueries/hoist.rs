@@ -33,23 +33,19 @@
 //!
 //! A `ScalarSubquery` node is hoisted only when ALL of the following hold:
 //!
-//! 1. The evaluator has no outer context of any kind (no outer row/schema,
-//!    no chained outer evaluator, no trigger or procedural context). This is
-//!    the top-level-query case; nested evaluation contexts fall back to the
-//!    existing cached per-row path.
-//! 2. The syntactic correlation check (`is_correlated_cached`) reports the
-//!    subquery as uncorrelated.
-//! 3. The correlation-reference extraction used by the caching layer
-//!    (`extract_correlation_values`) finds **zero** outer column references.
-//!    This catches unqualified column names that the syntactic check can miss
-//!    (the aggnested-1.4 / select1-18.x hazard).
-//! 4. The subquery's select list is statically known to produce exactly one
-//!    column — multi-column `ScalarSubquery` nodes participate in row-value
-//!    comparisons like `(a, b) = (SELECT x, y ...)` and must not be folded to
-//!    a scalar literal.
-//! 5. The one-shot evaluation succeeds. On error the node is left untouched so
-//!    the per-row path preserves lazy error semantics (e.g. a subquery inside
-//!    a CASE branch that is never taken).
+//! 1. The evaluator has no outer context of any kind (no outer row/schema, no chained outer
+//!    evaluator, no trigger or procedural context). This is the top-level-query case; nested
+//!    evaluation contexts fall back to the existing cached per-row path.
+//! 2. The syntactic correlation check (`is_correlated_cached`) reports the subquery as
+//!    uncorrelated.
+//! 3. The correlation-reference extraction used by the caching layer (`extract_correlation_values`)
+//!    finds **zero** outer column references. This catches unqualified column names that the
+//!    syntactic check can miss (the aggnested-1.4 / select1-18.x hazard).
+//! 4. The subquery's select list is statically known to produce exactly one column — multi-column
+//!    `ScalarSubquery` nodes participate in row-value comparisons like `(a, b) = (SELECT x, y ...)`
+//!    and must not be folded to a scalar literal.
+//! 5. The one-shot evaluation succeeds. On error the node is left untouched so the per-row path
+//!    preserves lazy error semantics (e.g. a subquery inside a CASE branch that is never taken).
 //!
 //! The traversal never descends into nested `SelectStmt` bodies (`IN`,
 //! `EXISTS`, quantified comparisons, or the subquery's own AST): expressions

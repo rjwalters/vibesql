@@ -6,10 +6,11 @@
 use vibesql_ast::{BinaryOperator, Expression};
 use vibesql_types::SqlValue;
 
+use super::{
+    range::{extract_range_predicate, merge_range_predicates, value_satisfies_range},
+    IndexPredicate, RangePredicate,
+};
 use crate::select::scan::index_scan::selection::is_column_reference;
-
-use super::range::{extract_range_predicate, merge_range_predicates, value_satisfies_range};
-use super::{IndexPredicate, RangePredicate};
 
 /// Extract index predicate (range or IN) for an indexed column from WHERE clause
 ///
@@ -69,7 +70,8 @@ pub(crate) fn extract_index_predicate(
                 in_vals.iter().filter(|v| value_satisfies_range(v, range)).cloned().collect();
 
             // Return the filtered IN list (may be empty for full contradiction)
-            // This ensures BOTH predicates are satisfied by using only IN values that pass the range
+            // This ensures BOTH predicates are satisfied by using only IN values that pass the
+            // range
             return Some(IndexPredicate::In(satisfying_values));
         }
     }

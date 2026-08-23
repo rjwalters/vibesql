@@ -29,7 +29,8 @@ impl DropTableExecutor {
     /// use vibesql_types::DataType;
     ///
     /// let mut db = Database::new();
-    /// let create_stmt = CreateTableStmt { temporary: false,
+    /// let create_stmt = CreateTableStmt {
+    ///     temporary: false,
     ///     if_not_exists: false,
     ///     table_name: "users".to_string(),
     ///     columns: vec![ColumnDef {
@@ -39,13 +40,17 @@ impl DropTableExecutor {
     ///         constraints: vec![],
     ///         default_value: None,
     ///         comment: None,
-    ///         generated_expr: None, is_exact_integer_type: false, type_source: None,
+    ///         generated_expr: None,
+    ///         is_exact_integer_type: false,
+    ///         type_source: None,
     ///     }],
     ///     table_constraints: vec![],
     ///     table_options: vec![],
     ///     quoted: false,
     ///     name_source: None,
-    ///     as_query: None, without_rowid: false, strict: false,
+    ///     as_query: None,
+    ///     without_rowid: false,
+    ///     strict: false,
     /// };
     /// CreateTableExecutor::execute(&create_stmt, &mut db).unwrap();
     ///
@@ -63,7 +68,7 @@ impl DropTableExecutor {
         // that is not registered in the catalog. Other non-existent `sqlite_`
         // names fall through to the normal "no such table" path, matching
         // sqlite3 (issue #5614).
-        if crate::sqlite_schema::is_sqlite_schema_table(&stmt.table_name) {
+        if crate::sqlite_schema::is_sqlite_schema_table_ref(&database.catalog, &stmt.table_name) {
             return Err(ExecutorError::SqliteCompatError(
                 "table sqlite_master may not be dropped".to_string(),
             ));

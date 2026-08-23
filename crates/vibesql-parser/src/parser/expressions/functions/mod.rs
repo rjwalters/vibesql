@@ -526,7 +526,8 @@ impl Parser {
             // percentile.c family - arg counts validated by the executor so
             // it can emit SQLite-exact "wrong number of arguments" errors
             "MEDIAN" | "PERCENTILE" | "PERCENTILE_CONT" | "PERCENTILE_DISC" => true,
-            "MIN" | "MAX" => args.len() <= 1 && !distinct, // multi-arg or DISTINCT with >1 arg = scalar
+            "MIN" | "MAX" => args.len() <= 1 && !distinct, /* multi-arg or DISTINCT with >1 arg */
+            // = scalar
             _ => false,
         };
 

@@ -12,7 +12,7 @@ use crate::{
     evaluator::{coercion::coerce_value_to_column_type, ExpressionEvaluator},
     expression_index_maintenance, partial_index_maintenance,
     privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table,
+    sqlite_schema::is_sqlite_schema_table_ref,
     truncate_validation::can_use_truncate,
 };
 
@@ -83,7 +83,9 @@ impl DeleteExecutor {
     ///     alias: None,
     ///     index_hint: None,
     ///     where_clause: Some(WhereClause::Condition(Expression::BinaryOp {
-    ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple("id", false))),
+    ///         left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+    ///             "id", false,
+    ///         ))),
     ///         op: BinaryOperator::Equal,
     ///         right: Box::new(Expression::Literal(SqlValue::Integer(1))),
     ///     })),
@@ -166,10 +168,15 @@ impl DeleteExecutor {
         // ONLY keyword is used in table inheritance to exclude derived tables.
         // Since table inheritance is not yet implemented, we treat all deletes the same.
 
-        // Check if target is sqlite_master/sqlite_schema (read-only system table)
-        if is_sqlite_schema_table(&stmt.table_name) {
+        // Check if target is sqlite_master/sqlite_schema (read-only system table).
+        // SQLite always reports the canonical `sqlite_master` name in this
+        // message regardless of which spelling (`sqlite_master`/`sqlite_schema`),
+        // case, or qualifier (bare, `main.`, or a currently-attached alias) the
+        // statement used — echoing `stmt.table_name` verbatim would leak the
+        // alias qualifier into the message (issue #6451).
+        if is_sqlite_schema_table_ref(&database.catalog, &stmt.table_name) {
             return Err(ExecutorError::SqliteSystemTableReadOnly {
-                table_name: stmt.table_name.clone(),
+                table_name: "sqlite_master".to_string(),
                 operation: "modified".to_string(),
             });
         }
@@ -315,7 +322,8 @@ impl DeleteExecutor {
                         && !has_expression_indexes
                         && !has_partial_indexes
                     {
-                        // Use the fast path - no triggers, no FKs, no expression indexes, single row PK delete
+                        // Use the fast path - no triggers, no FKs, no expression indexes, single
+                        // row PK delete
                         match database.delete_by_pk_fast(table_name, &pk_values) {
                             Ok(deleted) => {
                                 let count = if deleted { 1 } else { 0 };

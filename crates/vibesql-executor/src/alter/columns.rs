@@ -1,7 +1,6 @@
 //! Column operation executors for ALTER TABLE
 
-use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::*;
+use vibesql_ast::{pretty_print::ToSql, *};
 use vibesql_catalog::ColumnSchema;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
@@ -239,9 +238,9 @@ pub(super) fn execute_add_column(
     // untouched) if any current row would violate them (alter3-9.*). We check
     // the added column's:
     //   - column-level CHECK constraints, and
-    //   - NOT NULL, but only for a generated column (a non-generated column is
-    //     already guaranteed non-NULL by the constant-default rule enforced
-    //     above; a generated column's value is computed per row and may be NULL).
+    //   - NOT NULL, but only for a generated column (a non-generated column is already guaranteed
+    //     non-NULL by the constant-default rule enforced above; a generated column's value is
+    //     computed per row and may be NULL).
     // Rows are scanned in order and CHECK is evaluated before NOT NULL within a
     // row, matching sqlite3 3.51.0 (alter3-9.6 reports the CHECK failure even
     // though a later row would also fail NOT NULL).
@@ -249,18 +248,15 @@ pub(super) fn execute_add_column(
     // be persisted into `schema.check_constraints` below, using the same naming
     // convention CREATE TABLE's column-level CHECK uses (explicit name, else
     // the verbatim CHECK source text, else the re-rendered expression) --
-    // see `ConstraintValidator::process_constraints` in `constraint_validator.rs`.
+    // see `constraint_validator::process_constraints` in `constraint_validator.rs`.
     let added_checks: Vec<(String, Expression)> = stmt
         .column_def
         .constraints
         .iter()
         .filter_map(|c| match &c.kind {
             ColumnConstraintKind::Check { expr, source_text } => {
-                let name = c
-                    .name
-                    .clone()
-                    .or_else(|| source_text.clone())
-                    .unwrap_or_else(|| expr.to_sql());
+                let name =
+                    c.name.clone().or_else(|| source_text.clone()).unwrap_or_else(|| expr.to_sql());
                 Some((name, (**expr).clone()))
             }
             _ => None,

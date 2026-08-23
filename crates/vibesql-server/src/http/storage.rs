@@ -7,27 +7,23 @@
 //!
 //! The blob storage API has two backends selected by the server mode:
 //!
-//! * **Standalone**: blobs are written to a separate [`BlobStorageService`]
-//!   byte store (OpenDAL — filesystem, S3, GCS, Azure, in-memory). This path is
-//!   unchanged: the bytes live outside the SQL database and never touch
-//!   consensus.
+//! * **Standalone**: blobs are written to a separate [`BlobStorageService`] byte store (OpenDAL —
+//!   filesystem, S3, GCS, Azure, in-memory). This path is unchanged: the bytes live outside the SQL
+//!   database and never touch consensus.
 //!
-//! * **Replicated**: a separate node-local byte store would never replicate, so
-//!   blob writes are instead routed through the **same consensus SQL write
-//!   path** every other replicated HTTP surface uses. Each blob is a row in the
-//!   replicated `__vibesql_blobs` system table `(id, content_type, size,
-//!   created_at, data BLOB)`. An upload proposes an `INSERT` through consensus
-//!   via the [`HttpState::session`](crate::http::rest::HttpState) choke point
-//!   (leader-only, freeze-at-propose); a delete proposes a `DELETE`; a download
-//!   / metadata read runs the `SELECT` against the replicated state machine. So
-//!   a blob written on the leader replicates to every follower and is readable
-//!   on any node, an upload/delete on a follower surfaces the `NOT_LEADER`
-//!   refusal as `421` (never written locally — the split-brain invariant), and
-//!   there is no local-only blob write. The blob bytes ride the Raft log as a
-//!   SQL `BLOB` literal; this is sound for modest blobs but large blobs would
-//!   bloat the log/snapshots, so replicated uploads are capped at
-//!   [`MAX_REPLICATED_BLOB_BYTES`] (streaming large blobs out-of-band is a
-//!   documented follow-on).
+//! * **Replicated**: a separate node-local byte store would never replicate, so blob writes are
+//!   instead routed through the **same consensus SQL write path** every other replicated HTTP
+//!   surface uses. Each blob is a row in the replicated `__vibesql_blobs` system table `(id,
+//!   content_type, size, created_at, data BLOB)`. An upload proposes an `INSERT` through consensus
+//!   via the [`HttpState::session`](crate::http::rest::HttpState) choke point (leader-only,
+//!   freeze-at-propose); a delete proposes a `DELETE`; a download / metadata read runs the `SELECT`
+//!   against the replicated state machine. So a blob written on the leader replicates to every
+//!   follower and is readable on any node, an upload/delete on a follower surfaces the `NOT_LEADER`
+//!   refusal as `421` (never written locally — the split-brain invariant), and there is no
+//!   local-only blob write. The blob bytes ride the Raft log as a SQL `BLOB` literal; this is sound
+//!   for modest blobs but large blobs would bloat the log/snapshots, so replicated uploads are
+//!   capped at [`MAX_REPLICATED_BLOB_BYTES`] (streaming large blobs out-of-band is a documented
+//!   follow-on).
 
 use std::sync::Arc;
 
@@ -39,13 +35,14 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use tokio::sync::RwLock;
 use tracing::{debug, error};
-use vibesql_storage::{BlobId, BlobStorageConfig, BlobStorageService, Database};
+use vibesql_storage::{BlobId, BlobMetadata, BlobStorageConfig, BlobStorageService};
 
-use super::rest::{execution_error_response, get_database_name, HttpState};
-use super::types::*;
-use crate::registry::DatabaseRegistry;
+use super::{
+    rest::{execution_error_response, get_database_name, HttpState},
+    types::*,
+};
+use crate::registry::{DatabaseRegistry, SharedDatabase};
 
 /// Replicated system table that holds blobs as rows so blob writes ride the
 /// consensus SQL write path (#5455).
@@ -64,42 +61,62 @@ pub const MAX_REPLICATED_BLOB_BYTES: usize = 8 * 1024 * 1024;
 pub struct StorageState {
     /// Database registry for shared database access
     pub registry: DatabaseRegistry,
-    /// Legacy database reference for backwards compatibility (blob storage)
-    pub db: Arc<RwLock<Database>>,
-    /// Blob storage service
+    /// Shared, lock-guarded database handle backing the standalone blob
+    /// metadata surface.
+    ///
+    /// This is the **same** registry-backed handle held by [`HttpState::db`]
+    /// (and returned by `registry.get_or_create(DEFAULT_DATABASE_NAME)`), not
+    /// a separate copy: blob metadata this router writes into the
+    /// `vibesql_storage` system table is immediately visible to `/api/query`
+    /// and `/api/tables` on the same server, and vice versa (#6448).
+    pub db: SharedDatabase,
+    /// Blob storage service (I/O against the configured byte-store backend
+    /// only; metadata read/write goes through [`Self::db`] directly at each
+    /// call site — see [`BlobStorageService`]'s type-level docs).
     pub blob_service: Arc<BlobStorageService>,
 }
 
 impl StorageState {
-    /// Create storage state from database and registry
-    pub fn new(db: Arc<Database>, registry: DatabaseRegistry) -> Self {
-        // Create blob service with the database reference
-        let blob_service = Arc::new(BlobStorageService::new_default(db.clone()));
-        // Wrap Database in RwLock for safe concurrent access
-        let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        let db = Arc::new(RwLock::new(db_inner));
-        Self { registry, db, blob_service }
+    /// Create storage state from the shared database handle and registry.
+    pub fn new(db: SharedDatabase, registry: DatabaseRegistry) -> Self {
+        Self::with_config(BlobStorageConfig::default(), db, registry)
     }
 
-    /// Create storage state with custom config
-    #[allow(dead_code)]
+    /// Create storage state with custom config.
+    ///
+    /// `db` is the same shared, lock-guarded handle used by [`HttpState::db`]
+    /// and the registry entry `/api/query` executes against — no
+    /// `Arc::try_unwrap`-or-clone boundary here (that disconnected the blob
+    /// service from the caller's database; see #6443 / PR #6446's review /
+    /// #6448). [`BlobStorageService`] itself holds no database handle at all;
+    /// it takes `&Database`/`&mut Database` per call, so it works with
+    /// whatever lock discipline the caller already uses around `db`.
     pub fn with_config(
         config: BlobStorageConfig,
-        db: Arc<Database>,
+        db: SharedDatabase,
         registry: DatabaseRegistry,
     ) -> Self {
-        // Create blob service with the database reference
-        let blob_service = Arc::new(BlobStorageService::new(config, db.clone()));
-        // Wrap Database in RwLock for safe concurrent access
-        let db_inner = Arc::try_unwrap(db).unwrap_or_else(|arc| (*arc).clone());
-        let db = Arc::new(RwLock::new(db_inner));
+        let blob_service = Arc::new(BlobStorageService::new(config));
         Self { registry, db, blob_service }
     }
 }
 
 /// Create the storage API router for **standalone** mode (separate byte store).
-pub fn create_storage_router(db: Arc<Database>, registry: DatabaseRegistry) -> Router {
-    let state = StorageState::new(db, registry);
+pub fn create_storage_router(db: SharedDatabase, registry: DatabaseRegistry) -> Router {
+    create_storage_router_with_config(BlobStorageConfig::default(), db, registry)
+}
+
+/// Same as [`create_storage_router`], but takes an explicit blob storage
+/// backend config instead of always defaulting to the filesystem backend.
+/// `create_storage_router` is the production entry point (defaults preserved
+/// exactly); this variant lets a test select e.g. the in-memory backend while
+/// still sharing the exact same route wiring.
+pub(crate) fn create_storage_router_with_config(
+    config: BlobStorageConfig,
+    db: SharedDatabase,
+    registry: DatabaseRegistry,
+) -> Router {
+    let state = StorageState::with_config(config, db, registry);
 
     Router::new()
         .route("/upload", post(upload_blob))
@@ -144,25 +161,40 @@ async fn upload_blob(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    let size = body.len() as i64;
+    debug!("Uploading blob: {} bytes, content-type: {}", body.len(), content_type);
 
-    debug!("Uploading blob: {} bytes, content-type: {}", size, content_type);
-
-    match state.blob_service.store(body, content_type.clone()).await {
-        Ok(blob_id) => {
-            let url = state.blob_service.get_url(&blob_id);
-            let response = BlobUploadResponse { id: blob_id.to_string(), size, content_type, url };
-            (StatusCode::CREATED, Json(response)).into_response()
-        }
+    // Write the byte payload first — no database lock held during backend
+    // I/O — then take the shared database only for the brief metadata insert
+    // (#6448: `state.db` is the same registry-backed handle `/api/query` and
+    // `/api/tables` read, so the metadata row is immediately visible there).
+    let (blob_id, size) = match state.blob_service.write_bytes(body).await {
+        Ok(v) => v,
         Err(e) => {
             error!("Failed to upload blob: {}", e);
-            (
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse::new(format!("Failed to upload blob: {}", e))),
             )
-                .into_response()
+                .into_response();
+        }
+    };
+
+    let metadata = BlobMetadata::new(blob_id.clone(), size, content_type.clone());
+    {
+        let mut db = state.db.write().await;
+        if let Err(e) = state.blob_service.store_metadata(&mut db, &metadata) {
+            error!("Failed to store metadata for blob {}: {}", blob_id, e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse::new(format!("Failed to upload blob: {}", e))),
+            )
+                .into_response();
         }
     }
+
+    let url = state.blob_service.get_url(&blob_id);
+    let response = BlobUploadResponse { id: blob_id.to_string(), size, content_type, url };
+    (StatusCode::CREATED, Json(response)).into_response()
 }
 
 /// Download a blob
@@ -189,11 +221,14 @@ async fn download_blob(
     debug!("Downloading blob: {}", id);
 
     // Get metadata first to determine content type
-    let content_type = match state.blob_service.get_metadata(&id).await {
-        Ok(metadata) => metadata.content_type,
-        Err(e) => {
-            debug!("Failed to get metadata for blob {}, using default content-type: {}", id, e);
-            "application/octet-stream".to_string()
+    let content_type = {
+        let db = state.db.read().await;
+        match state.blob_service.get_metadata(&db, &id) {
+            Ok(metadata) => metadata.content_type,
+            Err(e) => {
+                debug!("Failed to get metadata for blob {}, using default content-type: {}", id, e);
+                "application/octet-stream".to_string()
+            }
         }
     };
 
@@ -245,7 +280,8 @@ async fn get_blob_metadata(
 
     debug!("Getting metadata for blob: {}", id);
 
-    match state.blob_service.get_metadata(&id).await {
+    let db = state.db.read().await;
+    match state.blob_service.get_metadata(&db, &id) {
         Ok(metadata) => {
             let response = BlobMetadataResponse {
                 id: metadata.id.to_string(),
@@ -289,17 +325,21 @@ async fn delete_blob(
 
     debug!("Deleting blob: {}", id);
 
-    match state.blob_service.delete(&id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => {
-            error!("Failed to delete blob {}: {}", id, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse::new(format!("Failed to delete blob: {}", e))),
-            )
-                .into_response()
-        }
+    if let Err(e) = state.blob_service.delete_bytes(&id).await {
+        error!("Failed to delete blob {}: {}", id, e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::new(format!("Failed to delete blob: {}", e))),
+        )
+            .into_response();
     }
+
+    {
+        let mut db = state.db.write().await;
+        state.blob_service.delete_metadata(&mut db, &id);
+    }
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ===========================================================================
@@ -533,12 +573,8 @@ async fn replicated_get_blob_metadata(
 
     match fetch_replicated_blob(&state, &db_name, &id).await {
         Ok(Some((content_type, size, created_at, _data))) => {
-            let response = BlobMetadataResponse {
-                id: id.to_string(),
-                size,
-                content_type,
-                created_at,
-            };
+            let response =
+                BlobMetadataResponse { id: id.to_string(), size, content_type, created_at };
             (StatusCode::OK, Json(response)).into_response()
         }
         Ok(None) => (
@@ -576,10 +612,8 @@ async fn replicated_delete_blob(
         return execution_error_response(&e);
     }
 
-    let sql = format!(
-        "DELETE FROM {BLOB_TABLE} WHERE id = {}",
-        sql_string_literal(&id.to_string()),
-    );
+    let sql =
+        format!("DELETE FROM {BLOB_TABLE} WHERE id = {}", sql_string_literal(&id.to_string()),);
 
     let shared_db = state.registry.get_or_create(&db_name).await;
     let mut session = state.session(&db_name, shared_db);
@@ -602,19 +636,25 @@ mod tests {
 
     use super::*;
 
-    fn create_test_router() -> Router {
-        let db = Arc::new(Database::new());
+    fn create_test_state() -> StorageState {
+        let db = SharedDatabase::new(vibesql_storage::Database::new());
         let registry = DatabaseRegistry::new();
         let config =
             BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
-        let state = StorageState::with_config(config, db, registry);
+        StorageState::with_config(config, db, registry)
+    }
 
+    fn router_for(state: StorageState) -> Router {
         Router::new()
             .route("/upload", post(upload_blob))
             .route("/{blob_id}", get(download_blob))
             .route("/{blob_id}", delete(delete_blob))
             .route("/{blob_id}/metadata", get(get_blob_metadata))
             .with_state(state)
+    }
+
+    fn create_test_router() -> Router {
+        router_for(create_test_state())
     }
 
     #[tokio::test]
@@ -687,6 +727,200 @@ mod tests {
         let response = router.oneshot(request).await.unwrap();
         // Delete is idempotent - deleting non-existent blob returns 204
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// End-to-end round trip for issue #6443: upload a blob over HTTP,
+    /// confirm `GET /{id}/metadata` returns the real size/content_type
+    /// (previously always 404 "Blob not found", even right after a
+    /// successful upload), confirm `GET /{id}` preserves the uploaded
+    /// content type (previously always fell back to
+    /// application/octet-stream), then confirm metadata is gone after
+    /// `DELETE /{id}`.
+    #[tokio::test]
+    async fn test_upload_metadata_download_delete_round_trip() {
+        let router = create_test_router();
+
+        let upload_request = Request::builder()
+            .method("POST")
+            .uri("/upload")
+            .header("content-type", "text/plain")
+            .body(Body::from("Hello, metadata!"))
+            .unwrap();
+        let upload_response = router.clone().oneshot(upload_request).await.unwrap();
+        assert_eq!(upload_response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(upload_response.into_body(), usize::MAX).await.unwrap();
+        let uploaded: BlobUploadResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(uploaded.size, "Hello, metadata!".len() as i64);
+        assert_eq!(uploaded.content_type, "text/plain");
+
+        // GET /{id}/metadata should now return real metadata instead of 404.
+        let metadata_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}/metadata", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let metadata_response = router.clone().oneshot(metadata_request).await.unwrap();
+        assert_eq!(metadata_response.status(), StatusCode::OK);
+        let metadata_body =
+            axum::body::to_bytes(metadata_response.into_body(), usize::MAX).await.unwrap();
+        let metadata: BlobMetadataResponse = serde_json::from_slice(&metadata_body).unwrap();
+        assert_eq!(metadata.id, uploaded.id);
+        assert_eq!(metadata.size, "Hello, metadata!".len() as i64);
+        assert_eq!(metadata.content_type, "text/plain");
+        assert!(!metadata.created_at.is_empty());
+
+        // GET /{id} should preserve the real content type (not the
+        // application/octet-stream fallback).
+        let download_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let download_response = router.clone().oneshot(download_request).await.unwrap();
+        assert_eq!(download_response.status(), StatusCode::OK);
+        assert_eq!(download_response.headers().get(header::CONTENT_TYPE).unwrap(), "text/plain");
+
+        // DELETE /{id} removes both bytes and metadata.
+        let delete_request = Request::builder()
+            .method("DELETE")
+            .uri(format!("/{}", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_response = router.clone().oneshot(delete_request).await.unwrap();
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+
+        let metadata_after_delete_request = Request::builder()
+            .method("GET")
+            .uri(format!("/{}/metadata", uploaded.id))
+            .body(Body::empty())
+            .unwrap();
+        let metadata_after_delete_response =
+            router.oneshot(metadata_after_delete_request).await.unwrap();
+        assert_eq!(metadata_after_delete_response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Regression test for PR #6446's review finding (and #6448): an upload
+    /// through the HTTP surface must write blob metadata into the database
+    /// handle `StorageState` itself holds — the shared, registry-backed
+    /// instance — not into a private `Database` clone.
+    ///
+    /// `state.db` is a [`SharedDatabase`] clone; `caller_db` below is a
+    /// second clone of the exact same `Arc<tokio::sync::RwLock<Database>>`,
+    /// so this reads back through an independent handle to the same
+    /// instance, not through the router's own copy.
+    #[tokio::test]
+    async fn test_upload_persists_metadata_into_shared_state_database() {
+        let state = create_test_state();
+        let caller_db = state.db.clone();
+        let router = router_for(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/upload")
+            .header("content-type", "text/plain")
+            .body(Body::from("Hello, shared state!"))
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let uploaded: BlobUploadResponse = serde_json::from_slice(&body).unwrap();
+
+        // Read the metadata back through the caller's handle.
+        let db = caller_db.read().await;
+        let table = db
+            .get_table("vibesql_storage")
+            .expect("shared state database must see the vibesql_storage metadata table");
+        let ids: Vec<String> = table
+            .scan()
+            .iter()
+            .filter_map(|row| match row.get(0) {
+                Some(vibesql_types::SqlValue::Varchar(v)) => Some(v.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            ids.contains(&uploaded.id),
+            "uploaded blob id {} missing from shared state database (found {:?})",
+            uploaded.id,
+            ids
+        );
+    }
+
+    /// Acceptance test for #6448: a blob uploaded via `POST /api/storage/upload`
+    /// must be visible to `SELECT * FROM vibesql_storage` issued through
+    /// `POST /api/query` **on the same server** — the standalone HTTP database
+    /// is one shared, lock-guarded instance across the storage router, the
+    /// query router, and `/api/tables`, not disconnected copies. Wires the HTTP
+    /// database up exactly the way `main.rs` does: register it in the registry
+    /// under [`crate::http::DEFAULT_DATABASE_NAME`] *before* building the
+    /// router, so `/api/query` and `/api/storage/upload` resolve the same
+    /// registry entry.
+    #[tokio::test]
+    async fn test_blob_metadata_visible_via_sql_query_on_same_server() {
+        use crate::{
+            http::rest::create_http_router_with_storage_config, subscription::SubscriptionManager,
+        };
+
+        let mut owned_db = vibesql_storage::Database::new();
+        let _change_rx = owned_db.enable_change_events(1024);
+        let registry = DatabaseRegistry::new();
+        registry.register_database(crate::http::DEFAULT_DATABASE_NAME, owned_db).await;
+        let db = registry.get_or_create(crate::http::DEFAULT_DATABASE_NAME).await;
+        let subscription_manager = Arc::new(SubscriptionManager::new());
+        // In-memory backend (see `create_http_router_with_storage_config`'s docs):
+        // the default `create_http_router` filesystem backend roots at
+        // `/var/vibesql/storage`, which is not writable in a test sandbox and
+        // is irrelevant to what this test asserts (metadata visibility, not
+        // byte-store choice).
+        let memory_config =
+            BlobStorageConfig { backend: "memory".to_string(), config: serde_json::json!({}) };
+        let app = create_http_router_with_storage_config(
+            db,
+            registry,
+            subscription_manager,
+            None,
+            None,
+            false,
+            memory_config,
+        );
+
+        // Upload a blob through the storage router.
+        let upload_request = Request::builder()
+            .method("POST")
+            .uri("/api/storage/upload")
+            .header("content-type", "text/plain")
+            .body(Body::from("Hello, SQL visibility!"))
+            .unwrap();
+        let upload_response = app.clone().oneshot(upload_request).await.unwrap();
+        assert_eq!(upload_response.status(), StatusCode::CREATED);
+        let upload_body =
+            axum::body::to_bytes(upload_response.into_body(), usize::MAX).await.unwrap();
+        let uploaded: BlobUploadResponse = serde_json::from_slice(&upload_body).unwrap();
+
+        // Query the metadata table through the SQL query router.
+        let query_body = serde_json::json!({ "sql": "SELECT id FROM vibesql_storage" });
+        let query_request = Request::builder()
+            .method("POST")
+            .uri("/api/query")
+            .header("content-type", "application/json")
+            .body(Body::from(query_body.to_string()))
+            .unwrap();
+        let query_response = app.oneshot(query_request).await.unwrap();
+        assert_eq!(query_response.status(), StatusCode::OK);
+        let query_response_body =
+            axum::body::to_bytes(query_response.into_body(), usize::MAX).await.unwrap();
+        let query_result: serde_json::Value = serde_json::from_slice(&query_response_body).unwrap();
+        let rows = query_result["rows"].as_array().expect("query response must carry a rows array");
+        let ids: Vec<&str> = rows.iter().filter_map(|row| row[0].as_str()).collect();
+        assert!(
+            ids.contains(&uploaded.id.as_str()),
+            "uploaded blob id {} not visible via SELECT * FROM vibesql_storage on /api/query \
+             (rows: {:?})",
+            uploaded.id,
+            rows
+        );
     }
 
     #[test]

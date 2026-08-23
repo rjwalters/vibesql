@@ -380,9 +380,8 @@ async fn get_primary_key_column(shared_db: &SharedDatabase, table_name: &str) ->
 /// Resolve the primary-key column for the CRUD by-id endpoints, from the
 /// right catalog for the server's mode (#5420):
 ///
-/// - **Replicated mode**: the schema lives in the consensus state machine, not
-///   the (empty) local registry database, so resolve it through the
-///   replication handle's catalog accessor.
+/// - **Replicated mode**: the schema lives in the consensus state machine, not the (empty) local
+///   registry database, so resolve it through the replication handle's catalog accessor.
 /// - **Standalone mode**: read the local registry database schema as before.
 ///
 /// Returns `None` when the table is unknown, has no primary key, or has a

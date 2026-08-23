@@ -20,9 +20,21 @@ use crate::{errors::ExecutorError, evaluator::ExpressionEvaluator};
 /// 2. Evaluates the expression(s) for each row to compute index key values
 /// 3. Builds the B-tree index with the computed keys
 /// 4. Enforces UNIQUE constraint if specified
+///
+/// `table_lookup_name` (e.g. `aux.t`) resolves the physical table the body
+/// is built from — storage's own bare-name search order (temp, then current
+/// schema, then each ATTACHed database in attachment order) can otherwise
+/// land on an unrelated same-named table instead of the one the caller
+/// actually intends (issue #6487). `table_name` (bare) is passed separately
+/// and used only for the value **stored** as the index's table identity:
+/// storage's `IndexMetadata::matches_table` matches a same-named bare probe
+/// during DML maintenance against that stored (usually bare) form, so
+/// silently promoting it to `table_lookup_name` would desync every
+/// subsequent INSERT/UPDATE/DELETE from this index.
 pub fn create_expression_index(
     database: &mut Database,
     table_name: &str,
+    table_lookup_name: &str,
     index_name: &str,
     table_schema: &TableSchema,
     columns: &[IndexColumn],
@@ -31,7 +43,7 @@ pub fn create_expression_index(
 ) -> Result<(), ExecutorError> {
     let keys = compute_expression_index_keys(
         database,
-        table_name,
+        table_lookup_name,
         index_name,
         table_schema,
         columns,
@@ -40,9 +52,10 @@ pub fn create_expression_index(
     )?;
 
     // Create the index in storage using the pre-computed keys
-    database.create_index_with_keys(
+    database.create_index_with_keys_for_table(
         index_name.to_string(),
         table_name.to_string(),
+        table_lookup_name,
         unique,
         columns.to_vec(),
         keys,
@@ -56,9 +69,12 @@ pub fn create_expression_index(
 ///
 /// Shared by [`create_expression_index`] (CREATE INDEX) and
 /// [`rebuild_pending_expression_indexes`] (REINDEX-on-load, issue #5784).
+/// `table_lookup_name` resolves the physical table to scan; see
+/// [`create_expression_index`] for why it may differ from the index's stored
+/// table identity.
 fn compute_expression_index_keys(
     database: &Database,
-    table_name: &str,
+    table_lookup_name: &str,
     index_name: &str,
     table_schema: &TableSchema,
     columns: &[IndexColumn],
@@ -67,8 +83,8 @@ fn compute_expression_index_keys(
 ) -> Result<Vec<(Vec<SqlValue>, usize)>, ExecutorError> {
     // Get table for scanning
     let table = database
-        .get_table(table_name)
-        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+        .get_table(table_lookup_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_lookup_name.to_string()))?;
 
     // Create expression evaluator for this table's schema.
     // Index context: a date/time function call that resolves the current time
@@ -111,8 +127,8 @@ fn compute_expression_index_keys(
                 let col_idx = table_schema.get_column_index(col_name).ok_or_else(|| {
                     ExecutorError::ColumnNotFound {
                         column_name: col_name.to_string(),
-                        table_name: table_name.to_string(),
-                        searched_tables: vec![table_name.to_string()],
+                        table_name: table_lookup_name.to_string(),
+                        searched_tables: vec![table_lookup_name.to_string()],
                         available_columns: table_schema
                             .columns
                             .iter()

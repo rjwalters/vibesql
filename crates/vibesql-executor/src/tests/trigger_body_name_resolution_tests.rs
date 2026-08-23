@@ -2,15 +2,14 @@
 //!
 //! Two behaviors verified against sqlite3 3.51.0:
 //!
-//! 1. An unresolved OLD/NEW column reference in a trigger body reports the
-//!    pseudo-table qualifier intact — `no such column: old.c`, not
-//!    `no such column: c` (triggerB-2.4). VibeSQL renders `ColumnNotFound` with
-//!    the qualified `column_name`, so the message carries `old.c` / `new.c`.
+//! 1. An unresolved OLD/NEW column reference in a trigger body reports the pseudo-table qualifier
+//!    intact — `no such column: old.c`, not `no such column: c` (triggerB-2.4). VibeSQL renders
+//!    `ColumnNotFound` with the qualified `column_name`, so the message carries `old.c` / `new.c`.
 //!
-//! 2. SQLite resolves a trigger's body when the firing DML is *prepared*, so a
-//!    body containing an unresolvable qualified reference (`SELECT wen.x`) errors
-//!    before the INSERT's own constraint checks run (triggerB-2.1). Without the
-//!    prepare-time pass the UNIQUE-constraint error would win instead.
+//! 2. SQLite resolves a trigger's body when the firing DML is *prepared*, so a body containing an
+//!    unresolvable qualified reference (`SELECT wen.x`) errors before the INSERT's own constraint
+//!    checks run (triggerB-2.1). Without the prepare-time pass the UNIQUE-constraint error would
+//!    win instead.
 
 use vibesql_ast::Statement;
 use vibesql_parser::Parser;

@@ -5,12 +5,11 @@
 
 use std::collections::HashSet;
 
+use super::predicates::{extract_table_names_from_from_clause, predicate_references_only_tables};
 use crate::optimizer::{
     combine_with_and,
     where_pushdown::{extract_referenced_tables_branch, flatten_conjuncts},
 };
-
-use super::predicates::{extract_table_names_from_from_clause, predicate_references_only_tables};
 
 /// Extract right-table-only predicates from a join condition for SEMI/ANTI join pushdown
 ///

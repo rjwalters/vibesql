@@ -10,13 +10,12 @@ use bytes::BytesMut;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tracing::{debug, error, info};
 
+use super::io::{flush_write_buffer, read_message};
 use crate::{
     auth::PasswordStore,
     config::Config,
     protocol::{BackendMessage, FrontendMessage},
 };
-
-use super::io::{flush_write_buffer, read_message};
 
 /// Authenticate the user based on the configured authentication method
 pub async fn authenticate(

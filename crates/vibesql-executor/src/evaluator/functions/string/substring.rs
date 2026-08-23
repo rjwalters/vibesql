@@ -2,8 +2,10 @@
 //!
 //! SQL:1999 Section 6.29: String value functions
 
-use crate::errors::ExecutorError;
-use crate::evaluator::functions::coercion::{coerce_to_integer, coerce_to_string};
+use crate::{
+    errors::ExecutorError,
+    evaluator::functions::coercion::{coerce_to_integer, coerce_to_string},
+};
 
 /// SUBSTRING(string, start [, length]) - Extract substring (SQLite compatible)
 ///
@@ -249,9 +251,9 @@ fn sqlite_substr(chars: &[char], char_count: i64, start: i64, length: Option<i64
             let start_from_end = (-start) as usize;
             if start_from_end > chars.len() {
                 // Start is before beginning of string
-                // SQLite behavior: adjust the length to account for "virtual" positions before the string
-                // Example: substr('Supercalifragilisticexpialidocious', -35, 2)
-                //   34-char string, start -35 = position 0 (before first char)
+                // SQLite behavior: adjust the length to account for "virtual" positions before the
+                // string Example: substr('Supercalifragilisticexpialidocious', -35,
+                // 2) 34-char string, start -35 = position 0 (before first char)
                 //   We want 2 chars, but we "use up" 1 char of length for the virtual position
                 //   So we get 1 char from the start of the string
                 let chars_before_string = start_from_end - chars.len();
@@ -397,8 +399,9 @@ pub(in crate::evaluator::functions) fn right(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn text(s: &str) -> SqlValue {
         SqlValue::Varchar(arcstr::ArcStr::from(s))

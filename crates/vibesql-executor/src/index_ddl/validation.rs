@@ -30,17 +30,14 @@ pub struct ValidationResult {
 /// Resolve the schema a CREATE INDEX statement's new index (and its target
 /// table) belongs to, WITHOUT validating that the schema actually exists.
 ///
-/// - When `stmt.schema` is present (`CREATE INDEX schema.i1 ON t(x)`), SQLite
-///   qualifies the *index* name with the schema, not the table name — the
-///   target table is then resolved within that exact schema, with no
-///   temp-shadows-main search. `temp` maps to this session's temp schema
-///   (`CREATE INDEX temp.i1` behaves like `CREATE INDEX i1` on a table
-///   already known to live in temp). See issue #6366.
-/// - Otherwise, `stmt.table_name` may still itself carry a legacy embedded
-///   `schema.table` spelling from the pre-#6366 (non-parser) construction
-///   path some direct-executor tests use.
-/// - With neither, fall back to the pre-existing unqualified resolution
-///   (temp shadows main).
+/// - When `stmt.schema` is present (`CREATE INDEX schema.i1 ON t(x)`), SQLite qualifies the *index*
+///   name with the schema, not the table name — the target table is then resolved within that exact
+///   schema, with no temp-shadows-main search. `temp` maps to this session's temp schema (`CREATE
+///   INDEX temp.i1` behaves like `CREATE INDEX i1` on a table already known to live in temp). See
+///   issue #6366.
+/// - Otherwise, `stmt.table_name` may still itself carry a legacy embedded `schema.table` spelling
+///   from the pre-#6366 (non-parser) construction path some direct-executor tests use.
+/// - With neither, fall back to the pre-existing unqualified resolution (temp shadows main).
 ///
 /// Callers that must reject an unrecognized `stmt.schema` qualifier with
 /// SQLite's `unknown database <name>` wording do so themselves — this helper
@@ -108,8 +105,22 @@ pub fn validate_create_index(
         stmt.table_name.clone()
     };
 
-    // Check if target is sqlite_master/sqlite_schema (read-only system table)
-    if is_sqlite_schema_table(&table_name) {
+    // Check if target is sqlite_master/sqlite_schema (read-only system table).
+    // `table_name` above already discarded any embedded schema qualifier, so
+    // the alias is checked separately via `schema_name` (resolved above,
+    // covering both the explicit `stmt.schema`-qualified index route and the
+    // legacy embedded `schema.table` spelling): the bare/`main.`-qualified
+    // forms match when `schema_name` is `main`, and `<alias>.sqlite_master`/
+    // `<alias>.sqlite_schema` match when `schema_name` is a currently-attached
+    // alias — matching SQLite's uniform rejection regardless of which live
+    // alias qualifies the name (issue #6451). A qualifier that is neither
+    // `main` nor a live attachment must NOT trigger this guard; it falls
+    // through to ordinary table resolution ("no such table"/"unknown
+    // database"), matching SQLite for a stale/unknown alias.
+    if is_sqlite_schema_table(&table_name)
+        && (schema_name.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA)
+            || database.catalog.is_attached_schema(&schema_name))
+    {
         return Err(ExecutorError::SqliteSystemTableReadOnly {
             table_name: table_name.clone(),
             operation: "indexed".to_string(),

@@ -12,14 +12,14 @@ use vibesql_storage::Database;
 ///
 /// Every `FromClause` variant that can appear in the outer FROM maps to one of
 /// these:
-/// - `FromClause::Table` → `Named` (base table via `database.get_table`, or a
-///   view via the catalog) unless it carries an explicit `column_aliases` list,
-///   in which case its exposed names are exactly that list (`Columns`).
-/// - `FromClause::Subquery` (derived table) → `Columns` from its explicit
-///   `column_aliases`, else from the inner SELECT projection
-///   (`derived_output_columns`); if neither can be determined, `Opaque`.
-/// - `FromClause::Values` → `Columns` from its explicit `column_aliases`, else
-///   the SQLite-style positional names `column1, column2, …`.
+/// - `FromClause::Table` → `Named` (base table via `database.get_table`, or a view via the catalog)
+///   unless it carries an explicit `column_aliases` list, in which case its exposed names are
+///   exactly that list (`Columns`).
+/// - `FromClause::Subquery` (derived table) → `Columns` from its explicit `column_aliases`, else
+///   from the inner SELECT projection (`derived_output_columns`); if neither can be determined,
+///   `Opaque`.
+/// - `FromClause::Values` → `Columns` from its explicit `column_aliases`, else the SQLite-style
+///   positional names `column1, column2, …`.
 /// - `FromClause::Join` → recurses into both sides.
 ///
 /// `effective` is always the qualifier a column reference would use (the alias
@@ -200,11 +200,11 @@ pub(super) enum OuterQualifier {
     /// Leave the reference unqualified and let normal resolution / the ambiguity
     /// guard handle it. This covers two distinct enumerable cases that both match
     /// pre-existing behavior:
-    /// - Two or more outer sources expose the column: genuinely ambiguous in the
-    ///   outer scope, so the guard errors, matching SQLite.
-    /// - No outer source exposes the column (and none were opaque): it is not an
-    ///   outer-scope column at all (e.g. a correlated reference to a further-out
-    ///   scope), so it stays unqualified for normal resolution.
+    /// - Two or more outer sources expose the column: genuinely ambiguous in the outer scope, so
+    ///   the guard errors, matching SQLite.
+    /// - No outer source exposes the column (and none were opaque): it is not an outer-scope
+    ///   column at all (e.g. a correlated reference to a further-out scope), so it stays
+    ///   unqualified for normal resolution.
     LeaveUnqualified,
     /// No enumerable outer source exposes the column and at least one source
     /// could not be enumerated (an opaque derived/VALUES table). We can neither
@@ -220,12 +220,12 @@ pub(super) enum OuterQualifier {
 /// SQLite's scoping: ambiguity is measured ONLY against the outer FROM sources.
 ///
 /// Every outer-FROM source kind is handled uniformly (see [`OuterSource`]):
-/// - Base tables via `database.get_table`, views via `catalog.get_view`, and
-///   enclosing CTEs via the query's `with_clause`.
-/// - Derived (subquery) tables via their explicit `column_aliases` or their
-///   inner SELECT projection.
-/// - `VALUES` tables via their explicit `column_aliases` or the positional
-///   `column1, column2, …` names.
+/// - Base tables via `database.get_table`, views via `catalog.get_view`, and enclosing CTEs via the
+///   query's `with_clause`.
+/// - Derived (subquery) tables via their explicit `column_aliases` or their inner SELECT
+///   projection.
+/// - `VALUES` tables via their explicit `column_aliases` or the positional `column1, column2, …`
+///   names.
 /// - Table aliases with an explicit column list (`AS t(x, y)`).
 ///
 /// The exactly-one → qualify / two-or-more → leave-for-guard rule applies to all

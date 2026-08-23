@@ -88,6 +88,9 @@ tikv-jemalloc-ctl = { version = "0.7", features = ["stats"], optional = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 stacker = "0.1.24"
 
+[package.metadata.cargo-machete]
+ignored = ["md-5"]
+
 [dev-dependencies]
 vibesql-parser = { version = "0.2.0", path = "../vibesql-parser" }
 # Note: vibesql-bench-common features (sqlite, duckdb, mysql) are enabled via Cargo feature unification

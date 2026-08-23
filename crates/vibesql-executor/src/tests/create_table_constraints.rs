@@ -360,7 +360,8 @@ fn test_auto_index_for_single_column_primary_key() {
         table_name: "t1".to_string(),
         columns: vec![ColumnDef {
             name: "id".to_string(),
-            data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
+            data_type: DataType::Varchar { max_length: Some(255) }, /* Non-INTEGER PRIMARY KEY
+                                                                     * gets autoindex */
             nullable: false,
             constraints: vec![ColumnConstraint {
                 name: None,
@@ -740,7 +741,8 @@ fn test_auto_index_for_primary_key_plus_unique() {
         columns: vec![
             ColumnDef {
                 name: "id".to_string(),
-                data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
+                data_type: DataType::Varchar { max_length: Some(255) }, /* Non-INTEGER PRIMARY
+                                                                         * KEY gets autoindex */
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,
@@ -803,7 +805,8 @@ fn test_auto_index_visible_in_catalog() {
         columns: vec![
             ColumnDef {
                 name: "id".to_string(),
-                data_type: DataType::Varchar { max_length: Some(255) }, // Non-INTEGER PRIMARY KEY gets autoindex
+                data_type: DataType::Varchar { max_length: Some(255) }, /* Non-INTEGER PRIMARY
+                                                                         * KEY gets autoindex */
                 nullable: false,
                 constraints: vec![ColumnConstraint {
                     name: None,

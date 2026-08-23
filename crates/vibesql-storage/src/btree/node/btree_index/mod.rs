@@ -28,8 +28,8 @@ use crate::{
 /// it by applying its logical inverse:
 /// - an `insert(key, row_id)` is undone by `delete_specific(key, row_id)`;
 /// - a `delete_specific(key, row_id)` is undone by `insert(key, row_id)`;
-/// - a full-key `delete(key)` is undone by re-inserting every `row_id` that
-///   was present for that key at delete time.
+/// - a full-key `delete(key)` is undone by re-inserting every `row_id` that was present for that
+///   key at delete time.
 #[derive(Debug, Clone)]
 pub enum DiskUndoOp {
     /// Undo an insert by deleting the specific (key, row_id) pair.
@@ -510,5 +510,4 @@ impl BTreeIndex {
     pub(crate) fn read_leaf_node(&self, page_id: PageId) -> Result<LeafNode, StorageError> {
         super::super::serialize::read_leaf_node(&self.page_manager, page_id)
     }
-
 }

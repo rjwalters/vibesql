@@ -26,17 +26,15 @@
 //
 // ## Checksum coverage (issue #5855)
 //
-// * **Version 2 (current)**: the CRC32 at bytes 28..32 covers the first 28
-//   header bytes (magic, version, LSN, timestamp, num_tables) followed by the
-//   entire payload. Flipping ANY bit in the file — header field or body —
-//   fails verification. This matters because the header LSN drives both
-//   checkpoint selection (newest-by-LSN) and WAL replay (entries at or below
-//   the checkpoint LSN are skipped): an unprotected LSN flip could silently
-//   open stale state or silently drop committed WAL entries.
-// * **Version 1 (legacy, read-only)**: the CRC covers only the payload; the
-//   header fields are NOT integrity-protected. Existing v1 files remain
-//   readable; the cross-file creation-order guard in `recovery.rs` limits the
-//   stale-selection blast radius for them.
+// * **Version 2 (current)**: the CRC32 at bytes 28..32 covers the first 28 header bytes (magic,
+//   version, LSN, timestamp, num_tables) followed by the entire payload. Flipping ANY bit in the
+//   file — header field or body — fails verification. This matters because the header LSN drives
+//   both checkpoint selection (newest-by-LSN) and WAL replay (entries at or below the checkpoint
+//   LSN are skipped): an unprotected LSN flip could silently open stale state or silently drop
+//   committed WAL entries.
+// * **Version 1 (legacy, read-only)**: the CRC covers only the payload; the header fields are NOT
+//   integrity-protected. Existing v1 files remain readable; the cross-file creation-order guard in
+//   `recovery.rs` limits the stale-selection blast radius for them.
 
 use std::{
     fs::{self, File},
@@ -643,12 +641,11 @@ mod tests {
     /// directory, not the file itself, so this reliably fails every
     /// `fs::remove_file` call in the loop without touching individual files.
     /// `cleanup_old_checkpoints` must:
-    ///   1. still attempt every removal (best-effort — one failure must not
-    ///      short-circuit the rest of the candidates), and
-    ///   2. return `Err` — not silently report `Ok(0)` as success — so the
-    ///      CLI's existing warn-not-fail seam (`WalState::checkpoint`,
-    ///      #6023/#6024) actually fires and the operator learns pruning
-    ///      under-deleted.
+    ///   1. still attempt every removal (best-effort — one failure must not short-circuit the rest
+    ///      of the candidates), and
+    ///   2. return `Err` — not silently report `Ok(0)` as success — so the CLI's existing
+    ///      warn-not-fail seam (`WalState::checkpoint`, #6023/#6024) actually fires and the
+    ///      operator learns pruning under-deleted.
     #[cfg(unix)]
     #[test]
     fn test_cleanup_surfaces_per_file_remove_errors() {

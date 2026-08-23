@@ -108,10 +108,7 @@ fn lateral_tvf_top_level_where_empties_left_returns_zero_rows() {
     run_stmt(&mut db, "CREATE TABLE t(id INTEGER, j TEXT)");
     run_stmt(&mut db, "INSERT INTO t VALUES (1, '[1,2]')");
 
-    let rows = query(
-        &db,
-        "SELECT t.id, je.value FROM t, json_each(t.j) AS je WHERE t.id > 99",
-    );
+    let rows = query(&db, "SELECT t.id, je.value FROM t, json_each(t.j) AS je WHERE t.id > 99");
     assert!(rows.is_empty(), "expected 0 rows, got {:?}", rows);
 }
 

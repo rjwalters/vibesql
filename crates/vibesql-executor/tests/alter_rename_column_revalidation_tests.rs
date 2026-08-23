@@ -6,8 +6,10 @@
 //! message, leaving the schema untouched.
 //!
 //! Verified against sqlite3 3.51.0 / `altercol.test` sections 13, 17, and 23:
-//!   * trigger body reading a non-existent table  -> `error in trigger tr1: no such table: main.nosuchtable`
-//!   * trigger body inserting into a missing table -> `error in trigger u7t: no such table: main.u8`
+//!   * trigger body reading a non-existent table  -> `error in trigger tr1: no such table:
+//!     main.nosuchtable`
+//!   * trigger body inserting into a missing table -> `error in trigger u7t: no such table:
+//!     main.u8`
 //!   * view selecting a non-existent column        -> `error in view t2: no such column: xyz`
 
 use vibesql_executor::{AlterTableExecutor, CreateTableExecutor, TriggerExecutor, ViewExecutor};

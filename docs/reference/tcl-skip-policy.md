@@ -271,6 +271,72 @@ databases (`memdb*`), transaction/ROLLBACK semantics (`trans`, `trans3`,
 `rollback`, `rollback2`), the parser tokenizer (`tokenize`), and the TCL-interface
 file (`tclsqlite`). These remain in-scope failures tracked by #6170–#6177.
 
+**PRAGMA family detail (#6175).** The `pragma*` straddler above covers several
+distinct Bucket-A-eligible sub-categories that stay visibly `failed` (not
+skip-listed) rather than being pulled into A1/A2 as named entries, because
+none is a static skip declaration — per the "Scope of this document" note
+above, this document classifies `vibesql_skip_*` array entries, and these
+PRAGMAs are deliberately left failing, not skipped.
+
+**Every test ID below was re-derived from a live re-run** of `pragma.test`
+(146 passed / 50 failed / 46 skipped), `pragma2.test` (6/5/13), `pragma3.test`
+(11/13/0), `pragma4.test` (8/9/69) and `pragma6.test` (2/1/0) on 2026-08-21
+against `origin/main` @ `64fac47e8`, native `tclsh` 8.6.18. The five bullets
+below enumerate that run's **complete** failing set for those files (50+5+13+9+1
+= 78 IDs), not a curated sample — so a reader can check the list against a fresh
+run rather than trust it. Do not copy example IDs forward from issue comments
+without re-running; several IDs previously listed here had already been fixed
+(see "now passing" note below).
+
+  - **A2-equivalent (pager/journal-internal):** `page_count`/`max_page_count`
+    (pragma-14.1/14.2/14.2uc/14.3/14.3uc/14.5), `freelist_count`
+    (pragma2-1.1/1.2/1.3/1.4 and pragma2-3.2 — tracked separately as #6414,
+    which is scoped to `freelist_count` and nothing else), proxy locking
+    (pragma-16.1/16.2.1/16.3/16.4/16.5/16.7/16.8/16.8.1).
+  - **A1-equivalent (C-API- or harness-helper-only, no SQL surface):**
+    `btree_from_db` (pragma-9.1.1/9.2.1/9.3.1/9.10/9.18), `sqlite3_db_config
+    DEFENSIVE` (pragma-8.1.3), and VDBE-opcode-level `EXPLAIN` output
+    (pragma4-2.100, which asserts the `P4_INTARRAY` rendering of `OP_IntegrityCk`
+    in `EXPLAIN PRAGMA integrity_check`; VibeSQL has no VDBE opcode stream to
+    render, so its parser rejects `EXPLAIN PRAGMA` outright).
+  - **testvfs (A1-equivalent, stubbed no-op `proc testvfs` in
+    `scripts/tester_vibesql.tcl`, not wired to real VFS-shim behavior):**
+    pragma-19.1/19.2/19.3/19.4/19.5.
+  - **Corruption harness (A2-equivalent, same precedent as `e_reindex-1.*`):**
+    `integrity_check` over a deliberately corrupted page image written with
+    `hexio_write` — pragma-3.2/3.3/3.5/3.6b/3.7/3.8.1/3.8.2/3.10/3.11/3.12/3.13/
+    3.14/3.16/3.17/3.18, plus `21.1`/`22.2`/`22.4.2` (the runner reports the
+    trailing pragma.test blocks without a `pragma-` prefix, matching the
+    `do_test` names in the file) and pragma6-1.0 (`decode_hexdb`). The same
+    missing `hexio_write` helper aborts pragma.test at file scope, producing
+    pragma-filescope-err.1 (`invalid command name "hexio_write"`) and its two
+    cascaded successors .2/.3. pragma-3.21/3.22/3.23 are the adjacent
+    `PRAGMA writable_schema` variant of the same harness (`sqlite_master` is
+    rewritten to fabricate UNIQUE/NOT NULL violations for `integrity_check` to
+    find) — same bucket, different corruption vector.
+  - **TCL-shim architecture limitation:** pragma3.test's 13 `data_version`
+    failures (pragma3-140/150/160/170/180/190/195/200/201/310/320/330/340) and
+    pragma4.test's 8 ATTACH-dependent failures (4.1.3/4.1.4/4.2.4/4.3.4/4.4.3
+    plus pragma4-filescope-err.1/.2/.3, all failing with
+    `no such table: aux.sqlite_master`) — root-caused as two distinct mechanisms
+    (a hardcoded `data_version` return in
+    `crates/vibesql-cli/src/executor/mod.rs`, and the shim's own
+    ATTACH-setup-rescue statement-stripping in `scripts/tester_vibesql.tcl`'s
+    `do_test`) in #6467, filed from #6175's re-verification. pragma-8.2.11 is a
+    byproduct of the same ATTACH skip-cascade.
+
+**Previously listed here, now passing — do not re-cite these as failures.**
+Earlier triage (and #6175's 2026-08-21 Curator Enhancement, which flagged its own
+numbers as not independently re-verified) listed
+`cache_size`/`default_cache_size` (pragma-1.*), `synchronous` (pragma-5.*),
+`lock_status` (pragma-7.3), `get_pwd` (pragma-9.5) and `cache_spill`
+(pragma2-5.1/5.2/5.3) as still-failing. All of them **pass** in the re-run above.
+`cache_spill` in particular was fixed by #6456 and its tracking issue #6415 is
+closed; it was never in scope for #6414, which covers `freelist_count` only.
+
+Full per-test itemization and rationale live in issue #6175's comment history
+(most recently the 2026-08-21 re-verification), not duplicated here.
+
 The `REINDEX` files `e_reindex` and `reindex` are handled the same straddler way
 (#6195, #5720): the collation-gated and writable_schema-corruption sub-sections
 are narrow **pattern** skips (`e_reindex-2.`/`reindex-2.`/`reindex-3.` → A5;

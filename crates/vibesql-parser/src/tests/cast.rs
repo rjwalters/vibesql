@@ -313,3 +313,79 @@ fn test_parse_cast_empty_typename_in_aggregate() {
     let result = Parser::parse_sql("SELECT sum(CAST(a AS )) FROM t1;");
     assert!(result.is_ok(), "sum(CAST(a AS )) should parse: {:?}", result);
 }
+
+// ========================================================================
+// CAST to a string-literal type name (issue #6172, e_expr-12.3.50/.51)
+//
+// SQLite's `ids` production is `ID | STRING`, so a string literal is legal
+// wherever an identifier is legal inside a type name. `CAST(x AS 'abcd')`
+// therefore parses, with the string's contents becoming the (semantically
+// arbitrary) type name verbatim; affinity is then derived from that name
+// like any other unrecognized type name (NUMERIC here, since neither
+// string matches the CHAR/INT/BLOB/REAL/DOUB/FLOA substring rules).
+// ========================================================================
+
+/// Extract the `data_type` of the first select-list item, asserting it is a CAST.
+fn cast_data_type(sql: &str) -> vibesql_types::DataType {
+    let stmt = Parser::parse_sql(sql).unwrap_or_else(|e| panic!("should parse: {}: {:?}", sql, e));
+    match stmt {
+        vibesql_ast::Statement::Select(select) => match &select.select_list[0] {
+            vibesql_ast::SelectItem::Expression { expr, .. } => match expr {
+                vibesql_ast::Expression::Cast { data_type, .. } => data_type.clone(),
+                other => panic!("Expected CAST expression, got {:?}", other),
+            },
+            other => panic!("Expected expression select item, got {:?}", other),
+        },
+        other => panic!("Expected SELECT statement, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_parse_cast_string_literal_typename(/* issue #6172 */) {
+    // e_expr-12.3.50: CAST(x AS 'abcd') is a hard parse error before the fix.
+    assert_eq!(
+        cast_data_type("SELECT CAST(1 AS 'abcd');"),
+        vibesql_types::DataType::UserDefined { type_name: "abcd".to_string() },
+        "string-literal type name should be kept verbatim as a UserDefined type"
+    );
+}
+
+#[test]
+fn test_parse_cast_string_literal_typename_with_punctuation(/* issue #6172 */) {
+    // e_expr-12.3.51: the string's contents are opaque — spaces and `$` are
+    // fine, since it never has to be a legal identifier.
+    assert_eq!(
+        cast_data_type("SELECT CAST(1 AS 'ab$ $cd');"),
+        vibesql_types::DataType::UserDefined { type_name: "ab$ $cd".to_string() },
+        "punctuation/space inside the string-literal type name must survive verbatim"
+    );
+}
+
+#[test]
+fn test_parse_cast_string_literal_typename_preserves_case(/* issue #6172 */) {
+    // Unlike a bare identifier (lowercased by the lexer), a string literal's
+    // contents are not normalized — the type name keeps the user's case.
+    assert_eq!(
+        cast_data_type("SELECT CAST(x AS 'MixedCase') FROM t1;"),
+        vibesql_types::DataType::UserDefined { type_name: "MixedCase".to_string() },
+        "string-literal type name should not be case-normalized"
+    );
+}
+
+#[test]
+fn test_parse_cast_string_literal_typename_with_size(/* issue #6172 */) {
+    // Same as the delimited-identifier form: an optional size specifier may
+    // follow the type name and is discarded for an opaque type.
+    assert_eq!(
+        cast_data_type("SELECT CAST(1 AS 'abcd'(10));"),
+        vibesql_types::DataType::UserDefined { type_name: "abcd".to_string() },
+        "optional size specifier after a string-literal type name should parse"
+    );
+}
+
+#[test]
+fn test_parse_cast_string_literal_typename_in_aggregate(/* issue #6172 */) {
+    // The fix must hold in nested expression contexts too.
+    let result = Parser::parse_sql("SELECT sum(CAST(a AS 'abcd')) FROM t1;");
+    assert!(result.is_ok(), "sum(CAST(a AS 'abcd')) should parse: {:?}", result);
+}

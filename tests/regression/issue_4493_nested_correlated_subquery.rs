@@ -34,11 +34,7 @@ fn create_minimal_tables(db: &mut Database) {
     for (table, col) in [("t1", "c"), ("t2", "x")] {
         let schema = TableSchema::new(
             table.to_string(),
-            vec![ColumnSchema::new(
-                col.to_string(),
-                DataType::Varchar { max_length: None },
-                true,
-            )],
+            vec![ColumnSchema::new(col.to_string(), DataType::Varchar { max_length: None }, true)],
         );
         db.create_table(schema).unwrap();
         let t = db.get_table_mut(table).unwrap();
@@ -51,11 +47,7 @@ fn create_three_row_tables(db: &mut Database) {
     for (table, col) in [("t1", "c"), ("t2", "x")] {
         let schema = TableSchema::new(
             table.to_string(),
-            vec![ColumnSchema::new(
-                col.to_string(),
-                DataType::Varchar { max_length: None },
-                true,
-            )],
+            vec![ColumnSchema::new(col.to_string(), DataType::Varchar { max_length: None }, true)],
         );
         db.create_table(schema).unwrap();
         let t = db.get_table_mut(table).unwrap();
@@ -128,15 +120,10 @@ fn test_two_level_nested_in_subquery() {
     let mut db = Database::new();
     create_three_row_tables(&mut db);
 
-    let rows = select_rows(
-        &db,
-        "SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t2, t1 WHERE x = c)",
-    );
+    let rows =
+        select_rows(&db, "SELECT x FROM t2, t1 WHERE x IN (SELECT x FROM t2, t1 WHERE x = c)");
     assert_eq!(rows.len(), 9);
-    assert_eq!(
-        sorted_first_column(&rows),
-        vec!["a", "a", "a", "b", "b", "b", "c", "c", "c"]
-    );
+    assert_eq!(sorted_first_column(&rows), vec!["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
 }
 
 #[test]
@@ -157,8 +144,5 @@ fn test_three_level_nested_in_subquery() {
         )",
     );
     assert_eq!(rows.len(), 9, "3-level nested correlated subquery should match all rows");
-    assert_eq!(
-        sorted_first_column(&rows),
-        vec!["a", "a", "a", "b", "b", "b", "c", "c", "c"]
-    );
+    assert_eq!(sorted_first_column(&rows), vec!["a", "a", "a", "b", "b", "b", "c", "c", "c"]);
 }

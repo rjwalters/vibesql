@@ -28,24 +28,20 @@
 //!
 //! Raft Phase A4 (PR 2 of #5198) completes the story across the network:
 //!
-//! - **Snapshot transfer** rides the existing `InstallSnapshot` RPC leg,
-//!   chunked by openraft's default `full_snapshot` implementation (see the
-//!   transfer design in `crate::tcp`'s module docs); a lagging follower
-//!   whose gap was purged on the leader heals via snapshot install instead
-//!   of log replay.
-//! - **Purge policy** is configurable through [`RaftTuning`]: automatic
-//!   snapshots every `snapshot_after_entries` log entries, automatic purge
-//!   of snapshotted entries keeping a `keep_in_log` catch-up tail. Purge
-//!   *compacts* the durable log file (see `crate::durable`), so the policy
-//!   actually reclaims disk.
-//! - **Interrupted-install recovery**: a follower that crashes after
-//!   durably installing a snapshot but before openraft's follow-up purge
-//!   record reaches its log restarts cleanly — `DurableStorage::open`
-//!   detects the window (durable snapshot covering more raft log than the
-//!   log holds, with the log otherwise intact) and repairs it by writing
-//!   the purge record the crash interrupted (judge follow-up from
-//!   PR #5369). A snapshot next to a log with *no* state at all is still a
-//!   loud refusal: that log lost its vote, which breaks election safety.
+//! - **Snapshot transfer** rides the existing `InstallSnapshot` RPC leg, chunked by openraft's
+//!   default `full_snapshot` implementation (see the transfer design in `crate::tcp`'s module
+//!   docs); a lagging follower whose gap was purged on the leader heals via snapshot install
+//!   instead of log replay.
+//! - **Purge policy** is configurable through [`RaftTuning`]: automatic snapshots every
+//!   `snapshot_after_entries` log entries, automatic purge of snapshotted entries keeping a
+//!   `keep_in_log` catch-up tail. Purge *compacts* the durable log file (see `crate::durable`), so
+//!   the policy actually reclaims disk.
+//! - **Interrupted-install recovery**: a follower that crashes after durably installing a snapshot
+//!   but before openraft's follow-up purge record reaches its log restarts cleanly —
+//!   `DurableStorage::open` detects the window (durable snapshot covering more raft log than the
+//!   log holds, with the log otherwise intact) and repairs it by writing the purge record the crash
+//!   interrupted (judge follow-up from PR #5369). A snapshot next to a log with *no* state at all
+//!   is still a loud refusal: that log lost its vote, which breaks election safety.
 //!
 //! ## Log index mapping
 //!
@@ -60,35 +56,36 @@
 //!
 //! [`ConsensusBackend`]: crate::ConsensusBackend
 
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::marker::PhantomData;
-use std::ops::RangeBounds;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use openraft::error::{ClientWriteError, InstallSnapshotError, RPCError, RaftError, Unreachable};
-use openraft::network::RPCOption;
-use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    io::Cursor,
+    marker::PhantomData,
+    ops::RangeBounds,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
-use openraft::storage::{LogFlushed, RaftLogStorage, RaftStateMachine};
+
 use openraft::{
+    error::{ClientWriteError, InstallSnapshotError, RPCError, RaftError, Unreachable},
+    network::RPCOption,
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, VoteRequest, VoteResponse,
+    },
+    storage::{LogFlushed, RaftLogStorage, RaftStateMachine},
     BasicNode, Config, Entry, EntryPayload, LogId, LogState, Raft, RaftLogReader,
     RaftSnapshotBuilder, ServerState, SnapshotMeta, SnapshotPolicy, StorageError, StoredMembership,
     Vote,
 };
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 
-use crate::backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot};
-use crate::cluster_config::ClusterConfig;
-use crate::durable::DurableLogStore;
-use crate::snapshot::{
-    decode_payload, encode_payload, NoopHorizonPin, SnapshotHorizonPin, SnapshotStore,
+use crate::{
+    backend::{ConsensusBackend, ConsensusError, LogIndex, Result, Role, Snapshot},
+    cluster_config::ClusterConfig,
+    durable::DurableLogStore,
+    snapshot::{decode_payload, encode_payload, NoopHorizonPin, SnapshotHorizonPin, SnapshotStore},
 };
 
 openraft::declare_raft_types!(

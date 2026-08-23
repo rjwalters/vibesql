@@ -19,100 +19,77 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 /// - v4: Added quoted flag for TableIdentifier (SQL:1999 case-sensitivity)
 /// - v5: Added column-level collation persistence
 /// - v6: Added expression index support (type_byte before each index column)
-/// - v7: Added MVCC version fields (`xmin: u64` + `xmax: Option<u64>`) per row.
-///       Phase 1a of #5136 / parent #4460. v6 files remain readable: the v6
-///       row layout has no MVCC prefix, so the read path treats absent fields
-///       as `xmin = PRE_MVCC_TXN_ID (= 0), xmax = None` — meaning "always
-///       committed, visible to every snapshot." Write path always emits v7.
-/// - v8: Added partial-index WHERE clause persistence per index. v7 files
-///       remain readable: the read path treats absent partial-index data as
-///       "no WHERE clause" (full index). Issue #5181.
-/// - v9: Added verbatim `TableSchema::sql_source` persistence per table (the
-///       byte-for-byte original `CREATE TABLE` text shown in
-///       `sqlite_master.sql`). v8 and earlier files remain readable: the read
-///       path treats the absent field as `sql_source = None`, falling back to
-///       the reconstructed CREATE TABLE text. Issue #5619.
-/// - v10: Added view persistence. The catalog serializer now emits a views
-///        section (name, schema, optional column list, with_check_option, the
-///        defining SELECT as SQL text, and the verbatim `sql_definition`) just
-///        before the triggers section, so view-dependent INSTEAD OF triggers
-///        resolve during recovery. v9 and earlier files remain readable: the
-///        read path is gated on `version >= 10` and treats absence as "zero
-///        views." A v10 file opened by a v9 binary is rejected cleanly by
-///        `read_header` (version > VERSION). Issue #5771.
-/// - v11: Added generated-column expression persistence per column
-///        (`ColumnSchema::generated_expr`, the `c AS (a+b)` in `CREATE TABLE`).
-///        Generated values are materialized at INSERT time, so rows written
-///        before a save always reload correctly — but without the expression
-///        the reloaded schema is amnesiac and post-reload INSERTs store NULL
-///        for the generated column. Encoded like `default_value`:
-///        present-flag bool + expression, after the collation field. v10 and
-///        earlier files remain readable: the read path is gated on
-///        `version >= 11` and treats absence as `generated_expr = None`
-///        (prior behavior). Issue #5794.
-/// - v12: Added `TableSchema::without_rowid` persistence per table (one bool
-///        after `sql_source`). Without it, a reloaded WITHOUT ROWID table
-///        forgets it is rowid-less, so `sqlite_master` wrongly lists its
-///        implicit PRIMARY KEY autoindex (SQLite never lists a WITHOUT ROWID
-///        PK autoindex — the PK *is* the table b-tree; alterdropcol 7.2).
-///        v11 and earlier files remain readable: the read path is gated on
-///        `version >= 12` and treats absence as `without_rowid = false`
-///        (prior behavior). Issue #5796.
-/// - v13: Added per-row rowid persistence (one u64 per row, after the MVCC
-///        version prefix and before the column values). Without it, every
-///        reloaded row lost its SQLite rowid and was silently renumbered by
-///        physical position, so `WHERE rowid=N` / `DELETE ... WHERE rowid=N`
-///        targeted different rows before and after a process restart, and
-///        new inserts could collide with reloaded explicit rowids. The write
-///        path materializes each live row's effective rowid (the rowid-alias
-///        INTEGER PRIMARY KEY value when the table has one, else the row's
-///        explicit rowid, else its implicit physical position + 1). v12 and
-///        earlier files remain readable: the read path is gated on
-///        `version >= 13` and treats absence as "no explicit rowid" (prior
-///        renumbering behavior). Issue #5835.
-/// - v14: Added `TriggerDefinition::schema` persistence per trigger (one
-///        present-flag bool + optional string, appended after the trigger's
-///        triggered_action). Without it, every reloaded trigger lost its schema
-///        tag and became a main-schema trigger, so a trigger that SQLite binds
-///        to a temp-table namesake was silently rebound to the main table after
-///        a checkpoint. The same change filters temp views and temp triggers
-///        (`is_temp()`) out of the catalog write entirely, since session-scoped
-///        temp objects must not survive a checkpoint at all. v13 and earlier
-///        files remain readable: the read path is gated on `version >= 14` and
-///        treats absence as `schema = None` (prior behavior). Issue #5940.
+/// - v7: Added MVCC version fields (`xmin: u64` + `xmax: Option<u64>`) per row. Phase 1a of #5136 /
+///   parent #4460. v6 files remain readable: the v6 row layout has no MVCC prefix, so the read path
+///   treats absent fields as `xmin = PRE_MVCC_TXN_ID (= 0), xmax = None` — meaning "always
+///   committed, visible to every snapshot." Write path always emits v7.
+/// - v8: Added partial-index WHERE clause persistence per index. v7 files remain readable: the read
+///   path treats absent partial-index data as "no WHERE clause" (full index). Issue #5181.
+/// - v9: Added verbatim `TableSchema::sql_source` persistence per table (the byte-for-byte original
+///   `CREATE TABLE` text shown in `sqlite_master.sql`). v8 and earlier files remain readable: the
+///   read path treats the absent field as `sql_source = None`, falling back to the reconstructed
+///   CREATE TABLE text. Issue #5619.
+/// - v10: Added view persistence. The catalog serializer now emits a views section (name, schema,
+///   optional column list, with_check_option, the defining SELECT as SQL text, and the verbatim
+///   `sql_definition`) just before the triggers section, so view-dependent INSTEAD OF triggers
+///   resolve during recovery. v9 and earlier files remain readable: the read path is gated on
+///   `version >= 10` and treats absence as "zero views." A v10 file opened by a v9 binary is
+///   rejected cleanly by `read_header` (version > VERSION). Issue #5771.
+/// - v11: Added generated-column expression persistence per column (`ColumnSchema::generated_expr`,
+///   the `c AS (a+b)` in `CREATE TABLE`). Generated values are materialized at INSERT time, so rows
+///   written before a save always reload correctly — but without the expression the reloaded schema
+///   is amnesiac and post-reload INSERTs store NULL for the generated column. Encoded like
+///   `default_value`: present-flag bool + expression, after the collation field. v10 and earlier
+///   files remain readable: the read path is gated on `version >= 11` and treats absence as
+///   `generated_expr = None` (prior behavior). Issue #5794.
+/// - v12: Added `TableSchema::without_rowid` persistence per table (one bool after `sql_source`).
+///   Without it, a reloaded WITHOUT ROWID table forgets it is rowid-less, so `sqlite_master`
+///   wrongly lists its implicit PRIMARY KEY autoindex (SQLite never lists a WITHOUT ROWID PK
+///   autoindex — the PK *is* the table b-tree; alterdropcol 7.2). v11 and earlier files remain
+///   readable: the read path is gated on `version >= 12` and treats absence as `without_rowid =
+///   false` (prior behavior). Issue #5796.
+/// - v13: Added per-row rowid persistence (one u64 per row, after the MVCC version prefix and
+///   before the column values). Without it, every reloaded row lost its SQLite rowid and was
+///   silently renumbered by physical position, so `WHERE rowid=N` / `DELETE ... WHERE rowid=N`
+///   targeted different rows before and after a process restart, and new inserts could collide with
+///   reloaded explicit rowids. The write path materializes each live row's effective rowid (the
+///   rowid-alias INTEGER PRIMARY KEY value when the table has one, else the row's explicit rowid,
+///   else its implicit physical position + 1). v12 and earlier files remain readable: the read path
+///   is gated on `version >= 13` and treats absence as "no explicit rowid" (prior renumbering
+///   behavior). Issue #5835.
+/// - v14: Added `TriggerDefinition::schema` persistence per trigger (one present-flag bool +
+///   optional string, appended after the trigger's triggered_action). Without it, every reloaded
+///   trigger lost its schema tag and became a main-schema trigger, so a trigger that SQLite binds
+///   to a temp-table namesake was silently rebound to the main table after a checkpoint. The same
+///   change filters temp views and temp triggers (`is_temp()`) out of the catalog write entirely,
+///   since session-scoped temp objects must not survive a checkpoint at all. v13 and earlier files
+///   remain readable: the read path is gated on `version >= 14` and treats absence as `schema =
+///   None` (prior behavior). Issue #5940.
 /// - v15: Added per-index-key-part explicit collation persistence
-///        (`IndexColumn::Column::collation`, the `COLLATE nocase` in
-///        `CREATE UNIQUE INDEX xyz1 ON xyz(d, c, b COLLATE nocase)`). Encoded as
-///        a present-flag bool + optional collation name, appended after the
-///        column's direction byte, and only for column-type index parts
-///        (type byte 0); expression parts carry any collation inside their SQL
-///        text. Without it, a reloaded index forgot its key-part collation, so
-///        an upsert conflict target such as `ON CONFLICT(b COLLATE nocase, ...)`
-///        stopped matching after a checkpoint (upsert4 2.x.2.1). v14 and earlier
-///        files remain readable: the read path is gated on `version >= 15` and
-///        treats absence as `collation = None` (prior behavior). Issue #5921.
-/// - v16: Added `TriggerDefinition::sql_definition` persistence per trigger (one
-///        present-flag bool + optional string, appended after the trigger's
-///        schema field). Without it, every reloaded trigger lost its verbatim
-///        `CREATE TRIGGER` text and `sqlite_master.sql` fell back to an
-///        AST-reconstructed form (injected `BEFORE`/`FOR EACH ROW`, normalized
-///        spacing), so a trigger's `sql` column changed after a checkpoint
-///        (altercol.test 9.x). Mirrors the view `sql_definition` field. v15 and
-///        earlier files remain readable: the read path is gated on
-///        `version >= 16` and treats absence as `sql_definition = None` (prior
-///        AST-reconstruction behavior). Issue #6174.
-/// - v17: Added the schema-object creation-order section (a trailing
-///        `count` + `(key, seq)` pairs written after the triggers section).
-///        SQLite lists `sqlite_master` rows in object-creation order — a table's
-///        indexes appear right after the table when created next — but VibeSQL
-///        stores tables and indexes in separate collections and the reader
-///        re-registers them in separate passes, which reproduced a "tables
-///        first, then indexes" ordering after every reload. Persisting each
-///        object's creation ordinal lets a reloaded database restore the true
-///        ordering (pragma.test 23.1, read across a second connection). v16 and
-///        earlier files remain readable: the read path is gated on
-///        `version >= 17`; absence leaves the ordinals unrecorded and the
-///        generator falls back to the prior emission order. Issue #6175.
+///   (`IndexColumn::Column::collation`, the `COLLATE nocase` in `CREATE UNIQUE INDEX xyz1 ON xyz(d,
+///   c, b COLLATE nocase)`). Encoded as a present-flag bool + optional collation name, appended
+///   after the column's direction byte, and only for column-type index parts (type byte 0);
+///   expression parts carry any collation inside their SQL text. Without it, a reloaded index
+///   forgot its key-part collation, so an upsert conflict target such as `ON CONFLICT(b COLLATE
+///   nocase, ...)` stopped matching after a checkpoint (upsert4 2.x.2.1). v14 and earlier files
+///   remain readable: the read path is gated on `version >= 15` and treats absence as `collation =
+///   None` (prior behavior). Issue #5921.
+/// - v16: Added `TriggerDefinition::sql_definition` persistence per trigger (one present-flag bool
+///   + optional string, appended after the trigger's schema field). Without it, every reloaded
+///   trigger lost its verbatim `CREATE TRIGGER` text and `sqlite_master.sql` fell back to an
+///   AST-reconstructed form (injected `BEFORE`/`FOR EACH ROW`, normalized spacing), so a trigger's
+///   `sql` column changed after a checkpoint (altercol.test 9.x). Mirrors the view `sql_definition`
+///   field. v15 and earlier files remain readable: the read path is gated on `version >= 16` and
+///   treats absence as `sql_definition = None` (prior AST-reconstruction behavior). Issue #6174.
+/// - v17: Added the schema-object creation-order section (a trailing `count` + `(key, seq)` pairs
+///   written after the triggers section). SQLite lists `sqlite_master` rows in object-creation
+///   order — a table's indexes appear right after the table when created next — but VibeSQL stores
+///   tables and indexes in separate collections and the reader re-registers them in separate
+///   passes, which reproduced a "tables first, then indexes" ordering after every reload.
+///   Persisting each object's creation ordinal lets a reloaded database restore the true ordering
+///   (pragma.test 23.1, read across a second connection). v16 and earlier files remain readable:
+///   the read path is gated on `version >= 17`; absence leaves the ordinals unrecorded and the
+///   generator falls back to the prior emission order. Issue #6175.
 pub const VERSION: u8 = 17;
 
 /// Type tags for binary serialization

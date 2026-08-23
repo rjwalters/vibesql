@@ -2,8 +2,10 @@
 
 use vibesql_types::SqlValue;
 
-use crate::identifier::{ColumnIdentifier, FunctionIdentifier};
-use crate::{BinaryOperator, OrderByItem, SelectStmt, UnaryOperator};
+use crate::{
+    identifier::{ColumnIdentifier, FunctionIdentifier},
+    BinaryOperator, OrderByItem, SelectStmt, UnaryOperator,
+};
 
 /// SQL Expression (can appear in SELECT, WHERE, etc.)
 #[derive(Debug, Clone, PartialEq)]
@@ -417,12 +419,11 @@ pub enum Expression {
 /// The conflict-resolution action of a `RAISE()` expression.
 ///
 /// Mirrors SQLite's RAISE behavior:
-/// - `Ignore` abandons just the current row's processing and continues
-///   (no error is reported).
-/// - `Abort` rolls back the changes made by the current statement, but
-///   preserves earlier statements in the transaction.
-/// - `Fail` stops the current statement without undoing changes it already
-///   made to earlier rows in that statement.
+/// - `Ignore` abandons just the current row's processing and continues (no error is reported).
+/// - `Abort` rolls back the changes made by the current statement, but preserves earlier statements
+///   in the transaction.
+/// - `Fail` stops the current statement without undoing changes it already made to earlier rows in
+///   that statement.
 /// - `Rollback` rolls back the entire enclosing transaction.
 ///
 /// `Abort`, `Fail`, and `Rollback` report the error message (SQLite error

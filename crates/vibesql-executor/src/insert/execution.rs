@@ -4,7 +4,7 @@ use vibesql_storage::statistics::CostEstimator;
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, expression_index_maintenance,
     partial_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
+    sqlite_schema::is_sqlite_schema_table_ref, sqlite_stat::is_sqlite_stat1_table,
 };
 
 /// Outcome of an INSERT statement execution.
@@ -152,21 +152,17 @@ pub(crate) fn coerce_rowid_affinity(
 fn materialize_window_values_rows(
     db: &vibesql_storage::Database,
     rows: Vec<Vec<vibesql_ast::Expression>>,
-    cte_results: Option<
-        &std::collections::HashMap<String, crate::select::cte::CteResult>,
-    >,
+    cte_results: Option<&std::collections::HashMap<String, crate::select::cte::CteResult>>,
 ) -> Result<Vec<Vec<vibesql_ast::Expression>>, ExecutorError> {
     // Fast path: no window function anywhere -> return the rows untouched.
-    if !rows.iter().any(|row| {
-        row.iter().any(crate::select::window::expression_has_window_function)
-    }) {
+    if !rows.iter().any(|row| row.iter().any(crate::select::window::expression_has_window_function))
+    {
         return Ok(rows);
     }
 
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        let has_window =
-            row.iter().any(crate::select::window::expression_has_window_function);
+        let has_window = row.iter().any(crate::select::window::expression_has_window_function);
         if !has_window {
             out.push(row);
             continue;
@@ -212,9 +208,7 @@ fn materialize_window_values_rows(
             .rows
             .into_iter()
             .next()
-            .map(|r| {
-                r.values.into_iter().map(vibesql_ast::Expression::Literal).collect::<Vec<_>>()
-            })
+            .map(|r| r.values.into_iter().map(vibesql_ast::Expression::Literal).collect::<Vec<_>>())
             .unwrap_or_default();
         out.push(literal_row);
     }
@@ -233,8 +227,11 @@ fn execute_insert_internal(
         None => stmt.table_name.clone(),
     };
 
-    // Check if target is sqlite_master/sqlite_schema (read-only system table)
-    if is_sqlite_schema_table(&stmt.table_name) {
+    // Check if target is sqlite_master/sqlite_schema (read-only system table).
+    // Checked against `full_table_name` (schema-qualified when `stmt.schema_name`
+    // is set) so a currently-attached alias's schema table is recognized too —
+    // not just the bare/`main.`-qualified forms (issue #6451).
+    if is_sqlite_schema_table_ref(&db.catalog, &full_table_name) {
         return Err(ExecutorError::SqliteSystemTableReadOnly {
             table_name: stmt.table_name.clone(),
             operation: "modified".to_string(),
@@ -648,12 +645,11 @@ fn execute_insert_internal(
     // Get table's current max rowid for auto-assignment (SQLite semantics)
     // When inserting with explicit rowid column, NULL rowids should be assigned values
     // greater than both:
-    // 1. The table's current max *signed* rowid (`max_rowid_signed()`: covers
-    //    every effective rowid ever assigned — implicit positions AND explicit
-    //    rowids, including rowids reloaded from disk, which can exceed the
-    //    compacted physical count; issue #5835). SQLite rowids are signed:
-    //    a table whose only rowid is -1 auto-assigns 0 next (verified against
-    //    sqlite3), and `None` (no rows ever) auto-assigns 1.
+    // 1. The table's current max *signed* rowid (`max_rowid_signed()`: covers every effective rowid
+    //    ever assigned — implicit positions AND explicit rowids, including rowids reloaded from
+    //    disk, which can exceed the compacted physical count; issue #5835). SQLite rowids are
+    //    signed: a table whose only rowid is -1 auto-assigns 0 next (verified against sqlite3), and
+    //    `None` (no rows ever) auto-assigns 1.
     // 2. Explicit rowids processed so far in the batch (NOT future rows)
     let table_max_rowid: Option<i64> =
         db.get_table(&storage_table_name).and_then(|t| t.max_rowid_signed());
@@ -1513,8 +1509,7 @@ fn execute_insert_internal(
                     // must both observe the recomputed (post-trigger) rowid, not
                     // the stale value assigned before the trigger ran.
                     candidate_last_id = Some(recomputed);
-                    batch_max_ipk =
-                        Some(batch_max_ipk.map_or(recomputed, |m| m.max(recomputed)));
+                    batch_max_ipk = Some(batch_max_ipk.map_or(recomputed, |m| m.max(recomputed)));
                 } else {
                     // `rowid` pseudo-column table (no INTEGER PRIMARY KEY): the
                     // auto rowid is carried in `explicit_rowid`, which flows into

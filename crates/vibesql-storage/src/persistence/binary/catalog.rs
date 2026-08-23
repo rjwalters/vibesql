@@ -261,72 +261,75 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     // is written so a session-local temp view never reappears in the next
     // session's catalog (issue #5940, Cluster A). The count and the write loop
     // iterate the same filtered list so they stay in lockstep.
-    let view_names: Vec<String> = db
+    // Iterate view definitions directly rather than via `list_views()` +
+    // `get_view()`: views are keyed per schema (#6490), so a name-only
+    // `get_view` always resolves to the same (temp-then-main-then-attached
+    // priority) entry — iterating by name would silently write the *same*
+    // main-schema view twice whenever an attached schema holds a same-named
+    // view, corrupting the snapshot with a duplicate `CREATE VIEW` that fails
+    // to reload.
+    let views_to_persist: Vec<&vibesql_catalog::ViewDefinition> = db
         .catalog
-        .list_views()
-        .into_iter()
-        .filter(|name| {
+        .iter_views()
+        .filter(|v| {
             // Views in ATTACHed database schemas are session-scoped (#6310),
-            // like temp views. The schema may be carried as a tag or embedded
-            // in the stored (qualified) view name.
-            let name_in_attached_schema = name
+            // like temp views. The schema may be carried as a tag or (for a
+            // legacy pre-#6490 snapshot) embedded in the stored name.
+            let name_in_attached_schema = v
+                .name
                 .split_once('.')
                 .is_some_and(|(schema, _)| db.catalog.is_attached_schema(schema));
             !name_in_attached_schema
-                && db.catalog.get_view(name).is_some_and(|v| {
-                    !v.is_temp()
-                        && !v.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
-                })
+                && !v.is_temp()
+                && !v.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
         })
         .collect();
-    write_u32(writer, view_names.len() as u32)?;
+    write_u32(writer, views_to_persist.len() as u32)?;
 
-    for view_name in view_names {
-        if let Some(view) = db.catalog.get_view(&view_name) {
-            // 1. name
-            write_string(writer, &view.name)?;
+    for view in views_to_persist {
+        // 1. name
+        write_string(writer, &view.name)?;
 
-            // 2. schema (present-flag + string) — preserves temp tagging
-            match &view.schema {
-                Some(schema) => {
-                    write_bool(writer, true)?;
-                    write_string(writer, schema)?;
-                }
-                None => {
-                    write_bool(writer, false)?;
+        // 2. schema (present-flag + string) — preserves temp tagging
+        match &view.schema {
+            Some(schema) => {
+                write_bool(writer, true)?;
+                write_string(writer, schema)?;
+            }
+            None => {
+                write_bool(writer, false)?;
+            }
+        }
+
+        // 3. columns (present-flag + count + strings)
+        match &view.columns {
+            Some(cols) => {
+                write_bool(writer, true)?;
+                write_u32(writer, cols.len() as u32)?;
+                for col in cols {
+                    write_string(writer, col)?;
                 }
             }
-
-            // 3. columns (present-flag + count + strings)
-            match &view.columns {
-                Some(cols) => {
-                    write_bool(writer, true)?;
-                    write_u32(writer, cols.len() as u32)?;
-                    for col in cols {
-                        write_string(writer, col)?;
-                    }
-                }
-                None => {
-                    write_bool(writer, false)?;
-                }
+            None => {
+                write_bool(writer, false)?;
             }
+        }
 
-            // 4. with_check_option
-            write_bool(writer, view.with_check_option)?;
+        // 4. with_check_option
+        write_bool(writer, view.with_check_option)?;
 
-            // 5. defining SELECT as SQL text
-            use vibesql_ast::pretty_print::ToSql;
-            write_string(writer, &view.query.to_sql())?;
+        // 5. defining SELECT as SQL text
+        use vibesql_ast::pretty_print::ToSql;
+        write_string(writer, &view.query.to_sql())?;
 
-            // 6. sql_definition (present-flag + string)
-            match &view.sql_definition {
-                Some(def) => {
-                    write_bool(writer, true)?;
-                    write_string(writer, def)?;
-                }
-                None => {
-                    write_bool(writer, false)?;
-                }
+        // 6. sql_definition (present-flag + string)
+        match &view.sql_definition {
+            Some(def) => {
+                write_bool(writer, true)?;
+                write_string(writer, def)?;
+            }
+            None => {
+                write_bool(writer, false)?;
             }
         }
     }
@@ -349,8 +352,7 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
         .catalog
         .iter_triggers()
         .filter(|t| {
-            !t.is_temp()
-                && !t.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
+            !t.is_temp() && !t.schema.as_deref().is_some_and(|s| db.catalog.is_attached_schema(s))
         })
         .collect();
     write_u32(writer, triggers.len() as u32)?;
@@ -1722,8 +1724,8 @@ mod tests {
             ))
             .unwrap();
 
-        // 4. RECURSIVE CTE view — ToSql must render the RECURSIVE keyword so
-        //    the flag survives the text round-trip.
+        // 4. RECURSIVE CTE view — ToSql must render the RECURSIVE keyword so the flag survives the
+        //    text round-trip.
         db.catalog
             .create_view(vibesql_catalog::ViewDefinition::new(
                 "v_rec".to_string(),

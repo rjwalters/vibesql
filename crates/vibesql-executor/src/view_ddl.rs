@@ -6,6 +6,66 @@ use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
 
+/// Split a possibly schema-qualified `CREATE VIEW`/`DROP VIEW` name into its
+/// `(schema, unqualified name)` parts, mirroring
+/// `CreateTableExecutor::execute_impl`'s handling of `stmt.table_name`
+/// (`create_table.rs`) so `CREATE VIEW <alias>.<name>` against an
+/// attached-database alias creates a view named `<name>` inside `<alias>`
+/// instead of literally storing `"<alias>.<name>"` in the default schema
+/// (issue #6490).
+///
+/// - `CREATE TEMP VIEW <name>` (no dot) -> `(Some("temp"), name)`.
+/// - `CREATE TEMP VIEW temp.<name>` -> `(Some("temp"), name)` (the redundant `temp.` qualifier is
+///   allowed, matching `CREATE TEMP TABLE temp.t(...)`).
+/// - `CREATE TEMP VIEW <schema>.<name>` for any other schema -> error "temporary view name must be
+///   unqualified" (mirrors the CREATE TEMP TABLE handling for #6173/#6406).
+/// - `CREATE VIEW <schema>.<name>` -> `(Some(schema), name)` verbatim; the schema may be `main`,
+///   `temp`, or an attached alias.
+/// - `CREATE VIEW <name>` (no dot, not temporary) -> `(None, name)`.
+pub(crate) fn split_view_schema_qualifier(
+    view_name: &str,
+    temporary: bool,
+) -> Result<(Option<String>, String), ExecutorError> {
+    if temporary {
+        if let Some((schema_part, name_part)) = view_name.split_once('.') {
+            if !schema_part.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA) {
+                return Err(ExecutorError::SqliteCompatError(
+                    "temporary view name must be unqualified".to_string(),
+                ));
+            }
+            Ok((Some(vibesql_catalog::TEMP_SCHEMA.to_string()), name_part.to_string()))
+        } else {
+            Ok((Some(vibesql_catalog::TEMP_SCHEMA.to_string()), view_name.to_string()))
+        }
+    } else if let Some((schema_part, name_part)) = view_name.split_once('.') {
+        Ok((Some(schema_part.to_string()), name_part.to_string()))
+    } else {
+        Ok((None, view_name.to_string()))
+    }
+}
+
+/// Validate that an explicit schema qualifier names `main`, `temp`, or an
+/// existing (e.g. ATTACHed, #6310) schema. Mirrors the identical guard in
+/// `TriggerExecutor::create_trigger_with_sql` (`trigger_ddl.rs`) and
+/// `CreateTableExecutor::execute_impl` (`create_table.rs`), echoing SQLite's
+/// `unknown database <name>` wording for a qualifier that resolves to
+/// nothing.
+pub(crate) fn validate_view_schema_qualifier(
+    schema: Option<&str>,
+    database: &Database,
+) -> Result<(), ExecutorError> {
+    if let Some(schema) = schema {
+        if !schema.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA)
+            && !schema.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA)
+            && !database.catalog.schema_exists(schema)
+            && !database.catalog.schema_exists(&schema.to_ascii_lowercase())
+        {
+            return Err(ExecutorError::SqliteCompatError(format!("unknown database {}", schema)));
+        }
+    }
+    Ok(())
+}
+
 /// Executor for view DDL statements
 pub struct ViewExecutor;
 
@@ -15,6 +75,13 @@ impl ViewExecutor {
         stmt: &CreateViewStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
+        // Split off any schema qualifier (`<alias>.<name>`) so the view is
+        // homed in the right schema instead of literally storing the dotted
+        // name in the default schema (#6490).
+        let (schema, unqualified_name) =
+            split_view_schema_qualifier(&stmt.view_name, stmt.temporary)?;
+        validate_view_schema_qualifier(schema.as_deref(), database)?;
+
         let view_exists = database.catalog.get_view(&stmt.view_name).is_some();
 
         // If IF NOT EXISTS and view already exists, just return success
@@ -30,15 +97,10 @@ impl ViewExecutor {
             })?;
         }
 
-        // Tag temp views with the `temp` schema so they surface via
-        // sqlite_temp_master and are excluded from sqlite_master (#5541),
-        // mirroring the temp-trigger (#5532) and temp-index (#5513) tags.
-        let schema = if stmt.temporary { Some("temp".to_string()) } else { None };
-
         // Create the view definition
         let view_def = if let Some(ref sql) = stmt.sql_definition {
             ViewDefinition::new_with_sql(
-                stmt.view_name.clone(),
+                unqualified_name,
                 stmt.columns.clone(),
                 *stmt.query.clone(),
                 stmt.with_check_option,
@@ -46,7 +108,7 @@ impl ViewExecutor {
             )
         } else {
             ViewDefinition::new(
-                stmt.view_name.clone(),
+                unqualified_name,
                 stmt.columns.clone(),
                 *stmt.query.clone(),
                 stmt.with_check_option,

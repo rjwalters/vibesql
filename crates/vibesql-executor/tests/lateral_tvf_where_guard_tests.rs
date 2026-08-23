@@ -24,11 +24,10 @@
 //! Differential behavior (verified against sqlite3 3.51.0):
 //!
 //! - **With the `json_valid` guard**: malformed rows are filtered; no error.
-//! - **Without the guard**: `json_each` reaches a malformed value and errors
-//!   ("malformed JSON") — we match sqlite3's error behavior rather than silently
-//!   filtering.
-//! - **A guard referencing a TVF column** (`json_each.value ...`) is NOT pushed;
-//!   it is still evaluated post-join, so it cannot pre-filter left rows.
+//! - **Without the guard**: `json_each` reaches a malformed value and errors ("malformed JSON") —
+//!   we match sqlite3's error behavior rather than silently filtering.
+//! - **A guard referencing a TVF column** (`json_each.value ...`) is NOT pushed; it is still
+//!   evaluated post-join, so it cannot pre-filter left rows.
 
 use vibesql_executor::SelectExecutor;
 use vibesql_types::SqlValue;

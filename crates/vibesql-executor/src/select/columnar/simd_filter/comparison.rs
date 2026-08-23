@@ -328,14 +328,13 @@ enum TimestampCmpOp {
 ///
 /// Issue #5335 semantics (matching the scalar comparator and the expression
 /// evaluator's #5329 rules):
-/// - `SqlValue::Timestamp` literal: ordinary temporal comparison via the
-///   microsecond encoding (SIMD i64 fast path)
-/// - string literal: compare the TEXT rendering of each timestamp against
-///   the string lexicographically (per-row scalar; strings on timestamp
-///   columns are rare and correctness across the scalar/SIMD threshold is
-///   required)
-/// - anything else: type mismatch error (predicate extraction declines these
-///   combinations, so this is defense in depth)
+/// - `SqlValue::Timestamp` literal: ordinary temporal comparison via the microsecond encoding (SIMD
+///   i64 fast path)
+/// - string literal: compare the TEXT rendering of each timestamp against the string
+///   lexicographically (per-row scalar; strings on timestamp columns are rare and correctness
+///   across the scalar/SIMD threshold is required)
+/// - anything else: type mismatch error (predicate extraction declines these combinations, so this
+///   is defense in depth)
 fn timestamp_cmp_mask(
     values: &[i64],
     value: &SqlValue,

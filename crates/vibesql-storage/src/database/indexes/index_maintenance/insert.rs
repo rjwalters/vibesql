@@ -35,7 +35,7 @@ impl IndexManager {
             // Case-insensitive comparison for table name matching
             // SQL parser normalizes identifiers to uppercase, but table/index metadata
             // may store the original case from DDL statements
-            if metadata.table_name.eq_ignore_ascii_case(table_name) {
+            if metadata.matches_table(table_name) {
                 // Skip expression indexes - they need pre-computed keys
                 // Expression indexes are handled by add_to_expression_indexes_for_insert
                 if metadata.columns.iter().any(|col| col.is_expression()) {
@@ -100,11 +100,9 @@ impl IndexManager {
                             // assigned to its nearest centroid (O(probe)); if the
                             // index is not yet trained it lands in the staging
                             // list, matching IVFFlatIndex::insert semantics.
-                            if let Some(col_idx) = Self::vector_index_column_idx(
-                                metadata,
-                                table_schema,
-                                index_name,
-                            ) {
+                            if let Some(col_idx) =
+                                Self::vector_index_column_idx(metadata, table_schema, index_name)
+                            {
                                 if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
                                     if let Err(e) = index.insert(row_index, vector) {
                                         log::warn!(
@@ -121,11 +119,9 @@ impl IndexManager {
                         IndexData::Hnsw { index } => {
                             // HNSW supports incremental inserts natively (no
                             // training step); wire the row's vector into the graph.
-                            if let Some(col_idx) = Self::vector_index_column_idx(
-                                metadata,
-                                table_schema,
-                                index_name,
-                            ) {
+                            if let Some(col_idx) =
+                                Self::vector_index_column_idx(metadata, table_schema, index_name)
+                            {
                                 if let Some(vector) = Self::extract_vector(&row.values[col_idx]) {
                                     if let Err(e) = index.insert(row_index, vector) {
                                         log::warn!(
@@ -159,7 +155,7 @@ impl IndexManager {
         expression_keys: &std::collections::HashMap<String, Vec<SqlValue>>,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if !metadata.table_name.eq_ignore_ascii_case(table_name) {
+            if !metadata.matches_table(table_name) {
                 continue;
             }
 
@@ -254,7 +250,7 @@ impl IndexManager {
             .indexes
             .iter()
             .filter(|(_, metadata)| {
-                metadata.table_name.eq_ignore_ascii_case(table_name)
+                metadata.matches_table(table_name)
                     && !metadata.columns.iter().any(|col| col.is_expression())
                     && !metadata.is_partial()
             })

@@ -477,8 +477,8 @@ impl CombinedExpressionEvaluator<'_> {
         }
 
         // Case 5: Left is NUMERIC/INTEGER/REAL column, right is NONE/TEXT column with TEXT value
-        // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE affinity,
-        // try to convert the TEXT value to a number for comparison.
+        // Per SQLite: when one operand has NUMERIC affinity and the other has TEXT or NONE
+        // affinity, try to convert the TEXT value to a number for comparison.
         // This handles column-to-column comparisons like: NUMERIC_col = NONE_col
         let is_right_non_numeric_affinity =
             matches!(right_affinity, Some(TypeAffinity::None) | Some(TypeAffinity::Text) | None);
@@ -713,8 +713,8 @@ impl CombinedExpressionEvaluator<'_> {
                 let column_display = col_id.column_display();
 
                 // Handle schema qualifier (three-part names like schema.table.column)
-                // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database names
-                // For our single-database implementation:
+                // SQLite schemas: "main" (default), "temp" (temporary tables), or attached database
+                // names For our single-database implementation:
                 // - "main" is silently accepted (treated as default)
                 // - Other schemas return "no such column" error to match SQLite behavior
                 if let Some(schema_name) = schema {
@@ -740,11 +740,12 @@ impl CombinedExpressionEvaluator<'_> {
                     return Ok(vibesql_types::SqlValue::Null);
                 }
 
-                // Check for ambiguous qualified column references (SQLite compatibility - issue #4507)
-                // This must be checked BEFORE resolving the column, as SQLite requires
-                // an error when a table alias appears multiple times in the FROM clause.
-                // Example: SELECT A.f1 FROM test1 AS A, test1 AS A => "ambiguous column name: A.f1"
-                // Use display forms to preserve original case in error messages
+                // Check for ambiguous qualified column references (SQLite compatibility - issue
+                // #4507) This must be checked BEFORE resolving the column, as
+                // SQLite requires an error when a table alias appears multiple
+                // times in the FROM clause. Example: SELECT A.f1 FROM test1 AS A,
+                // test1 AS A => "ambiguous column name: A.f1" Use display forms to
+                // preserve original case in error messages
                 if let Some(table_disp) = table_display {
                     self.schema.validate_qualified_reference(table_disp, column_display)?;
                 }
@@ -860,7 +861,8 @@ impl CombinedExpressionEvaluator<'_> {
                                 self.schema.table_schemas.get(&table_id)
                             {
                                 if let Some(ipk_col_idx) = table_schema.rowid_alias_column {
-                                    // Return the IPK column value (offset by start_idx in combined row)
+                                    // Return the IPK column value (offset by start_idx in combined
+                                    // row)
                                     let combined_idx = start_idx + ipk_col_idx;
                                     return row.get(combined_idx).cloned().ok_or(
                                         ExecutorError::ColumnIndexOutOfBounds {
@@ -890,7 +892,8 @@ impl CombinedExpressionEvaluator<'_> {
                         if let Some(row_id) = row.get_row_id_for_table(table) {
                             return Ok(vibesql_types::SqlValue::Bigint(row_id as i64));
                         }
-                        // ROWID not available - return NULL (matches SQLite behavior for derived tables)
+                        // ROWID not available - return NULL (matches SQLite behavior for derived
+                        // tables)
                         return Ok(vibesql_types::SqlValue::Null);
                     }
                 }
@@ -922,11 +925,13 @@ impl CombinedExpressionEvaluator<'_> {
                     // Issue #4783, #4903: USING column semantics differ from SQLite in OUTER JOINs
                     // For unqualified references to USING columns in RIGHT/FULL OUTER JOINs,
                     // apply N-way COALESCE semantics: return first non-NULL from chain.
-                    // Qualified references (t1.col) should NOT use coalesce - they return the raw value.
+                    // Qualified references (t1.col) should NOT use coalesce - they return the raw
+                    // value.
                     //
-                    // Issue #4905: For alias table references (e.g., j1.id where j1 aliases a USING join),
-                    // we SHOULD apply COALESCE semantics because the alias table represents the
-                    // coalesced join result, not individual underlying tables.
+                    // Issue #4905: For alias table references (e.g., j1.id where j1 aliases a USING
+                    // join), we SHOULD apply COALESCE semantics because the
+                    // alias table represents the coalesced join result, not
+                    // individual underlying tables.
                     let should_coalesce = if table.is_none() {
                         true // Unqualified references always use COALESCE for USING columns
                     } else if let Some(table_name) = table {
@@ -960,8 +965,8 @@ impl CombinedExpressionEvaluator<'_> {
                 }
 
                 // If not found in inner schema and outer context exists, try outer schema
-                // FIX for issue #4493: Support chained context resolution for deeply nested subqueries
-                // First try immediate parent (outer_row + outer_schema)
+                // FIX for issue #4493: Support chained context resolution for deeply nested
+                // subqueries First try immediate parent (outer_row + outer_schema)
                 if let (Some(outer_row), Some(outer_schema)) = (self.outer_row, self.outer_schema) {
                     if let Some(col_index) = outer_schema.get_column_index(table, column) {
                         return outer_row
@@ -977,7 +982,8 @@ impl CombinedExpressionEvaluator<'_> {
                 // instead of the previous manual 2-level check
                 let mut current_context = self.outer_context;
                 while let Some(ctx) = current_context {
-                    // Check this context's schema (which represents the parent evaluator's inner schema)
+                    // Check this context's schema (which represents the parent evaluator's inner
+                    // schema)
                     if let Some(outer_row) = ctx.outer_row {
                         if let Some(col_index) = ctx.schema.get_column_index(table, column) {
                             return outer_row
@@ -1203,7 +1209,8 @@ impl CombinedExpressionEvaluator<'_> {
                                 };
                                 (left_transformed, right_transformed)
                             } else if collation_lower == "rtrim" {
-                                // For RTRIM collation, trim trailing whitespace from both string values
+                                // For RTRIM collation, trim trailing whitespace from both string
+                                // values
                                 let left_transformed = match &left_val {
                                     SqlValue::Varchar(s) => {
                                         SqlValue::Varchar(arcstr::ArcStr::from(s.trim_end()))
@@ -1811,10 +1818,10 @@ impl CombinedExpressionEvaluator<'_> {
             // collation (including its default BINARY) blocks fallback to the
             // right; an explicit COLLATE on either side wins first (rule 1).
             // `tuple_on_left` decides which side is the left operand.
-            let tuple_operand = crate::evaluator::collation::operand_column_collation(
-                tuple_expr,
-                &|col_id| self.column_collation_of(col_id),
-            );
+            let tuple_operand =
+                crate::evaluator::collation::operand_column_collation(tuple_expr, &|col_id| {
+                    self.column_collation_of(col_id)
+                });
             let sub_operand = sub_collations[idx].clone();
             let (left_operand, right_operand) = if tuple_on_left {
                 (tuple_operand, sub_operand)

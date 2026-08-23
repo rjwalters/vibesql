@@ -552,8 +552,9 @@ pub(super) fn extract_table_name_and_alias(
 
 #[cfg(test)]
 mod residual_on_conjunct_tests {
-    use super::join_tree_has_residual_on_conjuncts;
     use vibesql_parser::Parser;
+
+    use super::join_tree_has_residual_on_conjuncts;
 
     fn from_clause_of(sql: &str) -> vibesql_ast::FromClause {
         match Parser::parse_sql(sql) {

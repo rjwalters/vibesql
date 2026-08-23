@@ -71,14 +71,13 @@ impl IndexManager {
         // first-class selectable read path (`select/scan/index_scan`,
         // `optimizer/index_planner::can_use_index`), so consulting an empty
         // body would silently return zero rows. To prevent that:
-        //   1. The index is recorded in `pending_expression_rebuilds`, and the
-        //      query planner declines any index for which
-        //      `is_index_pending_rebuild` is true — falling back to a
+        //   1. The index is recorded in `pending_expression_rebuilds`, and the query planner
+        //      declines any index for which `is_index_pending_rebuild` is true — falling back to a
         //      full-table scan (correct results, just slower).
-        //   2. `rebuild_pending_expression_indexes` in the executor evaluates
-        //      the index expression over the table rows and repopulates the
-        //      body via `populate_expression_index`, clearing the flag so the
-        //      index becomes a fully functional (and used) read path again.
+        //   2. `rebuild_pending_expression_indexes` in the executor evaluates the index expression
+        //      over the table rows and repopulates the body via `populate_expression_index`,
+        //      clearing the flag so the index becomes a fully functional (and used) read path
+        //      again.
         // The CLI open path runs the rebuild after every snapshot load, so a
         // reopened database keeps its expression indexes functional. Keeping the
         // metadata also means the catalog and ALTER/DROP-column validations
@@ -360,8 +359,7 @@ impl IndexManager {
         let key_size = std::mem::size_of::<Vec<SqlValue>>(); // Rough estimate
         let memory_bytes = self.estimate_index_memory(index_data_map.len(), key_size);
 
-        let index_data =
-            IndexData::InMemory { data: index_data_map };
+        let index_data = IndexData::InMemory { data: index_data_map };
 
         // Register the index with resource tracker
         self.resource_tracker.register_index(

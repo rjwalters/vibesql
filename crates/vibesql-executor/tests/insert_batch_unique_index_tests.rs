@@ -14,9 +14,7 @@
 //! now rehydrated from the persisted `sql_source` on binary reload.
 
 use vibesql_ast::Statement;
-use vibesql_executor::{
-    CreateIndexExecutor, CreateTableExecutor, InsertExecutor, SelectExecutor,
-};
+use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, InsertExecutor, SelectExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
@@ -92,8 +90,8 @@ fn fresh_unique_index_multi_row_insert_aborts() {
     create_index(&mut db, "CREATE UNIQUE INDEX i ON t(c)");
 
     // Default ABORT: the whole statement rolls back, nothing persisted.
-    let err = insert(&mut db, "INSERT INTO t VALUES(1),(1)")
-        .expect_err("in-batch duplicate must fail");
+    let err =
+        insert(&mut db, "INSERT INTO t VALUES(1),(1)").expect_err("in-batch duplicate must fail");
     assert_unique_violation(&err);
     assert_eq!(count(&db, "t"), 0, "ABORT must persist no rows");
 }

@@ -1,9 +1,8 @@
 //! Execution tests for the SQLite `RAISE()` trigger-program expression (#5409).
 //!
 //! Verified against sqlite3 3.51.x:
-//! - `RAISE(ABORT, msg)` / `RAISE(FAIL, msg)` / `RAISE(ROLLBACK, msg)` abort the
-//!   firing statement and report `msg` (SQLite error code 19); the message is
-//!   surfaced verbatim.
+//! - `RAISE(ABORT, msg)` / `RAISE(FAIL, msg)` / `RAISE(ROLLBACK, msg)` abort the firing statement
+//!   and report `msg` (SQLite error code 19); the message is surfaced verbatim.
 //! - `RAISE(IGNORE)` abandons just the current row and continues with no error.
 //!
 //! For a *single* aborting statement the three abort variants leave identical
@@ -354,8 +353,7 @@ fn raise_rollback_aborts_entire_transaction() {
 ///
 /// Scenario: txn has row 1; statement inserts (2,'okA'),(3,'BAD'),(4,'okB').
 ///   - ABORT  → final rows `{1}`            (whole statement undone)
-///   - FAIL   → final rows `{1, 2, 3}`      (rows applied so far kept; row 4
-///                                           never reached)
+///   - FAIL   → final rows `{1, 2, 3}`      (rows applied so far kept; row 4 never reached)
 /// Both verified against sqlite3 3.51.0.
 #[test]
 fn raise_abort_undoes_whole_statement_with_after_trigger() {
@@ -1262,8 +1260,8 @@ fn replace_with_raise_abort_before_delete_aborts() {
 //
 // Reference scenario (same as #5417): a transaction already holds row 1; a
 // single offending statement targets the `BAD` row with a trigger that RAISEs.
-//   - ABORT    -> the offending statement is undone; the txn stays open and
-//                 earlier statements survive.
+//   - ABORT    -> the offending statement is undone; the txn stays open and earlier statements
+//     survive.
 //   - FAIL     -> the statement's partial changes are kept; the txn stays open.
 //   - ROLLBACK -> the whole transaction is rolled back and closed.
 // For RETURNING, when the RAISE aborts the statement the error propagates and

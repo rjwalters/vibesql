@@ -796,8 +796,7 @@ pub fn transform_expression<V: ExpressionMutVisitor>(
 
         Expression::Raise { action, error_message } => Expression::Raise {
             action,
-            error_message: error_message
-                .map(|msg| Box::new(transform_expression(visitor, *msg))),
+            error_message: error_message.map(|msg| Box::new(transform_expression(visitor, *msg))),
         },
     };
 

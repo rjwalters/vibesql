@@ -82,14 +82,17 @@ fn check_schema_objects(
     // references in any spelling ("T1", "main.t1", ...) simulate the drop.
     let sim = DropSimulation::new(database, dropped);
 
-    for name in database.catalog.list_views() {
-        if let Some(view) = database.catalog.get_view(&name) {
-            if let Some(missing) = find_missing_column_in_view(view, &sim) {
-                return Err(ExecutorError::Other(format!(
-                    "error in view {}{}: no such column: {}",
-                    view.name, suffix, missing
-                )));
-            }
+    // Iterate view definitions directly rather than via `list_views()` +
+    // `get_view()`: views are keyed per schema (#6490), so a name-only
+    // `get_view` resolves temp-first-then-main-then-attached and could skip a
+    // `main` view that shares a name with a `temp`/attached-schema view
+    // (mirrors the trigger loop immediately below — issue #6296).
+    for view in database.catalog.iter_views() {
+        if let Some(missing) = find_missing_column_in_view(view, &sim) {
+            return Err(ExecutorError::Other(format!(
+                "error in view {}{}: no such column: {}",
+                view.name, suffix, missing
+            )));
         }
     }
 

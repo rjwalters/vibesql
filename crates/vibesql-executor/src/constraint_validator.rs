@@ -366,229 +366,224 @@ fn dedup_pk_key_parts(
     (out_cols, out_colls)
 }
 
-/// Constraint validator for table creation and alteration
-pub struct ConstraintValidator;
+/// Process all constraints from column definitions and table constraints
+///
+/// # Arguments
+///
+/// * `table_name` - The table name (used in SQLite-compatible error messages)
+/// * `columns` - The column definitions from the DDL statement
+/// * `table_constraints` - The table-level constraints
+///
+/// # Returns
+///
+/// A `ConstraintResult` containing all processed constraints, or an error if validation fails
+///
+/// # Errors
+///
+/// Returns `ExecutorError::MultiplePrimaryKeys` if multiple PRIMARY KEY constraints are defined
+pub fn process_constraints(
+    table_name: &str,
+    columns: &[ColumnDef],
+    table_constraints: &[TableConstraint],
+) -> Result<ConstraintResult, ExecutorError> {
+    let mut result = ConstraintResult::new();
 
-impl ConstraintValidator {
-    /// Process all constraints from column definitions and table constraints
-    ///
-    /// # Arguments
-    ///
-    /// * `table_name` - The table name (used in SQLite-compatible error messages)
-    /// * `columns` - The column definitions from the DDL statement
-    /// * `table_constraints` - The table-level constraints
-    ///
-    /// # Returns
-    ///
-    /// A `ConstraintResult` containing all processed constraints, or an error if validation fails
-    ///
-    /// # Errors
-    ///
-    /// Returns `ExecutorError::MultiplePrimaryKeys` if multiple PRIMARY KEY constraints are defined
-    pub fn process_constraints(
-        table_name: &str,
-        columns: &[ColumnDef],
-        table_constraints: &[TableConstraint],
-    ) -> Result<ConstraintResult, ExecutorError> {
-        let mut result = ConstraintResult::new();
+    // Track if we've seen a primary key at column level
+    let mut has_column_level_pk = false;
 
-        // Track if we've seen a primary key at column level
-        let mut has_column_level_pk = false;
-
-        // Process column-level constraints
-        for col_def in columns {
-            for constraint in &col_def.constraints {
-                match &constraint.kind {
-                    ColumnConstraintKind::PrimaryKey { .. } => {
-                        if has_column_level_pk {
-                            return Err(ExecutorError::MultiplePrimaryKeys {
-                                table_name: table_name.to_string(),
-                            });
-                        }
-                        if result.primary_key.is_some() {
-                            return Err(ExecutorError::MultiplePrimaryKeys {
-                                table_name: table_name.to_string(),
-                            });
-                        }
-                        result.primary_key = Some(vec![col_def.name.clone()]);
-                        // Column-level PK carries no key-part COLLATE (any COLLATE
-                        // is a separate column constraint that sets the column's
-                        // declared collation); enforcement falls back to that.
-                        result.primary_key_collations = Some(vec![None]);
-                        // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
-                        // Other types (TEXT, REAL, BLOB, etc.) can have NULL in PRIMARY KEY
-                        if col_def.data_type == DataType::Integer {
-                            result.not_null_columns.push(col_def.name.clone());
-                        }
-                        has_column_level_pk = true;
+    // Process column-level constraints
+    for col_def in columns {
+        for constraint in &col_def.constraints {
+            match &constraint.kind {
+                ColumnConstraintKind::PrimaryKey { .. } => {
+                    if has_column_level_pk {
+                        return Err(ExecutorError::MultiplePrimaryKeys {
+                            table_name: table_name.to_string(),
+                        });
                     }
-                    ColumnConstraintKind::Unique { .. } => {
-                        result.unique_constraints.push(vec![col_def.name.clone()]);
-                        // Column-level UNIQUE carries no key-part COLLATE; fall
-                        // back to the column's declared collation at enforcement.
-                        result.unique_constraint_collations.push(vec![None]);
-                    }
-                    ColumnConstraintKind::Check { expr, source_text } => {
-                        // SQLite rejects subqueries and bind parameters inside
-                        // CHECK constraints at CREATE TABLE time (check-3.1,
-                        // check-5.1). Enforce the same prohibition so an invalid
-                        // definition never leaves a half-formed table behind.
-                        validate_check_expression(expr)?;
-                        // Use explicit name if provided; otherwise use the
-                        // verbatim CHECK source text (SQLite echoes the
-                        // original operator spacing in the violation message),
-                        // falling back to the re-rendered expression only when
-                        // no source span was captured.
-                        let constraint_name = constraint
-                            .name
-                            .clone()
-                            .or_else(|| source_text.clone())
-                            .unwrap_or_else(|| expr.to_sql());
-                        result.check_constraints.push((constraint_name, (**expr).clone()));
-                    }
-                    ColumnConstraintKind::NotNull
-                    | ColumnConstraintKind::NotNullWithConflict { .. } => {
-                        result.not_null_columns.push(col_def.name.clone());
-                    }
-                    ColumnConstraintKind::References { .. } => {
-                        // Foreign key constraints are handled separately
-                        // during INSERT/UPDATE/DELETE operations
-                    }
-                    ColumnConstraintKind::AutoIncrement => {
-                        // AUTO_INCREMENT is handled in create_table.rs by creating
-                        // an internal sequence and setting the default value
-                        // No constraint validation needed here
-                    }
-                    ColumnConstraintKind::Key => {
-                        // KEY is a MySQL-specific index marker
-                        // For MVP, we parse it but don't enforce indexing behavior
-                        // No constraint validation needed here
-                    }
-                    ColumnConstraintKind::Collate(_) => {
-                        // COLLATE specifies the collation for string comparisons
-                        // For MVP, we parse it but don't enforce collation behavior
-                        // No constraint validation needed here
-                    }
-                }
-            }
-        }
-
-        // Process table-level constraints
-        for table_constraint in table_constraints {
-            match &table_constraint.kind {
-                TableConstraintKind::PrimaryKey { columns: pk_cols, .. } => {
-                    // Only allow one PRIMARY KEY constraint total (column-level OR table-level)
                     if result.primary_key.is_some() {
                         return Err(ExecutorError::MultiplePrimaryKeys {
                             table_name: table_name.to_string(),
                         });
                     }
-                    // Extract column names from IndexColumn structs
-                    let raw_column_names: Vec<String> =
-                        pk_cols.iter().map(|c| c.expect_column_name().to_string()).collect();
-                    // Carry the explicit per-key-part COLLATE so INSERT uniqueness
-                    // enforcement can honor `PRIMARY KEY(a COLLATE nocase)` (#5881).
-                    let raw_collations = key_part_collations(pk_cols);
-                    // Collapse exact-duplicate key parts (same column + same
-                    // effective collation) the way SQLite does, so a PK like
-                    // `(a, a, b)` becomes `(a, b)` and its internal unique index
-                    // is well-formed (#6171).
-                    let (column_names, collations) =
-                        dedup_pk_key_parts(&raw_column_names, &raw_collations, columns);
-                    result.primary_key = Some(column_names.clone());
-                    result.primary_key_collations = Some(collations);
+                    result.primary_key = Some(vec![col_def.name.clone()]);
+                    // Column-level PK carries no key-part COLLATE (any COLLATE
+                    // is a separate column constraint that sets the column's
+                    // declared collation); enforcement falls back to that.
+                    result.primary_key_collations = Some(vec![None]);
                     // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
-                    // For table-level constraints, check each column's type
-                    for col_name in &column_names {
-                        if let Some(col_def) = columns.iter().find(|c| &c.name == col_name) {
-                            if col_def.data_type == DataType::Integer
-                                && !result.not_null_columns.contains(col_name)
-                            {
-                                result.not_null_columns.push(col_name.to_string());
-                            }
-                        }
+                    // Other types (TEXT, REAL, BLOB, etc.) can have NULL in PRIMARY KEY
+                    if col_def.data_type == DataType::Integer {
+                        result.not_null_columns.push(col_def.name.clone());
                     }
+                    has_column_level_pk = true;
                 }
-                TableConstraintKind::Unique { columns, .. } => {
-                    // Extract column names from IndexColumn structs
-                    let column_names: Vec<String> =
-                        columns.iter().map(|c| c.expect_column_name().to_string()).collect();
-                    result.unique_constraints.push(column_names);
-                    // Carry the explicit per-key-part COLLATE so INSERT uniqueness
-                    // enforcement can honor `UNIQUE(a COLLATE nocase)` (#5881).
-                    result.unique_constraint_collations.push(key_part_collations(columns));
+                ColumnConstraintKind::Unique { .. } => {
+                    result.unique_constraints.push(vec![col_def.name.clone()]);
+                    // Column-level UNIQUE carries no key-part COLLATE; fall
+                    // back to the column's declared collation at enforcement.
+                    result.unique_constraint_collations.push(vec![None]);
                 }
-                TableConstraintKind::Check { expr, source_text } => {
-                    // SQLite rejects subqueries and bind parameters inside CHECK
-                    // constraints at CREATE TABLE time (check-3.1, check-5.1).
-                    // Enforce the same prohibition for table-level CHECKs too.
+                ColumnConstraintKind::Check { expr, source_text } => {
+                    // SQLite rejects subqueries and bind parameters inside
+                    // CHECK constraints at CREATE TABLE time (check-3.1,
+                    // check-5.1). Enforce the same prohibition so an invalid
+                    // definition never leaves a half-formed table behind.
                     validate_check_expression(expr)?;
-                    // Use explicit name if provided; otherwise the verbatim
-                    // CHECK source text, falling back to the re-rendered
-                    // expression only when no source span was captured.
-                    let constraint_name = table_constraint
+                    // Use explicit name if provided; otherwise use the
+                    // verbatim CHECK source text (SQLite echoes the
+                    // original operator spacing in the violation message),
+                    // falling back to the re-rendered expression only when
+                    // no source span was captured.
+                    let constraint_name = constraint
                         .name
                         .clone()
                         .or_else(|| source_text.clone())
                         .unwrap_or_else(|| expr.to_sql());
                     result.check_constraints.push((constraint_name, (**expr).clone()));
                 }
-                TableConstraintKind::ForeignKey { .. } => {
+                ColumnConstraintKind::NotNull
+                | ColumnConstraintKind::NotNullWithConflict { .. } => {
+                    result.not_null_columns.push(col_def.name.clone());
+                }
+                ColumnConstraintKind::References { .. } => {
                     // Foreign key constraints are handled separately
                     // during INSERT/UPDATE/DELETE operations
                 }
-                TableConstraintKind::Fulltext { .. } => {
-                    // FULLTEXT index constraints are handled separately
-                    // during table creation/schema updates
-                    // TODO: Implement FULLTEXT index tracking
+                ColumnConstraintKind::AutoIncrement => {
+                    // AUTO_INCREMENT is handled in create_table.rs by creating
+                    // an internal sequence and setting the default value
+                    // No constraint validation needed here
+                }
+                ColumnConstraintKind::Key => {
+                    // KEY is a MySQL-specific index marker
+                    // For MVP, we parse it but don't enforce indexing behavior
+                    // No constraint validation needed here
+                }
+                ColumnConstraintKind::Collate(_) => {
+                    // COLLATE specifies the collation for string comparisons
+                    // For MVP, we parse it but don't enforce collation behavior
+                    // No constraint validation needed here
                 }
             }
         }
-
-        Ok(result)
     }
 
-    /// Apply constraint results to a mutable column list
-    ///
-    /// This updates column nullability based on NOT NULL and PRIMARY KEY constraints
-    ///
-    /// # Arguments
-    ///
-    /// * `columns` - The column schemas to update
-    /// * `constraint_result` - The constraint processing results
-    pub fn apply_to_columns(columns: &mut [ColumnSchema], constraint_result: &ConstraintResult) {
-        // Mark NOT NULL columns as non-nullable
-        for col_name in &constraint_result.not_null_columns {
-            if let Some(col) = columns.iter_mut().find(|c| c.name == *col_name) {
-                col.nullable = false;
+    // Process table-level constraints
+    for table_constraint in table_constraints {
+        match &table_constraint.kind {
+            TableConstraintKind::PrimaryKey { columns: pk_cols, .. } => {
+                // Only allow one PRIMARY KEY constraint total (column-level OR table-level)
+                if result.primary_key.is_some() {
+                    return Err(ExecutorError::MultiplePrimaryKeys {
+                        table_name: table_name.to_string(),
+                    });
+                }
+                // Extract column names from IndexColumn structs
+                let raw_column_names: Vec<String> =
+                    pk_cols.iter().map(|c| c.expect_column_name().to_string()).collect();
+                // Carry the explicit per-key-part COLLATE so INSERT uniqueness
+                // enforcement can honor `PRIMARY KEY(a COLLATE nocase)` (#5881).
+                let raw_collations = key_part_collations(pk_cols);
+                // Collapse exact-duplicate key parts (same column + same
+                // effective collation) the way SQLite does, so a PK like
+                // `(a, a, b)` becomes `(a, b)` and its internal unique index
+                // is well-formed (#6171).
+                let (column_names, collations) =
+                    dedup_pk_key_parts(&raw_column_names, &raw_collations, columns);
+                result.primary_key = Some(column_names.clone());
+                result.primary_key_collations = Some(collations);
+                // SQLite quirk: only INTEGER PRIMARY KEY has implicit NOT NULL
+                // For table-level constraints, check each column's type
+                for col_name in &column_names {
+                    if let Some(col_def) = columns.iter().find(|c| &c.name == col_name) {
+                        if col_def.data_type == DataType::Integer
+                            && !result.not_null_columns.contains(col_name)
+                        {
+                            result.not_null_columns.push(col_name.to_string());
+                        }
+                    }
+                }
+            }
+            TableConstraintKind::Unique { columns, .. } => {
+                // Extract column names from IndexColumn structs
+                let column_names: Vec<String> =
+                    columns.iter().map(|c| c.expect_column_name().to_string()).collect();
+                result.unique_constraints.push(column_names);
+                // Carry the explicit per-key-part COLLATE so INSERT uniqueness
+                // enforcement can honor `UNIQUE(a COLLATE nocase)` (#5881).
+                result.unique_constraint_collations.push(key_part_collations(columns));
+            }
+            TableConstraintKind::Check { expr, source_text } => {
+                // SQLite rejects subqueries and bind parameters inside CHECK
+                // constraints at CREATE TABLE time (check-3.1, check-5.1).
+                // Enforce the same prohibition for table-level CHECKs too.
+                validate_check_expression(expr)?;
+                // Use explicit name if provided; otherwise the verbatim
+                // CHECK source text, falling back to the re-rendered
+                // expression only when no source span was captured.
+                let constraint_name = table_constraint
+                    .name
+                    .clone()
+                    .or_else(|| source_text.clone())
+                    .unwrap_or_else(|| expr.to_sql());
+                result.check_constraints.push((constraint_name, (**expr).clone()));
+            }
+            TableConstraintKind::ForeignKey { .. } => {
+                // Foreign key constraints are handled separately
+                // during INSERT/UPDATE/DELETE operations
+            }
+            TableConstraintKind::Fulltext { .. } => {
+                // FULLTEXT index constraints are handled separately
+                // during table creation/schema updates
+                // TODO: Implement FULLTEXT index tracking
             }
         }
     }
 
-    /// Apply constraint results to a table schema
-    ///
-    /// This sets the primary key, unique constraints, and check constraints on the schema
-    ///
-    /// # Arguments
-    ///
-    /// * `table_schema` - The table schema to update
-    /// * `constraint_result` - The constraint processing results
-    pub fn apply_to_schema(table_schema: &mut TableSchema, constraint_result: &ConstraintResult) {
-        // Set primary key
-        if let Some(pk) = &constraint_result.primary_key {
-            table_schema.primary_key = Some(pk.clone());
-            // Key-part collations are aligned with the PK column list (#5881).
-            table_schema.primary_key_collations = constraint_result.primary_key_collations.clone();
+    Ok(result)
+}
+
+/// Apply constraint results to a mutable column list
+///
+/// This updates column nullability based on NOT NULL and PRIMARY KEY constraints
+///
+/// # Arguments
+///
+/// * `columns` - The column schemas to update
+/// * `constraint_result` - The constraint processing results
+pub fn apply_to_columns(columns: &mut [ColumnSchema], constraint_result: &ConstraintResult) {
+    // Mark NOT NULL columns as non-nullable
+    for col_name in &constraint_result.not_null_columns {
+        if let Some(col) = columns.iter_mut().find(|c| c.name == *col_name) {
+            col.nullable = false;
         }
-
-        // Set unique constraints
-        table_schema.unique_constraints = constraint_result.unique_constraints.clone();
-        table_schema.unique_constraint_collations =
-            constraint_result.unique_constraint_collations.clone();
-
-        // Set check constraints
-        table_schema.check_constraints = constraint_result.check_constraints.clone();
     }
+}
+
+/// Apply constraint results to a table schema
+///
+/// This sets the primary key, unique constraints, and check constraints on the schema
+///
+/// # Arguments
+///
+/// * `table_schema` - The table schema to update
+/// * `constraint_result` - The constraint processing results
+pub fn apply_to_schema(table_schema: &mut TableSchema, constraint_result: &ConstraintResult) {
+    // Set primary key
+    if let Some(pk) = &constraint_result.primary_key {
+        table_schema.primary_key = Some(pk.clone());
+        // Key-part collations are aligned with the PK column list (#5881).
+        table_schema.primary_key_collations = constraint_result.primary_key_collations.clone();
+    }
+
+    // Set unique constraints
+    table_schema.unique_constraints = constraint_result.unique_constraints.clone();
+    table_schema.unique_constraint_collations =
+        constraint_result.unique_constraint_collations.clone();
+
+    // Set check constraints
+    table_schema.check_constraints = constraint_result.check_constraints.clone();
 }
 
 #[cfg(test)]
@@ -741,7 +736,7 @@ mod tests {
             "id",
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -771,8 +766,7 @@ mod tests {
             },
         }];
 
-        let result =
-            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
+        let result = process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string(), "tenant_id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -807,7 +801,7 @@ mod tests {
         let columns = vec![make_column_def("a", vec![]), make_column_def("b", vec![])];
         let constraints = vec![pk_constraint(&[("a", None), ("a", None), ("b", None)])];
 
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["a".to_string(), "b".to_string()]));
         // Collations stay positionally aligned with the deduped column list.
@@ -823,7 +817,7 @@ mod tests {
         let columns = vec![make_column_def("a", vec![]), make_column_def("b", vec![])];
         let constraints = vec![pk_constraint(&[("a", Some("nocase")), ("a", None)])];
 
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["a".to_string(), "a".to_string()]));
         assert_eq!(result.primary_key_collations, Some(vec![Some("nocase".to_string()), None]));
@@ -842,7 +836,7 @@ mod tests {
         // first (default) part also resolves to nocase → the two are duplicates.
         let constraints = vec![pk_constraint(&[("a", None), ("a", Some("nocase")), ("b", None)])];
 
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["a".to_string(), "b".to_string()]));
     }
@@ -866,7 +860,7 @@ mod tests {
             },
         }];
 
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &constraints);
+        let result = process_constraints("test_table", &columns, &constraints);
         assert!(matches!(result, Err(ExecutorError::MultiplePrimaryKeys { .. })));
         // SQLite-compatible wording (misc1-7.1/7.2, fuzz-8.1)
         let err = result.err().expect("expected MultiplePrimaryKeys error");
@@ -892,8 +886,7 @@ mod tests {
             },
         }];
 
-        let result =
-            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
+        let result = process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.unique_constraints.len(), 2);
         assert!(result.unique_constraints.contains(&vec!["email".to_string()]));
@@ -921,7 +914,7 @@ mod tests {
             }],
         )];
 
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.check_constraints.len(), 1);
         assert_eq!(result.check_constraints[0].1, check_expr);
@@ -938,11 +931,8 @@ mod tests {
             vibesql_ast::Statement::CreateTable(c) => c,
             other => panic!("expected CREATE TABLE, got {:?}", other),
         };
-        let res = ConstraintValidator::process_constraints(
-            &create.table_name,
-            &create.columns,
-            &create.table_constraints,
-        );
+        let res =
+            process_constraints(&create.table_name, &create.columns, &create.table_constraints);
         match res {
             Ok(_) => panic!("expected rejection of `{}`", sql),
             Err(e) => assert_eq!(e.to_string(), expected),
@@ -994,7 +984,7 @@ mod tests {
                 source_text: Some("d > 0".to_string()),
             }],
         )];
-        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        let result = process_constraints("t", &columns, &[]).unwrap();
         assert_eq!(result.check_constraints[0].0, "d > 0");
 
         // Unspaced source form is likewise preserved verbatim (SQLite echoes
@@ -1006,7 +996,7 @@ mod tests {
                 source_text: Some("d>0".to_string()),
             }],
         )];
-        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        let result = process_constraints("t", &columns, &[]).unwrap();
         assert_eq!(result.check_constraints[0].0, "d>0");
 
         // An explicit constraint name always wins over the source text.
@@ -1018,7 +1008,7 @@ mod tests {
                 source_text: Some("d > 0".to_string()),
             },
         });
-        let result = ConstraintValidator::process_constraints("t", &[col], &[]).unwrap();
+        let result = process_constraints("t", &[col], &[]).unwrap();
         assert_eq!(result.check_constraints[0].0, "chk_d");
     }
 
@@ -1036,7 +1026,7 @@ mod tests {
         let mut result = ConstraintResult::new();
         result.not_null_columns.push("id".to_string());
 
-        ConstraintValidator::apply_to_columns(&mut columns, &result);
+        apply_to_columns(&mut columns, &result);
 
         assert!(!columns[0].nullable); // id should be NOT NULL
         assert!(columns[1].nullable); // name should still be nullable
@@ -1052,7 +1042,7 @@ mod tests {
             DataType::Varchar { max_length: None },
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["name".to_string()]));
         // NOT NULL should NOT be added for non-INTEGER PRIMARY KEY
@@ -1067,7 +1057,7 @@ mod tests {
             DataType::Varchar { max_length: None },
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["c".to_string()]));
         assert!(!result.not_null_columns.contains(&"c".to_string()));
@@ -1081,7 +1071,7 @@ mod tests {
             DataType::Integer,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string()]));
         assert!(result.not_null_columns.contains(&"id".to_string()));
@@ -1115,8 +1105,7 @@ mod tests {
             },
         }];
 
-        let result =
-            ConstraintValidator::process_constraints("test_table", &columns, &constraints).unwrap();
+        let result = process_constraints("test_table", &columns, &constraints).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["id".to_string(), "code".to_string()]));
         // Only the INTEGER column should have NOT NULL
@@ -1132,7 +1121,7 @@ mod tests {
             DataType::Real,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["value".to_string()]));
         assert!(!result.not_null_columns.contains(&"value".to_string()));
@@ -1146,7 +1135,7 @@ mod tests {
             DataType::Bigint,
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("test_table", &columns, &[]).unwrap();
+        let result = process_constraints("test_table", &columns, &[]).unwrap();
 
         assert_eq!(result.primary_key, Some(vec!["big_id".to_string()]));
         // SQLite only treats INTEGER (not INT, BIGINT, etc.) specially
@@ -1177,7 +1166,7 @@ mod tests {
                 on_conflict: None,
             },
         }];
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
         assert_eq!(result.primary_key_collations, Some(vec![Some("nocase".to_string())]));
     }
 
@@ -1197,7 +1186,7 @@ mod tests {
                 on_conflict: None,
             },
         }];
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
         assert_eq!(
             result.unique_constraint_collations,
             vec![vec![Some("rtrim".to_string()), None]]
@@ -1213,7 +1202,7 @@ mod tests {
             DataType::Varchar { max_length: None },
             vec![ColumnConstraintKind::PrimaryKey { on_conflict: None }],
         )];
-        let result = ConstraintValidator::process_constraints("t", &columns, &[]).unwrap();
+        let result = process_constraints("t", &columns, &[]).unwrap();
         assert_eq!(result.primary_key_collations, Some(vec![None]));
     }
 
@@ -1231,13 +1220,13 @@ mod tests {
                 on_conflict: None,
             },
         }];
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
 
         let mut schema = TableSchema::new(
             "t".to_string(),
             vec![ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true)],
         );
-        ConstraintValidator::apply_to_schema(&mut schema, &result);
+        apply_to_schema(&mut schema, &result);
 
         assert_eq!(
             schema.primary_key_effective_collations(),
@@ -1259,13 +1248,13 @@ mod tests {
                 on_conflict: None,
             },
         }];
-        let result = ConstraintValidator::process_constraints("t", &columns, &constraints).unwrap();
+        let result = process_constraints("t", &columns, &constraints).unwrap();
 
         let mut col =
             ColumnSchema::new("a".to_string(), DataType::Varchar { max_length: None }, true);
         col.collation = Some("nocase".to_string());
         let mut schema = TableSchema::new("t".to_string(), vec![col]);
-        ConstraintValidator::apply_to_schema(&mut schema, &result);
+        apply_to_schema(&mut schema, &result);
 
         assert_eq!(
             schema.primary_key_effective_collations(),

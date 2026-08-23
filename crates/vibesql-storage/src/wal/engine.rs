@@ -171,9 +171,8 @@ mod native {
 
     use parking_lot::Mutex;
 
-    use crate::wal::format::WAL_HEADER_SIZE;
-
     use super::*;
+    use crate::wal::format::WAL_HEADER_SIZE;
 
     /// Flush completion notifier using a condition variable
     #[derive(Clone)]
@@ -373,8 +372,8 @@ mod native {
         /// starting LSN and header-writing behavior.
         ///
         /// * `start_lsn` — the first LSN this engine will assign.
-        /// * `write_header` — when `true`, write a fresh WAL header (new file);
-        ///   when `false`, append to an existing header-bearing WAL.
+        /// * `write_header` — when `true`, write a fresh WAL header (new file); when `false`,
+        ///   append to an existing header-bearing WAL.
         fn with_writer_opts<W: Write + Seek + Send + 'static>(
             writer: W,
             config: PersistenceConfig,

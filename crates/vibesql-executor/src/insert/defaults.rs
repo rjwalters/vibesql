@@ -138,8 +138,9 @@ pub fn evaluate_default_expression(
                 sequence_name
             )))
         }
-        // SQLite compatibility: unquoted identifiers in DEFAULT clauses are treated as string literals
-        // e.g., CREATE TABLE t(x TEXT DEFAULT hello) treats 'hello' as the string "hello"
+        // SQLite compatibility: unquoted identifiers in DEFAULT clauses are treated as string
+        // literals e.g., CREATE TABLE t(x TEXT DEFAULT hello) treats 'hello' as the string
+        // "hello"
         vibesql_ast::Expression::ColumnRef(col_id)
             if col_id.schema_canonical().is_none() && col_id.table_canonical().is_none() =>
         {
@@ -464,8 +465,8 @@ pub fn apply_default_values_with_batch_context(
 /// scan, correctly handles:
 ///
 /// - negative existing IPKs (max `-5` allocates `-4`, not `1`), and
-/// - saturation at `i64::MAX` (random unused rowid, then `SQLITE_FULL` — never
-///   a debug panic or a release wrap to `i64::MIN`).
+/// - saturation at `i64::MAX` (random unused rowid, then `SQLITE_FULL` — never a debug panic or a
+///   release wrap to `i64::MIN`).
 ///
 /// Returns `1` when the table does not yet exist in storage.
 fn compute_next_integer_pk_value(
@@ -483,9 +484,10 @@ fn compute_next_integer_pk_value(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{Expression, FunctionIdentifier};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn int_lit(v: i64) -> Expression {
         Expression::Literal(SqlValue::Integer(v))

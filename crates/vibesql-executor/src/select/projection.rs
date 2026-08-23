@@ -41,7 +41,8 @@ pub(crate) fn project_row_combined(
                 //
                 // Issue #4916: SQLite's behavior for USING column reordering:
                 // - Simple USING joins (no alias): columns stay in table order (a, b, c)
-                // - Aliased USING joins ((t1 JOIN t2 USING(b)) AS j1): USING columns first (b, a, c)
+                // - Aliased USING joins ((t1 JOIN t2 USING(b)) AS j1): USING columns first (b, a,
+                //   c)
                 //
                 // We detect aliased joins by checking if there's an alias table that shadows
                 // all non-alias tables. In that case, we use the alias table's column order
@@ -105,7 +106,8 @@ pub(crate) fn project_row_combined(
                                     continue;
                                 }
 
-                                // Skip right-side USING columns (output via left-side with COALESCE)
+                                // Skip right-side USING columns (output via left-side with
+                                // COALESCE)
                                 if schema.is_using_coalesce_right_side(abs_idx) {
                                     continue;
                                 }
@@ -242,7 +244,8 @@ pub(crate) fn project_row_combined(
                         // When window functions are present, only include base columns
                         let effective_end = if let Some(mapping) = window_mapping {
                             if !mapping.is_empty() {
-                                // Find the minimum window column index to know where base columns end
+                                // Find the minimum window column index to know where base columns
+                                // end
                                 let min_window_col =
                                     mapping.values().min().copied().unwrap_or(row.values.len());
                                 end_index.min(min_window_col)

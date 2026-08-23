@@ -83,14 +83,13 @@ fn is_window_function(expr: &Expression) -> bool {
 // pass to fix it up — but that pass historically handled only *top-level*
 // window SELECT items. The machinery below decomposes such expressions:
 //
-// 1. Each maximal window-free subexpression becomes a hidden "component"
-//    column, evaluated per group during aggregation (e.g. `sum(c)` → 4).
-// 2. Each embedded WindowFunction node becomes a hidden component column
-//    holding its placeholder, which the window pass later overwrites with
-//    the real window value (same contract as top-level windows).
-// 3. The original expression is rewritten into a "residual" expression that
-//    references the hidden columns; it is re-evaluated per row after the
-//    window pass and stored into the SELECT slot.
+// 1. Each maximal window-free subexpression becomes a hidden "component" column, evaluated per
+//    group during aggregation (e.g. `sum(c)` → 4).
+// 2. Each embedded WindowFunction node becomes a hidden component column holding its placeholder,
+//    which the window pass later overwrites with the real window value (same contract as top-level
+//    windows).
+// 3. The original expression is rewritten into a "residual" expression that references the hidden
+//    columns; it is re-evaluated per row after the window pass and stored into the SELECT slot.
 
 /// One hidden component column backing an embedded-window rewrite.
 pub(in crate::select::executor) struct EmbeddedWindowComponent {
@@ -538,11 +537,10 @@ fn collect_window_functions(
 ///
 /// Hidden column layout in each row (after the SELECT items):
 /// 1. `group_by_exprs` (count: G)
-/// 2. `order_by_aggregates` (count: order_by_aggregates_count) — pre-computed
-///    aggregates from the outer SQL ORDER BY (not used here, but skip past them)
-/// 3. `window_aggregates` (count: W) — pre-computed aggregates from the window's
-///    PARTITION BY/ORDER BY/frame (used to support `OVER (ORDER BY <agg>)`).
-///    See issue #5106.
+/// 2. `order_by_aggregates` (count: order_by_aggregates_count) — pre-computed aggregates from the
+///    outer SQL ORDER BY (not used here, but skip past them)
+/// 3. `window_aggregates` (count: W) — pre-computed aggregates from the window's PARTITION BY/ORDER
+///    BY/frame (used to support `OVER (ORDER BY <agg>)`). See issue #5106.
 pub(super) fn apply_window_functions_to_aggregates(
     mut rows: Vec<Row>,
     select_list: &[SelectItem],

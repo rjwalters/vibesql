@@ -11,8 +11,7 @@ use vibesql_parser::Parser;
 use vibesql_storage::Database;
 use vibesql_types::SqlValue;
 
-use crate::select::SelectExecutor;
-use crate::{CreateTableExecutor, InsertExecutor};
+use crate::{select::SelectExecutor, CreateTableExecutor, InsertExecutor};
 
 fn exec(db: &mut Database, sql: &str) {
     let stmt = Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse {sql:?}: {e:?}"));

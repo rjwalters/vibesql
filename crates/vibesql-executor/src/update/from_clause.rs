@@ -404,12 +404,11 @@ pub fn execute_update_from_join(
 /// target column as an ordinary scalar in the join context we need a per-column
 /// expression:
 ///
-/// - `RowValueConstructor([e0, e1, …])` → the elements directly (`e0`, `e1`, …).
-///   Arity is validated against the column list here so a mismatch reports the
-///   SQLite "N columns assigned M values" error rather than a downstream shape
-///   error.
-/// - Any other non-subquery RHS (e.g. `SET (a, b) = 1`) is projected once per
-///   column and the scalar evaluator surfaces the SQLite error.
+/// - `RowValueConstructor([e0, e1, …])` → the elements directly (`e0`, `e1`, …). Arity is validated
+///   against the column list here so a mismatch reports the SQLite "N columns assigned M values"
+///   error rather than a downstream shape error.
+/// - Any other non-subquery RHS (e.g. `SET (a, b) = 1`) is projected once per column and the scalar
+///   evaluator surfaces the SQLite error.
 ///
 /// A `ScalarSubquery` RHS is NOT handled here: it is intercepted earlier and
 /// evaluated once per matched row (issue #6086) so its columns keep SQLite's
@@ -510,8 +509,8 @@ impl AssignmentProjPlan {
 /// (issue #6105) so it can be carried on the substituted literal.
 ///
 /// - Qualified (`t.c`): looks the column up in table `t`'s schema.
-/// - Unqualified (`c`): finds the first outer table declaring a column `c`
-///   (mirroring the resolution used to classify the ref as outer above).
+/// - Unqualified (`c`): finds the first outer table declaring a column `c` (mirroring the
+///   resolution used to classify the ref as outer above).
 ///
 /// Returns the column's declared collation (`None` = default BINARY). A collation
 /// that names BINARY is treated as BINARY by the caller (a plain literal).
@@ -586,10 +585,10 @@ fn collect_from_clause_tables(
 /// against the UPDATE…FROM join row rather than the subquery's own scope.
 ///
 /// A reference is treated as outer when:
-/// - it is qualified (`t.c`) and `t` is one of the outer (target/FROM) tables and
-///   NOT a table bound locally inside the subquery, or
-/// - it is unqualified and matches a column of some outer table while not being a
-///   column of any table the subquery binds locally.
+/// - it is qualified (`t.c`) and `t` is one of the outer (target/FROM) tables and NOT a table bound
+///   locally inside the subquery, or
+/// - it is unqualified and matches a column of some outer table while not being a column of any
+///   table the subquery binds locally.
 ///
 /// References that resolve to the subquery's own scope are left untouched so the
 /// subquery evaluator resolves them normally. Only the *top-level* subquery scope

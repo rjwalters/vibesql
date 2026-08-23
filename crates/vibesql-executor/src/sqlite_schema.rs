@@ -38,6 +38,71 @@ pub fn is_sqlite_schema_table(table_name: &str) -> bool {
     )
 }
 
+/// Whether a table reference names `sqlite_master`/`sqlite_schema`, given the
+/// catalog's live attachments.
+///
+/// Extends [`is_sqlite_schema_table`] (bare and `main.`-qualified forms) to
+/// also recognize `<alias>.sqlite_master`/`<alias>.sqlite_schema` for any
+/// currently-attached database alias. Real SQLite rejects ALTER TABLE, DROP
+/// TABLE, INSERT, UPDATE, DELETE, ANALYZE, and CREATE INDEX against the
+/// schema table uniformly, regardless of which live alias qualifies the name
+/// (issue #6451) — this is the write-side guard counterpart to
+/// [`resolve_sqlite_schema_query_scope`], which handles the analogous
+/// alias-awareness for the SELECT/read path (#6436).
+///
+/// A qualifier that is neither `main` nor a live attachment (a stale alias
+/// after `DETACH`, an alias that was never attached, or an unrelated schema
+/// tag like `temp`) does NOT match — callers fall through to ordinary table
+/// resolution, matching SQLite's "no such table"/"unknown database" behavior
+/// for an unrecognized qualifier.
+pub fn is_sqlite_schema_table_ref(catalog: &vibesql_catalog::Catalog, table_name: &str) -> bool {
+    if is_sqlite_schema_table(table_name) {
+        return true;
+    }
+    let normalized = table_name.to_lowercase();
+    let Some((qualifier, object)) = normalized.split_once('.') else {
+        return false;
+    };
+    matches!(object, "sqlite_master" | "sqlite_schema") && catalog.is_attached_schema(qualifier)
+}
+
+/// Resolve a (possibly schema-qualified) table reference against the
+/// `sqlite_master`/`sqlite_schema` virtual table, returning the catalog
+/// schema whose objects the query should be built from.
+///
+/// Handles three shapes:
+///  - bare `sqlite_master` / `sqlite_schema` -> the `main` schema.
+///  - `main.sqlite_master` / `main.sqlite_schema` -> the `main` schema (same as the bare form — see
+///    [`is_sqlite_schema_table`]'s doc).
+///  - `<alias>.sqlite_master` / `<alias>.sqlite_schema`, where `<alias>` is currently registered as
+///    an attached database -> that attachment's own schema, so the query lists the attached
+///    database's own catalog (tables/indexes/views/triggers), not `main`'s (#6436).
+///
+/// Returns `None` for anything else, including `<alias>.sqlite_master` where
+/// `<alias>` is not (or no longer, e.g. after `DETACH`) an attached database —
+/// callers fall through to ordinary table resolution, which reports "no such
+/// table", matching SQLite's behavior for a stale/unknown alias.
+pub fn resolve_sqlite_schema_query_scope(
+    catalog: &vibesql_catalog::Catalog,
+    table_name: &str,
+) -> Option<String> {
+    let normalized = table_name.to_lowercase();
+    if matches!(normalized.as_str(), "sqlite_master" | "sqlite_schema") {
+        return Some(vibesql_catalog::DEFAULT_SCHEMA.to_string());
+    }
+    let (qualifier, object) = normalized.split_once('.')?;
+    if !matches!(object, "sqlite_master" | "sqlite_schema") {
+        return None;
+    }
+    if qualifier == vibesql_catalog::DEFAULT_SCHEMA {
+        return Some(vibesql_catalog::DEFAULT_SCHEMA.to_string());
+    }
+    if catalog.is_attached_schema(qualifier) {
+        return Some(qualifier.to_string());
+    }
+    None
+}
+
 /// Check whether an object name is reserved for internal use.
 ///
 /// SQLite reserves the `sqlite_` prefix for its own schema objects
@@ -163,6 +228,23 @@ fn is_sqlite_autoindex(name: &str) -> bool {
         && name[.."sqlite_autoindex_".len()].eq_ignore_ascii_case("sqlite_autoindex_")
 }
 
+/// Whether a view's/trigger's optional `schema` tag places it in
+/// `schema_name`'s sqlite_master listing.
+///
+/// `None` (the common case: no explicit schema qualifier at CREATE time)
+/// belongs to `main`. An explicit tag (e.g. `Some("main")` from `CREATE
+/// TRIGGER main.tr ...`, or a hypothetical attached-alias tag) is matched
+/// against `schema_name` case-insensitively. Callers must exclude temp-tagged
+/// objects separately (`is_temp()`) before calling this — temp objects never
+/// belong to any `sqlite_master` listing, they surface only via
+/// `sqlite_temp_master`.
+fn schema_tag_belongs_to(tag: Option<&str>, schema_name: &str) -> bool {
+    match tag {
+        None => schema_name.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA),
+        Some(s) => s.eq_ignore_ascii_case(schema_name),
+    }
+}
+
 /// Execute a `sqlite_master` / `sqlite_schema` query.
 ///
 /// Lists **main-schema** objects only. Temp-schema objects (temp tables and
@@ -172,6 +254,24 @@ fn is_sqlite_autoindex(name: &str) -> bool {
 pub fn execute_sqlite_schema_query(
     catalog: &vibesql_catalog::Catalog,
 ) -> Result<SelectResult, ExecutorError> {
+    execute_sqlite_schema_query_for_schema(catalog, vibesql_catalog::DEFAULT_SCHEMA)
+}
+
+/// Execute a `sqlite_master` / `sqlite_schema`-shaped query scoped to a single
+/// catalog schema.
+///
+/// `schema_name` is either `main` (the ordinary `sqlite_master`/`sqlite_schema`
+/// table) or an attached database's alias, for `<alias>.sqlite_master` /
+/// `<alias>.sqlite_schema` (#6436) — the query lists that attachment's own
+/// tables/indexes/views/triggers, never `main`'s. Temp-schema objects are
+/// never included here regardless of `schema_name`; they are reported only by
+/// `sqlite_temp_master` (see [`execute_sqlite_temp_schema_query`]), matching
+/// SQLite 3.51.0's `<alias>.sqlite_temp_master` having no meaning for an
+/// attached database (verified: `no such table`, not empty/main's rows).
+pub fn execute_sqlite_schema_query_for_schema(
+    catalog: &vibesql_catalog::Catalog,
+    schema_name: &str,
+) -> Result<SelectResult, ExecutorError> {
     let schema = get_sqlite_schema_table_schema();
     let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
     // Collect each row with the creation ordinal of the object it describes, so
@@ -179,23 +279,36 @@ pub fn execute_sqlite_schema_query(
     // in object-creation order (a table's indexes appear right after the table
     // when created next — see pragma.test 23.1). See `SchemaRowCollector`.
     let mut collector = SchemaRowCollector::new(catalog);
-    let main = vibesql_catalog::DEFAULT_SCHEMA;
+    let is_main = schema_name.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA);
 
-    // Add tables. `list_tables()` returns the current (main) schema only, so
-    // temp tables are already excluded here.
-    for table_name in catalog.list_tables() {
-        if let Some(table) = catalog.get_table(&table_name) {
+    // Add tables. `list_tables()` returns the current (main) schema only
+    // (temp tables are already excluded); `list_tables_in_schema` is used for
+    // an attached alias so the query draws from that attachment's own tables,
+    // not main's.
+    let table_names =
+        if is_main { catalog.list_tables() } else { catalog.list_tables_in_schema(schema_name) };
+    for table_name in table_names {
+        // Look up via the schema-qualified name for an attached alias so the
+        // attachment's own copy is read even if a same-named main table
+        // exists (must not cross-contaminate, #6436).
+        let lookup_name =
+            if is_main { table_name.clone() } else { format!("{schema_name}.{table_name}") };
+        if let Some(table) = catalog.get_table(&lookup_name) {
             let sql = generate_create_table_sql(table);
             // SQLite echoes the *original* declared case in sqlite_master, even
             // though lookups are case-folded (issue #5553). `table.name` retains
             // the original spelling; `table_name` is the lowercase catalog key.
-            collector.push(main, &table.name, schema_row("table", &table.name, &table.name, sql));
+            collector.push(
+                schema_name,
+                &table.name,
+                schema_row("table", &table.name, &table.name, sql),
+            );
         }
     }
 
-    // Add indexes owned by the main schema. Temp-table indexes are tagged with
+    // Add indexes owned by this schema. Temp-table indexes are tagged with
     // their temp schema (#5513) and surface only via sqlite_temp_master.
-    for index in catalog.get_schema_indexes(vibesql_catalog::DEFAULT_SCHEMA) {
+    for index in catalog.get_schema_indexes(schema_name) {
         if is_without_rowid_pk_autoindex(catalog, index) {
             continue;
         }
@@ -208,32 +321,42 @@ pub fn execute_sqlite_schema_query(
         collector.push(&index.schema, &index.name, row);
     }
 
-    // Add views. Temp views are tagged with the `temp` schema (#5541) and
-    // surface only via sqlite_temp_master, so skip them here.
-    for view_name in catalog.list_views() {
-        if let Some(view) = catalog.get_view(&view_name) {
-            if view.is_temp() {
-                continue;
-            }
-            let sql = generate_create_view_sql(view);
-            // tbl_name is same as name for views
-            collector.push(main, &view.name, schema_row("view", &view.name, &view.name, sql));
+    // Add views tagged to this schema. Temp views are tagged with the `temp`
+    // schema (#5541) and surface only via sqlite_temp_master, so skip them
+    // here; the main schema is the default (`schema == None`). Iterate view
+    // definitions directly rather than via `list_views()` + `get_view()`:
+    // views are keyed per schema (#6490), so a name-only `get_view` resolves
+    // temp-first-then-main-then-attached and would drop (or duplicate) a
+    // `main` view that shares a name with an `aux`/`temp` view (view analogue
+    // of the trigger fix in issue #6296).
+    for view in catalog.iter_views() {
+        if view.is_temp() {
+            continue;
         }
+        if !schema_tag_belongs_to(view.schema.as_deref(), schema_name) {
+            continue;
+        }
+        let sql = generate_create_view_sql(view);
+        // tbl_name is same as name for views
+        collector.push(schema_name, &view.name, schema_row("view", &view.name, &view.name, sql));
     }
 
-    // Add triggers. Temp triggers are tagged with the `temp` schema (#5532)
-    // and surface only via sqlite_temp_master, so skip them here. Iterate trigger
-    // definitions directly rather than via `list_triggers()` + `get_trigger()`:
-    // triggers are keyed per schema, so a name-only `get_trigger` resolves
-    // temp-first and would drop a `main` trigger that shares a name with a `temp`
-    // trigger (issue #6296).
+    // Add triggers tagged to this schema. Temp triggers are tagged with the
+    // `temp` schema (#5532) and surface only via sqlite_temp_master, so skip
+    // them here. Iterate trigger definitions directly rather than via
+    // `list_triggers()` + `get_trigger()`: triggers are keyed per schema, so a
+    // name-only `get_trigger` resolves temp-first and would drop a `main`
+    // trigger that shares a name with a `temp` trigger (issue #6296).
     for trigger in catalog.iter_triggers() {
         if trigger.is_temp() {
             continue;
         }
+        if !schema_tag_belongs_to(trigger.schema.as_deref(), schema_name) {
+            continue;
+        }
         let sql = generate_create_trigger_sql(trigger);
         collector.push(
-            main,
+            schema_name,
             &trigger.name,
             schema_row("trigger", &trigger.name, &trigger.table_name, sql),
         );
@@ -311,16 +434,15 @@ fn schema_where_is_truthy(value: &SqlValue) -> bool {
 /// VibeSQL implements the minimal subset the conformance suite exercises
 /// (alterdropcol 8.x, issue #5796):
 ///
-/// - Only assignments to the `sql` column are supported, and the assigned
-///   value must evaluate to a string.
-/// - Only `table` rows are rewritten: the new text replaces the table's
-///   verbatim `sql_source`, which is what `SELECT sql FROM sqlite_schema`
-///   echoes and what ALTER TABLE's textual schema rewrites operate on. The
-///   structured (parsed) schema is NOT re-derived from the new text — like
-///   SQLite, writable_schema trades integrity checking for direct access, so
-///   callers can make the stored text diverge from the live schema.
-/// - Matching `index`/`view`/`trigger` rows are left untouched (their `sql`
-///   is reconstructed from catalog metadata, not stored verbatim).
+/// - Only assignments to the `sql` column are supported, and the assigned value must evaluate to a
+///   string.
+/// - Only `table` rows are rewritten: the new text replaces the table's verbatim `sql_source`,
+///   which is what `SELECT sql FROM sqlite_schema` echoes and what ALTER TABLE's textual schema
+///   rewrites operate on. The structured (parsed) schema is NOT re-derived from the new text — like
+///   SQLite, writable_schema trades integrity checking for direct access, so callers can make the
+///   stored text diverge from the live schema.
+/// - Matching `index`/`view`/`trigger` rows are left untouched (their `sql` is reconstructed from
+///   catalog metadata, not stored verbatim).
 ///
 /// The row count returned is the number of schema rows matched by the WHERE
 /// clause, mirroring SQLite's changes() semantics.
@@ -459,17 +581,18 @@ pub fn execute_sqlite_temp_schema_query(
         }
     }
 
-    // Add temp views. Views are stored flat in the catalog (not partitioned by
-    // schema), so filter on the per-view `temp` tag set at CREATE TEMP VIEW
-    // time (#5541).
-    for view_name in catalog.list_views() {
-        if let Some(view) = catalog.get_view(&view_name) {
-            if !view.is_temp() {
-                continue;
-            }
-            let sql = generate_create_view_sql(view);
-            rows.push(schema_row("view", &view.name, &view.name, sql));
+    // Add temp views. Filter on the per-view `temp` tag set at CREATE TEMP
+    // VIEW time (#5541). Iterate view definitions directly rather than via
+    // `list_views()` + `get_view()`: views are keyed per schema (#6490), and a
+    // name-only `get_view` resolves temp-first, so a `temp` view sharing a
+    // name with a `main`/attached-schema view would be dropped or duplicated
+    // (view analogue of the trigger fix in issue #6296).
+    for view in catalog.iter_views() {
+        if !view.is_temp() {
+            continue;
         }
+        let sql = generate_create_view_sql(view);
+        rows.push(schema_row("view", &view.name, &view.name, sql));
     }
 
     // Add temp triggers. Filter on the `temp` schema tag from CREATE TEMP
@@ -798,6 +921,157 @@ mod tests {
         assert!(!is_sqlite_schema_table("sqlite_temp_master"));
         // temp-qualified master belongs to the temp schema, not main.
         assert!(!is_sqlite_schema_table("temp.sqlite_master"));
+    }
+
+    /// #6451: `<alias>.sqlite_master`/`<alias>.sqlite_schema` for a
+    /// currently-attached database is recognized as the schema table, just
+    /// like the bare/`main.`-qualified forms; a stale/unattached alias, or an
+    /// unrelated qualifier like `temp`, is not.
+    #[test]
+    fn test_is_sqlite_schema_table_ref() {
+        let mut catalog = Catalog::new();
+        catalog.attach_database("aux", ":memory:").unwrap();
+
+        // Bare/main-qualified forms behave exactly like `is_sqlite_schema_table`.
+        assert!(is_sqlite_schema_table_ref(&catalog, "sqlite_master"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "SQLITE_SCHEMA"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "main.sqlite_master"));
+
+        // A currently-attached alias's schema table is recognized too.
+        assert!(is_sqlite_schema_table_ref(&catalog, "aux.sqlite_master"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "AUX.SQLITE_SCHEMA"));
+
+        // An alias that was never attached must not be treated as a hit.
+        assert!(!is_sqlite_schema_table_ref(&catalog, "nosuchdb.sqlite_master"));
+        // Unrelated qualifiers/tables are unaffected.
+        assert!(!is_sqlite_schema_table_ref(&catalog, "temp.sqlite_master"));
+        assert!(!is_sqlite_schema_table_ref(&catalog, "users"));
+        assert!(!is_sqlite_schema_table_ref(&catalog, "aux.users"));
+
+        // After DETACH, the alias no longer resolves (clean "not found", not a
+        // stale hit).
+        catalog.detach_database("aux").unwrap();
+        assert!(!is_sqlite_schema_table_ref(&catalog, "aux.sqlite_master"));
+    }
+
+    /// #6436: `<alias>.sqlite_master`/`<alias>.sqlite_schema` for a
+    /// currently-attached database resolves to that alias's own schema; an
+    /// unqualified/`main.`-qualified reference resolves to `main`; anything
+    /// else (unattached alias, `sqlite_temp_master`, unrelated table) resolves
+    /// to `None` so callers fall through to ordinary "table not found".
+    #[test]
+    fn test_resolve_sqlite_schema_query_scope() {
+        let mut catalog = Catalog::new();
+        catalog.attach_database("aux", ":memory:").unwrap();
+
+        assert_eq!(
+            resolve_sqlite_schema_query_scope(&catalog, "sqlite_master"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            resolve_sqlite_schema_query_scope(&catalog, "SQLITE_SCHEMA"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            resolve_sqlite_schema_query_scope(&catalog, "main.sqlite_master"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            resolve_sqlite_schema_query_scope(&catalog, "aux.sqlite_master"),
+            Some("aux".to_string())
+        );
+        assert_eq!(
+            resolve_sqlite_schema_query_scope(&catalog, "AUX.SQLITE_SCHEMA"),
+            Some("aux".to_string())
+        );
+        // An alias that was never attached must not be treated as a schema hit.
+        assert_eq!(resolve_sqlite_schema_query_scope(&catalog, "nosuchdb.sqlite_master"), None);
+        // sqlite_temp_master has no attached-database counterpart (verified
+        // against sqlite3 3.51.0: `no such table: aux.sqlite_temp_master`).
+        assert_eq!(resolve_sqlite_schema_query_scope(&catalog, "aux.sqlite_temp_master"), None);
+        assert_eq!(resolve_sqlite_schema_query_scope(&catalog, "users"), None);
+
+        // After DETACH, the alias no longer resolves (clean "not found", not a
+        // stale read of the detached schema).
+        catalog.detach_database("aux").unwrap();
+        assert_eq!(resolve_sqlite_schema_query_scope(&catalog, "aux.sqlite_master"), None);
+    }
+
+    /// #6436: `SELECT ... FROM <alias>.sqlite_master` against an attached
+    /// database lists that attachment's own tables — not `main`'s, and
+    /// without cross-contamination when a same-named table exists in both.
+    #[test]
+    fn test_execute_sqlite_schema_query_for_attached_schema() {
+        let mut catalog = Catalog::new();
+
+        // main.t (should NOT appear in the `aux` listing).
+        let main_t = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("a".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table(main_t).unwrap();
+
+        catalog.attach_database("aux", ":memory:").unwrap();
+
+        // aux.t — same bare name as main.t, must not cross-contaminate.
+        let aux_t = TableSchema::new(
+            "t".to_string(),
+            vec![ColumnSchema::new("x".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table_in_schema("aux", aux_t).unwrap();
+        let aux_t2 = TableSchema::new(
+            "t2".to_string(),
+            vec![ColumnSchema::new("y".to_string(), DataType::Integer, true)],
+        );
+        catalog.create_table_in_schema("aux", aux_t2).unwrap();
+
+        let aux_result = execute_sqlite_schema_query_for_schema(&catalog, "aux").unwrap();
+        let aux_names: Vec<String> = aux_result
+            .rows
+            .iter()
+            .map(|r| match &r.values[1] {
+                SqlValue::Varchar(s) => s.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(aux_names, vec!["t".to_string(), "t2".to_string()]);
+
+        // main's own listing is unaffected and still lists only main.t.
+        let main_result = execute_sqlite_schema_query(&catalog).unwrap();
+        let main_names: Vec<String> = main_result
+            .rows
+            .iter()
+            .map(|r| match &r.values[1] {
+                SqlValue::Varchar(s) => s.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(main_names, vec!["t".to_string()]);
+
+        // The `aux.t` row's `sql` text is aux's own (columns x), not main's
+        // t (columns a) — confirms the by-alias lookup reads the right copy.
+        let aux_t_row = aux_result
+            .rows
+            .iter()
+            .find(|r| matches!(&r.values[1], SqlValue::Varchar(s) if s.as_str() == "t"))
+            .unwrap();
+        if let SqlValue::Varchar(sql) = &aux_t_row.values[4] {
+            assert!(sql.contains("x INTEGER"), "expected aux.t's own columns, got: {sql}");
+            assert!(!sql.contains("a INTEGER"), "must not read main.t's columns, got: {sql}");
+        } else {
+            panic!("Expected VARCHAR for sql column");
+        }
+    }
+
+    /// #6436: an attached database with no tables yields an empty result, not
+    /// an error.
+    #[test]
+    fn test_execute_sqlite_schema_query_for_attached_schema_empty() {
+        let mut catalog = Catalog::new();
+        catalog.attach_database("aux", ":memory:").unwrap();
+        let result = execute_sqlite_schema_query_for_schema(&catalog, "aux").unwrap();
+        assert!(result.rows.is_empty());
+        assert_eq!(result.columns, vec!["type", "name", "tbl_name", "rootpage", "sql"]);
     }
 
     #[test]

@@ -36,18 +36,21 @@
 //! loop handles requests sequentially, so the per-pair order is preserved —
 //! same guarantee a TCP connection gives.
 
-use tokio::sync::{mpsc, oneshot};
-
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
-use openraft::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
-use openraft::network::RPCOption;
-use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
 };
-use openraft::{BasicNode, Raft, RaftNetwork, RaftNetworkFactory};
+
+use openraft::{
+    error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable},
+    network::RPCOption,
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, VoteRequest, VoteResponse,
+    },
+    BasicNode, Raft, RaftNetwork, RaftNetworkFactory,
+};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::openraft_backend::TypeConfig;
 

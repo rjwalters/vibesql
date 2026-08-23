@@ -100,12 +100,11 @@ enum Quote {
 /// - Multi-line statements
 /// - Statement termination by semicolon
 /// - String literals (preserves content within quotes)
-/// - Quoted identifiers (`"…"` and `[…]`); a `'` inside one is literal text, not
-///   a string delimiter, and vice versa (tracked via [`Quote`], issue #5634)
-/// - `CREATE TRIGGER ... BEGIN ... END;` blocks where embedded semicolons inside
-///   the trigger body must NOT terminate the outer statement. We track BEGIN/END
-///   nesting depth (matched as whole-word identifiers, case-insensitively) and
-///   only honor `;` as a terminator at depth 0.
+/// - Quoted identifiers (`"…"` and `[…]`); a `'` inside one is literal text, not a string
+///   delimiter, and vice versa (tracked via [`Quote`], issue #5634)
+/// - `CREATE TRIGGER ... BEGIN ... END;` blocks where embedded semicolons inside the trigger body
+///   must NOT terminate the outer statement. We track BEGIN/END nesting depth (matched as
+///   whole-word identifiers, case-insensitively) and only honor `;` as a terminator at depth 0.
 ///
 /// # Returns
 /// A vector of SQL statement strings, trimmed and ready to parse
@@ -115,11 +114,10 @@ pub fn parse_sql_statements(content: &str) -> Result<Vec<String>, StorageError> 
     // The kind of quote we are currently inside, if any. SQLite has three
     // distinct quoting contexts that nest independently — a delimiter for one
     // context is ordinary text inside another:
-    //   - `Quote::Single` (`'…'`): a string literal. Only `''` escapes; the
-    //     legacy `\'` escape is also honored here (see the `\\` arm below).
+    //   - `Quote::Single` (`'…'`): a string literal. Only `''` escapes; the legacy `\'` escape is
+    //     also honored here (see the `\\` arm below).
     //   - `Quote::Double` (`"…"`): a quoted identifier. Only `""` escapes.
-    //   - `Quote::Bracket` (`[…]`): a quoted identifier. Has no escape; the
-    //     first `]` closes it.
+    //   - `Quote::Bracket` (`[…]`): a quoted identifier. Has no escape; the first `]` closes it.
     // Tracking these separately is what lets a `'` inside a `"…"`/`[…]`
     // identifier (e.g. a table renamed by `ALTER TABLE … RENAME TO`, which
     // sqlite3 emits double-quoted) be treated as literal text rather than as a
@@ -571,6 +569,7 @@ SELECT 1;"#;
     #[test]
     fn test_truncation_detection() {
         use std::io::Write;
+
         use tempfile::NamedTempFile;
 
         // Test 1: Complete dump file should succeed

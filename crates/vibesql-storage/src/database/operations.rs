@@ -46,6 +46,40 @@ fn make_spatial_index_key(schema: &str, index_name: &str) -> String {
     }
 }
 
+/// Find the `tables` key for `normalized_name` when unqualified resolution is
+/// restricted to a single schema (trigger-body execution, #6477).
+///
+/// The map is keyed by `"<schema>.<table>"`, but the restricting schema name
+/// can arrive in any case — a trigger's schema qualifier is stored verbatim as
+/// the user wrote it (`CREATE TRIGGER MAIN.tr` / `AUX.tr`) because schema
+/// comparisons are case-insensitive everywhere else. So an exact `HashMap`
+/// hit is tried first and, failing that, the schema component is matched
+/// case-insensitively — mirroring the catalog layer's
+/// `get_schema_case_insensitive` and the case-insensitive temp/attached
+/// fallbacks in the callers. The table component is compared exactly: it has
+/// already been normalized by the caller according to the catalog's
+/// case-sensitivity setting.
+pub(crate) fn find_restricted_table_key(
+    tables: &HashMap<String, Table>,
+    restrict_schema: &str,
+    normalized_name: &str,
+) -> Option<String> {
+    let restricted_qualified = format!("{}.{}", restrict_schema, normalized_name);
+    if tables.contains_key(&restricted_qualified) {
+        return Some(restricted_qualified);
+    }
+
+    tables
+        .keys()
+        .find(|key| match key.split_once('.') {
+            Some((schema_part, table_part)) => {
+                table_part == normalized_name && schema_part.eq_ignore_ascii_case(restrict_schema)
+            }
+            None => false,
+        })
+        .cloned()
+}
+
 /// Manages table and index operations
 #[derive(Debug, Clone)]
 pub struct Operations {
@@ -148,7 +182,24 @@ impl Operations {
 
         // Try with schema prefix if not already qualified
         if !table_name.contains('.') {
-            // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main tables)
+            // If unqualified resolution is restricted to a single schema
+            // (trigger-body execution, #6477), look up ONLY there — mirrors
+            // `Catalog::get_table`'s restriction so a trigger's DML physically
+            // writes to the same table its body's name resolution found,
+            // instead of falling back to `main`/temp/other attachments below.
+            if let Some(restrict_schema) =
+                catalog.unqualified_resolution_restricted_to().map(|s| s.to_string())
+            {
+                let restricted_key =
+                    find_restricted_table_key(tables, &restrict_schema, &normalized_name)
+                        .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()))?;
+                return tables
+                    .get_mut(&restricted_key)
+                    .ok_or_else(|| StorageError::TableNotFound(table_name.to_string()));
+            }
+
+            // Try 3: Session's temp schema first (SQLite semantics - temp tables shadow main
+            // tables)
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if tables.contains_key(&temp_qualified) {
                 return Ok(tables.get_mut(&temp_qualified).unwrap());
@@ -319,11 +370,8 @@ impl Operations {
         // the bulk append, so without in-batch tracking two colliding rows
         // in one batch would both pass and both be written.
         if let Some(schema) = table_schema {
-            self.index_manager.check_unique_constraints_for_insert_batch(
-                table_name,
-                schema,
-                &rows,
-            )?;
+            self.index_manager
+                .check_unique_constraints_for_insert_batch(table_name, schema, &rows)?;
         }
 
         // Record start index for return value
@@ -497,6 +545,22 @@ impl Operations {
     /// table rows make it into the initial index body. The executor crate
     /// is responsible for evaluating the predicate to produce that set;
     /// storage never evaluates expressions.
+    ///
+    /// `table_lookup_name` is used ONLY to resolve the physical [`Table`] and
+    /// its schema to build the index body from — it may be schema-qualified
+    /// (e.g. `aux.t`) when the caller already knows the exact owning schema
+    /// (CREATE INDEX's validator always does). `table_name` is what gets
+    /// persisted as the index metadata's table identity and is deliberately
+    /// left exactly as the caller passed it (historically bare for a
+    /// same-schema index): `IndexMetadata::matches_table` relies on that bare
+    /// form to match a same-named bare probe during DML maintenance (see its
+    /// doc comment), so silently promoting it to `table_lookup_name` here
+    /// would desync every subsequent INSERT/UPDATE/DELETE from this index.
+    /// Passing `table_lookup_name` distinct from `table_name` is what fixes
+    /// issue #6487 — a bare `table_name` resolved via this function's own
+    /// temp-then-current-then-attached search order could otherwise land on
+    /// an unrelated same-named table instead of the one the caller (and the
+    /// catalog) already resolved the index against.
     #[allow(clippy::too_many_arguments)]
     pub fn create_index(
         &mut self,
@@ -504,6 +568,7 @@ impl Operations {
         tables: &HashMap<String, Table>,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         unique: bool,
         columns: Vec<IndexColumn>,
         where_clause: Option<Box<vibesql_ast::Expression>>,
@@ -511,9 +576,9 @@ impl Operations {
     ) -> Result<(), StorageError> {
         // Normalize table name for lookup (matches catalog normalization)
         let normalized_name = if catalog.is_case_sensitive_identifiers() {
-            table_name.clone()
+            table_lookup_name.to_string()
         } else {
-            table_name.to_lowercase()
+            table_lookup_name.to_lowercase()
         };
 
         // Try to find the table with normalized name or qualified name.
@@ -526,7 +591,7 @@ impl Operations {
         // so CREATE INDEX on a temp table failed with `TableNotFound`. See #5505.
         let table = if let Some(tbl) = tables.get(&normalized_name) {
             tbl
-        } else if !table_name.contains('.') {
+        } else if !table_lookup_name.contains('.') {
             // Temp schema first (temp tables shadow main).
             let temp_qualified = format!("{}.{}", catalog.temp_schema_name(), normalized_name);
             if let Some(tbl) = tables.get(&temp_qualified) {
@@ -545,16 +610,16 @@ impl Operations {
                         .find_map(|attached| {
                             tables.get(&format!("{}.{}", attached.name, normalized_name))
                         })
-                        .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?
+                        .ok_or_else(|| StorageError::TableNotFound(table_lookup_name.to_string()))?
                 }
             }
         } else {
-            return Err(StorageError::TableNotFound(table_name.clone()));
+            return Err(StorageError::TableNotFound(table_lookup_name.to_string()));
         };
 
         let table_schema = catalog
-            .get_table(&table_name)
-            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
+            .get_table(table_lookup_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_lookup_name.to_string()))?;
 
         // Validate prefix lengths against column types and widths
         Self::validate_prefix_lengths(table_schema, &columns)?;
@@ -565,7 +630,7 @@ impl Operations {
         // the schema the catalog tags the index with in #5513. Falls back to the
         // default (main) schema when the table can't be resolved.
         let index_schema = catalog
-            .resolve_table_schema_name(&table_name)
+            .resolve_table_schema_name(table_lookup_name)
             .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
 
         // Pass table rows directly by reference - avoid cloning all rows
@@ -588,23 +653,30 @@ impl Operations {
     /// This method is used when the caller has already evaluated the expressions
     /// and computed the key values for each row. This is necessary for expression
     /// indexes where the key values are derived from evaluating expressions on rows.
+    ///
+    /// `table_lookup_name` resolves the table schema used for key-type
+    /// inference and is used only for that lookup; `table_name` is what gets
+    /// persisted as the index metadata's table identity (see the identical
+    /// split, and why it matters for DML-maintenance matching, on
+    /// [`Self::create_index`]).
     pub fn create_index_with_keys(
         &mut self,
         catalog: &vibesql_catalog::Catalog,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         unique: bool,
         columns: Vec<vibesql_ast::IndexColumn>,
         keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
     ) -> Result<(), StorageError> {
         // Get the table schema for key type inference
         let table_schema = catalog
-            .get_table(&table_name)
-            .ok_or_else(|| StorageError::TableNotFound(table_name.clone()))?;
+            .get_table(table_lookup_name)
+            .ok_or_else(|| StorageError::TableNotFound(table_lookup_name.to_string()))?;
 
         // Resolve the owning schema for the storage-side index key (#5540).
         let index_schema = catalog
-            .resolve_table_schema_name(&table_name)
+            .resolve_table_schema_name(table_lookup_name)
             .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
 
         self.index_manager.create_index_with_keys(
@@ -1795,11 +1867,8 @@ mod spatial_schema_tests {
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .expect("create main.ix");
         // Same bare name on a temp-schema table must NOT collide with main.ix.
-        ops.create_spatial_index(
-            meta("ix", "t", "temp_42"),
-            SpatialIndex::new("g".to_string()),
-        )
-        .expect("create temp_42.ix should not collide with main.ix");
+        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
+            .expect("create temp_42.ix should not collide with main.ix");
 
         // Both keys are present: bare `ix` (main) and `temp_42.ix` (temp).
         let keys = ops.list_spatial_indexes();
@@ -1818,11 +1887,8 @@ mod spatial_schema_tests {
         let mut ops = Operations::new();
         ops.create_spatial_index(meta("ix", "t", "main"), SpatialIndex::new("g".to_string()))
             .unwrap();
-        ops.create_spatial_index(
-            meta("ix", "t", "temp_42"),
-            SpatialIndex::new("g".to_string()),
-        )
-        .unwrap();
+        ops.create_spatial_index(meta("ix", "t", "temp_42"), SpatialIndex::new("g".to_string()))
+            .unwrap();
 
         // Bare name resolves to the temp index (temp shadows main).
         assert_eq!(ops.get_spatial_index_metadata("ix").unwrap().schema, "temp_42");

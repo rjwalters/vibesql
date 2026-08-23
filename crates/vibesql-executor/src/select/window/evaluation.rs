@@ -3,14 +3,15 @@
 //! When the `parallel` feature is enabled and there are multiple partitions,
 //! partition sorting and evaluation is parallelized using rayon.
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use vibesql_ast::{Expression, WindowFunctionSpec};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 use super::types::WindowFunctionInfo;
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
 use crate::{
     errors::ExecutorError,
     evaluator::{
@@ -24,9 +25,6 @@ use crate::{
         CombinedExpressionEvaluator,
     },
 };
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
 
 /// Coerce a value to a positive integer using SQLite's numeric-affinity rules
 /// for `nth_value(expr, N)`.

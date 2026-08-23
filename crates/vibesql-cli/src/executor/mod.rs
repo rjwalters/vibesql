@@ -7,6 +7,7 @@ use vibesql_types::SqlValue;
 // Submodules
 mod copy_handler;
 pub mod display;
+mod schema_qualify;
 pub mod validation;
 pub mod wal;
 
@@ -73,15 +74,31 @@ pub struct SqlExecutor {
     /// Bucket-A pager internal — it is a genuine SQL-visible value, just
     /// missing durable storage).
     default_cache_size_cookie: i64,
+    /// PRAGMA page_size session setting (SQLite-compatible; default 4096 —
+    /// `SQLITE_DEFAULT_PAGE_SIZE`). VibeSQL's storage is not paged, so nothing
+    /// is actually resized, but the value is stored and echoed exactly like
+    /// SQLite: a set is accepted only for a power of two in [512, 65536] and
+    /// silently ignored otherwise (`sqlite3BtreeSetPageSize`'s guard —
+    /// pragma4.test 1.18 vs 1.19). It is load-bearing beyond the echo:
+    /// `cache_spill` resolves its negative "KiB budget" arguments to page
+    /// counts by dividing by this value (pragma2-5.3).
+    ///
+    /// Known gap vs. real SQLite: SQLite refuses the change once the database
+    /// file already holds pages; VibeSQL has no page store to consult, so a
+    /// valid size is always accepted.
+    page_size: i64,
     /// PRAGMA cache_spill session setting (SQLite-compatible; default ON with
-    /// no explicit size, meaning the spill threshold mirrors `cache_size`).
-    /// VibeSQL has no pager to actually spill dirty pages, but it echoes the
-    /// get/set values like SQLite (pragma2.test pragma2-4.1/4.2):
-    /// `(enabled, explicit_size)` — when disabled, reads as 0 regardless of
-    /// `explicit_size`; when enabled with no explicit size, reads as the
-    /// current `cache_size`.
+    /// a spill threshold of 1 page, matching `sqlite3PcacheOpen`'s
+    /// `szSpill = 1`). VibeSQL has no pager to actually spill dirty pages, but
+    /// it reproduces SQLite's `sqlite3PcacheSetSpillsize` arithmetic so get/set
+    /// round-trips match (pragma2.test pragma2-4.*/5.*): when disabled it reads
+    /// as 0; otherwise it reads as
+    /// `max(numberOfCachePages(cache_size), cache_spill_size)`.
     cache_spill_enabled: bool,
-    cache_spill_explicit_size: Option<i64>,
+    /// The spill threshold in *pages* (SQLite's `PCache.szSpill`). A negative
+    /// `PRAGMA cache_spill=-N` argument is a KiB budget and is converted to a
+    /// page count against `page_size` at set time, exactly like SQLite.
+    cache_spill_size: i64,
     /// PRAGMA user_version session setting (SQLite-compatible, default 0).
     /// SQLite persists this as a raw signed 32-bit cookie in the database
     /// file header, available for application use; VibeSQL has no such
@@ -391,6 +408,56 @@ fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
     }
 }
 
+/// Translate a catalog-level [`vibesql_catalog::IndexType`] (the type
+/// actually recorded for an index) into the AST-level
+/// [`vibesql_ast::IndexType`] a synthetic `CreateIndexStmt` needs (#6407).
+///
+/// Used only when re-homing an attached schema's indexes on `ATTACH` of an
+/// existing file (`load_attached_schema_from_file`): the loaded standalone
+/// database's catalog metadata is the only surviving record of the original
+/// index's type once its physical body has been left behind in the
+/// throwaway `Database`. `vibesql_catalog::IndexType::Hash` denotes an
+/// auto-generated PRIMARY KEY/UNIQUE-constraint index, which is filtered out
+/// by the `pk_`/`sqlite_autoindex_` name-prefix skip before this is ever
+/// called; it is mapped to a plain (non-unique) `BTree` here purely as a
+/// defensive fallback that can never actually be exercised on that path.
+fn ast_index_type_from_catalog(
+    index_type: &vibesql_catalog::IndexType,
+    unique: bool,
+) -> vibesql_ast::IndexType {
+    fn convert_metric(
+        m: vibesql_catalog::VectorDistanceMetric,
+    ) -> vibesql_ast::VectorDistanceMetric {
+        match m {
+            vibesql_catalog::VectorDistanceMetric::L2 => vibesql_ast::VectorDistanceMetric::L2,
+            vibesql_catalog::VectorDistanceMetric::Cosine => {
+                vibesql_ast::VectorDistanceMetric::Cosine
+            }
+            vibesql_catalog::VectorDistanceMetric::InnerProduct => {
+                vibesql_ast::VectorDistanceMetric::InnerProduct
+            }
+        }
+    }
+
+    match index_type {
+        vibesql_catalog::IndexType::BTree | vibesql_catalog::IndexType::Hash => {
+            vibesql_ast::IndexType::BTree { unique }
+        }
+        vibesql_catalog::IndexType::RTree => vibesql_ast::IndexType::Spatial,
+        vibesql_catalog::IndexType::Fulltext => vibesql_ast::IndexType::Fulltext,
+        vibesql_catalog::IndexType::IVFFlat { metric, lists } => {
+            vibesql_ast::IndexType::IVFFlat { metric: convert_metric(*metric), lists: *lists }
+        }
+        vibesql_catalog::IndexType::Hnsw { metric, m, ef_construction } => {
+            vibesql_ast::IndexType::Hnsw {
+                metric: convert_metric(*metric),
+                m: *m,
+                ef_construction: *ef_construction,
+            }
+        }
+    }
+}
+
 /// Options controlling how the executor opens a database file.
 ///
 /// Bundled into a struct so the `--recover-fallback` opt-in (issue #5807)
@@ -569,7 +636,8 @@ impl SqlExecutor {
                     cache_size: SQLITE_DEFAULT_CACHE_SIZE,
                     default_cache_size_cookie: 0,
                     cache_spill_enabled: true,
-                    cache_spill_explicit_size: None,
+                    cache_spill_size: SQLITE_DEFAULT_SPILL_PAGES,
+                    page_size: SQLITE_DEFAULT_PAGE_SIZE,
                     user_version: 0,
                     application_id: 0,
                     schema_version: 0,
@@ -628,7 +696,8 @@ impl SqlExecutor {
             cache_size: SQLITE_DEFAULT_CACHE_SIZE,
             default_cache_size_cookie: 0,
             cache_spill_enabled: true,
-            cache_spill_explicit_size: None,
+            cache_spill_size: SQLITE_DEFAULT_SPILL_PAGES,
+            page_size: SQLITE_DEFAULT_PAGE_SIZE,
             user_version: 0,
             application_id: 0,
             schema_version: 0,
@@ -671,7 +740,8 @@ impl SqlExecutor {
     pub fn execute(&mut self, sql: &str) -> anyhow::Result<QueryResult> {
         let start = Instant::now();
 
-        // Parse SQL using arena fallback for SELECT statements (preserves original case in source_text)
+        // Parse SQL using arena fallback for SELECT statements (preserves original case in
+        // source_text)
         let statement = parse_with_arena_fallback(sql).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // The CLI executes statements directly and has no parameter-binding
@@ -701,7 +771,8 @@ impl SqlExecutor {
                         // Use column names from the executor result
                         result.columns = select_result.columns;
                         // Convert rows to string representation using SQLite-compatible format
-                        // NULL values are represented as None to distinguish from the literal string "NULL"
+                        // NULL values are represented as None to distinguish from the literal
+                        // string "NULL"
                         for row in select_result.rows {
                             let row_strs: Vec<Option<String>> = row
                                 .values
@@ -987,7 +1058,8 @@ impl SqlExecutor {
                             // SQLite-compatible EXPLAIN QUERY PLAN format
                             let output = explain_result.to_sqlite_eqp();
                             // Use "detail" as column name (matches SQLite's actual column)
-                            // The "QUERY PLAN" header is now included in the data for TCL test compatibility
+                            // The "QUERY PLAN" header is now included in the data for TCL test
+                            // compatibility
                             result.columns = vec!["detail".to_string()];
                             // Split output into rows for better display
                             for line in output.lines() {
@@ -1218,16 +1290,14 @@ impl SqlExecutor {
             if attached.path == ":memory:" || attached.path.is_empty() {
                 continue;
             }
-            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(
-                |e| {
-                    anyhow::anyhow!(
-                        "Failed to save attached database '{}' to {}: {}",
-                        attached.name,
-                        attached.path,
-                        e
-                    )
-                },
-            )?;
+            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to save attached database '{}' to {}: {}",
+                    attached.name,
+                    attached.path,
+                    e
+                )
+            })?;
         }
         Ok(())
     }
@@ -2065,6 +2135,26 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "PAGE_SIZE" => {
+                    // SQLite-compatible PRAGMA page_size set (pragma2.test
+                    // pragma2-4.3/5.1, pragma4.test 1.18/1.19). Mirrors
+                    // `sqlite3BtreeSetPageSize`'s guard: only a power of two in
+                    // [512, SQLITE_MAX_PAGE_SIZE] is accepted, anything else is
+                    // silently ignored (no error). VibeSQL's storage is not
+                    // paged, so this only feeds the negative-KiB -> page-count
+                    // arithmetic of `cache_spill`.
+                    let requested = pragma_value_atoi(value);
+                    if is_valid_page_size(requested) {
+                        self.page_size = requested;
+                    }
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "CACHE_SIZE" => {
                     // SQLite-compatible PRAGMA cache_size set (pragma.test
                     // pragma-1.*). Session-only (SQLite's `pSchema->cache_size`
@@ -2102,19 +2192,24 @@ impl SqlExecutor {
                 }
                 "CACHE_SPILL" => {
                     // SQLite-compatible PRAGMA cache_spill set (pragma2.test
-                    // pragma2-4.1/4.2). VibeSQL has no pager to actually spill
-                    // dirty pages, but it echoes the enabled/size state like
-                    // SQLite: a numeric argument sets an explicit spill-size
-                    // threshold (and toggles enabled off only for `0`); a
-                    // keyword argument (ON/OFF/...) toggles enabled without
-                    // touching any previously-set explicit size.
-                    let text = pragma_value_text(value).trim();
-                    if let Ok(size) = text.parse::<i64>() {
-                        self.cache_spill_explicit_size = Some(size);
-                        self.cache_spill_enabled = size != 0;
-                    } else {
-                        self.cache_spill_enabled = pragma_value_to_bool(value);
+                    // pragma2-4.*/5.*). VibeSQL has no pager to actually spill
+                    // dirty pages, but it reproduces `pragma.c`'s exact
+                    // sequence: `sqlite3GetInt32` first (a nonzero integer sets
+                    // the spill threshold via `sqlite3PcacheSetSpillsize`, a
+                    // literal `0` leaves the threshold alone), then
+                    // `sqlite3GetBoolean(zRight, size != 0)` decides the
+                    // enabled flag — so a keyword argument (ON/OFF/YES/...)
+                    // toggles enabled without touching the threshold, and an
+                    // unrecognized keyword falls back to enabled.
+                    let text = pragma_value_text(value);
+                    let as_int = text.trim().parse::<i64>().ok();
+                    if let Some(size) = as_int {
+                        if size != 0 {
+                            self.cache_spill_size = spill_pages_from_arg(size, self.page_size);
+                        }
                     }
+                    self.cache_spill_enabled =
+                        pragma_value_to_bool_with_default(value, as_int.unwrap_or(1) != 0);
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -2492,6 +2587,18 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "PAGE_SIZE" => {
+                    // SQLite-compatible PRAGMA page_size read (pragma.test
+                    // pragma-3.2, pragma2.test pragma2-5.*). Default 4096
+                    // (SQLITE_DEFAULT_PAGE_SIZE).
+                    Ok(QueryResult {
+                        columns: vec!["page_size".to_string()],
+                        rows: vec![vec![Some(self.page_size.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "CACHE_SIZE" => {
                     // SQLite-compatible PRAGMA cache_size read (pragma.test
                     // pragma-1.*). Returns the raw signed session value;
@@ -2521,14 +2628,17 @@ impl SqlExecutor {
                 }
                 "CACHE_SPILL" => {
                     // SQLite-compatible PRAGMA cache_spill read (pragma2.test
-                    // pragma2-4.1/4.2). Disabled reads as 0 regardless of any
-                    // stored explicit size; enabled with no explicit size
-                    // mirrors the current `cache_size` (SQLite's spill
-                    // threshold defaults to the cache size until set).
+                    // pragma2-4.*/5.*). Disabled reads as 0; otherwise mirrors
+                    // `sqlite3PcacheSetSpillsize(pBt, 0)`'s return value, which
+                    // is `max(numberOfCachePages(cache_size), szSpill)` — so a
+                    // threshold below the cache size reads back as the cache
+                    // size (pragma2-4.5.3), and a negative `cache_size` is
+                    // resolved from its KiB budget to a page count first.
                     let value = if !self.cache_spill_enabled {
                         0
                     } else {
-                        self.cache_spill_explicit_size.unwrap_or(self.cache_size)
+                        number_of_cache_pages(self.cache_size, self.page_size)
+                            .max(self.cache_spill_size)
                     };
                     Ok(QueryResult {
                         columns: vec!["cache_spill".to_string()],
@@ -2605,12 +2715,10 @@ impl SqlExecutor {
             return Err(anyhow::anyhow!("cannot ATTACH database within transaction"));
         }
 
-        let existing_nonempty = stmt.filename != ":memory:"
-            && !stmt.filename.is_empty()
-            && {
-                let path = std::path::Path::new(&stmt.filename);
-                path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
-            };
+        let existing_nonempty = stmt.filename != ":memory:" && !stmt.filename.is_empty() && {
+            let path = std::path::Path::new(&stmt.filename);
+            path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+        };
 
         self.db.catalog.attach_database(&stmt.schema_name, &stmt.filename).map_err(
             |e| match e {
@@ -2642,20 +2750,48 @@ impl SqlExecutor {
     }
 
     /// Load an existing on-disk database file into a newly-attached schema
-    /// (#6362 Phase 2).
+    /// (#6362 Phase 2, #6407).
     ///
     /// Loads `path` via [`load_database_file`] (format auto-detection: SQL
     /// dump, binary/JSON snapshot, or SQLite import) into a standalone
     /// `Database`, then re-homes each of its default-schema tables
-    /// (definition + live row data) into `schema_name` of the live session.
-    /// `schema_name` must already be an empty, freshly-attached schema (the
-    /// caller creates it via `Catalog::attach_database` first).
+    /// (definition + live row data), indexes, views, and triggers into
+    /// `schema_name` of the live session. `schema_name` must already be an
+    /// empty, freshly-attached schema (the caller creates it via
+    /// `Catalog::attach_database` first).
     ///
-    /// Scope: only tables round-trip through ATTACH. Views, triggers, and
-    /// indexes present in the loaded file's default schema are not currently
-    /// re-homed — see `Database::save_attached_schema_sql_dump` in
-    /// vibesql-storage for the matching writer-side limitation and rationale
-    /// (tracked as a follow-up in issue #6407).
+    /// Order matters: tables are re-homed first (indexes/views/triggers all
+    /// depend on their target table already existing with its row data),
+    /// then indexes (rebuilt against the live table via
+    /// `CreateIndexExecutor` — partial-predicate and expression-index bodies
+    /// are evaluated fresh rather than transplanted, mirroring
+    /// `rebuild_pending_expression_indexes`), then views, then triggers
+    /// (matching `write_sql_dump_to_file`'s emission order so an `INSTEAD OF`
+    /// trigger's target view already exists).
+    ///
+    /// The loaded file's objects are always schema-relative (the writer,
+    /// `Database::save_attached_schema_sql_dump`, stripped the attachment's
+    /// schema qualifier before persisting), so they are re-qualified here
+    /// with `schema_name` — the alias *this* session attached the file
+    /// under, which need not match the alias used when it was saved.
+    ///
+    /// Re-qualification covers the view's *body* as well as its name
+    /// ([`schema_qualify::qualify_unqualified_tables`]): an unqualified table
+    /// reference left in the body would otherwise late-bind through
+    /// `Catalog::get_table`'s temp → main → attached search order and
+    /// silently read `main`'s same-named table.
+    ///
+    /// Two documented gaps, both pre-existing name-resolution defects that
+    /// reproduce in a live session with no save/reload, and neither of which
+    /// can prevent the `ATTACH` itself from succeeding:
+    ///
+    /// - **Trigger bodies** are not re-bound to `schema_name` — see the `KNOWN LIMITATION (#6477)`
+    ///   note at the trigger loop below.
+    /// - **Index rebuilds are best-effort**: an index whose bare target-table name is shadowed by a
+    ///   same-named table in `main` (or temp, or an earlier attachment) is skipped with a logged
+    ///   warning rather than rebuilt, because the storage-side body build binds by bare name — see
+    ///   the `KNOWN LIMITATION (#6487)` note at the index loop below. The attachment's tables,
+    ///   rows, views, and triggers still re-home normally; only the index is absent.
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
@@ -2669,11 +2805,11 @@ impl SqlExecutor {
             .map(|s| s.list_tables())
             .unwrap_or_default();
 
-        for table_name in table_names {
+        for table_name in &table_names {
             let Some(table_schema) = loaded
                 .catalog
                 .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
-                .and_then(|s| s.get_table(&table_name, true))
+                .and_then(|s| s.get_table(table_name, true))
                 .cloned()
             else {
                 continue;
@@ -2688,6 +2824,199 @@ impl SqlExecutor {
             if let Some(table) = loaded.tables.remove(&src_key) {
                 self.db.tables.insert(format!("{}.{}", schema_name, table_name), table);
             }
+        }
+
+        // Indexes: rebuild the physical index body against the now-populated
+        // attached-schema table rather than transplanting `loaded`'s index
+        // structures (#6407). `IndexColumn`/`where_clause` are shared AST
+        // types between the catalog and executor crates, so the loaded
+        // metadata plugs directly into a synthetic `CreateIndexStmt`.
+        //
+        // The auto-generated-index filter below deliberately tests
+        // `storage_meta.index_name` (the bare name) rather than the value
+        // yielded by `list_indexes()`, which is the storage *map key*.
+        // `loaded` is a standalone database whose objects all live in the
+        // default schema, so its keys happen to be bare today and testing
+        // either would work — but `make_index_key` prefixes any non-`main`
+        // schema, so a key-based test silently stops excluding auto-indexes
+        // the moment this loop is pointed at a schema-bearing database. That
+        // is exactly the defect that shipped on the writer side in
+        // `save_attached_schema_sql_dump`; filtering on the metadata name
+        // costs nothing and removes the latent trap.
+        for index_key in loaded.list_indexes() {
+            let Some(storage_meta) = loaded.get_index(&index_key) else { continue };
+            let lower_name = storage_meta.index_name.to_lowercase();
+            if lower_name.starts_with("pk_")
+                || lower_name.starts_with("sqlite_autoindex_")
+                || lower_name.starts_with(vibesql_catalog::WITHOUT_ROWID_PK_INDEX_PREFIX)
+            {
+                continue;
+            }
+            let Some(catalog_meta) = loaded.catalog.find_index_by_name(&storage_meta.index_name)
+            else {
+                continue;
+            };
+
+            let index_type =
+                ast_index_type_from_catalog(&catalog_meta.index_type, storage_meta.unique);
+            let create_stmt = vibesql_ast::CreateIndexStmt {
+                if_not_exists: false,
+                index_name: storage_meta.index_name.clone(),
+                schema: None,
+                table_name: format!("{}.{}", schema_name, storage_meta.table_name),
+                index_type,
+                columns: storage_meta.columns.clone(),
+                where_clause: catalog_meta.where_clause.clone(),
+            };
+
+            // KNOWN LIMITATION (#6487): the index body build binds by BARE
+            // table name, so it must be skipped when the bare name does not
+            // resolve to this attachment.
+            //
+            // `CreateIndexExecutor` validates against the *qualified* target
+            // (`aux.t`) but `build_btree_index_body` then hands storage the
+            // **bare** name, and storage re-resolves it through the temp →
+            // main → attached search order. When `main` holds a same-named
+            // table that resolution lands on `main.t` instead, with two bad
+            // outcomes: if `main.t` lacks the indexed column the build errors
+            // (`Column 'z' not found in table 't'`), and if it happens to
+            // have one the body is silently built from `main.t`'s rows and
+            // registered as a `main`-schema index. Propagating either from
+            // here would make an attachment that merely *contains* an index
+            // impossible to re-`ATTACH` at all — strictly worse than
+            // pre-#6407, where indexes were never persisted.
+            //
+            // So the rebuild is best-effort: it is attempted only when the
+            // bare name provably resolves back to this attachment (the same
+            // `resolve_table_schema_name` order storage itself uses), and any
+            // error from the attempt is logged and skipped rather than
+            // propagated. A skipped index degrades the reload to "the index
+            // is missing" — exactly the pre-#6407 behavior — while the tables,
+            // their rows, views, and triggers all still re-home and the
+            // `ATTACH` succeeds. Removing this guard is safe (and desirable)
+            // once #6487 makes the body build bind to the qualified name.
+            // `test_attach_reattach_index_skipped_on_main_table_name_collision`
+            // and its `*_with_matching_column` sibling pin both branches.
+            let resolves_to_attachment = self
+                .db
+                .catalog
+                .resolve_table_schema_name(&storage_meta.table_name)
+                .is_some_and(|resolved| resolved.eq_ignore_ascii_case(schema_name));
+            if !resolves_to_attachment {
+                log::warn!(
+                    "ATTACH '{}' AS {}: skipping rebuild of index '{}' on '{}.{}' — the bare \
+                     table name '{}' resolves to another schema (a same-named table shadows the \
+                     attachment), and the index body build would bind to that table instead \
+                     (#6487). The attached data is unaffected; only the index is missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    storage_meta.table_name,
+                );
+                continue;
+            }
+            if let Err(e) =
+                vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
+            {
+                log::warn!(
+                    "ATTACH '{}' AS {}: failed to rebuild index '{}' on '{}.{}': {} — continuing \
+                     without it (#6487). The attached data is unaffected; only the index is \
+                     missing.",
+                    path,
+                    schema_name,
+                    storage_meta.index_name,
+                    schema_name,
+                    storage_meta.table_name,
+                    e,
+                );
+            }
+        }
+
+        // Views: re-qualify the (already schema-relative) view name and
+        // definition with the live session's attachment alias. Views have no
+        // separate `schema` AST field — the qualifier lives directly in the
+        // name (`ViewDefinition::name`), matching how the writer strips it.
+        //
+        // The view's *body* must be re-bound too, not just its name (#6476
+        // review). An unqualified table reference inside the body is
+        // late-bound through `Catalog::get_table`'s temp → main → attached
+        // search order, so a body persisted as `SELECT x FROM t` would
+        // silently read `main.t` whenever `main` happens to hold a same-named
+        // table — returning another database's rows rather than erroring.
+        // `qualify_unqualified_tables` applies SQLite's rule (an unqualified
+        // name in a view body resolves within the schema containing the view)
+        // by rewriting every bare base-table reference to
+        // `<this session's alias>.<table>`; explicitly-qualified references
+        // (`main.mt`, `other.u`) — which the writer never stripped — are left
+        // alone.
+        for view_name in loaded.catalog.list_views() {
+            let Some(view_def) = loaded.catalog.get_view(&view_name) else { continue };
+            if view_def.is_temp() {
+                continue;
+            }
+            let qualified_name = format!("{}.{}", schema_name, view_def.name);
+            let mut query = view_def.query.clone();
+            schema_qualify::qualify_unqualified_tables(&mut query, schema_name);
+            let create_stmt = vibesql_ast::CreateViewStmt {
+                view_name: qualified_name,
+                columns: view_def.columns.clone(),
+                query: Box::new(query),
+                with_check_option: view_def.with_check_option,
+                or_replace: false,
+                if_not_exists: false,
+                temporary: false,
+                sql_definition: view_def.sql_definition.clone(),
+            };
+            vibesql_executor::ViewExecutor::execute_create_view(&create_stmt, &mut self.db)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+        }
+
+        // Triggers: unlike views, triggers carry an explicit `schema` AST
+        // field distinct from their bare name/table, so re-homing is a
+        // direct field-for-field translation from the loaded
+        // `TriggerDefinition` into a synthetic `CreateTriggerStmt`, replayed
+        // through `TriggerExecutor` so target-table/schema validation runs
+        // exactly as it would for a live `CREATE TRIGGER`.
+        //
+        // KNOWN LIMITATION (#6477): the trigger's *body* is NOT re-bound to
+        // `schema_name` the way the view body above is. A trigger body is
+        // stored as `TriggerAction::RawSql` and re-parsed when the trigger
+        // fires, and the parser rejects a qualified table name inside a
+        // trigger body outright ("qualified table names are not allowed on
+        // INSERT, UPDATE, and DELETE statements within triggers", matching
+        // SQLite) — so there is no AST to rewrite and no parseable text form
+        // that would express the binding. Its unqualified names therefore
+        // still resolve through `Catalog::get_table`'s temp → main →
+        // attached search order, so a same-named table in `main` wins. That
+        // late binding is pre-existing and reproduces with no save/reload at
+        // all; fixing it means teaching trigger execution to resolve a
+        // body's names in the trigger's own schema, which is #6477's job.
+        // `test_attach_reattach_trigger_body_binds_to_main_on_name_collision`
+        // pins the actual behavior so it cannot change unnoticed.
+        for trigger_def in loaded.catalog.iter_triggers() {
+            if trigger_def.is_temp() {
+                continue;
+            }
+            let create_stmt = vibesql_ast::CreateTriggerStmt {
+                if_not_exists: false,
+                schema: Some(schema_name.to_string()),
+                trigger_name: trigger_def.name.clone(),
+                name_source: None,
+                timing: trigger_def.timing.clone(),
+                event: trigger_def.event.clone(),
+                table_name: trigger_def.table_name.clone(),
+                granularity: trigger_def.granularity.clone(),
+                when_condition: trigger_def.when_condition.clone(),
+                triggered_action: trigger_def.triggered_action.clone(),
+            };
+            vibesql_executor::TriggerExecutor::create_trigger_with_sql(
+                &mut self.db,
+                &create_stmt,
+                trigger_def.sql_definition.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
         Ok(())
@@ -2791,11 +3120,7 @@ impl SqlExecutor {
                     .and_then(|p| p.to_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| attached.path.clone())
             };
-            rows.push(vec![
-                Some((2 + i).to_string()),
-                Some(attached.name.clone()),
-                Some(file),
-            ]);
+            rows.push(vec![Some((2 + i).to_string()), Some(attached.name.clone()), Some(file)]);
         }
 
         let row_count = rows.len();
@@ -2895,9 +3220,10 @@ impl SqlExecutor {
 
         // Schema-qualified pragma handling. VibeSQL only carries a single schema today,
         // so:
-        //   PRAGMA <unknown>.foreign_key_check;            -> return empty (no tables in that schema)
-        //   PRAGMA <unknown>.foreign_key_check(table);     -> error "no such table: <schema>.<table>"
-        // "main" and the current schema both refer to the only available schema.
+        //   PRAGMA <unknown>.foreign_key_check;            -> return empty (no tables in that
+        // schema)   PRAGMA <unknown>.foreign_key_check(table);     -> error "no such table:
+        // <schema>.<table>" "main" and the current schema both refer to the only available
+        // schema.
         let current_schema = self.db.catalog.get_current_schema().to_string();
         if let Some(ref schema) = stmt.database {
             let is_current =
@@ -3187,40 +3513,34 @@ impl SqlExecutor {
         // quirks depend on the original declaration rather than the internal
         // affinity/rowid state:
         //
-        //   * The `type` column echoes the *declared* type text. A typeless
-        //     column (`CREATE TABLE t(a)`) reports an empty type in SQLite, but
-        //     VibeSQL folds it into BLOB affinity — so without this we'd wrongly
-        //     print "BLOB". `type_source == None` marks the typeless case.
-        //   * The `notnull` column reflects only an *explicit* NOT NULL clause.
-        //     An `INTEGER PRIMARY KEY` rowid alias is internally non-nullable
-        //     (VibeSQL sets `nullable = false`) yet SQLite reports `notnull = 0`
-        //     for it. Deriving notnull from the explicit NOT NULL constraint in
-        //     the source matches SQLite exactly.
-        //   * The `pk` column reports the 1-based position of a column within the
-        //     declared PRIMARY KEY. SQLite keys this off the *first* occurrence
-        //     of each column in the declared key list but still advances the
-        //     ordinal for repeated columns, so `PRIMARY KEY(a,b,a,c)` yields
-        //     a=1, b=2, c=4 (the duplicate `a` consumes position 3). VibeSQL's
-        //     catalog `primary_key` list is de-duplicated and loses that gap, so
-        //     we recover the raw ordinals from the re-parsed table-level PK
-        //     constraint.
+        //   * The `type` column echoes the *declared* type text. A typeless column (`CREATE TABLE
+        //     t(a)`) reports an empty type in SQLite, but VibeSQL folds it into BLOB affinity — so
+        //     without this we'd wrongly print "BLOB". `type_source == None` marks the typeless
+        //     case.
+        //   * The `notnull` column reflects only an *explicit* NOT NULL clause. An `INTEGER PRIMARY
+        //     KEY` rowid alias is internally non-nullable (VibeSQL sets `nullable = false`) yet
+        //     SQLite reports `notnull = 0` for it. Deriving notnull from the explicit NOT NULL
+        //     constraint in the source matches SQLite exactly.
+        //   * The `pk` column reports the 1-based position of a column within the declared PRIMARY
+        //     KEY. SQLite keys this off the *first* occurrence of each column in the declared key
+        //     list but still advances the ordinal for repeated columns, so `PRIMARY KEY(a,b,a,c)`
+        //     yields a=1, b=2, c=4 (the duplicate `a` consumes position 3). VibeSQL's catalog
+        //     `primary_key` list is de-duplicated and loses that gap, so we recover the raw
+        //     ordinals from the re-parsed table-level PK constraint.
         //
         // `decl_facts` is keyed by lowercase column name. Absent (no sql_source,
         // a CREATE ... AS SELECT with no explicit column list, or a re-parse
         // failure) means we fall back to the catalog-derived behavior below,
         // unchanged. `pk_source_positions` is likewise a best-effort override.
-        //   * The `type` column echoes the *declared* type text verbatim, as
-        //     written in the CREATE TABLE statement (only the surrounding
-        //     delimiters of a bracketed/quoted type name are stripped). The
-        //     catalog's affinity-only `data_type` is lossy — it renders
-        //     `VARCHAR(45, 65)` as `VARCHAR(45)` — so we prefer the re-parsed
-        //     `type_source`. `decl_type` holds the delimiter-stripped verbatim
-        //     text; `None` marks a typeless column (empty type).
-        //   * The `dflt_value` column echoes the *verbatim* DEFAULT expression
-        //     source (e.g. `X'abcdef'`, `'abcde'`, `-1`, `CURRENT_TIME`) rather
-        //     than a lossy `ToSql` re-render that uppercases blob hex and drops
-        //     operator spacing. A single balanced outer parenthesis pair is
-        //     stripped (`DEFAULT (5+3)` -> `5+3`), matching SQLite.
+        //   * The `type` column echoes the *declared* type text verbatim, as written in the CREATE
+        //     TABLE statement (only the surrounding delimiters of a bracketed/quoted type name are
+        //     stripped). The catalog's affinity-only `data_type` is lossy — it renders `VARCHAR(45,
+        //     65)` as `VARCHAR(45)` — so we prefer the re-parsed `type_source`. `decl_type` holds
+        //     the delimiter-stripped verbatim text; `None` marks a typeless column (empty type).
+        //   * The `dflt_value` column echoes the *verbatim* DEFAULT expression source (e.g.
+        //     `X'abcdef'`, `'abcde'`, `-1`, `CURRENT_TIME`) rather than a lossy `ToSql` re-render
+        //     that uppercases blob hex and drops operator spacing. A single balanced outer
+        //     parenthesis pair is stripped (`DEFAULT (5+3)` -> `5+3`), matching SQLite.
         let mut decl_facts: std::collections::HashMap<String, (bool, bool)> =
             std::collections::HashMap::new();
         let mut decl_types: std::collections::HashMap<String, Option<String>> =
@@ -3711,6 +4031,42 @@ fn pragma_value_to_bool(value: &vibesql_ast::PragmaValue) -> bool {
     }
 }
 
+/// Mirrors SQLite's `sqlite3GetBoolean(z, dflt)` (util.c → `getSafetyLevel`)
+/// for the PRAGMAs whose enabled-flag falls back to a caller-supplied default
+/// rather than to `false`: a **leading-digit** spelling is its own truthiness,
+/// the recognized keywords `on`/`no`/`off`/`false`/`yes`/`true`/`extra` map to
+/// their table values, and **anything else returns `dflt`**.
+///
+/// The digit gate is `sqlite3Isdigit(*z)` — an ASCII digit in the *first*
+/// position, with no sign accepted. A negative spelling such as `-1024` is
+/// therefore **not** numeric here: it falls through every keyword match and
+/// returns `dflt`, which `pragma.c` supplies as `(size != 0)` for
+/// `cache_spill`, i.e. enabled for any nonzero negative argument. Verified
+/// against SQLite 3.53.4: `cache_spill=-1024` reads back enabled, while
+/// `cache_spill=256` reads back disabled (the `(u8)` truncation quirk below).
+///
+/// `pragma_value_to_bool` above treats an unrecognized spelling as `false`,
+/// which is right for the plain on/off PRAGMAs but wrong for `cache_spill`
+/// (pragma2.test pragma2-5.3: `cache_spill(-51)` must leave spilling enabled).
+fn pragma_value_to_bool_with_default(value: &vibesql_ast::PragmaValue, dflt: bool) -> bool {
+    let text = pragma_value_text(value);
+    let trimmed = text.trim();
+    let first = trimmed.chars().next();
+    // `sqlite3Isdigit(*z)`: ASCII digit only, no sign.
+    let numeric = matches!(first, Some(c) if c.is_ascii_digit());
+    if numeric {
+        // SQLite returns `(u8)sqlite3Atoi(z)`, i.e. the low byte of the parsed
+        // integer, then tests it against zero.
+        let parsed = pragma_value_atoi(value);
+        return (parsed as u8) != 0;
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "on" | "yes" | "true" | "extra" => true,
+        "no" | "off" | "false" => false,
+        _ => dflt,
+    }
+}
+
 /// Parse a numeric PRAGMA value into an `i64`, if it is integral.
 ///
 /// Used by integer-valued internal PRAGMAs such as `trigger_depth_limit`
@@ -3792,6 +4148,55 @@ const SQLITE_DEFAULT_SYNCHRONOUS: i64 = 2;
 /// `PRAGMA cache_size` / `PRAGMA default_cache_size` report when no explicit
 /// size has ever been set.
 const SQLITE_DEFAULT_CACHE_SIZE: i64 = -2000;
+
+/// SQLite's `SQLITE_DEFAULT_PAGE_SIZE` compile-time constant: the value
+/// `PRAGMA page_size` reports for a database whose page size has never been
+/// changed.
+const SQLITE_DEFAULT_PAGE_SIZE: i64 = 4096;
+
+/// SQLite's `SQLITE_MAX_PAGE_SIZE` compile-time constant — the upper bound
+/// `sqlite3BtreeSetPageSize` accepts.
+const SQLITE_MAX_PAGE_SIZE: i64 = 65536;
+
+/// The spill threshold (`PCache.szSpill`) a fresh connection starts with,
+/// matching `sqlite3PcacheOpen`'s `p->szSpill = 1`.
+const SQLITE_DEFAULT_SPILL_PAGES: i64 = 1;
+
+/// Mirrors `sqlite3BtreeSetPageSize`'s acceptance test: a page size must be a
+/// power of two between 512 and `SQLITE_MAX_PAGE_SIZE` inclusive. Anything
+/// else leaves the current page size untouched (SQLite reports no error).
+fn is_valid_page_size(size: i64) -> bool {
+    (512..=SQLITE_MAX_PAGE_SIZE).contains(&size) && (size & (size - 1)) == 0
+}
+
+/// Mirrors SQLite's `numberOfCachePages()` (pcache.c): a non-negative
+/// `cache_size` is already a page count, while a negative one is a KiB budget
+/// that must be divided by the page size to yield pages.
+fn number_of_cache_pages(cache_size: i64, page_size: i64) -> i64 {
+    if cache_size >= 0 {
+        cache_size
+    } else {
+        kib_budget_to_pages(cache_size, page_size)
+    }
+}
+
+/// Mirrors the negative-argument branch of `sqlite3PcacheSetSpillsize()`
+/// (pcache.c): `mxPage = (-1024 * (i64)mxPage) / (szPage + szExtra)`. A
+/// positive argument is already a page count and passes through unchanged.
+fn spill_pages_from_arg(arg: i64, page_size: i64) -> i64 {
+    if arg < 0 {
+        kib_budget_to_pages(arg, page_size)
+    } else {
+        arg
+    }
+}
+
+/// Converts a negative "KiB budget" PRAGMA argument (SQLite's convention for
+/// `cache_size` / `cache_spill`) into a page count against `page_size`.
+fn kib_budget_to_pages(kib_budget: i64, page_size: i64) -> i64 {
+    let page_size = if page_size > 0 { page_size } else { SQLITE_DEFAULT_PAGE_SIZE };
+    kib_budget.saturating_mul(-1024) / page_size
+}
 
 /// Mirrors SQLite's `getSafetyLevel()` (pragma.c) used by `PRAGMA
 /// synchronous = <value>`: a numeric string is parsed via a C-style

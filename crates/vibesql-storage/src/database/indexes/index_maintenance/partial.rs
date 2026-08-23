@@ -42,7 +42,7 @@ impl IndexManager {
         included_partial_indexes: &HashSet<String>,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if !metadata.table_name.eq_ignore_ascii_case(table_name) {
+            if !metadata.matches_table(table_name) {
                 continue;
             }
             if !metadata.is_partial() {
@@ -130,7 +130,7 @@ impl IndexManager {
             .indexes
             .iter()
             .filter(|(_, metadata)| {
-                metadata.table_name.eq_ignore_ascii_case(table_name)
+                metadata.matches_table(table_name)
                     && metadata.is_partial()
                     && !metadata.columns.iter().any(|col| col.is_expression())
             })
@@ -237,7 +237,7 @@ impl IndexManager {
         included_partial_indexes: &HashSet<String>,
     ) {
         for (index_name, metadata) in &self.indexes {
-            if !metadata.table_name.eq_ignore_ascii_case(table_name) {
+            if !metadata.matches_table(table_name) {
                 continue;
             }
             if !metadata.is_partial() {
@@ -333,9 +333,9 @@ impl IndexManager {
 
     /// Whether the given table has any partial indexes.
     pub fn has_partial_indexes(&self, table_name: &str) -> bool {
-        self.indexes.values().any(|metadata| {
-            metadata.table_name.eq_ignore_ascii_case(table_name) && metadata.is_partial()
-        })
+        self.indexes
+            .values()
+            .any(|metadata| metadata.matches_table(table_name) && metadata.is_partial())
     }
 
     /// Get all partial indexes for a specific table.
@@ -348,9 +348,7 @@ impl IndexManager {
     ) -> Vec<(String, &crate::database::indexes::index_metadata::IndexMetadata)> {
         self.indexes
             .iter()
-            .filter(|(_, metadata)| {
-                metadata.table_name.eq_ignore_ascii_case(table_name) && metadata.is_partial()
-            })
+            .filter(|(_, metadata)| metadata.matches_table(table_name) && metadata.is_partial())
             .map(|(name, metadata)| (name.clone(), metadata))
             .collect()
     }
@@ -367,9 +365,7 @@ impl IndexManager {
         let indexes_to_clear: Vec<String> = self
             .indexes
             .iter()
-            .filter(|(_, metadata)| {
-                metadata.table_name.eq_ignore_ascii_case(table_name) && metadata.is_partial()
-            })
+            .filter(|(_, metadata)| metadata.matches_table(table_name) && metadata.is_partial())
             .map(|(name, _)| name.clone())
             .collect();
 

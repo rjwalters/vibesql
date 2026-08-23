@@ -3,19 +3,19 @@
 //! Calculates frame boundaries (ROWS mode) for window function evaluation.
 //! Supports SQL:2011 EXCLUDE clause for excluding rows from the frame.
 
-use std::cmp::Ordering;
-use std::ops::Range;
+use std::{cmp::Ordering, ops::Range};
 
 use vibesql_ast::{
     Expression, FrameBound, FrameExclude, FrameUnit, NullsOrder, OrderByItem, OrderDirection,
     UnaryOperator, WindowFrame,
 };
+use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use vibesql_storage::Row;
-
-use super::partitioning::Partition;
-use super::sorting::{compare_values, compare_values_with_collation};
+use super::{
+    partitioning::Partition,
+    sorting::{compare_values, compare_values_with_collation},
+};
 
 /// Validate a window frame specification, returning an error if invalid.
 ///

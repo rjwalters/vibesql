@@ -248,8 +248,9 @@ pub(crate) fn values_are_distinct(
 
 #[cfg(test)]
 mod blob_equality_tests {
-    use super::{values_are_distinct, values_are_equal};
     use vibesql_types::SqlValue;
+
+    use super::{values_are_distinct, values_are_equal};
 
     // Regression for e_expr-8.2.10.10.1 / 8.2.11.11.1 / 8.2.12.12.1: identical
     // BLOB values must compare equal (and NOT distinct), matching `=`.

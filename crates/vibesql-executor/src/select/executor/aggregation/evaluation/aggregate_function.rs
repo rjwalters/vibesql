@@ -152,7 +152,8 @@ fn evaluate_expr_against_outer_row(
                 }
             }
 
-            // Column not found - return NULL (shouldn't happen if expression_refs_only_outer_columns is correct)
+            // Column not found - return NULL (shouldn't happen if
+            // expression_refs_only_outer_columns is correct)
             Ok(SqlValue::Null)
         }
         Expression::Literal(val) => Ok(val.clone()),
@@ -169,7 +170,8 @@ fn evaluate_expr_against_outer_row(
 }
 
 /// Compare two sets of sort keys with collation and NULLS FIRST/LAST support.
-/// This is a helper function to eliminate code duplication between GROUP_CONCAT and JSON_GROUP_ARRAY.
+/// This is a helper function to eliminate code duplication between GROUP_CONCAT and
+/// JSON_GROUP_ARRAY.
 fn compare_sort_keys(
     a_keys: &[SortKey],
     b_keys: &[SortKey],
@@ -458,7 +460,8 @@ pub(super) fn evaluate(
                     "COUNT(DISTINCT *) is not valid SQL".to_string(),
                 ));
             }
-            // Fast path: COUNT(*) without DISTINCT and without FILTER is just row count (O(1) vs O(n))
+            // Fast path: COUNT(*) without DISTINCT and without FILTER is just row count (O(1) vs
+            // O(n))
             if filter.is_none() {
                 let result = vibesql_types::SqlValue::Integer(group_rows.len() as i64);
                 // Cache the result (lazily initialized)
@@ -560,8 +563,9 @@ pub(super) fn evaluate(
                     vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
                         s.to_string()
                     }
-                    vibesql_types::SqlValue::Null => String::new(), // NULL separator = empty string (SQLite behavior)
-                    other => other.to_string(),                     // Convert other types to string
+                    vibesql_types::SqlValue::Null => String::new(), /* NULL separator = empty string (SQLite behavior) */
+                    other => other.to_string(),                     /* Convert other types to
+                                                                      * string */
                 }
             } else {
                 ",".to_string() // Empty group, use default

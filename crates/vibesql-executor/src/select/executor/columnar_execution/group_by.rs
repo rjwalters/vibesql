@@ -61,16 +61,15 @@ impl SelectExecutor<'_> {
         // Resolve each GROUP BY expression to a batch column index.
         //
         // - A bare `ColumnRef` resolves directly to its base column index.
-        // - Any other expression is materialized as a *derived key column*
-        //   appended to a cloned batch, reusing the shared #5994 machinery:
-        //   `extract_derived_expr` (the exact same numeric-arithmetic guard the
-        //   computed-WHERE-predicate path uses) builds an index-resolved
-        //   `DerivedExpr`, and `materialize_derived_column` evaluates it with
-        //   row-path-exact semantics (overflow -> Double, div-by-zero -> NULL,
-        //   NULL propagation) into a `ColumnArray::Mixed`. The resulting column
-        //   feeds the existing GroupKey/GroupKeySpec hashing machinery unchanged
-        //   (Mixed key columns take the Generic key path, whose Vec<SqlValue>
-        //   hashing/equality is identical to the row path's group-key map).
+        // - Any other expression is materialized as a *derived key column* appended to a cloned
+        //   batch, reusing the shared #5994 machinery: `extract_derived_expr` (the exact same
+        //   numeric-arithmetic guard the computed-WHERE-predicate path uses) builds an
+        //   index-resolved `DerivedExpr`, and `materialize_derived_column` evaluates it with
+        //   row-path-exact semantics (overflow -> Double, div-by-zero -> NULL, NULL propagation)
+        //   into a `ColumnArray::Mixed`. The resulting column feeds the existing
+        //   GroupKey/GroupKeySpec hashing machinery unchanged (Mixed key columns take the Generic
+        //   key path, whose Vec<SqlValue> hashing/equality is identical to the row path's group-key
+        //   map).
         //
         // If any grouping expression is an unsupported shape, we decline the
         // whole query and fall back to row-oriented execution (unchanged
@@ -288,9 +287,9 @@ impl SelectExecutor<'_> {
     /// On success returns `Some((rows, group_col_count, aggregates))` where:
     /// - `rows` are `[group_keys..., aggregates...]` positional result rows,
     /// - `group_col_count` is the number of leading group-key columns,
-    /// - `aggregates` are the extracted aggregate specs (in the same order as the
-    ///   aggregate columns in each row), which `having::apply_having_filter` needs
-    ///   to map aggregate references to result-row positions (Issue #6009).
+    /// - `aggregates` are the extracted aggregate specs (in the same order as the aggregate columns
+    ///   in each row), which `having::apply_having_filter` needs to map aggregate references to
+    ///   result-row positions (Issue #6009).
     ///
     /// Returns `Ok(None)` to decline to the row-oriented path.
     pub(in crate::select::executor) fn execute_columnar_join_group_by(
@@ -359,20 +358,18 @@ impl SelectExecutor<'_> {
 
         // Resolve each GROUP BY expression to a joined-batch column index.
         //
-        // - A bare `ColumnRef` resolves directly against the combined (joined)
-        //   schema, whose column order matches the joined batch layout.
-        // - Any other expression is materialized as a *derived key column*
-        //   appended to a cloned joined batch, reusing the shared #5994
-        //   machinery: `extract_derived_expr` (the exact same numeric-arithmetic
-        //   guard the single-table GROUP BY key path and the computed-WHERE-
-        //   predicate path use) builds a combined-schema-index-resolved
-        //   `DerivedExpr`, and `materialize_derived_column` evaluates it with
-        //   row-path-exact semantics (overflow -> Double, div-by-zero -> NULL,
-        //   NULL propagation — including outer-join NULL-padded columns) into a
-        //   `ColumnArray::Mixed`. The derived column feeds the existing group-key
-        //   machinery unchanged: its `Vec<SqlValue>` hashing/equality is
-        //   identical to the row path's group-key map, so NULL keys collapse into
-        //   one group and int-vs-double keys match the row path by construction.
+        // - A bare `ColumnRef` resolves directly against the combined (joined) schema, whose column
+        //   order matches the joined batch layout.
+        // - Any other expression is materialized as a *derived key column* appended to a cloned
+        //   joined batch, reusing the shared #5994 machinery: `extract_derived_expr` (the exact
+        //   same numeric-arithmetic guard the single-table GROUP BY key path and the
+        //   computed-WHERE- predicate path use) builds a combined-schema-index-resolved
+        //   `DerivedExpr`, and `materialize_derived_column` evaluates it with row-path-exact
+        //   semantics (overflow -> Double, div-by-zero -> NULL, NULL propagation — including
+        //   outer-join NULL-padded columns) into a `ColumnArray::Mixed`. The derived column feeds
+        //   the existing group-key machinery unchanged: its `Vec<SqlValue>` hashing/equality is
+        //   identical to the row path's group-key map, so NULL keys collapse into one group and
+        //   int-vs-double keys match the row path by construction.
         //
         // If any grouping expression is an unsupported shape, we decline the
         // whole query and fall back to row-oriented execution.

@@ -6,16 +6,14 @@
 // (`access_signal.rs`). It converts structural observations — row count plus the
 // scan / point-lookup / write mix — into two decisions:
 //
-//   1. **Dispatch** (`should_use_columnar`): should a row-oriented table use its
-//      columnar representation for an analytical scan, or stay on the row path?
-//      This replaces the old hardcoded `SIMD_COLUMNAR_THRESHOLD = 500`
-//      row-count-only gate in the executor.
+//   1. **Dispatch** (`should_use_columnar`): should a row-oriented table use its columnar
+//      representation for an analytical scan, or stay on the row path? This replaces the old
+//      hardcoded `SIMD_COLUMNAR_THRESHOLD = 500` row-count-only gate in the executor.
 //
-//   2. **Hotness** (`columnar_hotness`): a single scalar ordering cached tables
-//      by how analytically-hot they are, used by `ColumnarCache` to evict the
-//      *coldest* resident table under memory pressure instead of the merely
-//      least-recently-used one. Hot analytical tables therefore stay resident
-//      while colder tables are reclaimed first.
+//   2. **Hotness** (`columnar_hotness`): a single scalar ordering cached tables by how
+//      analytically-hot they are, used by `ColumnarCache` to evict the *coldest* resident table
+//      under memory pressure instead of the merely least-recently-used one. Hot analytical tables
+//      therefore stay resident while colder tables are reclaimed first.
 //
 // ## Hard constraint: structural signals only, never wall-clock
 //
@@ -50,13 +48,12 @@ pub const SCAN_DOMINANCE_FACTOR: u64 = 4;
 /// Driven purely by structural signals (never wall-clock):
 ///
 /// - Tables below [`MIN_COLUMNAR_ROWS`] always take the row path.
-/// - A large table with no recorded access history yet defaults to columnar
-///   (legacy behavior: a large table converted on its first analytical scan).
-/// - A large table with history is columnar-eligible unless its access is
-///   *dominated* by point lookups and/or writes — i.e. unless
-///   `scan_count * SCAN_DOMINANCE_FACTOR < point_lookups + writes`. Point-lookup
-///   -dominated and write-thrashed tables therefore stay on the row path and are
-///   never converted/cached.
+/// - A large table with no recorded access history yet defaults to columnar (legacy behavior: a
+///   large table converted on its first analytical scan).
+/// - A large table with history is columnar-eligible unless its access is *dominated* by point
+///   lookups and/or writes — i.e. unless `scan_count * SCAN_DOMINANCE_FACTOR < point_lookups +
+///   writes`. Point-lookup -dominated and write-thrashed tables therefore stay on the row path and
+///   are never converted/cached.
 ///
 /// Native `STORAGE COLUMNAR` tables are authoritative and are handled by their
 /// own always-resident path; this function is only consulted for the transparent

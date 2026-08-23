@@ -14,8 +14,8 @@
 //! loaded). Instead we capture `log` output (at Debug level, since the fallback
 //! marker is a `debug!`) and assert:
 //!   - the row-fallback marker must NOT appear;
-//!   - the positive info marker "Native columnar execution completed" with
-//!     `group_by=true` proves the columnar GROUP BY path ran.
+//!   - the positive info marker "Native columnar execution completed" with `group_by=true` proves
+//!     the columnar GROUP BY path ran.
 //!
 //! Parity is checked by comparing the columnar result against the row path
 //! (`VIBESQL_DISABLE_COLUMNAR=1`) for the same query, including NULL keys,

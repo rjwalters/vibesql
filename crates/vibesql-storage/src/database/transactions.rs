@@ -352,23 +352,18 @@ impl TransactionManager {
     /// are no other concurrently-active transactions to put in
     /// `in_progress`. The snapshot is:
     ///
-    /// - `xmin_active = txn_id + 1` — one past the snapshot's own
-    ///   transaction id. Any row whose `xmax` value falls in
-    ///   `(xmin_active, ∞)` was deleted by a *later* transaction (one
-    ///   that hadn't yet been allocated when our snapshot was taken).
-    ///   Under the single-writer model this set is currently empty, but
-    ///   the bookkeeping keeps the `xmax > xmin_active` clause in
+    /// - `xmin_active = txn_id + 1` — one past the snapshot's own transaction id. Any row whose
+    ///   `xmax` value falls in `(xmin_active, ∞)` was deleted by a *later* transaction (one that
+    ///   hadn't yet been allocated when our snapshot was taken). Under the single-writer model this
+    ///   set is currently empty, but the bookkeeping keeps the `xmax > xmin_active` clause in
     ///   [`Row::visible_to`] semantically correct.
-    /// - `xmax_committed = txn_id` — every transaction id allocated so
-    ///   far, **including our own**, is treated as committed-as-of this
-    ///   snapshot. This is the #5207 "see your own writes" widening:
-    ///   a row stamped with `xmin = txn_id` (the active transaction's
-    ///   own write) passes `is_committed(self)` and is therefore visible
-    ///   to subsequent reads within the same transaction. The same
-    ///   widening makes prior-transaction writes visible too — which is
-    ///   the correct snapshot-isolation behavior in single-writer
-    ///   (every "prior" transaction has already finished by the time
-    ///   the next one starts).
+    /// - `xmax_committed = txn_id` — every transaction id allocated so far, **including our own**,
+    ///   is treated as committed-as-of this snapshot. This is the #5207 "see your own writes"
+    ///   widening: a row stamped with `xmin = txn_id` (the active transaction's own write) passes
+    ///   `is_committed(self)` and is therefore visible to subsequent reads within the same
+    ///   transaction. The same widening makes prior-transaction writes visible too — which is the
+    ///   correct snapshot-isolation behavior in single-writer (every "prior" transaction has
+    ///   already finished by the time the next one starts).
     /// - `in_progress = ∅` — no concurrent transactions.
     ///
     /// **Future (multi-writer / Raft):** when concurrent transactions
@@ -385,11 +380,7 @@ impl TransactionManager {
         // this is safe because there are no concurrent peers. Multi-
         // writer will need to model the "still-running peers" set in
         // `in_progress` instead.
-        TxnSnapshot::new(
-            txn_id.saturating_add(1),
-            txn_id,
-            std::collections::HashSet::new(),
-        )
+        TxnSnapshot::new(txn_id.saturating_add(1), txn_id, std::collections::HashSet::new())
     }
 
     /// Commit the current transaction
@@ -510,21 +501,16 @@ impl TransactionManager {
     ///
     /// # Semantics
     ///
-    /// - If a transaction is active, the horizon is its snapshot's
-    ///   `xmin_active`. Under single-writer that's `txn_id + 1`, so any
-    ///   `xmax <= txn_id` (i.e. any committed deletion) would still
-    ///   technically need to be visible to the active reader if it's
-    ///   examining a pre-delete state... wait — under single-writer,
-    ///   the active txn IS the deleter, so this case is effectively
-    ///   handled by holding the horizon back to the active txn's own
-    ///   xmin_active and refusing to reclaim rows whose `xmax` equals
-    ///   the active txn id.
-    /// - If no transaction is active, the horizon is `next_transaction_id`
-    ///   (one past the highest allocated id). Under single-writer with no
-    ///   active txn, every committed deletion is invisible to every
-    ///   reader that *could* now start (since any new BEGIN would
-    ///   snapshot with an even-higher `xmin_active`), so anything stamped
-    ///   so far is safe to reclaim.
+    /// - If a transaction is active, the horizon is its snapshot's `xmin_active`. Under
+    ///   single-writer that's `txn_id + 1`, so any `xmax <= txn_id` (i.e. any committed deletion)
+    ///   would still technically need to be visible to the active reader if it's examining a
+    ///   pre-delete state... wait — under single-writer, the active txn IS the deleter, so this
+    ///   case is effectively handled by holding the horizon back to the active txn's own
+    ///   xmin_active and refusing to reclaim rows whose `xmax` equals the active txn id.
+    /// - If no transaction is active, the horizon is `next_transaction_id` (one past the highest
+    ///   allocated id). Under single-writer with no active txn, every committed deletion is
+    ///   invisible to every reader that *could* now start (since any new BEGIN would snapshot with
+    ///   an even-higher `xmin_active`), so anything stamped so far is safe to reclaim.
     ///
     /// **Multi-writer note:** when concurrent transactions are
     /// supported, this becomes `min(xmin_active across all active txns)`

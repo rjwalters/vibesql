@@ -55,9 +55,9 @@ const INL_SIZE_RATIO_THRESHOLD: usize = 10;
 
 /// Execute a JOIN operation
 ///
-/// The `join_alias` parameter is the alias for a parenthesized join expression (e.g., `(A JOIN B) AS X`).
-/// This alias must be passed so that ON clause validation can recognize references like `X.column`.
-/// Issue #4786: ON clause validation was failing because the alias wasn't available.
+/// The `join_alias` parameter is the alias for a parenthesized join expression (e.g., `(A JOIN B)
+/// AS X`). This alias must be passed so that ON clause validation can recognize references like
+/// `X.column`. Issue #4786: ON clause validation was failing because the alias wasn't available.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_join<F>(
     left: &vibesql_ast::FromClause,

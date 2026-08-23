@@ -44,9 +44,6 @@ pub trait TPCCExecutor {
     fn stock_level(&self, input: &StockLevelInput) -> TransactionResult;
 }
 
-use vibesql_executor::SelectExecutor;
-use vibesql_parser::Parser;
-
 // Import transaction types from shared crate
 pub use vibesql_bench_common::tpcc::{
     generate_delivery_input, generate_new_order_input, generate_order_status_input,
@@ -54,6 +51,8 @@ pub use vibesql_bench_common::tpcc::{
     NewOrderItemInput, OrderStatusInput, PaymentInput, StockLevelInput, TPCCBenchmarkResults,
     TPCCRng, TPCCWorkload, TransactionResult,
 };
+use vibesql_executor::SelectExecutor;
+use vibesql_parser::Parser;
 
 // Thread-local profiling accumulators for query breakdown
 thread_local! {

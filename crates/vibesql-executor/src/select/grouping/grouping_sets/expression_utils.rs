@@ -13,8 +13,8 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
         (Expression::ColumnRef(col_id1), Expression::ColumnRef(col_id2))
             if col_id1.schema_canonical().is_none() && col_id2.schema_canonical().is_none() =>
         {
-            // Use direct equality on canonical forms - they already handle SQL:1999 case sensitivity
-            // (unquoted → lowercase, quoted → preserved case)
+            // Use direct equality on canonical forms - they already handle SQL:1999 case
+            // sensitivity (unquoted → lowercase, quoted → preserved case)
             let columns_equal = col_id1.column_canonical() == col_id2.column_canonical();
             let tables_equal = match (col_id1.table_canonical(), col_id2.table_canonical()) {
                 (Some(tb1), Some(tb2)) => tb1 == tb2,
@@ -50,8 +50,9 @@ pub fn expressions_equal(a: &Expression, b: &Expression) -> bool {
                 && a1.iter().zip(a2).all(|(x, y)| expressions_equal(x, y))
         }
 
-        // AggregateFunction: case-insensitive name (via FunctionIdentifier), check distinct, recurse into args
-        // Note: order_by is ignored in equality check for grouping purposes
+        // AggregateFunction: case-insensitive name (via FunctionIdentifier), check distinct,
+        // recurse into args Note: order_by is ignored in equality check for grouping
+        // purposes
         (
             Expression::AggregateFunction { name: n1, distinct: d1, args: a1, .. },
             Expression::AggregateFunction { name: n2, distinct: d2, args: a2, .. },

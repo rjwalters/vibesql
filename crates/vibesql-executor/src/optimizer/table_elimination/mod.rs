@@ -22,8 +22,6 @@ mod types;
 
 use std::collections::HashSet;
 
-use vibesql_ast::{Expression, SelectItem, SelectStmt};
-
 use join_analysis::{extract_equijoin_tables, extract_equijoin_tables_from_joins};
 use predicate::extract_local_predicates;
 use prefix::build_column_prefix_map;
@@ -35,6 +33,7 @@ use transform::{
     remove_eliminated_predicates,
 };
 use types::EliminatedTable;
+use vibesql_ast::{Expression, SelectItem, SelectStmt};
 
 /// Apply table elimination optimization to a SELECT statement
 ///

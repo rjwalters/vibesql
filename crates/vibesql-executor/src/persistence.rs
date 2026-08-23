@@ -170,6 +170,7 @@ fn truncate_for_error(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use std::{fs, io::Write};
+
     use tempfile::NamedTempFile;
 
     use super::*;

@@ -243,8 +243,8 @@ fn compute_floor(year: i32, month: u32, day: i64) -> i64 {
 /// time-value as 'now').
 ///
 /// Returns:
-/// - `Ok(None)` for NULL input, unparseable timestrings, or invalid modifiers
-///   (SQLite returns NULL in these cases)
+/// - `Ok(None)` for NULL input, unparseable timestrings, or invalid modifiers (SQLite returns NULL
+///   in these cases)
 /// - `Err(...)` for argument types that are not supported at all
 ///
 /// Shared by `datetime()` and `strftime()`; `func_name` is used in error messages.
@@ -601,8 +601,7 @@ fn apply_datetime_modifier(rdt: ResolvedDateTime, modifier: &str) -> Option<Reso
 ///
 /// Returns:
 /// - `None` if the modifier is not of this form (caller should fall through)
-/// - `Some(None)` if it is of this form but invalid (SQLite returns NULL,
-///   e.g. `'12:60'`)
+/// - `Some(None)` if it is of this form but invalid (SQLite returns NULL, e.g. `'12:60'`)
 /// - `Some(Some(dt))` on success
 fn try_apply_hh_mm_modifier(dt: NaiveDateTime, modifier: &str) -> Option<Option<NaiveDateTime>> {
     let (sign, rest) = match modifier.as_bytes().first() {

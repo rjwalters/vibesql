@@ -157,10 +157,10 @@ pub(crate) enum ResolvedPosition<'a> {
 /// Convert a `SELECT *` output column's COALESCE chain (a list of absolute row
 /// indices) into a [`ResolvedPosition`] for ORDER BY.
 ///
-/// - A single-index chain resolves to a table-qualified column name, matching
-///   the existing wildcard behaviour (and keeping #5231's ambiguity fix).
-/// - A multi-index chain resolves to a `COALESCE(t1.c, t2.c, ...)` expression so
-///   sorting uses the merged USING/NATURAL OUTER-JOIN value (issue #5657).
+/// - A single-index chain resolves to a table-qualified column name, matching the existing wildcard
+///   behaviour (and keeping #5231's ambiguity fix).
+/// - A multi-index chain resolves to a `COALESCE(t1.c, t2.c, ...)` expression so sorting uses the
+///   merged USING/NATURAL OUTER-JOIN value (issue #5657).
 fn resolve_chain_to_position<'a>(
     chain: &[usize],
     schema: &crate::schema::CombinedSchema,
@@ -361,9 +361,10 @@ pub(crate) fn count_select_columns(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vibesql_ast::{Expression, UnaryOperator};
     use vibesql_types::SqlValue;
+
+    use super::*;
 
     fn int_lit(n: i64) -> Expression {
         Expression::Literal(SqlValue::Integer(n))

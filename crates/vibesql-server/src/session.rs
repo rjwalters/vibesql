@@ -1,11 +1,11 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::Result;
+use vibesql_consensus::{QueryResult, TxnEntry};
 use vibesql_executor::{
     CursorExecutor, CursorStore, FetchResult as CursorFetchResult, PreparedStatement,
     PreparedStatementCache, PreparedStatementCacheStats,
 };
-use vibesql_consensus::{QueryResult, TxnEntry};
 use vibesql_types::SqlValue;
 
 use crate::{
@@ -61,8 +61,8 @@ struct ReplicatedSessionState {
     /// - write statements return an optimistic ack (`rows_affected = 0`); the authoritative row
     ///   counts are knowable only after the atomic apply at `COMMIT`;
     /// - reads see the session's own buffered writes via leader-local speculative replay (#5401):
-    ///   the buffer is merged into a `TxnEntry` and replayed into a discardable scratch transaction,
-    ///   then the read runs against it. Nothing commits until `COMMIT`.
+    ///   the buffer is merged into a `TxnEntry` and replayed into a discardable scratch
+    ///   transaction, then the read runs against it. Nothing commits until `COMMIT`.
     open_txn: Option<OpenTxn>,
 }
 
@@ -423,9 +423,9 @@ impl Session {
     /// a SELECT we resolve the result column names (explicit columns, aliases,
     /// derived expression names, and `SELECT *` / `table.*` expanded against the
     /// catalog schema). Returns:
-    /// - `Ok(Some(names))` for a SELECT — these match the simple-query path
-    ///   label-for-label (`SelectExecutor::resolve_column_names`, the same
-    ///   `derive_column_names` used by `execute_with_columns`).
+    /// - `Ok(Some(names))` for a SELECT — these match the simple-query path label-for-label
+    ///   (`SelectExecutor::resolve_column_names`, the same `derive_column_names` used by
+    ///   `execute_with_columns`).
     /// - `Ok(None)` for a non-SELECT (the protocol sends `NoData`).
     ///
     /// Both modes resolve names via the same
@@ -759,10 +759,7 @@ impl Session {
     /// and the open-transaction EXECUTE path (`execute_in_open_txn`), so a
     /// prepared write buffers into the open transaction exactly as if the
     /// substituted SQL had been issued directly.
-    fn substitute_execute_sql(
-        &self,
-        execute_stmt: &vibesql_ast::ExecuteStmt,
-    ) -> Result<String> {
+    fn substitute_execute_sql(&self, execute_stmt: &vibesql_ast::ExecuteStmt) -> Result<String> {
         let name = &execute_stmt.name;
         let prepared = self
             .named_statements
@@ -804,11 +801,10 @@ impl Session {
         &mut self,
         stmt: &vibesql_ast::SavepointStmt,
     ) -> Result<ExecutionResult> {
-        let open = self
-            .replication
-            .as_mut()
-            .and_then(|s| s.open_txn.as_mut())
-            .ok_or_else(|| anyhow::anyhow!("SAVEPOINT can only be used inside a transaction"))?;
+        let open =
+            self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
+                anyhow::anyhow!("SAVEPOINT can only be used inside a transaction")
+            })?;
         let depth = open.writes.len();
         open.savepoints.push((stmt.name.clone(), depth));
         Ok(ExecutionResult::Other { message: "SAVEPOINT".to_string() })
@@ -825,9 +821,10 @@ impl Session {
         &mut self,
         stmt: &vibesql_ast::RollbackToSavepointStmt,
     ) -> Result<ExecutionResult> {
-        let open = self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
-            anyhow::anyhow!("ROLLBACK TO SAVEPOINT can only be used inside a transaction")
-        })?;
+        let open =
+            self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
+                anyhow::anyhow!("ROLLBACK TO SAVEPOINT can only be used inside a transaction")
+            })?;
         // Find the most recent savepoint with this name.
         let pos = open
             .savepoints
@@ -851,9 +848,10 @@ impl Session {
         &mut self,
         stmt: &vibesql_ast::ReleaseSavepointStmt,
     ) -> Result<ExecutionResult> {
-        let open = self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
-            anyhow::anyhow!("RELEASE SAVEPOINT can only be used inside a transaction")
-        })?;
+        let open =
+            self.replication.as_mut().and_then(|s| s.open_txn.as_mut()).ok_or_else(|| {
+                anyhow::anyhow!("RELEASE SAVEPOINT can only be used inside a transaction")
+            })?;
         let pos = open
             .savepoints
             .iter()
@@ -872,15 +870,15 @@ impl Session {
     /// keep their `0A000` refusal.
     ///
     /// Mid-transaction result semantics (documented contract):
-    /// - **Writes** are frozen at buffer time and return their command tag with `rows_affected = 0`.
-    ///   The buffer is not proposed until `COMMIT`, so the authoritative row count is not yet known;
-    ///   clients learn the outcome (success or a deterministic rejection) at `COMMIT`.
-    /// - **Reads** observe the session's own buffered writes (full read-your-own-writes, #5401): the
-    ///   frozen buffer is replayed into a discardable leader-local scratch transaction and the read
-    ///   runs against it. Because the replay reuses the buffer's already-frozen values, a read of a
-    ///   `random()` / `now()` write sees exactly the value the committed row will carry. Reads with
-    ///   no buffered writes yet serve committed state through the normal local read path. Nothing is
-    ///   committed until `COMMIT`.
+    /// - **Writes** are frozen at buffer time and return their command tag with `rows_affected =
+    ///   0`. The buffer is not proposed until `COMMIT`, so the authoritative row count is not yet
+    ///   known; clients learn the outcome (success or a deterministic rejection) at `COMMIT`.
+    /// - **Reads** observe the session's own buffered writes (full read-your-own-writes, #5401):
+    ///   the frozen buffer is replayed into a discardable leader-local scratch transaction and the
+    ///   read runs against it. Because the replay reuses the buffer's already-frozen values, a read
+    ///   of a `random()` / `now()` write sees exactly the value the committed row will carry. Reads
+    ///   with no buffered writes yet serve committed state through the normal local read path.
+    ///   Nothing is committed until `COMMIT`.
     fn execute_in_open_txn(
         &mut self,
         sql: &str,
@@ -1121,11 +1119,8 @@ impl Session {
                     .into_iter()
                     .map(|r| Row { values: r.values.to_vec() })
                     .collect();
-                let columns = select_result
-                    .columns
-                    .into_iter()
-                    .map(|name| Column { name })
-                    .collect();
+                let columns =
+                    select_result.columns.into_iter().map(|name| Column { name }).collect();
 
                 Ok(ExecutionResult::Select { rows: result_rows, columns })
             }

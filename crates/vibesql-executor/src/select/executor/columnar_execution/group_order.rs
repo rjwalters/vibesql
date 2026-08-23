@@ -101,11 +101,10 @@ fn resolve_single_term(
         }
     }
 
-    // 3. Structural expression match against a SELECT item. This covers bare
-    //    group keys (`ORDER BY a`), derived-key expressions (`ORDER BY a + b`),
-    //    and aggregates (`ORDER BY SUM(x)`). `expressions_equal` is the same
-    //    positional-matching helper used to validate the SELECT list against the
-    //    GROUP BY keys, so a term that matches here addresses exactly the output
+    // 3. Structural expression match against a SELECT item. This covers bare group keys (`ORDER BY
+    //    a`), derived-key expressions (`ORDER BY a + b`), and aggregates (`ORDER BY SUM(x)`).
+    //    `expressions_equal` is the same positional-matching helper used to validate the SELECT
+    //    list against the GROUP BY keys, so a term that matches here addresses exactly the output
     //    column that holds its value.
     for (i, item) in select_list.iter().enumerate() {
         if let SelectItem::Expression { expr: select_expr, .. } = item {

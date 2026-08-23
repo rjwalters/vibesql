@@ -11,18 +11,16 @@ use std::sync::Arc;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
 use super::SelectionVector;
+#[cfg(feature = "parallel")]
+use crate::select::parallel::ParallelConfig;
 use crate::{
     errors::ExecutorError,
     select::columnar::{ColumnArray, ColumnarBatch},
 };
-
-#[cfg(feature = "parallel")]
-use crate::select::parallel::ParallelConfig;
 
 /// Gather specific columns from a columnar batch using a selection vector
 ///

@@ -2,15 +2,14 @@
 //! INSERT/UPDATE (issue #6193, e_insert-4.1.1.7/1.9, e_update-1.8.x).
 //!
 //! Per SQLite (lang_conflict.html):
-//! - `OR FAIL` stops the statement at the first constraint violation but
-//!   KEEPS every row change the statement already applied before that row.
-//! - `OR ROLLBACK` stops the statement at the first constraint violation and
-//!   rolls back the ENTIRE enclosing transaction (autocommit is re-enabled
-//!   even when the violation happened inside an explicit `BEGIN`).
-//! - Both are exempt from a FOREIGN KEY constraint violation, which always
-//!   behaves as the default ABORT regardless of the statement's own
-//!   conflict-resolution clause (fkey2-20.2.6.x / 20.3.6.x, mirroring the
-//!   existing `OR IGNORE` carve-out in `or_ignore_fk_enforcement.rs`).
+//! - `OR FAIL` stops the statement at the first constraint violation but KEEPS every row change the
+//!   statement already applied before that row.
+//! - `OR ROLLBACK` stops the statement at the first constraint violation and rolls back the ENTIRE
+//!   enclosing transaction (autocommit is re-enabled even when the violation happened inside an
+//!   explicit `BEGIN`).
+//! - Both are exempt from a FOREIGN KEY constraint violation, which always behaves as the default
+//!   ABORT regardless of the statement's own conflict-resolution clause (fkey2-20.2.6.x / 20.3.6.x,
+//!   mirroring the existing `OR IGNORE` carve-out in `or_ignore_fk_enforcement.rs`).
 
 use vibesql_ast::Statement;
 use vibesql_storage::Database;
@@ -102,10 +101,7 @@ fn update_or_fail_surfaces_not_null_violation_on_a_later_row() {
         "UPDATE OR FAIL t SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
     )
     .unwrap_err();
-    assert!(
-        err.contains("NOT NULL constraint failed"),
-        "expected a NOT NULL error, got: {err}"
-    );
+    assert!(err.contains("NOT NULL constraint failed"), "expected a NOT NULL error, got: {err}");
 
     // Row 1's update (b = 100) was applied before the offending row and is kept;
     // rows 2 and 3 are untouched (the statement stopped at row 2).
@@ -136,10 +132,7 @@ fn update_or_fail_surfaces_not_null_violation_without_a_primary_key() {
         "UPDATE OR FAIL t2 SET b = CASE a WHEN 1 THEN 100 WHEN 2 THEN NULL ELSE 300 END",
     )
     .unwrap_err();
-    assert!(
-        err.contains("NOT NULL constraint failed"),
-        "expected a NOT NULL error, got: {err}"
-    );
+    assert!(err.contains("NOT NULL constraint failed"), "expected a NOT NULL error, got: {err}");
 
     assert_eq!(
         query_all(&db, "SELECT a, b FROM t2 ORDER BY a"),

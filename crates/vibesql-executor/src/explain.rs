@@ -12,12 +12,11 @@
 //! - PostgreSQL-style text output (default for EXPLAIN)
 //! - SQLite-style EXPLAIN QUERY PLAN output (for TCL test compatibility)
 
-use std::fmt::Write;
+use std::{collections::HashSet, fmt::Write};
 
-use std::collections::HashSet;
-
-use vibesql_ast::pretty_print::ToSql;
-use vibesql_ast::{ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement};
+use vibesql_ast::{
+    pretty_print::ToSql, ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement,
+};
 use vibesql_storage::Database;
 
 use crate::{
@@ -1003,18 +1002,15 @@ impl ExplainExecutor {
 
         // Analyze FROM clause. The base scan's effective ordering
         // requirement follows SQLite's pipeline priority:
-        // - When the SELECT list contains window functions, the scan feeds
-        //   the INNERMOST window sorting pass (SQLite's co-routine rewrite,
-        //   see count_window_sorts) — SQLite picks an index that delivers
-        //   PARTITION BY/ORDER BY order even without any predicate
+        // - When the SELECT list contains window functions, the scan feeds the INNERMOST window
+        //   sorting pass (SQLite's co-routine rewrite, see count_window_sorts) — SQLite picks an
+        //   index that delivers PARTITION BY/ORDER BY order even without any predicate
         //   (windowpushd.test 2.1.3.6).
-        // - Otherwise the grouping/dedup pass consumes the scan's order:
-        //   when its suppression fired, the scan rides the delivering index
-        //   (#5371, sqlite3 3.51.0 verified live).
-        // - Otherwise the statement-level ORDER BY applies; the scan may
-        //   ride an ordering index exactly when the ORDER BY temp-line
-        //   suppression fires, so non-suppressed shapes keep their
-        //   pre-existing rendering.
+        // - Otherwise the grouping/dedup pass consumes the scan's order: when its suppression
+        //   fired, the scan rides the delivering index (#5371, sqlite3 3.51.0 verified live).
+        // - Otherwise the statement-level ORDER BY applies; the scan may ride an ordering index
+        //   exactly when the ORDER BY temp-line suppression fires, so non-suppressed shapes keep
+        //   their pre-existing rendering.
         //
         // The scan rendering and the suppression stay COUPLED on purpose
         // (#5373, investigated): sqlite3 also rides an index satisfying only
@@ -1342,30 +1338,24 @@ impl ExplainExecutor {
     /// SELECT list that are not satisfied by an index.
     ///
     /// SQLite semantics (window1.test section 23, `do_ordercount_test`):
-    /// - The sort key for a window is its PARTITION BY expressions (treated
-    ///   as ASC with default null ordering) followed by its ORDER BY items.
-    ///   `OVER (PARTITION BY a ORDER BY b)` and `OVER (ORDER BY a, b)` share
-    ///   the key `(a, b)`.
-    /// - Keys are deduplicated by exact structural equality (including
-    ///   direction and COLLATE); frame clauses are ignored entirely.
-    /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no
-    ///   sorting pass.
-    /// - Only the INNERMOST sorting pass scans the base table and can be
-    ///   satisfied by an index (e.g. key `(a, b)` with index `t5ab(a, b)`).
-    ///   SQLite's nested co-routine rewrite emits passes in reverse
-    ///   SELECT-list order, so the innermost pass corresponds to the LAST
+    /// - The sort key for a window is its PARTITION BY expressions (treated as ASC with default
+    ///   null ordering) followed by its ORDER BY items. `OVER (PARTITION BY a ORDER BY b)` and
+    ///   `OVER (ORDER BY a, b)` share the key `(a, b)`.
+    /// - Keys are deduplicated by exact structural equality (including direction and COLLATE);
+    ///   frame clauses are ignored entirely.
+    /// - Windows with neither PARTITION BY nor ORDER BY (`OVER ()`) need no sorting pass.
+    /// - Only the INNERMOST sorting pass scans the base table and can be satisfied by an index
+    ///   (e.g. key `(a, b)` with index `t5ab(a, b)`). SQLite's nested co-routine rewrite emits
+    ///   passes in reverse SELECT-list order, so the innermost pass corresponds to the LAST
     ///   distinct key (by first occurrence).
-    /// - When the innermost pass IS satisfied by an index, sortedness
-    ///   propagates outward: each outer pass whose key is a structural
-    ///   prefix of the order delivered by the pass below it needs no sort
-    ///   either, because the rows flow through in an order that already
-    ///   satisfies it (window9.test 5.1.1: index `i1(a,b,c,d,e)` satisfies
-    ///   keys `(a,b,c,d)`, `(a,b,c)`, `(a,b)` and `(a)` — zero sorts).
-    ///   The chain breaks at the first outer key that is not such a prefix;
-    ///   that key and all keys outside it need temp B-trees (the temp
-    ///   B-tree sort is not guaranteed to preserve residual ordering, so no
-    ///   further propagation is attempted — matching the conservative
-    ///   pre-existing behavior validated by window1.test section 23).
+    /// - When the innermost pass IS satisfied by an index, sortedness propagates outward: each
+    ///   outer pass whose key is a structural prefix of the order delivered by the pass below it
+    ///   needs no sort either, because the rows flow through in an order that already satisfies it
+    ///   (window9.test 5.1.1: index `i1(a,b,c,d,e)` satisfies keys `(a,b,c,d)`, `(a,b,c)`, `(a,b)`
+    ///   and `(a)` — zero sorts). The chain breaks at the first outer key that is not such a
+    ///   prefix; that key and all keys outside it need temp B-trees (the temp B-tree sort is not
+    ///   guaranteed to preserve residual ordering, so no further propagation is attempted —
+    ///   matching the conservative pre-existing behavior validated by window1.test section 23).
     fn count_window_sorts(stmt: &SelectStmt, database: &Database) -> usize {
         let distinct_keys = Self::distinct_window_keys(stmt);
 
@@ -1885,32 +1875,26 @@ impl ExplainExecutor {
         ctes: &HashSet<String>,
     ) -> Result<PlanNode, ExecutorError> {
         match from {
-            vibesql_ast::FromClause::Table { name, alias, .. } => {
+            vibesql_ast::FromClause::Table { name, alias, index_hint, .. } => {
                 // Expand views in EQP output instead of showing an opaque
                 // `SCAN <view>`. CTE names shadow same-named views and are
                 // never expanded.
                 //
-                // - Window-function views (#5347) and blocked bodies —
-                //   aggregates, GROUP BY/HAVING, DISTINCT, LIMIT/OFFSET,
-                //   compound, VALUES, WITH (#5361): SQLite cannot flatten
-                //   them, so the body's plan renders as a CO-ROUTINE block
-                //   plus a trailing `SCAN <name>` (windowpushd.test 2.1.3.6;
-                //   sqlite3 3.51.0 verified per category). VibeSQL's runtime
-                //   materializes every view body, so the block + inner plan
-                //   is truthful even where SQLite manages to flatten a
-                //   specific shape (LIMIT-only bodies, UNION ALL bodies,
-                //   single-use plain CTEs — documented divergences in
+                // - Window-function views (#5347) and blocked bodies — aggregates, GROUP BY/HAVING,
+                //   DISTINCT, LIMIT/OFFSET, compound, VALUES, WITH (#5361): SQLite cannot flatten
+                //   them, so the body's plan renders as a CO-ROUTINE block plus a trailing `SCAN
+                //   <name>` (windowpushd.test 2.1.3.6; sqlite3 3.51.0 verified per category).
+                //   VibeSQL's runtime materializes every view body, so the block + inner plan is
+                //   truthful even where SQLite manages to flatten a specific shape (LIMIT-only
+                //   bodies, UNION ALL bodies, single-use plain CTEs — documented divergences in
                 //   explain_view_expansion_tests.rs).
-                // - Plain flattenable views (#5355): SQLite inlines the body
-                //   into the outer query and shows the underlying table
-                //   access with no mention of the view. VibeSQL's runtime
-                //   MATERIALIZES views (select/scan/table.rs executes the
-                //   full body, then post-filters the outer WHERE), so the
-                //   inner scans shown here are the truthful access path; we
-                //   deliberately do NOT fabricate SQLite's outer-WHERE
-                //   push-down (`SEARCH <table> (x=?)`) because no index
-                //   probe happens at runtime. Where no index applies the
-                //   output matches SQLite exactly (`SCAN <table>`).
+                // - Plain flattenable views (#5355): SQLite inlines the body into the outer query
+                //   and shows the underlying table access with no mention of the view. VibeSQL's
+                //   runtime MATERIALIZES views (select/scan/table.rs executes the full body, then
+                //   post-filters the outer WHERE), so the inner scans shown here are the truthful
+                //   access path; we deliberately do NOT fabricate SQLite's outer-WHERE push-down
+                //   (`SEARCH <table> (x=?)`) because no index probe happens at runtime. Where no
+                //   index applies the output matches SQLite exactly (`SCAN <table>`).
                 if !ctes.contains(&name.to_ascii_lowercase()) {
                     if let Some(view) = database.catalog.get_view(name) {
                         let source = alias.as_deref().unwrap_or(name.as_str());
@@ -1956,6 +1940,7 @@ impl ExplainExecutor {
                     prefer_ordering_scan,
                     needed_columns,
                     database,
+                    index_hint.as_ref(),
                 )
             }
             vibesql_ast::FromClause::Join {
@@ -2253,6 +2238,9 @@ impl ExplainExecutor {
             false,
             &empty_cols,
             database,
+            // Synthetic outer-driver rendering for correlated-join MULTI-INDEX
+            // OR (#6405: INDEXED BY forcing is single-table-FROM scope only).
+            None,
         )?;
         join_node.add_child(outer_node);
 
@@ -2624,6 +2612,37 @@ impl ExplainExecutor {
         is_covering_index(index_name, &all_needed_columns, database)
     }
 
+    /// Build the `(index_name, sorted_columns)` pair `explain_table_scan` uses
+    /// to render an `INDEXED BY <index_name>`-forced index scan (issue #6405),
+    /// in the same shape `cost_based_index_selection` returns for a
+    /// cost-model-chosen index. Returns `None` if `index_name` does not
+    /// resolve to a real index (should not happen — the hint was already
+    /// validated), so the caller can fall back to normal selection.
+    ///
+    /// Expression indexes have no column name to report, so `sorted_columns`
+    /// is `None` for them — same as the runtime's `forced_index_scan_choice`
+    /// in `select/scan/index_scan/selection.rs`, which this mirrors.
+    fn forced_index_info(
+        index_name: &str,
+        database: &Database,
+    ) -> Option<(String, Option<Vec<(String, vibesql_ast::OrderDirection)>>)> {
+        let index_metadata = database.get_index(index_name)?;
+        let sorted_columns = if index_metadata.columns.iter().any(|col| col.is_expression()) {
+            None
+        } else {
+            Some(
+                index_metadata
+                    .columns
+                    .iter()
+                    .filter_map(|col| {
+                        col.column_name().map(|name| (name.to_string(), col.direction()))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        Some((index_name.to_string(), sorted_columns))
+    }
+
     /// Generate plan node for table scan (sequential or index)
     fn explain_table_scan(
         table_name: &str,
@@ -2633,6 +2652,7 @@ impl ExplainExecutor {
         prefer_ordering_scan: bool,
         needed_columns: &HashSet<String>,
         database: &Database,
+        index_hint: Option<&vibesql_ast::IndexHint>,
     ) -> Result<PlanNode, ExecutorError> {
         // MULTI-INDEX OR (epic #5668): the runtime may execute this WHERE as a
         // union of per-branch index lookups. EQP must render the same plan the
@@ -2642,9 +2662,13 @@ impl ExplainExecutor {
         // MULTI-INDEX OR, build SQLite's subtree and return early; otherwise fall
         // through to the existing single-scan rendering below (byte-identical).
         if order_by.is_none() {
-            if let Some(IndexScanChoice::MultiIndexOr { branches, .. }) =
-                select_index_scan_method(table_name, where_clause.as_ref(), None, database)
-            {
+            if let Some(IndexScanChoice::MultiIndexOr { branches, .. }) = select_index_scan_method(
+                table_name,
+                where_clause.as_ref(),
+                None,
+                database,
+                index_hint,
+            )? {
                 let mut node = PlanNode::new("Multi-Index Or").with_object(table_name);
                 for branch in &branches {
                     // Inner SEARCH line: `SEARCH <table> USING [COVERING ]INDEX
@@ -2680,13 +2704,45 @@ impl ExplainExecutor {
             }
         }
 
+        // SQLite `INDEXED BY <name>` (issue #6405): forces EQP to show the
+        // named index (`SEARCH`/`SCAN ... USING INDEX <name>`) instead of the
+        // cost model's normal pick, mirroring the runtime forcing in
+        // `select_index_scan_method`. Falls through to the normal cost-based
+        // pick if the hint doesn't resolve (defensive; should not happen —
+        // `validate_index_hints` runs before EXPLAIN reaches here).
+        let forced_index_info = match index_hint {
+            Some(vibesql_ast::IndexHint::IndexedBy(index_name)) => {
+                if let Some(info) = Self::forced_index_info(index_name, database) {
+                    // Same partial-index guard as the runtime forcing in
+                    // `select_index_scan_method` (issue #6405): a forced
+                    // partial index whose predicate the query WHERE doesn't
+                    // imply cannot be satisfied, and SQLite reports this as a
+                    // prepare-time error rather than rendering a (misleading)
+                    // plan for it.
+                    if !crate::optimizer::predicate_implication::partial_index_usable(
+                        database,
+                        index_name,
+                        where_clause.as_ref(),
+                    ) {
+                        return Err(ExecutorError::Other("no query solution".to_string()));
+                    }
+                    Some(info)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
         // First check for regular index scan
-        let index_info = cost_based_index_selection(
-            table_name,
-            where_clause.as_ref(),
-            order_by.as_ref().map(|v| v.as_slice()),
-            database,
-        );
+        let index_info = forced_index_info.or_else(|| {
+            cost_based_index_selection(
+                table_name,
+                where_clause.as_ref(),
+                order_by.as_ref().map(|v| v.as_slice()),
+                database,
+            )
+        });
 
         // If no regular index scan, check for skip-scan optimization
         let skip_scan_plan = if index_info.is_none() {
@@ -3207,8 +3263,7 @@ fn extract_predicates_recursive(
     index_columns: &[String],
     predicates: &mut Vec<(String, String)>,
 ) {
-    use vibesql_ast::pretty_print::ToSql;
-    use vibesql_ast::BinaryOperator;
+    use vibesql_ast::{pretty_print::ToSql, BinaryOperator};
 
     /// Check if an expression matches any index column (column ref or expression index)
     fn expr_matches_index(expr: &Expression, index_columns: &[String]) -> Option<String> {

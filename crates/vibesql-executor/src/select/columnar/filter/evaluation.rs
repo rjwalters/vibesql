@@ -323,6 +323,7 @@ pub fn evaluate_predicate(predicate: &ColumnPredicate, value: &SqlValue) -> bool
             values: list_values, negated, use_strict_type_ordering, ..
         } => {
             use std::cmp::Ordering;
+
             use vibesql_types::SqlValue;
 
             // A NULL column value is UNKNOWN for both IN and NOT IN (issue

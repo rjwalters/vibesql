@@ -29,10 +29,10 @@
 //! The caller (see [`crate::subscription::manager`]) consults
 //! [`PkPruner::pk_might_match`] per changed row:
 //! - **Insert**: re-query unless the new PK cannot match.
-//! - **Delete**: re-query unless the old PK cannot match (a removed in-set row
-//!   is a real change the subscriber must observe).
-//! - **Update**: re-query unless **both** the old and new PK cannot match — a
-//!   row moving *into* or *out of* the set is a real change.
+//! - **Delete**: re-query unless the old PK cannot match (a removed in-set row is a real change the
+//!   subscriber must observe).
+//! - **Update**: re-query unless **both** the old and new PK cannot match — a row moving *into* or
+//!   *out of* the set is a real change.
 
 use vibesql_ast::{BinaryOperator, Expression, FromClause, SelectStmt, Statement};
 use vibesql_types::SqlValue;
@@ -183,8 +183,8 @@ impl PkPruner {
     /// Returns:
     /// - `Some(true)`  — the value definitely satisfies the predicate,
     /// - `Some(false)` — the value definitely does NOT satisfy the predicate,
-    /// - `None`        — unknown (NULL / not comparable / unsupported); the
-    ///   caller treats this conservatively as "might match".
+    /// - `None`        — unknown (NULL / not comparable / unsupported); the caller treats this
+    ///   conservatively as "might match".
     fn eval(expr: &Expression, pk: &SqlValue) -> Option<bool> {
         match expr {
             Expression::Conjunction(exprs) => {
@@ -224,12 +224,14 @@ impl PkPruner {
             }
 
             Expression::BinaryOp { op, left, right } => match op {
-                BinaryOperator::And => {
-                    Self::eval(&Expression::Conjunction(vec![(**left).clone(), (**right).clone()]), pk)
-                }
-                BinaryOperator::Or => {
-                    Self::eval(&Expression::Disjunction(vec![(**left).clone(), (**right).clone()]), pk)
-                }
+                BinaryOperator::And => Self::eval(
+                    &Expression::Conjunction(vec![(**left).clone(), (**right).clone()]),
+                    pk,
+                ),
+                BinaryOperator::Or => Self::eval(
+                    &Expression::Disjunction(vec![(**left).clone(), (**right).clone()]),
+                    pk,
+                ),
                 _ => {
                     let l = Self::resolve_value(left, pk)?;
                     let r = Self::resolve_value(right, pk)?;
@@ -455,17 +457,13 @@ mod tests {
 
     #[test]
     fn join_is_unanalyzable() {
-        let p =
-            PkPruner::analyze("SELECT * FROM t JOIN u ON t.id = u.id WHERE t.id = 5", "id");
+        let p = PkPruner::analyze("SELECT * FROM t JOIN u ON t.id = u.id WHERE t.id = 5", "id");
         assert!(matches!(p, PkPruner::Unanalyzable));
     }
 
     #[test]
     fn subquery_predicate_is_unanalyzable() {
-        let p = PkPruner::analyze(
-            "SELECT * FROM t WHERE id IN (SELECT id FROM u)",
-            "id",
-        );
+        let p = PkPruner::analyze("SELECT * FROM t WHERE id IN (SELECT id FROM u)", "id");
         assert!(matches!(p, PkPruner::Unanalyzable));
         assert!(p.pk_might_match(&pk(9)));
     }

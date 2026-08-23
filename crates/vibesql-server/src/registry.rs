@@ -6,10 +6,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::RwLock;
-use vibesql_storage::Database;
-
 // Re-export SharedDatabase from executor for backwards compatibility
 pub use vibesql_executor::SharedDatabase;
+use vibesql_storage::Database;
 
 /// Type alias for the raw Arc<RwLock<Database>> type.
 /// This maintains backwards compatibility with code that expects this type.

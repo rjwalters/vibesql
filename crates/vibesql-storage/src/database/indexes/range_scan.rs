@@ -133,8 +133,9 @@ impl IndexData {
                                 // This ensures we exclude ALL keys starting with the original value
                                 match smart_increment_value(v) {
                                     Some(incremented) => (vec![incremented], true),
-                                    // If increment fails (overflow/non-numeric), fall back to Excluded
-                                    // but mark that we need to filter results manually
+                                    // If increment fails (overflow/non-numeric), fall back to
+                                    // Excluded but mark that we
+                                    // need to filter results manually
                                     None => {
                                         needs_start_filter = true;
                                         (vec![v.clone()], false)
@@ -169,7 +170,8 @@ impl IndexData {
                                 }
                             } else {
                                 // For exclusive: use end_val itself as Excluded bound
-                                // But this doesn't correctly exclude [v, x] keys, so we need filtering
+                                // But this doesn't correctly exclude [v, x] keys, so we need
+                                // filtering
                                 needs_end_filter = true;
                                 Some((vec![v.clone()], false))
                             }
@@ -209,7 +211,8 @@ impl IndexData {
                                 if let (Some(first), Some(start_val)) =
                                     (first_col, normalized_start.as_ref())
                                 {
-                                    // Skip if first column equals start value (we want strictly greater)
+                                    // Skip if first column equals start value (we want strictly
+                                    // greater)
                                     if first == start_val {
                                         continue;
                                     }

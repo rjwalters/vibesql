@@ -7,15 +7,13 @@
 //! ```
 //!
 //! Semantics (see <https://www.sqlite.org/lang_upsert.html>):
-//! - When a conflict target `(cols)` is given, only conflicts on that exact
-//!   PRIMARY KEY / UNIQUE constraint / unique index take the update arm.
-//!   Conflicts on other constraints surface as normal UNIQUE errors via the
-//!   regular insert path.
-//! - `excluded.col` in SET/WHERE expressions refers to the row that would
-//!   have been inserted; unqualified or target-table-qualified references
-//!   resolve to the existing (conflicting) row.
-//! - When the `DO UPDATE ... WHERE` predicate is false or NULL the candidate
-//!   row is silently dropped (neither inserted nor updated).
+//! - When a conflict target `(cols)` is given, only conflicts on that exact PRIMARY KEY / UNIQUE
+//!   constraint / unique index take the update arm. Conflicts on other constraints surface as
+//!   normal UNIQUE errors via the regular insert path.
+//! - `excluded.col` in SET/WHERE expressions refers to the row that would have been inserted;
+//!   unqualified or target-table-qualified references resolve to the existing (conflicting) row.
+//! - When the `DO UPDATE ... WHERE` predicate is false or NULL the candidate row is silently
+//!   dropped (neither inserted nor updated).
 //!
 //! Conflict targets match the PRIMARY KEY, table-level UNIQUE constraints,
 //! and unique indexes — including expression indexes (`ON CONFLICT(a+b)`
@@ -37,15 +35,14 @@
 //! are still treated as inexact and never match.
 //!
 //! Known limitations (issue #5269):
-//! - UPDATE triggers do not fire on the upsert update arm (parity with the
-//!   MySQL-style `ON DUPLICATE KEY UPDATE` path).
+//! - UPDATE triggers do not fire on the upsert update arm (parity with the MySQL-style `ON
+//!   DUPLICATE KEY UPDATE` path).
 //!
 //! Subqueries in SET/WHERE execute with full scope resolution (issue #5279):
 //! names bound by a subquery's own FROM clause win over the upsert scope, and
 //! a FROM item named/aliased `excluded` shadows the pseudo-table. See
 //! `UpsertColumnSubstituter` for one documented edge involving `IN`.
 
-use crate::errors::ExecutorError;
 use vibesql_ast::{
     visitor::{transform_expression, ExpressionMutVisitor, VisitResult},
     Assignment, ConflictTargetItem, Expression, FromClause, OnConflictAction, OnConflictClause,
@@ -53,8 +50,10 @@ use vibesql_ast::{
 };
 use vibesql_types::SqlValue;
 
-use crate::partial_index_maintenance::is_predicate_truthy;
-use crate::select::grouping::expressions_equal;
+use crate::{
+    errors::ExecutorError, expression_index_maintenance, partial_index_maintenance,
+    partial_index_maintenance::is_predicate_truthy, select::grouping::expressions_equal,
+};
 
 /// Outcome of per-row clause selection across a statement's ON CONFLICT
 /// clauses (generalized UPSERT, upsert5).
@@ -379,14 +378,12 @@ fn resolve_target_items<'a>(
 /// (`expressions_equal`, so `a+(+b)` does NOT match `a+b` — upsert1-210).
 /// The target-level WHERE is matched against the index predicate with SQLite's
 /// asymmetric rule:
-/// - against a **partial** index (`candidate.predicate = Some`), the target
-///   WHERE must structurally equal the index predicate: a bare target never
-///   matches a partial index (upsert1-300) and a mismatched predicate never
-///   matches (upsert1-310);
-/// - against a **full** (non-partial) index (`candidate.predicate = None`), a
-///   target WHERE clause is parsed and validated but ignored for matching, so
-///   `ON CONFLICT(b,c,d) WHERE a!=0` still matches a full index on
-///   `(d,c,b)` (upsert4 2.x.2.6 / 2.x.2.9).
+/// - against a **partial** index (`candidate.predicate = Some`), the target WHERE must structurally
+///   equal the index predicate: a bare target never matches a partial index (upsert1-300) and a
+///   mismatched predicate never matches (upsert1-310);
+/// - against a **full** (non-partial) index (`candidate.predicate = None`), a target WHERE clause
+///   is parsed and validated but ignored for matching, so `ON CONFLICT(b,c,d) WHERE a!=0` still
+///   matches a full index on `(d,c,b)` (upsert4 2.x.2.6 / 2.x.2.9).
 fn candidate_matches_target(
     candidate: &UniqueCandidate,
     target: &[ResolvedTargetItem<'_>],
@@ -661,14 +658,12 @@ fn unique_violation_message(
 /// Enforce constraints on the row produced by the DO UPDATE arm — the same
 /// checks a normal UPDATE runs (issue #5836, upsert4 1.x.5):
 ///
-/// - NOT NULL and CHECK constraints (per-row, via the shared UPDATE
-///   validator);
-/// - PRIMARY KEY / UNIQUE constraints / unique indexes, by scanning live
-///   rows directly. The scan excludes the row being updated (`row_id`) so a
-///   SET that leaves a key unchanged never conflicts with itself. Live-row
-///   scanning matches this module's conflict detection and does not depend
-///   on database-level index data, which the upsert arm does not maintain
-///   (issue #5269).
+/// - NOT NULL and CHECK constraints (per-row, via the shared UPDATE validator);
+/// - PRIMARY KEY / UNIQUE constraints / unique indexes, by scanning live rows directly. The scan
+///   excludes the row being updated (`row_id`) so a SET that leaves a key unchanged never conflicts
+///   with itself. Live-row scanning matches this module's conflict detection and runs BEFORE the
+///   row is written back, so it cannot rely on database-level index data reflecting the new values
+///   yet (index data itself IS kept in sync with the write, per issue #6493).
 ///
 /// Errors use SQLite's exact wording, verified against sqlite3:
 /// `UNIQUE constraint failed: t.c` / `NOT NULL constraint failed: t.b` /
@@ -775,12 +770,11 @@ pub fn row_conflicts_on_target(
 ///
 /// Returns:
 /// - `Updated(row_id)` when a conflicting row was found and updated,
-/// - `Skipped` when a conflicting row was found but the WHERE predicate was
-///   not satisfied (the candidate row is dropped silently),
-/// - `NoConflict` when no row conflicts on the targeted constraint(s); the
-///   caller should proceed with a normal insert (which may still raise
-///   UNIQUE errors for constraints other than the named target — SQLite
-///   semantics, upsert1-201).
+/// - `Skipped` when a conflicting row was found but the WHERE predicate was not satisfied (the
+///   candidate row is dropped silently),
+/// - `NoConflict` when no row conflicts on the targeted constraint(s); the caller should proceed
+///   with a normal insert (which may still raise UNIQUE errors for constraints other than the named
+///   target — SQLite semantics, upsert1-201).
 #[allow(clippy::too_many_arguments)]
 pub fn handle_on_conflict_update(
     db: &mut vibesql_storage::Database,
@@ -903,14 +897,29 @@ pub fn handle_on_conflict_update(
         .get_table_mut(table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
     table_mut
-        .update_row(row_id, new_row)
+        .update_row(row_id, new_row.clone())
         .map_err(|e| ExecutorError::UnsupportedExpression(format!("Storage error: {}", e)))?;
 
-    // NOTE: database-level index data is not rebuilt here, matching the
-    // MySQL-style ON DUPLICATE KEY UPDATE path. Updating an indexed column
-    // through the upsert arm can leave index data stale — a known v1
-    // limitation (issue #5269). Conflict detection above scans live rows
-    // directly, so upsert correctness does not depend on index data.
+    // Maintain user-defined indexes exactly like a normal UPDATE does (issue
+    // #6493): plain indexes first, then expression and partial indexes (the
+    // same sequence `update/executor.rs` uses for a single-row update). Prior
+    // to this fix, database-level index data was never rebuilt on the DO
+    // UPDATE arm, leaving indexes silently stale after an upsert.
+    db.update_indexes_for_update(table_name, &existing_row, &new_row, row_id, None);
+    expression_index_maintenance::maintain_expression_indexes_for_update(
+        db,
+        table_name,
+        &existing_row,
+        &new_row,
+        row_id,
+    );
+    partial_index_maintenance::maintain_partial_indexes_for_update(
+        db,
+        table_name,
+        &existing_row,
+        &new_row,
+        row_id,
+    );
 
     // Invalidate the database-level columnar cache since table data changed.
     // The table-level cache is already invalidated by update_row(); both are

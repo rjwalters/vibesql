@@ -374,8 +374,7 @@ fn parse_single_aggregate(sql: &str) -> (String, bool, Vec<vibesql_ast::Expressi
 
 fn assert_column(expr: &vibesql_ast::Expression, expected: &str) {
     match expr {
-        vibesql_ast::Expression::ColumnRef(col_id)
-            if col_id.column_canonical() == expected => {}
+        vibesql_ast::Expression::ColumnRef(col_id) if col_id.column_canonical() == expected => {}
         other => panic!("Expected column reference {expected}, got {other:?}"),
     }
 }

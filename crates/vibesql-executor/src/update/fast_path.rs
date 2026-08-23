@@ -5,11 +5,11 @@
 //!
 //! ## Optimization Tiers
 //!
-//! 1. **Super-fast path**: Direct in-place column updates for literal assignments
-//!    to non-indexed, non-PK, non-unique columns. No row cloning required.
+//! 1. **Super-fast path**: Direct in-place column updates for literal assignments to non-indexed,
+//!    non-PK, non-unique columns. No row cloning required.
 //!
-//! 2. **Fast path**: Single-row PK updates with minimal validation. Skips
-//!    trigger checks, schema cloning, and two-phase execution.
+//! 2. **Fast path**: Single-row PK updates with minimal validation. Skips trigger checks, schema
+//!    cloning, and two-phase execution.
 
 use std::collections::{HashMap, HashSet};
 

@@ -42,8 +42,7 @@ pub(super) use math_funcs::likelihood;
 pub(super) use math_funcs::{likely, random, unlikely};
 // Re-export pattern functions
 pub(super) use pattern_funcs::glob;
-pub(super) use pattern_funcs::like;
-pub(super) use pattern_funcs::match_default;
+pub(super) use pattern_funcs::{like, match_default};
 // Re-export string functions
 pub(super) use string_funcs::char_func;
 pub(super) use string_funcs::{concat_ws, printf, unicode, unistr};

@@ -11,11 +11,10 @@
 //! These end-to-end tests drive the real SQL executor and assert on *structural*
 //! `columnar_cache_stats()` counters — never wall-clock timing (the benchmark
 //! machine is always loaded):
-//!   - `conversions` stays flat across a mix of INSERTs and scans (no rebuild
-//!     per write), while `incremental_updates` climbs, and
-//!   - result parity: the incrementally-maintained columnar path returns
-//!     byte-identical rows to the row path forced by disabling the
-//!     representation cache (`columnar_cache_budget = 0`).
+//!   - `conversions` stays flat across a mix of INSERTs and scans (no rebuild per write), while
+//!     `incremental_updates` climbs, and
+//!   - result parity: the incrementally-maintained columnar path returns byte-identical rows to the
+//!     row path forced by disabling the representation cache (`columnar_cache_budget = 0`).
 //!
 //! No wall-clock assertions anywhere.
 
