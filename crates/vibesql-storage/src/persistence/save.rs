@@ -425,11 +425,77 @@ impl Database {
 /// which — for a schema-qualified table like `aux.t` — would still contain
 /// the `aux.` qualifier baked into the original CREATE TABLE text and fail to
 /// reload as a standalone database).
+///
+/// For each column, determine whether it had NO declared type at all in the
+/// original `CREATE TABLE` text (e.g. `CREATE TABLE t(a)` — as opposed to an
+/// explicit `CREATE TABLE t(a BLOB)`, which also parses to
+/// `DataType::BinaryLargeObject` and must NOT be treated as typeless).
+/// Returns `Some(vec)` aligned 1:1 with `schema.columns` when
+/// the check could be performed, `None` when it could not (see below) — in
+/// either case, `write_create_table_ddl` treats an unknown/absent entry as
+/// "type declared", which reproduces the exact behavior this function is
+/// replacing.
+///
+/// `TableSchema::sql_source` is the right thing to re-parse here — NOT the
+/// same "verbatim shortcut" this function's own doc comment says
+/// `write_create_table_ddl` deliberately avoids: that avoidance is about
+/// output-side table-name qualification (`aux.` baked into the emitted
+/// `CREATE TABLE` line and, separately, `sql_source` going stale after an
+/// `ALTER TABLE ADD/DROP/RENAME COLUMN`), not about the *type text* of an
+/// individual column that still exists. `sql_source` is kept in lockstep
+/// with the live column set by every ALTER TABLE path
+/// (`update_sql_source_after_alter` et al. in
+/// `vibesql-executor/src/alter/mod.rs`): it is rewritten in place when the
+/// edit can be applied to it, or invalidated to `None` when it can't. So a
+/// present `sql_source` is exactly as trustworthy here as it already is for
+/// the STRICT/rowid-alias/AUTOINCREMENT rehydration in
+/// `vibesql-storage/src/persistence/binary/constraints.rs`, which relies on
+/// the identical invariant. When `sql_source` is `None` (never captured, or
+/// invalidated by an ALTER this function can't safely reconstruct from) or
+/// fails to re-parse as a bare `CREATE TABLE`, every column conservatively
+/// falls back to "type declared" — the original (typeless-losing) behavior —
+/// rather than guessing.
+fn typeless_columns_from_sql_source(schema: &vibesql_catalog::TableSchema) -> Option<Vec<bool>> {
+    let src = schema.sql_source.as_deref()?;
+    let stmt = vibesql_parser::Parser::parse_sql(src).ok()?;
+    let create = match stmt {
+        vibesql_ast::Statement::CreateTable(create) => create,
+        _ => return None,
+    };
+    // CREATE TABLE ... AS SELECT carries no column type declarations at all;
+    // every column type there is inferred, never "typeless" in this sense.
+    if create.as_query.is_some() {
+        return None;
+    }
+    Some(
+        schema
+            .columns
+            .iter()
+            .map(|col| {
+                create
+                    .columns
+                    .iter()
+                    .find(|c| c.name.eq_ignore_ascii_case(&col.name))
+                    .map(|c| c.type_source.is_none())
+                    .unwrap_or(false)
+            })
+            .collect(),
+    )
+}
+
 fn write_create_table_ddl<W: Write>(
     writer: &mut W,
     quoted_output_name: &str,
     schema: &vibesql_catalog::TableSchema,
 ) -> Result<(), StorageError> {
+    // Which columns had NO declared type at all in the original `CREATE
+    // TABLE` (e.g. `CREATE TABLE t(a)`), so their type token can be omitted
+    // below instead of defaulting to a literal "BLOB" (issue #6481). `None`
+    // when this can't be determined (no captured `sql_source`, or it fails
+    // to re-parse) — every column then falls back to always emitting a type,
+    // the pre-#6481 behavior.
+    let typeless_columns = typeless_columns_from_sql_source(schema);
+
     write!(writer, "CREATE TABLE {} (", quoted_output_name)
         .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
@@ -438,10 +504,20 @@ fn write_create_table_ddl<W: Write>(
             write!(writer, ", ")
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         }
-        // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
-        let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
-        write!(writer, "{} {}", quote_identifier(&col.name), type_str)
-            .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        let is_typeless =
+            typeless_columns.as_ref().and_then(|v| v.get(i)).copied().unwrap_or(false);
+        if is_typeless {
+            // No declared type: emit just the column name, matching SQLite's
+            // (and this engine's own same-session/main-schema) rendering of
+            // a typeless column, e.g. `CREATE TABLE t2 (d, e, f)`.
+            write!(writer, "{}", quote_identifier(&col.name))
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        } else {
+            // Format column type, preserving INT vs INTEGER distinction for rowid alias behavior
+            let type_str = format_column_type(&col.data_type, col.is_exact_integer_type);
+            write!(writer, "{} {}", quote_identifier(&col.name), type_str)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        }
 
         // Handle generated columns (AS expression syntax)
         if let Some(ref generated_expr) = col.generated_expr {
@@ -1416,6 +1492,146 @@ mod tests {
         assert!(
             !dump.contains("tr_temp"),
             "temp trigger must NOT appear in the SQL dump, got:\n{dump}"
+        );
+    }
+
+    // ========================================================================
+    // write_create_table_ddl typeless-column reconstruction (#6481)
+    //
+    // Regenerated attached-schema DDL (`write_create_table_ddl`, used by
+    // `save_attached_schema_sql_dump`) must preserve the "no declared type"
+    // distinction for a column that had none in the original `CREATE TABLE`,
+    // instead of defaulting every undeclared-type column to a literal
+    // "BLOB" — the process-boundary bug from issue #6481.
+    // ========================================================================
+
+    #[test]
+    fn test_attached_schema_dump_omits_type_for_typeless_column() {
+        let mut db = Database::new();
+        db.catalog.attach_database("aux", ":memory:").unwrap();
+
+        let columns = vec![
+            vibesql_catalog::ColumnSchema {
+                name: "d".to_string(),
+                data_type: vibesql_types::DataType::BinaryLargeObject,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: false,
+            },
+            vibesql_catalog::ColumnSchema {
+                name: "e".to_string(),
+                data_type: vibesql_types::DataType::Varchar { max_length: None },
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: false,
+            },
+        ];
+        let mut schema = vibesql_catalog::TableSchema::new("t2".to_string(), columns);
+        // Mirrors the stripped (unqualified) form `create_table.rs` stores
+        // for an attached-schema table (the `aux.` qualifier is never kept
+        // in `sql_source`).
+        schema.set_sql_source("CREATE TABLE t2(d, e TEXT)");
+        db.create_table_with_identifier(
+            schema,
+            vibesql_catalog::TableIdentifier::qualified("aux", false, "t2", false),
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aux.vbsql");
+        db.save_attached_schema_sql_dump("aux", &path).unwrap();
+        let dump = std::fs::read_to_string(&path).unwrap();
+
+        // Column `e`'s declared type is reconstructed from `data_type`
+        // (`Varchar { max_length: None }`) via `format_column_type`, which
+        // always renders the canonical "VARCHAR" spelling rather than
+        // preserving the original "TEXT" text from `sql_source` — a
+        // pre-existing, unrelated normalization of this reconstruction path
+        // (see `typeless_columns_from_sql_source`'s doc comment). This
+        // assertion only pins that a *typed* column still gets a concrete,
+        // non-empty type token, alongside the typeless column `d` getting
+        // none at all.
+        assert!(
+            dump.contains("CREATE TABLE t2 (d, e VARCHAR)"),
+            "typeless column must be emitted with no type token, got:\n{dump}"
+        );
+        assert!(
+            !dump.to_uppercase().contains("BLOB"),
+            "typeless column must never be reconstructed as BLOB, got:\n{dump}"
+        );
+    }
+
+    #[test]
+    fn test_attached_schema_dump_keeps_explicit_blob_type() {
+        // An explicit `BLOB` declaration must still round-trip as a
+        // concrete type, not regress to typeless/empty.
+        let mut db = Database::new();
+        db.catalog.attach_database("aux", ":memory:").unwrap();
+
+        let columns = vec![vibesql_catalog::ColumnSchema {
+            name: "a".to_string(),
+            data_type: vibesql_types::DataType::BinaryLargeObject,
+            nullable: true,
+            default_value: None,
+            generated_expr: None,
+            collation: None,
+            is_exact_integer_type: false,
+        }];
+        let mut schema = vibesql_catalog::TableSchema::new("t3".to_string(), columns);
+        schema.set_sql_source("CREATE TABLE t3(a BLOB)");
+        db.create_table_with_identifier(
+            schema,
+            vibesql_catalog::TableIdentifier::qualified("aux", false, "t3", false),
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aux.vbsql");
+        db.save_attached_schema_sql_dump("aux", &path).unwrap();
+        let dump = std::fs::read_to_string(&path).unwrap();
+
+        assert!(
+            dump.contains("CREATE TABLE t3 (a BLOB)"),
+            "explicit BLOB declaration must round-trip as BLOB, got:\n{dump}"
+        );
+    }
+
+    #[test]
+    fn test_attached_schema_dump_falls_back_to_typed_without_sql_source() {
+        // No `sql_source` (e.g. a programmatically-built schema) must fall
+        // back to the pre-#6481 behavior of always emitting a type, rather
+        // than guessing a column is typeless.
+        let mut db = Database::new();
+        db.catalog.attach_database("aux", ":memory:").unwrap();
+
+        let columns = vec![vibesql_catalog::ColumnSchema {
+            name: "a".to_string(),
+            data_type: vibesql_types::DataType::BinaryLargeObject,
+            nullable: true,
+            default_value: None,
+            generated_expr: None,
+            collation: None,
+            is_exact_integer_type: false,
+        }];
+        let schema = vibesql_catalog::TableSchema::new("t4".to_string(), columns);
+        db.create_table_with_identifier(
+            schema,
+            vibesql_catalog::TableIdentifier::qualified("aux", false, "t4", false),
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("aux.vbsql");
+        db.save_attached_schema_sql_dump("aux", &path).unwrap();
+        let dump = std::fs::read_to_string(&path).unwrap();
+
+        assert!(
+            dump.contains("CREATE TABLE t4 (a BLOB)"),
+            "no sql_source must fall back to always emitting a type, got:\n{dump}"
         );
     }
 
