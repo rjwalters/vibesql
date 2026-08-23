@@ -10,7 +10,9 @@
 //! - `advanced` - Advanced SQL objects (types, domains, sequences, views, triggers, etc.)
 
 use std::{
+    cell::RefCell,
     collections::{HashMap, HashSet},
+    marker::PhantomData,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -46,6 +48,74 @@ pub use attachments::{AttachedDatabase, MAX_ATTACHED_DATABASES};
 /// This ensures each Catalog instance gets a unique session ID,
 /// even if created in the same process.
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// Current unqualified-resolution schema restriction (trigger-body /
+    /// view-body execution, #6477/#6485) — thread-local rather than a field
+    /// on `Catalog` so concurrent query execution across OS threads (e.g.
+    /// `SharedDatabase`'s concurrent readers, `crates/vibesql-executor/src/readonly.rs`,
+    /// which the HTTP server drives one-per-request against a single shared
+    /// `Database`) can never race on it.
+    ///
+    /// This replaced a `RwLock<Option<String>>` *field* on `Catalog`, which
+    /// was `Sync` at the type level but still shared, catalog-global mutable
+    /// state: two concurrent view-body executions on the same `Database`
+    /// interleaved their set-then-restore pairs and could leave the
+    /// restriction permanently stuck on one schema, corrupting every
+    /// subsequent unrelated query on that database (PR #6506 review — the
+    /// reviewer reproduced `errors=119999` / `stuck_restriction=Some("main")`
+    /// with 8 threads). Making the restriction thread-local removes the
+    /// sharing entirely: a single query's execution runs synchronously to
+    /// completion on the thread that set the restriction (the executor has no
+    /// `.await` points inside a query, so no other query can interleave its
+    /// own set/restore in between), so scoping by thread confines the
+    /// restriction to exactly the call stack that established it — no shared
+    /// mutable state, and therefore no lock.
+    ///
+    /// Always establish it through
+    /// [`Catalog::scoped_unqualified_resolution_restriction`], whose guard
+    /// restores the previous value on drop. Because query threads are pooled
+    /// and long-lived, a restriction leaked by a skipped restore (an early
+    /// `?` return or a panic) would otherwise silently mis-resolve every
+    /// later, unrelated query that happens to land on the same thread —
+    /// the thread-scoped version of the very bug this replaced.
+    static RESTRICT_UNQUALIFIED_RESOLUTION_TO_SCHEMA: RefCell<Option<String>> =
+        const { RefCell::new(None) };
+}
+
+/// RAII guard for a scoped unqualified-resolution restriction.
+///
+/// Created by [`Catalog::scoped_unqualified_resolution_restriction`]. The
+/// restriction is active for exactly as long as the guard is alive, and the
+/// previously-active restriction is restored when it drops — including on an
+/// early `?` return or a panic unwinding through the scope. Nested guards
+/// therefore behave like a proper stack (an inner trigger/view body restores
+/// the outer body's restriction, not `None`).
+///
+/// Deliberately **not** `Send`: the value it restores lives in the
+/// thread-local of the thread that created it, so dropping it on a different
+/// thread would write the restore into the wrong thread's state and leave the
+/// originating thread stuck.
+#[derive(Debug)]
+#[must_use = "the restriction is only active while the guard is alive; binding it to `_` drops it \
+              immediately"]
+pub struct UnqualifiedResolutionRestrictionGuard {
+    /// The restriction that was active when this guard was created, restored
+    /// on drop.
+    previous: Option<String>,
+    _not_send: PhantomData<*const ()>,
+}
+
+impl Drop for UnqualifiedResolutionRestrictionGuard {
+    fn drop(&mut self) {
+        // `try_with` rather than `with`: during thread teardown the
+        // thread-local may already be destroyed, and `with` would panic
+        // there. A destroyed thread-local has nothing left to corrupt, so
+        // silently skipping the restore is correct.
+        let _ = RESTRICT_UNQUALIFIED_RESOLUTION_TO_SCHEMA
+            .try_with(|cell| *cell.borrow_mut() = self.previous.take());
+    }
+}
 
 /// Database catalog - manages all schemas and their objects.
 #[derive(Debug, Clone)]
@@ -90,21 +160,6 @@ pub struct Catalog {
     /// When true, identifier lookups are case-sensitive (SQL standard).
     /// When false (default), identifier lookups are case-insensitive (MySQL compatible).
     pub(crate) case_sensitive_identifiers: bool,
-    /// When set, unqualified table-name resolution is restricted to exactly
-    /// this internal schema name, bypassing the ordinary
-    /// temp -> current -> attached search order entirely. This models
-    /// SQLite's rule that an unqualified table name inside a trigger body
-    /// resolves *only* within the schema that owns the trigger, never
-    /// falling back to another schema: a `main` trigger cannot see a
-    /// same-named TEMP table (trigger1-3.2..3.5), a `temp` trigger keeps its
-    /// normal temp-first resolution (the value here is the session's own
-    /// temp schema name), and — the fix for #6477 — a trigger owned by an
-    /// ATTACHed schema resolves its body's unqualified names only within
-    /// that attachment, never `main` or any other attachment. It is toggled
-    /// on only for the duration of a trigger body's execution and restored
-    /// afterward (nested trigger bodies restore the prior value on unwind).
-    /// Default `None` (full search order) everywhere else.
-    pub(crate) restrict_unqualified_resolution_to_schema: Option<String>,
     /// Monotonic creation-order sequence for schema objects (tables, indexes,
     /// views, triggers), keyed by `"{schema}\u{1}{name}"` (both lowercased).
     ///
@@ -183,9 +238,6 @@ impl Catalog {
             // The parser preserves original case from SQL text. We use case-insensitive
             // mode so lookups work regardless of case in queries.
             case_sensitive_identifiers: false,
-            // Full search order is active by default; only a trigger body's
-            // execution restricts it (see field docs).
-            restrict_unqualified_resolution_to_schema: None,
             creation_seq: HashMap::new(),
             next_creation_seq: 0,
             temp_touched: false,
@@ -333,17 +385,46 @@ impl Catalog {
     /// owned by that attachment. `None` restores the ordinary search order.
     /// Returns the previous value so the caller can restore it (correct
     /// nesting of trigger bodies).
+    ///
+    /// Note this is thread-local state, not per-`Catalog` state — `&self` is
+    /// accepted (rather than `&mut self`) purely so this can be called from
+    /// the read-only view-body-at-query-time path, which only holds
+    /// `&Database`. See the `RESTRICT_UNQUALIFIED_RESOLUTION_TO_SCHEMA`
+    /// thread-local for why it is not a field on `Catalog`.
+    ///
+    /// Prefer [`Self::scoped_unqualified_resolution_restriction`], which
+    /// restores the previous value automatically; this raw setter exists for
+    /// the trigger-body path, whose restore is interleaved with other
+    /// bookkeeping it must undo in the same order.
     pub fn set_restrict_unqualified_resolution_to_schema(
-        &mut self,
+        &self,
         schema: Option<String>,
     ) -> Option<String> {
-        std::mem::replace(&mut self.restrict_unqualified_resolution_to_schema, schema)
+        RESTRICT_UNQUALIFIED_RESOLUTION_TO_SCHEMA
+            .with(|cell| std::mem::replace(&mut *cell.borrow_mut(), schema))
+    }
+
+    /// Restrict unqualified table-name resolution for the lifetime of the
+    /// returned guard, restoring the previously-active restriction when it
+    /// drops.
+    ///
+    /// This is the safe form of
+    /// [`Self::set_restrict_unqualified_resolution_to_schema`]: the restore
+    /// cannot be skipped by an early `?` return or a panic, which matters
+    /// because query threads are pooled — a leaked restriction would
+    /// mis-resolve later, unrelated queries on the same thread (#6506).
+    pub fn scoped_unqualified_resolution_restriction(
+        &self,
+        schema: Option<String>,
+    ) -> UnqualifiedResolutionRestrictionGuard {
+        let previous = self.set_restrict_unqualified_resolution_to_schema(schema);
+        UnqualifiedResolutionRestrictionGuard { previous, _not_send: PhantomData }
     }
 
     /// The schema unqualified table-name resolution is currently restricted
     /// to, if any (see [`Self::set_restrict_unqualified_resolution_to_schema`]).
-    pub fn unqualified_resolution_restricted_to(&self) -> Option<&str> {
-        self.restrict_unqualified_resolution_to_schema.as_deref()
+    pub fn unqualified_resolution_restricted_to(&self) -> Option<String> {
+        RESTRICT_UNQUALIFIED_RESOLUTION_TO_SCHEMA.with(|cell| cell.borrow().clone())
     }
 
     /// Resolve a schema name written by the user to the **canonical** internal

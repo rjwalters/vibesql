@@ -74,8 +74,39 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                 // (notably SetOperationColumnMismatch, see select7.test 8.2) pass through
                 // bare, matching SQLite's query-time messages.
                 use crate::select::SelectExecutor;
+                // Scope unqualified table-name resolution in the view body to
+                // the view's own schema while deriving columns — and ONLY
+                // that schema, never falling back to `temp` or elsewhere
+                // (#6485). SQLite resolves a view's body against the schema
+                // that owns the view: an unqualified reference inside a
+                // `main` (or ATTACHed-schema, #6490) view's body must not
+                // silently resolve to a same-named TEMP table, or the view
+                // would be permanently mis-homed to the wrong table. A TEMP
+                // view keeps ordinary temp-first resolution (temp shadows
+                // main), so it is left unrestricted. Mirrors the trigger-body
+                // restriction mechanism
+                // (`Catalog::scoped_unqualified_resolution_restriction`,
+                // trigger_execution.rs, #6477) rather than reinventing it.
+                //
+                // The restriction is thread-local and established through an
+                // RAII guard, so concurrent executions never share it and the
+                // previous value is restored even on the early `return Err`
+                // paths in the `match` below (#6506).
+                let restriction = if stmt.temporary {
+                    None
+                } else {
+                    let owning_schema = schema
+                        .as_deref()
+                        .map(|s| db.catalog.canonical_schema_name(s))
+                        .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+                    Some(owning_schema)
+                };
+                let restriction_guard =
+                    db.catalog.scoped_unqualified_resolution_restriction(restriction);
                 let executor = SelectExecutor::new(db);
-                match executor.execute_with_simple_columns(&stmt.query) {
+                let result = executor.execute_with_simple_columns(&stmt.query);
+                drop(restriction_guard);
+                match result {
                     Ok(result) => Some(result.columns),
                     Err(e @ ExecutorError::OrderByTermNotInResultSet { .. }) => {
                         return Err(ExecutorError::SqliteCompatError(format!(

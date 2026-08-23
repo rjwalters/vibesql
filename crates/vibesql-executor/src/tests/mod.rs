@@ -44,6 +44,8 @@
 //! - `truncate_cascade_tests`: TRUNCATE TABLE CASCADE/RESTRICT tests (issue #1393)
 //! - `truncate_table_tests`: TRUNCATE TABLE tests (single table, multiple tables, IF EXISTS)
 //! - `view_tests`: VIEW support tests (CREATE/DROP/SELECT, OR REPLACE, CASCADE)
+//! - `view_resolution_concurrency_tests`: concurrent-reader regression coverage for the view-body
+//!   unqualified-resolution restriction (#6485 / PR #6506 review)
 //! - `index_scan_tests`: Index scan optimization tests (Phase 5a of issue #1387)
 //! - `index_optimization`: Index optimization edge case tests (BETWEEN, IN, commute, numeric types
 //!   - issue #1821)
@@ -156,6 +158,7 @@ mod truncate_table_tests;
 mod unique_index_tests;
 mod update_returning;
 mod vector_distance_operators;
+mod view_resolution_concurrency_tests;
 mod view_tests;
 mod window1_quick_wins;
 mod window1_residuals;

@@ -3505,3 +3505,87 @@ fn test_upsert_do_update_maintains_indexes_attached_schema() {
     assert!(!index_has_numeric_key(&ex, "aux_partial_idx", 9.0));
     assert!(index_has_numeric_key(&ex, "aux_expr_idx", 9.0), "abs(-9) is still 9");
 }
+
+#[test]
+fn test_create_view_unqualified_body_prefers_main_over_temp() {
+    // Regression test for #6485 (Gap 2): a `main` view's body must resolve
+    // an unqualified table name against `main`, never falling back to a
+    // same-named TEMP table — matching real SQLite. VibeSQL previously
+    // resolved the view body with the ordinary temp-first search order
+    // (`Catalog::get_table`'s default), so a TEMP table created *after* the
+    // view silently hijacked every future reference to the view, both at
+    // CREATE VIEW time (column derivation) and at query time (view-body
+    // re-execution). Exercises the exact repro from the issue body: a
+    // self-join of the view's own table, so a mixup would surface not just
+    // as wrong data but as duplicated rows from the wrong schema.
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute("CREATE TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO t1 VALUES('a main','b main')").unwrap();
+    ex.execute("CREATE TEMP TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO temp.t1 VALUES('a temp','b temp')").unwrap();
+    ex.execute("CREATE VIEW nv AS SELECT * FROM t1 AS x, t1 AS y").unwrap();
+
+    let result = ex.execute("SELECT * FROM nv").unwrap();
+    assert_eq!(
+        result.rows,
+        vec![vec![
+            Some("a main".to_string()),
+            Some("b main".to_string()),
+            Some("a main".to_string()),
+            Some("b main".to_string()),
+        ]],
+        "#6485: an unqualified `t1` inside a main view's body must resolve to main.t1, not \
+         temp.t1"
+    );
+}
+
+#[test]
+fn test_create_view_unqualified_body_prefers_main_over_temp_created_after_view() {
+    // Companion to the above: the TEMP table is created *after* the view, so
+    // this also pins the query-time (view-body re-execution) half of the fix
+    // in `select/scan/table.rs`, not just CREATE VIEW's eager column
+    // derivation. A regression here would mean the view's *rows* still come
+    // from `main` right after creation but silently start coming from `temp`
+    // the moment a colliding TEMP table shows up later in the session.
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute("CREATE TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO t1 VALUES('a main','b main')").unwrap();
+    ex.execute("CREATE VIEW nv AS SELECT * FROM t1").unwrap();
+
+    // Sanity: before the TEMP collision exists, the view reads main as expected.
+    assert_eq!(
+        ex.execute("SELECT * FROM nv").unwrap().rows,
+        vec![vec![Some("a main".to_string()), Some("b main".to_string())]]
+    );
+
+    ex.execute("CREATE TEMP TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO temp.t1 VALUES('a temp','b temp')").unwrap();
+
+    assert_eq!(
+        ex.execute("SELECT * FROM nv").unwrap().rows,
+        vec![vec![Some("a main".to_string()), Some("b main".to_string())]],
+        "#6485: nv must keep reading main.t1 after a colliding TEMP table is created, not \
+         silently switch to it"
+    );
+}
+
+#[test]
+fn test_create_temp_view_unqualified_body_still_prefers_temp() {
+    // A TEMP view is left unrestricted (unlike a main view): its body keeps
+    // ordinary temp-first resolution, so an unqualified name inside a TEMP
+    // view's body resolving to a colliding TEMP table (shadowing main) is
+    // correct SQLite behavior and must not regress into an over-broad
+    // "always main" restriction.
+    let mut ex = SqlExecutor::new(None).unwrap();
+    ex.execute("CREATE TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO t1 VALUES('a main','b main')").unwrap();
+    ex.execute("CREATE TEMP TABLE t1(a,b)").unwrap();
+    ex.execute("INSERT INTO temp.t1 VALUES('a temp','b temp')").unwrap();
+    ex.execute("CREATE TEMP VIEW tv AS SELECT * FROM t1").unwrap();
+
+    assert_eq!(
+        ex.execute("SELECT * FROM tv").unwrap().rows,
+        vec![vec![Some("a temp".to_string()), Some("b temp".to_string())]],
+        "a TEMP view's unqualified body must keep resolving against temp (shadowing main)"
+    );
+}

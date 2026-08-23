@@ -241,7 +241,7 @@ impl Database {
             if let Some(restrict_schema) = self.catalog.unqualified_resolution_restricted_to() {
                 return super::operations::find_restricted_table_key(
                     &self.tables,
-                    restrict_schema,
+                    &restrict_schema,
                     &lowercase_name,
                 )
                 .and_then(|key| self.tables.get(&key));
