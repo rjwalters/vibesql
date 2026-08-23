@@ -1883,6 +1883,112 @@ fn test_attach_save_exit_reattach_round_trip_with_own_file() {
 }
 
 #[test]
+fn test_attach_reattach_typeless_column_reports_empty_type() {
+    // Issue #6481: a column with NO declared type (`CREATE TABLE
+    // aux.t2(d, e, f)`) must still report an empty declared type from
+    // `PRAGMA table_info`, not "BLOB", after the attached schema's DDL
+    // round-trips through save/reload across a fresh session — exactly like
+    // `test_pragma_table_info_typeless_column_reports_empty_type` above
+    // already guards for the *main* schema. Before the fix, the attached
+    // schema's on-disk DDL reconstruction (`write_create_table_ddl`) always
+    // emitted a concrete type token, permanently losing the "no declared
+    // type" distinction for every column that didn't have one.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        // Session A: create the attached table with a mix of typeless and
+        // explicitly-typed columns, then exit cleanly (writes the attached
+        // file via `save_attached_schema_sql_dump`).
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t2(d, e TEXT, f)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    assert!(aux_path.exists(), "clean exit must have written the attached file");
+
+    // The on-disk attached-schema dump must never contain a bare "BLOB" type
+    // token for the typeless columns — assert this directly on the file
+    // contents so a regression is caught even if a future PRAGMA change
+    // masked it at the query layer.
+    let aux_contents = std::fs::read_to_string(&aux_path).unwrap();
+    assert!(
+        !aux_contents.to_uppercase().contains("BLOB"),
+        "attached-schema dump must not fabricate a BLOB type for typeless columns, got:\n{aux_contents}"
+    );
+
+    {
+        // Session B: a fresh executor, re-attaching the same file — the
+        // process boundary the bug is specifically tied to.
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        let result = ex.execute("PRAGMA table_info(t2)").unwrap();
+        assert_eq!(result.row_count, 3);
+        // Columns are cid, name, type, notnull, dflt_value, pk (type is index 2).
+        assert_eq!(result.rows[0][2].as_deref(), Some(""), "typeless column d -> empty type");
+        // The attached-schema DDL reconstruction (`write_create_table_ddl`)
+        // normalizes an explicitly-typed column through `format_column_type`
+        // rather than preserving the original spelling — `TEXT` (Varchar
+        // affinity with no length) round-trips as `VARCHAR`. That
+        // normalization is pre-existing and independent of #6481's fix
+        // (which only changes the *typeless* branch below it); this
+        // assertion just pins that a typed column still gets a concrete,
+        // non-empty type, not that its spelling is preserved verbatim.
+        assert_eq!(
+            result.rows[1][2].as_deref(),
+            Some("VARCHAR"),
+            "typed column e keeps a concrete type"
+        );
+        assert_eq!(result.rows[2][2].as_deref(), Some(""), "typeless column f -> empty type");
+    }
+}
+
+#[test]
+fn test_attach_reattach_explicit_blob_and_any_columns_still_round_trip_as_blob() {
+    // Regression guard alongside #6481's typeless-column fix: an explicit
+    // `BLOB` declaration (`DataType::BinaryLargeObject` — the same internal
+    // representation a *typeless* column also collapses to) must NOT be
+    // reclassified as typeless and must still report "BLOB" from `PRAGMA
+    // table_info` after an attached-schema save/reattach round trip.
+    //
+    // `ANY` is included as a second explicitly-typed column for the same
+    // "must not go empty" guard, but it is a distinct case: `ANY` is not
+    // special-cased to `BinaryLargeObject` in the parser (SQLite gives it
+    // NUMERIC affinity, not BLOB affinity — see
+    // `crates/vibesql-parser/src/parser/create/types.rs`, #6191) and instead
+    // parses to `DataType::UserDefined { type_name: "any" }`, which
+    // round-trips verbatim (lowercased, matching the lexer's identifier
+    // normalization) rather than through the BLOB-affinity formatting path.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t3(a BLOB, b ANY)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+
+        let result = ex.execute("PRAGMA table_info(t3)").unwrap();
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][2].as_deref(), Some("BLOB"), "explicit BLOB must round-trip");
+        assert_eq!(result.rows[1][2].as_deref(), Some("any"), "explicit ANY must not go empty");
+    }
+}
+
+#[test]
 fn test_detach_flushes_pending_state_before_removing_schema() {
     // DETACH itself must persist the attached schema's data before removing
     // it — without a prior explicit `\save`, the data must still survive.
