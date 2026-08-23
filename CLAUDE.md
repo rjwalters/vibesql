@@ -43,6 +43,8 @@ VibeSQL runs SQLite's canonical TCL test suite for conformance testing. The test
 
 Tests use native `tclsh` by default, which correctly handles TCL constructs like loops that cannot be statically parsed.
 
+**`tclsh` version requirement:** `scripts/tester_vibesql.tcl` declares `package require Tcl 8.5` and is untested against Tcl 9.x's breaking changes. `scripts/tcl_runner.py` no longer trusts a bare `tclsh` lookup — it searches `tclsh8.5`, `tclsh8.6`, then bare `tclsh` on `PATH` and verifies each candidate's own `info patchlevel` is `< 9.0` before using it, so a Homebrew `tcl-tk` 9.x install that shadows a compatible interpreter (e.g. macOS system `/usr/bin/tclsh -> tclsh8.5`) no longer silently breaks every native-TCL run (#6484). Set `VIBESQL_TCLSH=/path/to/tclsh8.5` to pin an interpreter explicitly (e.g. `brew install tcl-tk@8` on a machine with no 8.x interpreter at all); if you see a `WARNING: no Tcl 8.x-compatible tclsh found` on stderr, the run's `status='incomplete'` marker rows are an environment problem, not a conformance regression — do not treat a resulting 0%-pass file as a real regression without checking this first.
+
 ```bash
 # Run Priority 1 tests (core SQL: select, where, join, etc.)
 make test-tcl

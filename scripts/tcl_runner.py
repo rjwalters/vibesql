@@ -12,6 +12,7 @@ that generate data dynamically.
 """
 
 import argparse
+import functools
 import json
 import os
 import re
@@ -34,6 +35,93 @@ from tcl_parser import TclTestParser, ParsedTest, ParsedFile, TestType
 # fail. main() inspects this to exit non-zero so CI/callers notice that the
 # tcl_test_results detail table is incomplete.
 _SAVE_HAD_FATAL_INSERT_FAILURES = False
+
+# `scripts/tester_vibesql.tcl` declares `package require Tcl 8.5` and has
+# never been verified against Tcl 9.x's breaking changes. Homebrew's `tcl-tk`
+# formula defaults to 9.x as of 2025+, so on a machine where that formula's
+# `tclsh` resolves earlier on PATH than a compatible 8.x interpreter (e.g.
+# macOS system `/usr/bin/tclsh -> tclsh8.5`), a bare `tclsh` lookup silently
+# picks the incompatible interpreter, the shim dies in `package require`
+# before printing its summary trailer, and the whole file is recorded as a
+# single `status='incomplete'` marker row -- reading as a 0%-passed
+# regression rather than an environment/PATH problem (#6484).
+#
+# Prefer explicit, versioned interpreter names over the ambiguous bare
+# `tclsh`, and verify each candidate's own `info patchlevel` before trusting
+# it, instead of trusting whatever `tclsh` happens to resolve first on PATH.
+_TCLSH_CANDIDATES = ("tclsh8.5", "tclsh8.6", "tclsh")
+_TCLSH_ENV_OVERRIDE = "VIBESQL_TCLSH"
+
+
+def _tcl_patchlevel(tclsh_path: str) -> Optional[str]:
+    """Return `info patchlevel` reported by a tclsh binary, or None if it
+    could not be run (missing, not executable, timed out, ...)."""
+    try:
+        result = subprocess.run(
+            [tclsh_path],
+            input="puts [info patchlevel]\n",
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return None
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    return lines[-1].strip() if lines else None
+
+
+@functools.lru_cache(maxsize=1)
+def resolve_tclsh() -> str:
+    """
+    Resolve a Tcl 8.x-compatible `tclsh` interpreter for running the shim.
+
+    Searches `_TCLSH_CANDIDATES` in order, verifying each resolved binary's
+    own `info patchlevel` is a `8.x` release (not `9.x`) before returning it.
+    This is the fix for #6484: a bare `tclsh` lookup can silently resolve to
+    an incompatible Tcl 9.x interpreter on machines where Homebrew's tcl-tk
+    9.x shadows the compatible system tclsh on PATH.
+
+    `VIBESQL_TCLSH` overrides the search entirely (used as-is, no version
+    check) for anyone who knows their own interpreter is compatible.
+
+    Cached for the life of the process: resolution runs once even when many
+    `run_native_tcl` calls share it (e.g. under `--jobs>1`).
+    """
+    override = os.environ.get(_TCLSH_ENV_OVERRIDE)
+    if override:
+        return override
+
+    checked = []
+    for candidate in _TCLSH_CANDIDATES:
+        resolved = shutil.which(candidate)
+        if not resolved:
+            continue
+        patchlevel = _tcl_patchlevel(resolved)
+        if patchlevel is None:
+            continue
+        major = patchlevel.split(".", 1)[0]
+        if major.isdigit() and int(major) < 9:
+            return resolved
+        checked.append(f"{candidate} -> {resolved} (Tcl {patchlevel})")
+
+    # No compatible interpreter found. Fall back to whatever bare `tclsh`
+    # resolves to (preserves prior behavior), but warn loudly so a resulting
+    # 'incomplete' marker row is not misread as a real conformance
+    # regression -- see CLAUDE.md's "SQLite TCL Test Suite" section.
+    fallback = shutil.which("tclsh") or "tclsh"
+    details = "; ".join(checked) if checked else "none of the candidates were found on PATH"
+    print(
+        f"WARNING: no Tcl 8.x-compatible tclsh found (checked "
+        f"{', '.join(_TCLSH_CANDIDATES)}: {details}). Falling back to "
+        f"'{fallback}'. scripts/tester_vibesql.tcl requires `package require "
+        f"Tcl 8.5`, so if this is a Tcl 9.x interpreter the run will fail "
+        f"before emitting a summary trailer and be recorded as an "
+        f"'incomplete' marker (0% pass), NOT a real regression. Install a "
+        f"Tcl 8.x tclsh (e.g. `brew install tcl-tk@8`) or set "
+        f"{_TCLSH_ENV_OVERRIDE}=/path/to/tclsh8.5 to pin one explicitly.",
+        file=sys.stderr,
+    )
+    return fallback
 
 
 @dataclass
@@ -1172,7 +1260,7 @@ def run_native_tcl(test_file: str, shim_path: str, verbose: bool = False, timeou
     # VibeSQL binary path is already cwd-independent (derived from the shim's own
     # [info script]), so it is unaffected.
     abs_test_file = os.path.abspath(test_file)
-    cmd = ["tclsh", shim_path, abs_test_file, "--emit-detail"]
+    cmd = [resolve_tclsh(), shim_path, abs_test_file, "--emit-detail"]
     if verbose:
         cmd.append("--verbose")
 
