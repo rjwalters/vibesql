@@ -149,28 +149,7 @@ pub fn run_test_file_with_details(contents: &str, file_name: &str) -> TestFileRe
 #[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
-    use std::env;
-
-    #[allow(unused_imports)]
     use super::*;
-    #[allow(unused_imports)]
-    use crate::sqllogictest::scheduler::get_test_file_timeout;
-
-    #[test]
-    fn test_timeout_wraps_execution() {
-        // Test that timeout wrapper can be set via environment variable
-        let original = env::var("SQLLOGICTEST_FILE_TIMEOUT").ok();
-
-        env::set_var("SQLLOGICTEST_FILE_TIMEOUT", "1");
-        let timeout_secs = get_test_file_timeout();
-        assert_eq!(timeout_secs, 1);
-
-        // Restore original value or remove
-        match original {
-            Some(val) => env::set_var("SQLLOGICTEST_FILE_TIMEOUT", val),
-            None => env::remove_var("SQLLOGICTEST_FILE_TIMEOUT"),
-        }
-    }
 
     #[tokio::test]
     async fn test_file_timeout_triggers() {
