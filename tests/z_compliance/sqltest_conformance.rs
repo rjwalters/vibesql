@@ -401,7 +401,9 @@ impl SqltestRunner {
             | vibesql_ast::Statement::DropCron(_)
             | vibesql_ast::Statement::AlterCron(_)
             | vibesql_ast::Statement::CancelSchedule(_)
-            | vibesql_ast::Statement::Pragma(_) => {
+            | vibesql_ast::Statement::Pragma(_)
+            | vibesql_ast::Statement::Attach(_)
+            | vibesql_ast::Statement::Detach(_) => {
                 // Transactions, cursors, triggers, assertions, procedures, functions, and advanced
                 // SQL objects are no-ops for validation
                 Ok(true)
