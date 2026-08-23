@@ -69,6 +69,22 @@ export const employeesDatabase: SampleDatabase = {
 /**
  * Northwind Sample Database (Simplified)
  * Purpose: Complex JOINs, aggregates, subqueries
+ *
+ * NOTE ON DATA DIVERGENCE (#6518): This `products` table is seeded
+ * independently from `tests/common/web_demo_helpers/database_fixtures.rs`'s
+ * `create_northwind_db()`, which is a separate, hand-authored northwind
+ * fixture used only by the Rust `web_demo_*` integration tests. From
+ * `product_id` 6 onward the two datasets intentionally differ in row
+ * ordering, membership, and column values (and the Rust fixture omits
+ * `customers`/`orders` entirely) — they are NOT meant to be kept in sync.
+ * `web-demo/src/data/examples/*.json`'s `expectedRows` blocks are ground-
+ * truthed against the **Rust fixture**, not this file, because the Rust
+ * side is the only consumer that does a strict, ordered, cell-by-cell
+ * comparison (`validate_results()` in
+ * `tests/common/web_demo_helpers/mod.rs`, exercised by
+ * `test_basic_sql_examples`). Do NOT recompute `expectedRows` against the
+ * data in this file — see the mirrored note on `create_northwind_db()` for
+ * the other half of this contract.
  */
 export const northwindDatabase: SampleDatabase = {
   id: 'northwind',
