@@ -13,6 +13,22 @@ use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue, StringValue};
 
 /// Create a Northwind database for testing
+///
+/// NOTE ON DATA DIVERGENCE (#6518): This fixture is a separate,
+/// hand-authored northwind dataset from `web-demo/src/data/sample-databases.ts`'s
+/// `northwindDatabase` (which seeds the browser demo). From `PRODUCT_ID` 6
+/// onward the two intentionally differ in row ordering, membership, and
+/// column values, and this fixture omits `customers`/`orders` entirely —
+/// they are NOT meant to be kept in sync.
+///
+/// **This fixture is the ground truth** for `web-demo/src/data/examples/*.json`'s
+/// `expectedRows` blocks: `validate_results()` in
+/// `tests/common/web_demo_helpers/mod.rs` does a strict, ordered,
+/// cell-by-cell comparison of `expectedRows` against query results produced
+/// by *this* database (via `test_basic_sql_examples`). If you change the
+/// data here, the affected `expectedRows` blocks must be regenerated to
+/// match — never recompute them against `sample-databases.ts` instead, which
+/// is not this fixture's source and is not value-asserted anywhere.
 pub fn create_northwind_db() -> Database {
     let mut db = Database::new();
 
