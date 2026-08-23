@@ -38,6 +38,34 @@ pub fn is_sqlite_schema_table(table_name: &str) -> bool {
     )
 }
 
+/// Whether a table reference names `sqlite_master`/`sqlite_schema`, given the
+/// catalog's live attachments.
+///
+/// Extends [`is_sqlite_schema_table`] (bare and `main.`-qualified forms) to
+/// also recognize `<alias>.sqlite_master`/`<alias>.sqlite_schema` for any
+/// currently-attached database alias. Real SQLite rejects ALTER TABLE, DROP
+/// TABLE, INSERT, UPDATE, DELETE, ANALYZE, and CREATE INDEX against the
+/// schema table uniformly, regardless of which live alias qualifies the name
+/// (issue #6451) — this is the write-side guard counterpart to
+/// [`resolve_sqlite_schema_query_scope`], which handles the analogous
+/// alias-awareness for the SELECT/read path (#6436).
+///
+/// A qualifier that is neither `main` nor a live attachment (a stale alias
+/// after `DETACH`, an alias that was never attached, or an unrelated schema
+/// tag like `temp`) does NOT match — callers fall through to ordinary table
+/// resolution, matching SQLite's "no such table"/"unknown database" behavior
+/// for an unrecognized qualifier.
+pub fn is_sqlite_schema_table_ref(catalog: &vibesql_catalog::Catalog, table_name: &str) -> bool {
+    if is_sqlite_schema_table(table_name) {
+        return true;
+    }
+    let normalized = table_name.to_lowercase();
+    let Some((qualifier, object)) = normalized.split_once('.') else {
+        return false;
+    };
+    matches!(object, "sqlite_master" | "sqlite_schema") && catalog.is_attached_schema(qualifier)
+}
+
 /// Resolve a (possibly schema-qualified) table reference against the
 /// `sqlite_master`/`sqlite_schema` virtual table, returning the catalog
 /// schema whose objects the query should be built from.
@@ -893,6 +921,37 @@ mod tests {
         assert!(!is_sqlite_schema_table("sqlite_temp_master"));
         // temp-qualified master belongs to the temp schema, not main.
         assert!(!is_sqlite_schema_table("temp.sqlite_master"));
+    }
+
+    /// #6451: `<alias>.sqlite_master`/`<alias>.sqlite_schema` for a
+    /// currently-attached database is recognized as the schema table, just
+    /// like the bare/`main.`-qualified forms; a stale/unattached alias, or an
+    /// unrelated qualifier like `temp`, is not.
+    #[test]
+    fn test_is_sqlite_schema_table_ref() {
+        let mut catalog = Catalog::new();
+        catalog.attach_database("aux", ":memory:").unwrap();
+
+        // Bare/main-qualified forms behave exactly like `is_sqlite_schema_table`.
+        assert!(is_sqlite_schema_table_ref(&catalog, "sqlite_master"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "SQLITE_SCHEMA"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "main.sqlite_master"));
+
+        // A currently-attached alias's schema table is recognized too.
+        assert!(is_sqlite_schema_table_ref(&catalog, "aux.sqlite_master"));
+        assert!(is_sqlite_schema_table_ref(&catalog, "AUX.SQLITE_SCHEMA"));
+
+        // An alias that was never attached must not be treated as a hit.
+        assert!(!is_sqlite_schema_table_ref(&catalog, "nosuchdb.sqlite_master"));
+        // Unrelated qualifiers/tables are unaffected.
+        assert!(!is_sqlite_schema_table_ref(&catalog, "temp.sqlite_master"));
+        assert!(!is_sqlite_schema_table_ref(&catalog, "users"));
+        assert!(!is_sqlite_schema_table_ref(&catalog, "aux.users"));
+
+        // After DETACH, the alias no longer resolves (clean "not found", not a
+        // stale hit).
+        catalog.detach_database("aux").unwrap();
+        assert!(!is_sqlite_schema_table_ref(&catalog, "aux.sqlite_master"));
     }
 
     /// #6436: `<alias>.sqlite_master`/`<alias>.sqlite_schema` for a

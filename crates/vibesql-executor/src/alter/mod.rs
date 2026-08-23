@@ -87,7 +87,7 @@ impl AlterTableExecutor {
         // alterdropcol.test). Checked before the privilege check and before
         // dispatch, so it applies uniformly and atomically — no sub-command-
         // specific handler needs its own copy of this guard.
-        if validation::is_sqlite_schema_table(table_name) {
+        if validation::is_sqlite_schema_table_ref(&database.catalog, table_name) {
             // The schema table always reports the canonical `sqlite_master` name,
             // regardless of which alias (`sqlite_master`/`sqlite_schema`, temp
             // variants) or case the statement used — SQLite canonicalizes this

@@ -17,6 +17,24 @@ pub(super) fn is_sqlite_schema_table(name: &str) -> bool {
     )
 }
 
+/// Extends [`is_sqlite_schema_table`] to also recognize
+/// `<alias>.sqlite_master`/`<alias>.sqlite_schema` for a currently-attached
+/// database alias, matching SQLite's uniform rejection of ALTER TABLE against
+/// the schema table regardless of which live alias qualifies the name (issue
+/// #6451). A qualifier that is neither unattached nor a live attachment (a
+/// stale alias after DETACH, or one that was never attached) does NOT match —
+/// callers fall through to ordinary table resolution.
+pub(super) fn is_sqlite_schema_table_ref(catalog: &vibesql_catalog::Catalog, name: &str) -> bool {
+    if is_sqlite_schema_table(name) {
+        return true;
+    }
+    let normalized = name.to_ascii_lowercase();
+    let Some((qualifier, object)) = normalized.split_once('.') else {
+        return false;
+    };
+    matches!(object, "sqlite_master" | "sqlite_schema") && catalog.is_attached_schema(qualifier)
+}
+
 /// Whether `column` participates in any UNIQUE constraint of `schema`
 /// (case-insensitive). Used to reject `DROP COLUMN` of a UNIQUE column, matching
 /// SQLite's `cannot drop UNIQUE column` rejection.
