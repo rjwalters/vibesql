@@ -143,6 +143,13 @@ impl SubscriptionManager {
 
         let subscription = sub_ref.value_mut();
 
+        // Paused subscriptions (SubscriptionPause, 0xF5) are skipped entirely until
+        // SubscriptionResume (0xF6) — no re-query, no notification.
+        if subscription.paused {
+            trace!(subscription_id = %id, "Subscription is paused, skipping notification");
+            return;
+        }
+
         // Try to execute with retry logic
         self.execute_with_retry(subscription, db, id).await;
     }
@@ -176,10 +183,17 @@ impl SubscriptionManager {
             // Clone the query string out before re-querying so the state
             // machine lock (held inside `query_fn`) never overlaps the DashMap
             // mutable borrow used for notification.
-            let query = match self.subscriptions.get(&id) {
-                Some(sub) => sub.query.clone(),
+            let (query, paused) = match self.subscriptions.get(&id) {
+                Some(sub) => (sub.query.clone(), sub.paused),
                 None => continue,
             };
+
+            // Paused subscriptions (SubscriptionPause, 0xF5) are skipped entirely
+            // until SubscriptionResume (0xF6) — no re-query, no notification.
+            if paused {
+                trace!(subscription_id = %id, "Subscription is paused, skipping replicated re-query");
+                continue;
+            }
 
             // PK pruning (#5472): skip the re-query when the changed PK provably
             // cannot satisfy this subscription's WHERE filter.
@@ -277,10 +291,20 @@ impl SubscriptionManager {
         }
 
         for id in affected {
-            let query = match self.subscriptions.get(&id) {
-                Some(sub) => sub.query.clone(),
+            let (query, paused) = match self.subscriptions.get(&id) {
+                Some(sub) => (sub.query.clone(), sub.paused),
                 None => continue,
             };
+
+            // Paused subscriptions (SubscriptionPause, 0xF5) are skipped entirely
+            // until SubscriptionResume (0xF6) — no re-query, no notification.
+            if paused {
+                trace!(
+                    subscription_id = %id,
+                    "Subscription is paused, skipping coalesced replicated re-query"
+                );
+                continue;
+            }
 
             // PK pruning (#5472): skip the re-query entirely when none of this
             // subscription's relevant changes could satisfy its WHERE filter.
