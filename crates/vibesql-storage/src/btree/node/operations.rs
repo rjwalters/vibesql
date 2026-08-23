@@ -55,19 +55,10 @@ impl LeafNode {
         }
     }
 
-    /// Search for a key in this leaf node
-    ///
-    /// Returns a reference to the Vec of row_ids if found
-    #[allow(dead_code)]
-    pub fn search(&self, key: &Key) -> Option<&Vec<RowId>> {
-        self.entries.binary_search_by_key(&key, |(k, _)| k).ok().map(|idx| &self.entries[idx].1)
-    }
-
     /// Delete a specific row_id for a key from this leaf node
     ///
     /// If this was the last row_id for the key, removes the key entirely.
     /// Returns true if the row_id was found and deleted, false otherwise.
-    #[allow(dead_code)]
     pub fn delete(&mut self, key: &Key, row_id: RowId) -> bool {
         match self.entries.binary_search_by_key(&key, |(k, _)| k) {
             Ok(idx) => {
