@@ -18,12 +18,34 @@ impl Catalog {
             });
         }
 
-        // Verify table exists. Use the temp-shadow-aware resolver so an index
-        // on an unqualified TEMP table (which lives in the session temp schema,
-        // not `main`) is accepted. Previously this only checked the current
-        // (main) schema, causing CREATE INDEX on a temp table to fail with
-        // `TableNotFound`. See issue #5505.
-        let table = match self.get_table(&index.table_name) {
+        // Verify table exists. `index.table_name` is deliberately stored bare
+        // (see the field doc on `IndexMetadata::table_name`) so a temp-table
+        // index and a main-table index can share a table name without
+        // colliding in the catalog's index registry (#5513). `index.schema`
+        // carries the *actual* owning schema for callers that resolved it
+        // correctly (e.g. CREATE INDEX's validator), so prefer a lookup
+        // scoped to that exact schema first — otherwise a same-named table
+        // earlier in `get_table`'s bare-name search order (temp, then
+        // current schema, then each ATTACHed schema) can silently shadow the
+        // real target, either failing this check outright when the shadow
+        // lacks an indexed column, or succeeding against the wrong table's
+        // schema (issue #6487).
+        //
+        // Fall back to the bare-name search when the qualified lookup
+        // fails: some callers (e.g. `create_table.rs`'s implicit
+        // PRIMARY KEY/UNIQUE auto-indexes) build `IndexMetadata` via `new()`
+        // without calling `.with_schema(..)`, so `index.schema` defaults to
+        // `main` even when the table actually lives in a session temp schema
+        // or an ATTACHed schema — those rely on the temp-shadows-main
+        // resolution `get_table` already performs using the *current*
+        // schema at index-creation time (see issue #5505). Preserving that
+        // fallback keeps those call sites working exactly as before, while
+        // the schema-qualified lookup taking priority is what fixes #6487.
+        let qualified_table_name = format!("{}.{}", index.schema, index.table_name);
+        let table = match self
+            .get_table(&qualified_table_name)
+            .or_else(|| self.get_table(&index.table_name))
+        {
             Some(table) => table,
             None => {
                 return Err(CatalogError::TableNotFound { table_name: index.table_name.clone() });

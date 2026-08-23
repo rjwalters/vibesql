@@ -79,6 +79,7 @@ pub fn create_btree_index(
         database,
         stmt,
         table_name,
+        qualified_table_name,
         index_name,
         table_schema,
         unique,
@@ -107,10 +108,23 @@ pub fn create_btree_index(
 /// Build the physical B-tree index body (expression, partial, or plain
 /// column index). Factored out of [`create_btree_index`] so a build failure
 /// can roll back the already-added catalog entry.
+///
+/// `qualified_table_name` (e.g. `aux.t`) is used to *resolve the physical
+/// table* the body is built from — storage's own bare-name search order
+/// (temp, then current schema, then each ATTACHed database in attachment
+/// order) can otherwise land on an unrelated same-named table (e.g.
+/// `main.t`) instead of the table the validator actually resolved the index
+/// against (issue #6487). `table_name` (bare) is passed separately and used
+/// only for the value **stored** as the index's table identity — storage's
+/// `IndexMetadata::matches_table` matches a same-named bare probe during
+/// DML maintenance against that stored (usually bare) form, so silently
+/// promoting it to `qualified_table_name` would desync every subsequent
+/// INSERT/UPDATE/DELETE from this index.
 fn build_btree_index_body(
     database: &mut Database,
     stmt: &CreateIndexStmt,
     table_name: &str,
+    qualified_table_name: &str,
     index_name: &str,
     table_schema: &TableSchema,
     unique: bool,
@@ -127,6 +141,7 @@ fn build_btree_index_body(
         create_expression_index(
             database,
             table_name,
+            qualified_table_name,
             index_name,
             table_schema,
             &stmt.columns,
@@ -139,10 +154,11 @@ fn build_btree_index_body(
         // body. Deleted rows must not be evaluated — a tombstoned row could
         // otherwise still trigger the non-deterministic rejection below
         // (date2-420 deletes the 'now' row and expects the CREATE to pass).
-        let table_rows: Vec<(usize, vibesql_storage::Row)> = match database.get_table(table_name) {
-            Some(table) => table.scan_live().map(|(idx, row)| (idx, row.clone())).collect(),
-            None => Vec::new(),
-        };
+        let table_rows: Vec<(usize, vibesql_storage::Row)> =
+            match database.get_table(qualified_table_name) {
+                Some(table) => table.scan_live().map(|(idx, row)| (idx, row.clone())).collect(),
+                None => Vec::new(),
+            };
         // Index context: SQLite rejects non-deterministic date/time uses in
         // a partial index's WHERE predicate at evaluation time, so the
         // CREATE INDEX build fails when an existing row triggers one
@@ -171,9 +187,10 @@ fn build_btree_index_body(
                 }
             }
         }
-        database.create_index_partial(
+        database.create_index_partial_for_table(
             index_name.to_string(),
             table_name.to_string(),
+            qualified_table_name,
             unique,
             stmt.columns.clone(),
             Box::new(where_expr.clone()),
@@ -181,9 +198,10 @@ fn build_btree_index_body(
         )?;
     } else {
         // Column-only index: use existing storage API
-        database.create_index(
+        database.create_index_for_table(
             index_name.to_string(),
             table_name.to_string(),
+            qualified_table_name,
             unique,
             stmt.columns.clone(),
         )?;

@@ -132,10 +132,54 @@ impl Database {
     /// [`Database::create_index_partial`] instead so the executor can supply
     /// both the predicate AST (for metadata) and the set of rows whose
     /// predicate evaluated to truthy (for the initial index body).
+    ///
+    /// Resolves the target table by `table_name` itself (bare or qualified,
+    /// searched temp-then-current-then-attached when bare). Use
+    /// [`Database::create_index_for_table`] instead when the caller has
+    /// already resolved a schema-qualified table name distinct from the bare
+    /// name it wants recorded as the index's table identity (issue #6487).
     pub fn create_index(
         &mut self,
         index_name: String,
         table_name: String,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+    ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
+        let table_lookup_name = table_name.clone();
+        self.operations.create_index(
+            &self.catalog,
+            &self.tables,
+            index_name,
+            table_name,
+            &table_lookup_name,
+            unique,
+            columns,
+            None,
+            None,
+        )
+    }
+
+    /// Create a full-coverage index, resolving the physical table via
+    /// `table_lookup_name` (which may be schema-qualified, e.g. `aux.t`)
+    /// while recording `table_name` (typically bare) as the index's stored
+    /// table identity.
+    ///
+    /// This split exists because `IndexMetadata::matches_table` relies on
+    /// the historical (usually bare) `table_name` form to match a same-named
+    /// bare probe during INSERT/UPDATE/DELETE maintenance — silently
+    /// promoting the stored identity to a schema-qualified name would desync
+    /// every subsequent DML maintenance call from this index. Passing a
+    /// schema-qualified `table_lookup_name` distinct from `table_name` is
+    /// what lets CREATE INDEX build the index body against the exact table
+    /// the catalog already resolved (e.g. an ATTACHed `aux.t`) instead of
+    /// re-deriving it via `table_name`'s own bare-name search order, which
+    /// can land on an unrelated same-named table (issue #6487).
+    pub fn create_index_for_table(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        table_lookup_name: &str,
         unique: bool,
         columns: Vec<IndexColumn>,
     ) -> Result<(), StorageError> {
@@ -145,6 +189,7 @@ impl Database {
             &self.tables,
             index_name,
             table_name,
+            table_lookup_name,
             unique,
             columns,
             None,
@@ -161,10 +206,45 @@ impl Database {
     /// evaluated to truthy at build time; only those rows are placed in the
     /// initial index body. The executor crate is responsible for evaluating
     /// the predicate — storage never evaluates expressions.
+    ///
+    /// Resolves the target table by `table_name` itself; use
+    /// [`Database::create_index_partial_for_table`] when the caller has a
+    /// distinct schema-qualified lookup name (see
+    /// [`Database::create_index_for_table`] for why the split exists).
     pub fn create_index_partial(
         &mut self,
         index_name: String,
         table_name: String,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+        where_clause: Box<vibesql_ast::Expression>,
+        included_row_indices: &std::collections::HashSet<usize>,
+    ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
+        let table_lookup_name = table_name.clone();
+        self.operations.create_index(
+            &self.catalog,
+            &self.tables,
+            index_name,
+            table_name,
+            &table_lookup_name,
+            unique,
+            columns,
+            Some(where_clause),
+            Some(included_row_indices),
+        )
+    }
+
+    /// Create a partial index, resolving the physical table via
+    /// `table_lookup_name` while recording `table_name` as the index's
+    /// stored table identity. See [`Database::create_index_for_table`] for
+    /// why the split exists (issue #6487).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_index_partial_for_table(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        table_lookup_name: &str,
         unique: bool,
         columns: Vec<IndexColumn>,
         where_clause: Box<vibesql_ast::Expression>,
@@ -176,6 +256,7 @@ impl Database {
             &self.tables,
             index_name,
             table_name,
+            table_lookup_name,
             unique,
             columns,
             Some(where_clause),
@@ -195,6 +276,11 @@ impl Database {
     /// * `unique` - Whether this is a unique index
     /// * `columns` - The index column definitions (for metadata storage)
     /// * `keys` - Pre-computed (key_values, row_id) pairs
+    ///
+    /// Resolves the table schema (for key-type inference) via `table_name`
+    /// itself; use [`Database::create_index_with_keys_for_table`] when the
+    /// caller has a distinct schema-qualified lookup name (see
+    /// [`Database::create_index_for_table`] for why the split exists).
     pub fn create_index_with_keys(
         &mut self,
         index_name: String,
@@ -204,10 +290,38 @@ impl Database {
         keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
     ) -> Result<(), StorageError> {
         self.snapshot_operations_for_mutation();
+        let table_lookup_name = table_name.clone();
         self.operations.create_index_with_keys(
             &self.catalog,
             index_name,
             table_name,
+            &table_lookup_name,
+            unique,
+            columns,
+            keys,
+        )
+    }
+
+    /// Create an index with pre-computed keys, resolving the table schema
+    /// (for key-type inference) via `table_lookup_name` while recording
+    /// `table_name` as the index's stored table identity. See
+    /// [`Database::create_index_for_table`] for why the split exists
+    /// (issue #6487).
+    pub fn create_index_with_keys_for_table(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        table_lookup_name: &str,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+        keys: Vec<(Vec<vibesql_types::SqlValue>, usize)>,
+    ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
+        self.operations.create_index_with_keys(
+            &self.catalog,
+            index_name,
+            table_name,
+            table_lookup_name,
             unique,
             columns,
             keys,
