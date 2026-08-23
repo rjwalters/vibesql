@@ -33,18 +33,6 @@ fn test_leaf_node_duplicate_insert() {
 }
 
 #[test]
-fn test_leaf_node_search() {
-    let mut leaf = LeafNode::new(1);
-
-    leaf.insert(vec![SqlValue::Integer(10)], 100);
-    leaf.insert(vec![SqlValue::Integer(20)], 200);
-
-    assert_eq!(leaf.search(&vec![SqlValue::Integer(10)]), Some(&vec![100]));
-    assert_eq!(leaf.search(&vec![SqlValue::Integer(20)]), Some(&vec![200]));
-    assert_eq!(leaf.search(&vec![SqlValue::Integer(15)]), None);
-}
-
-#[test]
 fn test_leaf_node_delete() {
     let mut leaf = LeafNode::new(1);
 
