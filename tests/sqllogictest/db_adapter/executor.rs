@@ -680,7 +680,9 @@ pub fn execute_sql(
         | vibesql_ast::Statement::DropCron(_)
         | vibesql_ast::Statement::AlterCron(_)
         | vibesql_ast::Statement::CancelSchedule(_)
-        | vibesql_ast::Statement::Pragma(_) => Ok(DBOutput::StatementComplete(0)),
+        | vibesql_ast::Statement::Pragma(_)
+        | vibesql_ast::Statement::Attach(_)
+        | vibesql_ast::Statement::Detach(_) => Ok(DBOutput::StatementComplete(0)),
     }
 }
 
