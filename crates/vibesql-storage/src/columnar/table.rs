@@ -346,53 +346,6 @@ impl ColumnarTable {
         Ok(())
     }
 
-    /// Remove a row at the given index from the columnar table.
-    ///
-    /// This shifts all subsequent rows down by one. For bulk deletions,
-    /// consider using `remove_rows_sorted` instead.
-    ///
-    /// # Arguments
-    /// * `index` - Row index to remove
-    ///
-    /// # Returns
-    /// * `Ok(())` on success
-    /// * `Err(String)` if index out of bounds
-    pub fn remove_row_at(&mut self, index: usize) -> Result<(), String> {
-        if index >= self.row_count {
-            return Err(format!(
-                "Row index {} out of bounds (row_count: {})",
-                index, self.row_count
-            ));
-        }
-
-        for col_name in self.column_names.clone() {
-            if let Some(column) = self.columns.get_mut(&col_name) {
-                column.remove_at(index);
-            }
-        }
-
-        self.row_count -= 1;
-        Ok(())
-    }
-
-    /// Remove multiple rows by sorted indices (must be sorted in ascending order).
-    ///
-    /// Removes from the end first to avoid index shifting issues.
-    ///
-    /// # Arguments
-    /// * `indices` - Row indices to remove, sorted in ascending order
-    ///
-    /// # Returns
-    /// * `Ok(())` on success
-    /// * `Err(String)` if any index is out of bounds
-    pub fn remove_rows_sorted(&mut self, indices: &[usize]) -> Result<(), String> {
-        // Remove from the end first to avoid index invalidation
-        for &index in indices.iter().rev() {
-            self.remove_row_at(index)?;
-        }
-        Ok(())
-    }
-
     /// Clear all data from the columnar table, keeping column names.
     pub fn clear(&mut self) {
         self.columns.clear();

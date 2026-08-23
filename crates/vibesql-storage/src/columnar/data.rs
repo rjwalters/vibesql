@@ -451,62 +451,6 @@ impl ColumnData {
         Ok(())
     }
 
-    /// Remove the value at the given index from this column.
-    ///
-    /// Uses swap-remove semantics for O(1) removal when order doesn't matter,
-    /// but this method preserves order using regular remove (O(n)).
-    /// For deletion-heavy workloads, consider using a deletion bitmap instead.
-    ///
-    /// # Arguments
-    /// * `index` - The index of the value to remove
-    ///
-    /// # Panics
-    /// Panics if `index` is out of bounds
-    pub fn remove_at(&mut self, index: usize) {
-        match self {
-            ColumnData::Int64 { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Float64 { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::String { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Bool { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Date { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Time { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Timestamp { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Interval { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Vector { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-            ColumnData::Blob { values, nulls } => {
-                Arc::make_mut(values).remove(index);
-                Arc::make_mut(nulls).remove(index);
-            }
-        }
-    }
-
     /// Update the value at the given index in this column.
     ///
     /// Uses `Arc::make_mut` for copy-on-write semantics.
