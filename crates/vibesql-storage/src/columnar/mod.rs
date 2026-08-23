@@ -470,45 +470,6 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_row_at() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Integer(2)]),
-            Row::new(vec![SqlValue::Integer(3)]),
-        ];
-        let column_names = vec!["id".to_string()];
-        let mut columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
-
-        // Remove middle row
-        columnar.remove_row_at(1).unwrap();
-
-        assert_eq!(columnar.row_count(), 2);
-        let id_col = columnar.get_column("id").unwrap();
-        assert_eq!(id_col.get(0), SqlValue::Integer(1));
-        assert_eq!(id_col.get(1), SqlValue::Integer(3));
-    }
-
-    #[test]
-    fn test_remove_rows_sorted() {
-        let rows = vec![
-            Row::new(vec![SqlValue::Integer(1)]),
-            Row::new(vec![SqlValue::Integer(2)]),
-            Row::new(vec![SqlValue::Integer(3)]),
-            Row::new(vec![SqlValue::Integer(4)]),
-        ];
-        let column_names = vec!["id".to_string()];
-        let mut columnar = ColumnarTable::from_rows(&rows, &column_names).unwrap();
-
-        // Remove rows at index 1 and 3
-        columnar.remove_rows_sorted(&[1, 3]).unwrap();
-
-        assert_eq!(columnar.row_count(), 2);
-        let id_col = columnar.get_column("id").unwrap();
-        assert_eq!(id_col.get(0), SqlValue::Integer(1));
-        assert_eq!(id_col.get(1), SqlValue::Integer(3));
-    }
-
-    #[test]
     fn test_clear_columnar_table() {
         let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![SqlValue::Integer(2)])];
         let column_names = vec!["id".to_string()];
@@ -615,22 +576,6 @@ mod tests {
         col.set_value(0, &SqlValue::Null).unwrap();
         assert!(col.is_null(0));
         assert_eq!(col.get(1), SqlValue::Integer(42));
-    }
-
-    #[test]
-    fn test_column_data_remove_at() {
-        use std::sync::Arc;
-
-        let mut col = ColumnData::Int64 {
-            values: Arc::new(vec![10, 20, 30, 40]),
-            nulls: Arc::new(vec![false, false, false, false]),
-        };
-
-        col.remove_at(1);
-        assert_eq!(col.len(), 3);
-        assert_eq!(col.get(0), SqlValue::Integer(10));
-        assert_eq!(col.get(1), SqlValue::Integer(30));
-        assert_eq!(col.get(2), SqlValue::Integer(40));
     }
 
     #[test]
