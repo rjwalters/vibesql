@@ -936,21 +936,33 @@ impl Database {
         // (issue #6296's trigger-listing bug, applied to views).
         writeln!(writer, "-- Views")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-        for view_def in self.catalog.iter_views() {
-            if view_def.is_temp() {
-                continue;
-            }
-            let owned_by_schema = view_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
+        // Emitted in the schema's own creation order (#6508), not
+        // `iter_views()`'s underlying `HashMap` iteration order — otherwise
+        // the dump text itself scrambles view order before a fresh reload
+        // even gets a chance to preserve it, since the reload assigns each
+        // view a *new* creation ordinal in the order its `CREATE VIEW`
+        // statement appears in this file.
+        let mut owned_views: Vec<&vibesql_catalog::ViewDefinition> = self
+            .catalog
+            .iter_views()
+            .filter(|view_def| {
+                if view_def.is_temp() {
+                    return false;
+                }
+                view_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
                     // A legacy pre-#6490 snapshot may still carry the schema
                     // embedded in the stored name.
                     || view_def
                         .name
                         .split_once('.')
-                        .is_some_and(|(s, _)| s.eq_ignore_ascii_case(schema_name));
-            if !owned_by_schema {
-                continue;
-            }
-
+                        .is_some_and(|(s, _)| s.eq_ignore_ascii_case(schema_name))
+            })
+            .collect();
+        owned_views.sort_by_key(|view_def| {
+            let bare_name = view_def.name.split_once('.').map(|(_, n)| n).unwrap_or(&view_def.name);
+            self.catalog.creation_seq(schema_name, bare_name).unwrap_or(u64::MAX)
+        });
+        for view_def in owned_views {
             let sql = view_def.sql_definition.as_ref().map_or_else(
                 || {
                     let bare_name =
@@ -974,16 +986,24 @@ impl Database {
         // (`INSERT INTO aux.t2 ...`).
         writeln!(writer, "-- Triggers")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-        for trigger_def in self.catalog.iter_triggers() {
-            if trigger_def.is_temp() {
-                continue;
-            }
-            let owned_by_schema =
-                trigger_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name));
-            if !owned_by_schema {
-                continue;
-            }
-
+        // Emitted in the schema's own creation order (#6508) — same rationale
+        // as the views loop above: `iter_triggers()` iterates a `HashMap`, so
+        // without an explicit sort the dump text itself scrambles trigger
+        // order before a fresh reload ever runs.
+        let mut owned_triggers: Vec<&vibesql_catalog::TriggerDefinition> = self
+            .catalog
+            .iter_triggers()
+            .filter(|trigger_def| {
+                if trigger_def.is_temp() {
+                    return false;
+                }
+                trigger_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
+            })
+            .collect();
+        owned_triggers.sort_by_key(|trigger_def| {
+            self.catalog.creation_seq(schema_name, &trigger_def.name).unwrap_or(u64::MAX)
+        });
+        for trigger_def in owned_triggers {
             match trigger_def.sql_definition.as_ref() {
                 Some(sql) => {
                     let sql = strip_schema_qualifier(sql.trim_end_matches(';').trim(), schema_name);
