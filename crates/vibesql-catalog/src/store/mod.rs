@@ -11,7 +11,10 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
+    },
 };
 
 use indexmap::IndexMap;
@@ -48,7 +51,16 @@ pub use attachments::{AttachedDatabase, MAX_ATTACHED_DATABASES};
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Database catalog - manages all schemas and their objects.
-#[derive(Debug, Clone)]
+///
+/// `Clone` is implemented manually (below) rather than derived: the
+/// `restrict_unqualified_resolution_to_schema` field uses `RwLock` for
+/// interior mutability (see its field doc), and `RwLock` does not implement
+/// `Clone` — a manual impl deep-clones its current value into a fresh lock
+/// instead, which also correctly gives each clone independent, unshared
+/// restriction state (as opposed to `Arc<RwLock<_>>`, which would let two
+/// unrelated `Catalog` clones interfere with each other's transient
+/// resolution-restriction toggling).
+#[derive(Debug)]
 pub struct Catalog {
     /// Session ID for temp table isolation.
     /// Each Catalog instance gets a unique session ID, and temp tables
@@ -104,7 +116,24 @@ pub struct Catalog {
     /// on only for the duration of a trigger body's execution and restored
     /// afterward (nested trigger bodies restore the prior value on unwind).
     /// Default `None` (full search order) everywhere else.
-    pub(crate) restrict_unqualified_resolution_to_schema: Option<String>,
+    ///
+    /// `RwLock`-wrapped (rather than a plain field mutated via `&mut self`,
+    /// or `RefCell`) because a view body is re-executed from deep inside an
+    /// already in-flight, read-only `SelectExecutor` (which holds only
+    /// `&Database`, see `select/scan/table.rs`) — there is no `&mut Database`
+    /// available at that point to toggle the restriction the way
+    /// trigger-body execution does. Interior mutability lets
+    /// `Catalog::set_restrict_unqualified_resolution_to_schema` be called
+    /// from a `&self` (or `&mut self`, which still auto-derefs) context
+    /// either way (#6485). `RwLock` rather than `RefCell` specifically: a
+    /// `&Database` also crosses real thread boundaries in parallel query
+    /// execution (rayon scans/joins/window functions), which requires
+    /// `Database: Sync` — `RefCell` is not `Sync` (even for reads, since its
+    /// internal borrow-count isn't atomic) and would poison that bound for
+    /// the whole `Catalog`/`Database` tree; `RwLock` is `Sync`. Reads (the
+    /// hot path, in `store/tables.rs`) use `.read()`; only the rare
+    /// set/restore around trigger and view-body execution takes `.write()`.
+    pub(crate) restrict_unqualified_resolution_to_schema: RwLock<Option<String>>,
     /// Monotonic creation-order sequence for schema objects (tables, indexes,
     /// views, triggers), keyed by `"{schema}\u{1}{name}"` (both lowercased).
     ///
@@ -140,6 +169,50 @@ pub struct Catalog {
     /// [`Catalog::record_creation_seq`], and never cleared; never persisted
     /// (temp objects themselves are session-only and never persisted either).
     pub(crate) temp_touched: bool,
+}
+
+impl Clone for Catalog {
+    fn clone(&self) -> Self {
+        Catalog {
+            session_id: self.session_id,
+            temp_schema_name: self.temp_schema_name.clone(),
+            schemas: self.schemas.clone(),
+            attached_databases: self.attached_databases.clone(),
+            current_schema: self.current_schema.clone(),
+            privilege_grants: self.privilege_grants.clone(),
+            roles: self.roles.clone(),
+            domains: self.domains.clone(),
+            sequences: self.sequences.clone(),
+            type_definitions: self.type_definitions.clone(),
+            collations: self.collations.clone(),
+            character_sets: self.character_sets.clone(),
+            translations: self.translations.clone(),
+            views: self.views.clone(),
+            triggers: self.triggers.clone(),
+            assertions: self.assertions.clone(),
+            functions: self.functions.clone(),
+            procedures: self.procedures.clone(),
+            indexes: self.indexes.clone(),
+            current_catalog: self.current_catalog.clone(),
+            current_charset: self.current_charset.clone(),
+            current_collation: self.current_collation.clone(),
+            current_timezone: self.current_timezone.clone(),
+            case_sensitive_identifiers: self.case_sensitive_identifiers,
+            // `RwLock` doesn't implement `Clone`; deep-clone its current
+            // value into a fresh, independent lock (see the field doc and
+            // the struct-level doc comment above for why this must not be
+            // shared, e.g. via `Arc<RwLock<_>>`, across clones).
+            restrict_unqualified_resolution_to_schema: RwLock::new(
+                self.restrict_unqualified_resolution_to_schema
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            ),
+            creation_seq: self.creation_seq.clone(),
+            next_creation_seq: self.next_creation_seq,
+            temp_touched: self.temp_touched,
+        }
+    }
 }
 
 impl Catalog {
@@ -185,7 +258,7 @@ impl Catalog {
             case_sensitive_identifiers: false,
             // Full search order is active by default; only a trigger body's
             // execution restricts it (see field docs).
-            restrict_unqualified_resolution_to_schema: None,
+            restrict_unqualified_resolution_to_schema: RwLock::new(None),
             creation_seq: HashMap::new(),
             next_creation_seq: 0,
             temp_touched: false,
@@ -334,16 +407,37 @@ impl Catalog {
     /// Returns the previous value so the caller can restore it (correct
     /// nesting of trigger bodies).
     pub fn set_restrict_unqualified_resolution_to_schema(
-        &mut self,
+        &self,
         schema: Option<String>,
     ) -> Option<String> {
-        std::mem::replace(&mut self.restrict_unqualified_resolution_to_schema, schema)
+        // Recover from a poisoned lock (a prior panic while the lock was
+        // held) rather than propagating the panic here: this is transient
+        // bookkeeping, not data whose integrity we need to protect by
+        // refusing further access.
+        let mut guard = self
+            .restrict_unqualified_resolution_to_schema
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::replace(&mut *guard, schema)
     }
 
     /// The schema unqualified table-name resolution is currently restricted
     /// to, if any (see [`Self::set_restrict_unqualified_resolution_to_schema`]).
-    pub fn unqualified_resolution_restricted_to(&self) -> Option<&str> {
-        self.restrict_unqualified_resolution_to_schema.as_deref()
+    /// Returns an owned copy (rather than `Option<&str>`) since the value is
+    /// held behind an `RwLock`, whose guard cannot outlive this call.
+    pub fn unqualified_resolution_restricted_to(&self) -> Option<String> {
+        self.restriction_read_guard().clone()
+    }
+
+    /// Read guard over the current unqualified-resolution restriction,
+    /// recovering from lock poisoning the same way the setter/getter do.
+    /// Internal helper shared by `store/tables.rs`'s several restriction
+    /// checks so each call site doesn't repeat the poison-recovery
+    /// boilerplate.
+    pub(crate) fn restriction_read_guard(&self) -> std::sync::RwLockReadGuard<'_, Option<String>> {
+        self.restrict_unqualified_resolution_to_schema
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Resolve a schema name written by the user to the **canonical** internal

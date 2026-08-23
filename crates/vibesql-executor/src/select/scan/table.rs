@@ -556,12 +556,39 @@ pub(crate) fn execute_table_scan(
         // `SELECT * FROM missing_table` (not via a view) never reaches this
         // view-body resolution, and a temp view's body resolves against the
         // temp schema, which sqlite3 reports without a schema prefix. See #5570.
-        let select_result = if view.is_temp() {
-            executor.execute_with_columns(&view.query)?
+        // Scope unqualified table-name resolution in the view body to the
+        // view's own schema — and ONLY that schema, never falling back to
+        // `temp` or elsewhere — for a main or ATTACHed-schema (#6490) view;
+        // a TEMP view keeps ordinary temp-first resolution (temp shadows
+        // main), so it is left unrestricted. Without this, an unqualified
+        // name inside a main view's body could resolve to a same-named TEMP
+        // table created after the view, which is not how SQLite resolves
+        // view bodies (#6485). Mirrors the CREATE-time restriction applied in
+        // `advanced_objects::views::execute_create_view` and the trigger-body
+        // mechanism it was itself modeled on (#6477).
+        // `Catalog::set_restrict_unqualified_resolution_to_schema` takes
+        // `&self` (interior mutability) precisely so it can be toggled here,
+        // deep inside an already in-flight read-only `SelectExecutor` that
+        // only holds `&Database`.
+        let is_temp_view = view.is_temp();
+        let restriction = if is_temp_view {
+            None
         } else {
-            executor
-                .execute_with_columns(&view.query)
-                .map_err(ExecutorError::with_main_schema_qualifier)?
+            let owning_schema = view
+                .schema
+                .as_deref()
+                .map(|s| database.catalog.canonical_schema_name(s))
+                .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+            Some(owning_schema)
+        };
+        let prev_restriction =
+            database.catalog.set_restrict_unqualified_resolution_to_schema(restriction);
+        let result = executor.execute_with_columns(&view.query);
+        database.catalog.set_restrict_unqualified_resolution_to_schema(prev_restriction);
+        let select_result = if is_temp_view {
+            result?
+        } else {
+            result.map_err(ExecutorError::with_main_schema_qualifier)?
         };
 
         // Build a schema from the column names
