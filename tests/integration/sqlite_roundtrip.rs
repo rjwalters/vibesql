@@ -104,8 +104,15 @@ fn test_import_skips_internal_tables() {
     conn.close().unwrap();
 
     let result = vibesql_cli::sqlite_io::import_sqlite(&path).unwrap();
+    // The importer skips copying the *source* database's `sqlite_`-prefixed
+    // tables verbatim (see the `starts_with("sqlite_")` guard in
+    // `sqlite_io::import_sqlite`), so only the one user table is imported.
     assert_eq!(result.tables_imported, 1);
-    assert!(result.database.get_table("SQLITE_SEQUENCE").is_none());
+    // VibeSQL now mirrors SQLite exactly (issue #6173): creating a table with
+    // AUTOINCREMENT lazily provisions a genuine `sqlite_sequence` bookkeeping
+    // table as a side effect of `CREATE TABLE`, so it legitimately exists
+    // after import — it isn't a leftover copy of the source's internal table.
+    assert!(result.database.get_table("SQLITE_SEQUENCE").is_some());
 }
 
 #[test]

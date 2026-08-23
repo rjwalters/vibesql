@@ -204,18 +204,16 @@ jobs:
   # #6412 lands, drop these four names from SKIP_TESTS to restore their
   # coverage too.
   #
-  # SKIP_TESTS also excludes six targets with genuine pre-existing test
-  # *failures* (not compile errors), discovered by actually running the full
-  # ~83-target set with `--no-fail-fast` (2026-08-22, since none of these
-  # have ever run in CI before, there was no prior signal): alter_table (a
-  # DROP COLUMN IF EXISTS bug, one test's own comment reads "known bug"),
-  # delimited_identifiers, error_handling, sqlite_roundtrip, web_demo_basic
-  # (a data-generation/escaping bug — see #6497), and update_pk_performance
-  # (a wall-clock performance-threshold assertion, unsuitable for a shared CI
-  # runner's variable load regardless of correctness). Landing this job with
-  # any of these included would turn it red on the very first run for
-  # reasons this CI-wiring PR did not introduce. Tracked for a follow-up fix
-  # + re-inclusion in #6497.
+  # The six targets with genuine pre-existing test *failures* (not compile
+  # errors) found alongside the #6412 targets above — alter_table,
+  # delimited_identifiers, error_handling, sqlite_roundtrip, web_demo_basic,
+  # update_pk_performance — were fixed and re-included in #6497: each failure
+  # was either a stale test assertion (updated to match intentional,
+  # documented SQLite-compat behavior — e.g. #5553's identifier case-folding,
+  # #6173's `sqlite_sequence` bookkeeping table) or, for update_pk_performance,
+  # a wall-clock performance threshold now `#[ignore]`d (unsuitable for a
+  # shared CI runner's variable load; see that test's doc comment for how to
+  # run it manually on a quiet machine).
   # ============================================================================
   test-root-package:
     runs-on: ubuntu-latest
@@ -237,9 +235,9 @@ jobs:
         with:
           cache-key-suffix: ci
 
-      - name: Run root vibesql package's integration tests (excludes tests/z_compliance/*, #6412-affected targets, and #6497 pre-existing failures)
+      - name: Run root vibesql package's integration tests (excludes tests/z_compliance/* and #6412-affected targets)
         run: |
-          SKIP_TESTS='^(sqllogictest_basic|sqllogictest_benchmark|sqllogictest_runner|sqllogictest_sqlite|sqllogictest_suite|sqltest_conformance|pgsql_regress|benchmark_example|dialect_tests|select5_verification|metrics|alter_table|delimited_identifiers|error_handling|sqlite_roundtrip|web_demo_basic|update_pk_performance)$'
+          SKIP_TESTS='^(sqllogictest_basic|sqllogictest_benchmark|sqllogictest_runner|sqllogictest_sqlite|sqllogictest_suite|sqltest_conformance|pgsql_regress|benchmark_example|dialect_tests|select5_verification|metrics)$'
           TESTS=$(awk '
             /^\[\[test\]\]$/ { name=""; path="" }
             /^name = "/ { name=$0; sub(/^name = "/,"",name); sub(/"$/,"",name) }

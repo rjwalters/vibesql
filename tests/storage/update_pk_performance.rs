@@ -8,7 +8,17 @@ use vibesql_executor::UpdateExecutor;
 use vibesql_storage::{Database, Row};
 use vibesql_types::{DataType, SqlValue};
 
+// This is a wall-clock performance-threshold assertion, not a correctness
+// check, so it is `#[ignore]`d by default: shared/loaded CI and dev machines
+// (see CLAUDE.md's benchmarking-constraint note) are not a reliable basis for
+// a hard millisecond threshold inside `cargo test`, and a flaky perf gate in
+// the default test run is worse than no gate at all (#6497). Run explicitly
+// with `cargo test -p vibesql --release --test update_pk_performance --
+// --ignored` on a quiet machine to sanity-check the PK-index optimization by
+// hand; it is not part of `make benchmark-*` because it exercises an
+// internal `UpdateExecutor` API rather than end-to-end SQL.
 #[test]
+#[ignore]
 fn test_update_with_pk_index_performance() {
     // Create database with 1000 rows
     let mut db = Database::new();

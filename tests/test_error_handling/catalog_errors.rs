@@ -249,10 +249,12 @@ fn test_view_already_exists_error() {
         let result = execute_create_view(&create_stmt, &mut db);
         assert!(result.is_err(), "Should fail with ViewAlreadyExists");
 
-        // Error is wrapped in ExecutorError::Other
+        // Error is wrapped in ExecutorError::Other with SQLite's exact wording
+        // ("view <name> already exists", lowercase — see view1.test/fuzz-8.1
+        // and the `CatalogError::ViewAlreadyExists` conversion in errors.rs).
         match result {
             Err(ExecutorError::Other(msg)) if msg.contains("already exists") => {
-                assert!(msg.contains("View"));
+                assert!(msg.contains("view"));
             }
             other => panic!("Expected ViewAlreadyExists error, got: {:?}", other),
         }
