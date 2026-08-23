@@ -37,9 +37,6 @@ impl InternalNode {
     }
 
     /// Check if the node is full (needs splitting)
-    ///
-    /// This method will be used in Part 2b for tree-level insert operations
-    #[allow(dead_code)]
     pub fn is_full(&self, degree: usize) -> bool {
         self.children.len() >= degree
     }
@@ -71,17 +68,11 @@ impl LeafNode {
     }
 
     /// Check if the node is full (needs splitting)
-    ///
-    /// This method will be used in Part 2b for tree-level insert operations
-    #[allow(dead_code)]
     pub fn is_full(&self, degree: usize) -> bool {
         self.entries.len() >= degree
     }
 
     /// Check if node is underfull (needs merging)
-    ///
-    /// This method will be used in Part 2b for tree-level delete operations
-    #[allow(dead_code)]
     pub fn is_underfull(&self, degree: usize) -> bool {
         self.entries.len() < degree / 2
     }
