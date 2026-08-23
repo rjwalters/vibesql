@@ -266,6 +266,39 @@ set ::txn_had_tolerated_error 0
 # and its caller in execsql's `$::in_transaction` branch (Part of #6170).
 set ::txn_dml_count_result {}
 
+# Snapshot of the three file-header PRAGMA cookie arrays
+# (::pragma_user_version_cookie, ::pragma_application_id_cookie,
+# ::pragma_default_cache_size_cookie), taken at the most recent transaction
+# BEGIN so a later ROLLBACK — real or shim-skipped — can restore them
+# (#6455). track_pragma_setting eagerly writes a SET's value into these
+# cookie arrays the instant the SQL text is scanned, regardless of whether
+# the enclosing (possibly still-uncommitted) transaction ultimately commits
+# or rolls back. That is unlike the real engine, and unlike $::sql_batch
+# itself (which defers a statement's real-database effect to the eventual
+# COMMIT/ROLLBACK flush) — so without a restore, a cookie SET made inside a
+# transaction that later rolls back leaks its never-committed value into
+# every later fresh-process PRAGMA read (pragma.test pragma-8.2.13).
+#
+# A plain "skip tracking while a transaction is open" guard — mirroring the
+# `synchronous` pragma's guard — is deliberately NOT used here: `synchronous`
+# is flatly REJECTED by the engine mid-transaction (the SET never takes
+# effect at all, so skipping its capture is exactly correct), but
+# user_version/application_id/default_cache_size are real, engine-accepted
+# writes that must be visible to reads issued from INSIDE the same
+# transaction (query_in_transaction) and must persist if the transaction
+# commits. Only a ROLLBACK should undo them — hence a snapshot-and-restore
+# rather than a blanket skip.
+set ::pragma_cookie_txn_snapshot [dict create]
+
+# Rolling "state just before the current execsql call's track_pragma_setting
+# scan" snapshot of the same three cookie arrays (#6455). Refreshed at the
+# top of every execsql invocation (see snapshot_pragma_cookie_pretrack_state)
+# so that when a SINGLE execsql call both opens a transaction AND sets a
+# cookie in the same SQL text (e.g. the ATTACH-rescue's `BEGIN;\nPRAGMA
+# user_version=11;`), the eventual ::pragma_cookie_txn_snapshot captures the
+# state from BEFORE that call's own write, not after it.
+set ::pragma_cookie_pretrack_snapshot [dict create]
+
 # PRAGMA state tracking - persists across process invocations
 # These are prepended to every SQL execution to maintain consistent state
 set ::pragma_full_column_names 0   ;# Default: OFF
@@ -1936,6 +1969,10 @@ proc build_pragma_prefix {} {
     if {[info exists ::pragma_default_cache_size_cookie($::db_file)]} {
         append prefix "PRAGMA default_cache_size=$::pragma_default_cache_size_cookie($::db_file);\n"
     }
+    # Also replay this cookie for every currently-attached alias whose OWN
+    # file has a recorded value, schema-qualified so it targets that
+    # database's own header instead of main's (#6455).
+    append_attached_pragma_cookie_replay prefix ::pragma_default_cache_size_cookie default_cache_size
     if {$::pragma_cache_size_raw ne ""} {
         append prefix "PRAGMA cache_size=$::pragma_cache_size_raw;\n"
     }
@@ -1955,9 +1992,14 @@ proc build_pragma_prefix {} {
     if {[info exists ::pragma_user_version_cookie($::db_file)]} {
         append prefix "PRAGMA user_version=$::pragma_user_version_cookie($::db_file);\n"
     }
+    # Also replay for every currently-attached alias, schema-qualified, so
+    # `aux.user_version` (etc.) is restored to ITS OWN tracked value instead
+    # of leaking main's (#6455).
+    append_attached_pragma_cookie_replay prefix ::pragma_user_version_cookie user_version
     if {[info exists ::pragma_application_id_cookie($::db_file)]} {
         append prefix "PRAGMA application_id=$::pragma_application_id_cookie($::db_file);\n"
     }
+    append_attached_pragma_cookie_replay prefix ::pragma_application_id_cookie application_id
     # Replay real TEMP tables (#5591) so connection-scoped temp objects exist in
     # this fresh CLI process. Skip names whose CREATE TEMP TABLE is already in the
     # current batch (avoids a redundant create). IF NOT EXISTS keeps replay safe.
@@ -2001,6 +2043,125 @@ proc build_pragma_prefix {} {
         puts stderr "DEBUG-PREFIX>>>${prefix}<<<DEBUG-PREFIX"
     }
     return $prefix
+}
+
+# Resolve a PRAGMA schema qualifier (e.g. "aux", "main", or "" for an
+# unqualified statement) to the on-disk file whose header cookie it actually
+# refers to, so the user_version/application_id/default_cache_size cookie
+# arrays can be keyed by the REAL underlying file instead of collapsing every
+# schema onto $::db_file regardless of which one a statement targeted (#6455).
+#
+# Real SQLite ties these three cookies to the physical database file's
+# header, not to the alias name that happens to reference it in the current
+# session — keying this way also means a cookie correctly "follows" a file
+# that gets re-attached under a different alias in a later batch, rather than
+# being lost or misapplied.
+#
+# main / unqualified -> $::db_file (the primary connection's file; unchanged
+# from before this fix, so every existing main-only replay/lookup site keeps
+# working without modification).
+#
+# Any other name is looked up in ::attach_replay_ddl (the shim's existing
+# ATTACH-replay state, #6363) for a currently-attached alias of that name,
+# extracting the path/expression between ATTACH [DATABASE] and AS. Falls back
+# to a synthetic "schema:<name>" key — distinct from $::db_file and from any
+# other schema's key — when the alias has no ATTACH text on record (e.g. the
+# owning file is not in vibesql_attach_replay_files, so register_attach_state
+# never populated ::attach_replay_ddl for it): this still prevents a
+# collision with main's slot, even though such a file gets no cross-batch
+# cookie replay for the attached schema either way (matching its pre-existing
+# lack of ATTACH replay generally).
+proc pragma_cookie_file_key {schema} {
+    set s [string tolower [string trim $schema]]
+    if {$s eq "" || $s eq "main"} {
+        return $::db_file
+    }
+    if {[dict exists $::attach_replay_ddl $s]} {
+        set ddl [dict get $::attach_replay_ddl $s]
+        if {[regexp -nocase {^ATTACH(?:\s+DATABASE)?\s+(.+)\s+AS\s+(?:\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$} $ddl - pathexpr]} {
+            set pathexpr [string trim $pathexpr]
+            if {[regexp {^'((?:[^']|'')*)'$} $pathexpr - inner]} {
+                return [string map {'' '} $inner]
+            }
+            if {[regexp {^"((?:[^"]|"")*)"$} $pathexpr - inner]} {
+                return [string map [list "\"\"" "\""] $inner]
+            }
+            return $pathexpr
+        }
+    }
+    return "schema:$s"
+}
+
+# Replay a per-file header cookie (user_version/application_id/
+# default_cache_size) for every currently-attached alias whose resolved file
+# has a recorded value, schema-qualifying the PRAGMA with the alias name so
+# it targets THAT database's own header (#6455) — mirroring real SQLite,
+# where each attached file carries its own independent cookie rather than
+# sharing $::db_file's. Called from build_pragma_prefix immediately after the
+# corresponding main-schema replay (which is unchanged: it still keys off
+# $::db_file directly, same as before this fix).
+proc append_attached_pragma_cookie_replay {prefix_var cookie_array pragma_name} {
+    upvar 1 $prefix_var prefix
+    upvar #0 $cookie_array cookie
+    if {[dict size $::attach_replay_ddl] == 0} {
+        return
+    }
+    dict for {alias ddl} $::attach_replay_ddl {
+        set key [pragma_cookie_file_key $alias]
+        if {[info exists cookie($key)]} {
+            append prefix "PRAGMA ${alias}.${pragma_name}=$cookie($key);\n"
+        }
+    }
+}
+
+# Capture the current contents of the three file-header PRAGMA cookie arrays
+# into ::pragma_cookie_pretrack_snapshot (#6455). Called unconditionally at
+# the very top of every execsql invocation, BEFORE track_pragma_setting scans
+# that same call's SQL text — track_pragma_setting eagerly writes a SET's
+# value into the live cookie arrays the instant it is scanned (see the
+# ::pragma_cookie_txn_snapshot declaration for the full rationale), so a
+# single execsql call containing BOTH the transaction-opening `BEGIN` AND a
+# cookie SET (e.g. the rescued `BEGIN;\nPRAGMA user_version=11;`) would
+# otherwise have already mutated the live arrays by the time
+# snapshot_pragma_cookie_txn_state's OWN snapshot ran later in the same call
+# — capturing the just-written value as if it were the pre-transaction
+# baseline, so a later ROLLBACK "restores" to the wrong (already-mutated)
+# value instead of the transaction's true starting point.
+proc snapshot_pragma_cookie_pretrack_state {} {
+    set ::pragma_cookie_pretrack_snapshot [dict create \
+        user_version [array get ::pragma_user_version_cookie] \
+        application_id [array get ::pragma_application_id_cookie] \
+        default_cache_size [array get ::pragma_default_cache_size_cookie]]
+}
+
+# Promote the most recent pretrack snapshot (captured before THIS execsql
+# call's track_pragma_setting ran) to ::pragma_cookie_txn_snapshot, the
+# actual rollback-restore target (#6455). Called exactly once, at the moment
+# a FRESH transaction opens (mirrors the existing
+# `if {!$::in_transaction} { teardown_txn_trial_db }` guard in execsql's
+# BEGIN-opening branch, so a nested reopen after a tolerated error does not
+# clobber the snapshot taken at the transaction's true start).
+proc snapshot_pragma_cookie_txn_state {} {
+    set ::pragma_cookie_txn_snapshot $::pragma_cookie_pretrack_snapshot
+}
+
+# Restore the three file-header PRAGMA cookie arrays to their state at the
+# most recent snapshot_pragma_cookie_txn_state call (#6455). Called when a
+# batched transaction ends via ROLLBACK — real (execsql's closing-statement
+# branch, when the closing SQL is a rollback) or shim-skipped
+# (reconcile_skipped_txn_state's net-close branch, which already treats a
+# skipped closer as equivalent to a ROLLBACK per its own doc comment) — so a
+# cookie SET made inside the now-discarded transaction does not leak forward.
+proc restore_pragma_cookie_txn_snapshot {} {
+    if {[dict size $::pragma_cookie_txn_snapshot] == 0} {
+        return
+    }
+    array unset ::pragma_user_version_cookie
+    array set ::pragma_user_version_cookie [dict get $::pragma_cookie_txn_snapshot user_version]
+    array unset ::pragma_application_id_cookie
+    array set ::pragma_application_id_cookie [dict get $::pragma_cookie_txn_snapshot application_id]
+    array unset ::pragma_default_cache_size_cookie
+    array set ::pragma_default_cache_size_cookie [dict get $::pragma_cookie_txn_snapshot default_cache_size]
 }
 
 # Track PRAGMA settings when they are executed
@@ -2187,12 +2348,19 @@ proc track_pragma_setting {sql} {
     # one). Unlike cache_size above, real SQLite persists this into the
     # database file header, so it must survive a `db close` / reopen against
     # the SAME file. Tracked per-file in `::pragma_default_cache_size_cookie`
-    # (array keyed by db file path), NOT reset by the per-connection reset
-    # block in `proc sqlite3` — only cleared when the file itself is
-    # genuinely fresh (see the `forcedelete $new_file` "first open" branch).
-    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?default_cache_size\s*=\s*(-?\d+)} $sql]
-    foreach {match value} $matches {
-        set ::pragma_default_cache_size_cookie($::db_file) $value
+    # (array keyed by db file path — see pragma_cookie_file_key for how a
+    # schema qualifier resolves to that key, #6455), NOT reset by the
+    # per-connection reset block in `proc sqlite3` — only cleared when the
+    # file itself is genuinely fresh (see the `forcedelete $new_file` "first
+    # open" branch).
+    #
+    # The schema qualifier is now CAPTURED (not just optionally matched) so
+    # `aux.default_cache_size` and `default_cache_size`/`main.default_cache_size`
+    # are tracked in DIFFERENT slots instead of both collapsing onto
+    # $::db_file and clobbering each other (#6455).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:(\w+)\.)?default_cache_size\s*=\s*(-?\d+)} $sql]
+    foreach {match schema value} $matches {
+        set ::pragma_default_cache_size_cookie([pragma_cookie_file_key $schema]) $value
         set found 1
     }
 
@@ -2200,15 +2368,18 @@ proc track_pragma_setting {sql} {
     # use last one). Real SQLite file-header cookies (#6175): both `= N` and
     # the function-style `(N)` syntax are accepted, mirroring the CLI parser.
     # Tracked per-file (like default_cache_size above) so they survive a
-    # `db close` / reopen against the SAME file.
-    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?user_version\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
-    foreach {match value} $matches {
-        set ::pragma_user_version_cookie($::db_file) $value
+    # `db close` / reopen against the SAME file, and — like default_cache_size
+    # above — now schema-qualified via pragma_cookie_file_key so `aux.` and
+    # `main.`/unqualified writes land in different slots instead of
+    # clobbering each other (#6455).
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:(\w+)\.)?user_version\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
+    foreach {match schema value} $matches {
+        set ::pragma_user_version_cookie([pragma_cookie_file_key $schema]) $value
         set found 1
     }
-    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:\w+\.)?application_id\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
-    foreach {match value} $matches {
-        set ::pragma_application_id_cookie($::db_file) $value
+    set matches [regexp -all -inline -nocase {PRAGMA\s+(?:(\w+)\.)?application_id\s*[=(]\s*(-?\d+)\s*[)]?} $sql]
+    foreach {match schema value} $matches {
+        set ::pragma_application_id_cookie([pragma_cookie_file_key $schema]) $value
         set found 1
     }
 
@@ -3414,6 +3585,14 @@ proc execsql {sql {db ""}} {
     # recognize. No-op outside vibesql_attach_replay_files.
     register_qualified_temp_tables $sql
 
+    # Capture the pretrack cookie snapshot BEFORE track_pragma_setting scans
+    # this call's own SQL text (#6455) — see snapshot_pragma_cookie_pretrack_state's
+    # doc comment for why this ordering matters (a single execsql call that
+    # both opens a transaction AND sets a cookie in the same text, like the
+    # ATTACH-rescue's `BEGIN;\nPRAGMA user_version=11;`, must snapshot the
+    # state from before its own write).
+    snapshot_pragma_cookie_pretrack_state
+
     # Always track PRAGMA settings in any SQL (handles multi-statement blocks)
     track_pragma_setting $sql
 
@@ -3606,8 +3785,14 @@ proc execsql {sql {db ""}} {
         # Defensive: a fresh transaction must never inherit a stale incremental
         # trial DB from a previous one (every normal transaction-end path tears
         # it down; this guards against any missed path).
+        #
+        # Also snapshot the file-header PRAGMA cookies here (#6455) — but ONLY
+        # on a genuinely fresh open, not the "survived trial error, still the
+        # same transaction" reopen this same branch can also reach — so a
+        # later ROLLBACK restores to this transaction's true starting point.
         if {!$::in_transaction} {
             teardown_txn_trial_db
+            snapshot_pragma_cookie_txn_state
         }
         set ::txn_survived_trial_error 0
         if {[catch {trial_check_in_transaction $sql} trial_err]} {
@@ -3851,6 +4036,15 @@ proc execsql {sql {db ""}} {
             if {$pre_flush_snapshot ne ""} {
                 delete_db_with_wal $pre_flush_snapshot
             }
+        }
+        # This closing statement's net effect might be a ROLLBACK rather than
+        # a COMMIT/END; if so, revert any file-header PRAGMA cookie SET made
+        # since the transaction's BEGIN so it doesn't leak its
+        # never-committed value into a later fresh-process PRAGMA read
+        # (#6455) — mirroring reconcile_skipped_txn_state's identical restore
+        # for a SKIPPED closer. Uses the same detection pattern as that proc.
+        if {[regexp -nocase {(?:^|;|\n)\s*ROLLBACK\s*(?:;|\s|$)} $sql]} {
+            restore_pragma_cookie_txn_snapshot
         }
         set parsed [parse_result $result $tolerate_err]
         # When the statement that closes this batched transaction is ONLY a
@@ -7084,6 +7278,31 @@ array set vibesql_attach_ok {
     e_dropview-5.3 1
 }
 
+# Narrow exception to the ATTACH-setup rescue's single-shot ::attach_skipped
+# gate in `do_test` (#6455): a test name listed here has had its
+# `strip_attached_db_statements` remainder manually verified to contain no
+# schema-creating DDL (no CREATE/DROP/ALTER — only transaction-control and/or
+# PRAGMA statements), so rescuing it cannot leak a "main-side object" into
+# downstream tests the way the gate exists to prevent (see the doc comment at
+# the gate's use site in `do_test`). This does NOT require the owning file to
+# be in vibesql_attach_replay_files / vibesql_attach_ok — those two arrays
+# gate genuine cross-batch ATTACH persistence and uses_sqlite_internals'
+# broader auto-skip bypass respectively; this one narrowly re-enables the
+# EXISTING #6193 rescue mechanism for one specific, already-skipped-for-other
+# reasons test.
+#
+# pragma-8.2.9 (`BEGIN; PRAGMA aux.user_version = 10; PRAGMA user_version =
+# 11;`) is reached only after pragma-8.2.5 already set ::attach_skipped, so
+# without this entry it is skipped outright rather than rescued to
+# `BEGIN;\nPRAGMA user_version = 11;` — meaning the transaction
+# pragma-8.2.10..8.2.13 all assume is open never actually opens, and
+# pragma-8.2.11's `PRAGMA main.user_version` read reads the stale
+# pre-transaction cookie instead of 11.
+variable vibesql_attach_rescue_always
+array set vibesql_attach_rescue_always {
+    pragma-8.2.9 1
+}
+
 # e_createtable-1.0 (`ATTACH 'test.db2' AS auxa; ATTACH 'test.db3' AS auxb;`)
 # is wrapped in `do_execsql_test`, unlike e_expr.test's bare file-scope ATTACH
 # (which runs directly via `execsql`, bypassing do_test's skip-check
@@ -7763,6 +7982,12 @@ proc reconcile_skipped_txn_state {script} {
         set ::savepoint_stack {}
         set ::txn_opened_by_savepoint 0
         teardown_txn_trial_db
+        # This proc's own doc comment above treats a skipped closer as
+        # equivalent to a ROLLBACK ("the skipped cleanup blocks in practice
+        # ROLLBACK, and discarding is the safe choice") — so any file-header
+        # PRAGMA cookie SET made since the transaction's BEGIN must be
+        # reverted too, the same as a real ROLLBACK (#6455).
+        restore_pragma_cookie_txn_snapshot
     }
 }
 
@@ -7899,7 +8124,38 @@ proc do_test {name script expected} {
         # reached only AFTER an earlier aux/ATTACH test has set ::attach_skipped,
         # so it is NOT rescued — preventing its main-side objects from leaking
         # into and corrupting the downstream tests that follow it.
-        if {![info exists ::attach_skipped] || !$::attach_skipped} {
+        #
+        # vibesql_attach_rescue_always (#6455) is a narrow, individually-
+        # verified exception to that single-shot gate: a test explicitly
+        # listed there is one whose stripped remainder was manually confirmed
+        # to carry NO schema-creating DDL (no CREATE/DROP/ALTER) — only
+        # transaction-control and/or PRAGMA statements — so it cannot leak a
+        # "main-side object" the way the gate above guards against, and is
+        # therefore safe to rescue even after an earlier aux/ATTACH test in
+        # the same file already set ::attach_skipped. pragma.test's
+        # pragma-8.2.9 is the motivating case: `BEGIN; PRAGMA aux.user_version
+        # = 10; PRAGMA user_version = 11;` strips to `BEGIN;\nPRAGMA
+        # user_version = 11;` — a plain MAIN-schema write with no dependency
+        # on the stripped aux statement — but was unconditionally skipped
+        # (never actually opening the transaction pragma-8.2.10..8.2.13 all
+        # assume is open), which is why pragma-8.2.11's later
+        # `PRAGMA main.user_version` read the stale pre-transaction cookie
+        # instead of the value this batch was supposed to set.
+        # Look up BOTH the bare test name and the testprefix-prefixed name
+        # (mirroring vibesql_attach_ok's lookup above, #6455) rather than
+        # overwriting the bare name with the prefixed one: pragma.test sets
+        # `set testprefix pragma` at file scope, but its do_test names are
+        # already fully-qualified literals like "pragma-8.2.9" — a prefixed
+        # lookup of "pragma-pragma-8.2.9" would never match, silently
+        # defeating this rescue for every file that sets a testprefix.
+        variable vibesql_attach_rescue_always
+        set attach_rescue_ok [info exists vibesql_attach_rescue_always($name)]
+        if {!$attach_rescue_ok && [info exists ::testprefix] && $::testprefix ne ""} {
+            set attach_rescue_ok \
+                [info exists vibesql_attach_rescue_always(${::testprefix}-${name})]
+        }
+        if {![info exists ::attach_skipped] || !$::attach_skipped
+                || $attach_rescue_ok} {
         if {([string match "*ATTACH DATABASE*" $reason]
                 || [string match "*DETACH DATABASE*" $reason]
                 || [string match "*attached database schema*" $reason])
