@@ -6697,6 +6697,11 @@ array set vibesql_skip_tests {
     e_createtable-1.9.1 "Downstream of the e_createtable-1.7.2.4 cross-schema existence-check engine gap: earlier statements in this section silently land in (or collide with) the wrong schema, so by the time this test runs, MAIN no longer has the index state SQLite expects and the test's asserted 'there is already an index named i1' error never fires. Re-skipped rather than allowed to regress; engine-level fix tracked separately (#6404)."
     e_createtable-1.11.2.2 "Downstream of the same cross-schema unqualified-name-resolution engine gap (#6404): DROP TABLE IF EXISTS resolves an unqualified name against the wrong attached schema during the file's earlier drop_all_tables cleanup calls (which only clean the MAIN schema, per drop_all_tables's own scope — the shim never attempts to also clean ATTACHed schemas), leaving stale/mismatched state that surfaces here as a spurious 'no such table: t2'. Re-skipped rather than allowed to regress; engine-level fix tracked separately."
 
+    pragma4-4.1.6 "Genuine VibeSQL ENGINE gap surfaced by fixing the proc sqlite3/reset_db force-delete race (#6482), confirmed via direct CLI reproduction with no shim involved (#6531): an attached database is loaded from the raw .vbsql SNAPSHOT only and never gets the WAL/checkpoint recovery a direct 'main' open performs, so the attached and direct views of one file diverge. 4.1.4's 'DROP TABLE t2' through a DIRECT open of test.db2 genuinely succeeds (the drop lands in test.wal/test-checkpoints/; the snapshot is left byte-for-byte unchanged, verified by md5), but this test's 'PRAGMA table_info(t2)' — issued on the primary connection, which reaches the same file through its replayed aux attachment — still reads the pre-drop snapshot and reports t2's three columns instead of nothing. Was passing before #6482 ONLY because the shim force-deleted test.db2 out from under the live connection, which made this PRAGMA trivially empty for the wrong reason (and made 4.1.4 itself fail with 'no such table: t2'). Skipped rather than allowed to regress; engine-level fix tracked in #6531 (not a TCL-shim issue). pragma4-4.4.3 is the same #6531 divergence in the opposite direction (an aux-side 'CREATE INDEX aux.i2' invisible to a direct-open 'DROP INDEX i2') but was already failing before #6482, so it is deliberately left FAILING and visible rather than skipped. NOTE for future editors: this reason string deliberately contains no ALL-CAPS spelling of the a-t-t-a-c-h keyword. omit_test turns any reason matching that all-caps spelling into ::attach_skipped, which would be a FALSE attribution here (the aux database IS live; nothing about this skip is an unrun attach setup) and would wrongly re-cascade pragma4's 4.5.x/4.6.x sections into 'cascading from skipped ...' skips, hiding 4 genuine passes and 3 genuine failures. Keep it lowercase if you reword this."
+
+    e_changes-1.1.6 "Pre-existing TCL-shim gap unmasked (not caused) by fixing the proc sqlite3/reset_db force-delete race (#6482), tracked in #6532: the shim stores 'db changes' in the PROCESS-GLOBAL ::last_changes rather than per-connection, so the secondary connection's INSERT in the preceding 1.1.5 overwrites the primary connection's count and this test reads 1 where real SQLite reads 4. That is exactly the requirement 1.1.5/1.1.6 exist to assert ('changes made by other connections do not show up in the return value of sqlite3_changes()'). It was passing before #6482 ONLY for the wrong reason: 'sqlite3 db2 test.db' force-deleted the live database, so 1.1.5's 'execsql {INSERT ...} db2' errored and never wrote the global. With the race fixed, 1.1.5, 1.1.8 and 1.1.10 genuinely pass for the first time and this one fails honestly. Skipped rather than allowed to regress; shim-level fix tracked in #6532."
+    e_changes-1.2.6 "Same process-global ::last_changes gap as e_changes-1.1.6 above, in the WITHOUT ROWID arm of the same foreach loop (#6532, unmasked by #6482). Skipped rather than allowed to regress."
+
     table-19.1 "Genuine VibeSQL engine gap surfaced by enabling ATTACH replay for table.test (#6404), confirmed via direct single-session CLI reproduction (not a shim artifact): once a second database is ATTACHed, an unqualified 'CREATE TABLE t19 AS SELECT * FROM sqlite_master' (CTAS) fails with 'no such table: sqlite_master', even though a plain 'SELECT * FROM sqlite_master' with the identical ATTACH state resolves fine — i.e. the gap is specific to CTAS's query-planning path losing the unqualified-name-to-MAIN-schema resolution once any ATTACHed database exists, not a general sqlite_master/ATTACH interaction. Was passing before ATTACH replay was enabled for this file only because aux was never genuinely attached in the per-batch CLI process reaching this test (table-14.3/14.4 above, the file's only ATTACH statement, previously hit the file-scope ATTACH skip). Re-skipped rather than allowed to regress; engine-level fix tracked separately (not a TCL-shim issue)."
 }
 
@@ -7270,6 +7275,7 @@ array set vibesql_attach_ok {
     pragma4-4.1.1 1
     pragma4-4.2.1 1
     pragma4-4.3.1 1
+    pragma4-4.4.0 1
     e_dropview-3.5.0 1
     e_dropview-3.5.1 1
     e_dropview-3.5.2 1
@@ -7331,6 +7337,14 @@ array set vibesql_attach_rescue_always {
 # already-diagnosed shim/engine gaps rather than regressing anything that
 # previously passed.
 
+# pragma4-4.4.0 (#6482) was added to vibesql_attach_ok later than the three
+# 4.x.1 setup blocks below, for the same "the `aux.` text lives inside the
+# do_test body" reason: `CREATE INDEX main.i1 ON t1(b, c); CREATE INDEX aux.i2
+# ON t2(e, f);`. It was deliberately left out by #6440 because, with the
+# `proc sqlite3`/`reset_db` force-delete race still live, the tables it indexes
+# had just been destroyed underneath it. With that race fixed, t1/t2 survive
+# and 4.4.0 both runs and passes.
+#
 # pragma4.test's ATTACH usage (#6440) is confined to three near-identical
 # foundational setup blocks (4.1.1, 4.2.1, 4.3.1 — each `CREATE TABLE t1(...);
 # ATTACH 'test.db2' AS aux; CREATE TABLE aux.t2(...);`, sometimes with an
@@ -7384,6 +7398,31 @@ array set vibesql_attach_rescue_always {
 #     TABLE` across independent process invocations of the same file persist
 #     correctly), confirming the bug is in this shim bookkeeping, not
 #     storage-layer persistence.
+#
+#     FIXED by #6482: `proc sqlite3`'s "first time opening this file" check now
+#     skips the force-delete when the connection being opened is a SECONDARY
+#     named connection reopening a file that is still LIVE for the primary
+#     connection — either `$::db_file` itself or any file still ATTACHed to it
+#     (see `live_primary_db_files` and `is_secondary_reopen_of_live_db` at that
+#     check). Both halves are needed here: 4.1.4 pairs `sqlite3 db3 test.db`
+#     (the `$::db_file` half) with `sqlite3 db2 test.db2` (the ATTACHed half,
+#     the file 4.1.1 just created `aux.t2` in). Measured on pragma4.test:
+#     9 passed / 5 failed / 69 skipped -> 16 passed / 5 failed / 62 skipped.
+#     4.1.4, 4.2.4, 4.3.4 and 4.4.0 (newly allow-listed in vibesql_attach_ok,
+#     since with the race fixed its `CREATE INDEX main.i1/aux.i2` now has live
+#     tables to build on) flip to passing, and the 4.5.x/4.6.x sections stop
+#     cascading as skipped.
+#
+#     Two of the five residual failures are a DIFFERENT, deeper gap that the
+#     fix unmasked rather than caused — a genuine ENGINE bug (#6531): ATTACH
+#     loads the raw .vbsql SNAPSHOT and never runs the WAL/checkpoint recovery
+#     a direct "main" open performs, so the ATTACHed and direct views of one
+#     file diverge. 4.4.3 was already failing pre-fix and is left FAILING and
+#     visible; 4.1.6 was PASSING pre-fix only because the force-delete had
+#     emptied test.db2 (making its `PRAGMA table_info(t2)` trivially empty for
+#     the wrong reason) and is individually skip-listed with the full
+#     reproduction in vibesql_skip_tests, per the same "re-skip rather than
+#     let it regress" convention #6404 established above.
 
 # e_dropview-3.5.0/3.5.1/3.5.2 and e_dropview-5.1/5.2/5.3 (#6459): unlike
 # e_createtable-1.0/table-14.3/autoinc-5.1 above, being merely in
@@ -9662,6 +9701,38 @@ proc ::rename {oldname newname} {
     return [::tcltest_tcl_core_rename $oldname $newname]
 }
 
+# Normalized paths of every database file that is CURRENTLY LIVE for the
+# primary "db" connection: its own $::db_file, plus every file still ATTACHed
+# to it according to the shim's ATTACH-replay state (#6363's
+# ::attach_replay_ddl, which is populated only for files listed in
+# vibesql_attach_replay_files — so a file outside that allow-list contributes
+# nothing here and sees no behavior change from the attached-file half of
+# this).
+#
+# Used by `proc sqlite3` to decide whether an incoming SECONDARY named
+# connection (db2, db3, ...) is reopening an already-established live
+# database, in which case it must NOT be force-deleted as a "first open"
+# (#6482 — see the use site for the full race description).
+proc live_primary_db_files {} {
+    set files {}
+    if {[info exists ::db_file] && $::db_file ne ""} {
+        lappend files $::db_file
+    }
+    if {[info exists ::attach_replay_ddl]} {
+        dict for {alias ddl} $::attach_replay_ddl {
+            # pragma_cookie_file_key already unwraps the quoted path literal
+            # from the recorded `ATTACH '<path>' AS <alias>` text. It returns a
+            # synthetic "schema:<name>" key (never a real path) when the alias
+            # has no usable ATTACH text on record — skip those.
+            set path [pragma_cookie_file_key $alias]
+            if {[string match "schema:*" $path]} { continue }
+            if {$path eq "" || $path eq ":memory:"} { continue }
+            lappend files [file normalize $path]
+        }
+    }
+    return $files
+}
+
 proc sqlite3 {db args} {
     # Handle special flags first (like "sqlite3 -version")
     if {$db eq "-version"} {
@@ -9717,11 +9788,41 @@ proc sqlite3 {db args} {
         set new_file [file normalize $filename]
     }
 
+    # A SECONDARY named connection (db2, db3, ...) reopening a file that is
+    # CURRENTLY LIVE for the primary "db" connection must never be treated as
+    # a genuine first-open, even if that file isn't (or is no longer) in
+    # ::opened_dbs. `reset_db` (#6175) removes $::db_file from ::opened_dbs
+    # so that a LATER EXPLICIT `sqlite3 db test.db` reopen of the primary
+    # connection is correctly treated as fresh — but plenty of test files
+    # never explicitly reopen "db" after reset_db, going straight to
+    # `execsql`/`do_execsql_test` (which never touch ::opened_dbs at all).
+    # The first thing to call `proc sqlite3` again for that same path is then
+    # a SECONDARY connection, which — without this guard — would be
+    # (incorrectly) treated as a genuine first-open and force-delete the file,
+    # wiping out everything the primary "db" connection had just written
+    # (#6482; e.g. pragma4.test's 4.1.4/4.2.4/4.3.4/4.4.3, `sqlite3 db3
+    # test.db` immediately after a `CREATE TABLE`/`reset_db` with no explicit
+    # `sqlite3 db test.db` reopen in between). A second connection to an
+    # already-established live database should never truncate it, matching
+    # real SQLite's own multi-connection semantics.
+    #
+    # "Live for the primary connection" covers the ATTACHed files too, not
+    # just $::db_file — see live_primary_db_files. pragma4.test's 4.1.4 pairs
+    # `sqlite3 db3 test.db` (main) with `sqlite3 db2 test.db2` (the file
+    # 4.1.1 just ATTACHed as aux and created aux.t2 in): guarding only
+    # $::db_file leaves the db2 half force-deleting the live aux file, so
+    # `DROP TABLE t2` still fails with "no such table: t2".
+    set is_secondary_reopen_of_live_db [expr {
+        $db ne "" && $db ne "db"
+        && [lsearch -exact [live_primary_db_files] $new_file] >= 0
+    }]
+
     # Only delete the file if this is a NEW database (different from current)
     # AND it's the first time we're opening this file in this test run.
     # This allows tests to do: sqlite3 db test.db; db close; sqlite3 db test.db
     # and expect data to persist.
-    if {![info exists ::opened_dbs] || [lsearch -exact $::opened_dbs $new_file] < 0} {
+    if {!$is_secondary_reopen_of_live_db
+            && (![info exists ::opened_dbs] || [lsearch -exact $::opened_dbs $new_file] < 0)} {
         # First time opening this database file in this test - clean it.
         # Use forcedelete so stale WAL/checkpoint/lock siblings from a prior
         # run are removed too; otherwise the fresh open would replay an old
