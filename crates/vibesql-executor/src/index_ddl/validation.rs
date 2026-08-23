@@ -105,8 +105,22 @@ pub fn validate_create_index(
         stmt.table_name.clone()
     };
 
-    // Check if target is sqlite_master/sqlite_schema (read-only system table)
-    if is_sqlite_schema_table(&table_name) {
+    // Check if target is sqlite_master/sqlite_schema (read-only system table).
+    // `table_name` above already discarded any embedded schema qualifier, so
+    // the alias is checked separately via `schema_name` (resolved above,
+    // covering both the explicit `stmt.schema`-qualified index route and the
+    // legacy embedded `schema.table` spelling): the bare/`main.`-qualified
+    // forms match when `schema_name` is `main`, and `<alias>.sqlite_master`/
+    // `<alias>.sqlite_schema` match when `schema_name` is a currently-attached
+    // alias — matching SQLite's uniform rejection regardless of which live
+    // alias qualifies the name (issue #6451). A qualifier that is neither
+    // `main` nor a live attachment must NOT trigger this guard; it falls
+    // through to ordinary table resolution ("no such table"/"unknown
+    // database"), matching SQLite for a stale/unknown alias.
+    if is_sqlite_schema_table(&table_name)
+        && (schema_name.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA)
+            || database.catalog.is_attached_schema(&schema_name))
+    {
         return Err(ExecutorError::SqliteSystemTableReadOnly {
             table_name: table_name.clone(),
             operation: "indexed".to_string(),

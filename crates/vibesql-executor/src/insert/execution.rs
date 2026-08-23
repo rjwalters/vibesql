@@ -4,7 +4,7 @@ use vibesql_storage::statistics::CostEstimator;
 use crate::{
     dml_cost::DmlOptimizer, errors::ExecutorError, expression_index_maintenance,
     partial_index_maintenance, privilege_checker::PrivilegeChecker,
-    sqlite_schema::is_sqlite_schema_table, sqlite_stat::is_sqlite_stat1_table,
+    sqlite_schema::is_sqlite_schema_table_ref, sqlite_stat::is_sqlite_stat1_table,
 };
 
 /// Outcome of an INSERT statement execution.
@@ -227,8 +227,11 @@ fn execute_insert_internal(
         None => stmt.table_name.clone(),
     };
 
-    // Check if target is sqlite_master/sqlite_schema (read-only system table)
-    if is_sqlite_schema_table(&stmt.table_name) {
+    // Check if target is sqlite_master/sqlite_schema (read-only system table).
+    // Checked against `full_table_name` (schema-qualified when `stmt.schema_name`
+    // is set) so a currently-attached alias's schema table is recognized too —
+    // not just the bare/`main.`-qualified forms (issue #6451).
+    if is_sqlite_schema_table_ref(&db.catalog, &full_table_name) {
         return Err(ExecutorError::SqliteSystemTableReadOnly {
             table_name: stmt.table_name.clone(),
             operation: "modified".to_string(),

@@ -68,7 +68,7 @@ impl DropTableExecutor {
         // that is not registered in the catalog. Other non-existent `sqlite_`
         // names fall through to the normal "no such table" path, matching
         // sqlite3 (issue #5614).
-        if crate::sqlite_schema::is_sqlite_schema_table(&stmt.table_name) {
+        if crate::sqlite_schema::is_sqlite_schema_table_ref(&database.catalog, &stmt.table_name) {
             return Err(ExecutorError::SqliteCompatError(
                 "table sqlite_master may not be dropped".to_string(),
             ));
