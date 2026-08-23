@@ -678,6 +678,11 @@ impl Database {
     /// # Arguments
     /// * `index_name` - Name for the new index
     /// * `table_name` - Name of the table containing the vector column
+    /// * `table_lookup_name` - Schema-qualified (or bare) name used to resolve the physical table
+    ///   the vectors are extracted from. May differ from `table_name` when the caller has already
+    ///   resolved the owning schema (e.g. an ATTACHed `aux.t`) — see
+    ///   [`crate::database::Operations::create_ivfflat_index`] for why the split matters (issue
+    ///   #6502).
     /// * `column_name` - Name of the vector column to index
     /// * `col_idx` - Column index in the table schema
     /// * `dimensions` - Number of dimensions in the vectors
@@ -688,6 +693,7 @@ impl Database {
         &mut self,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         column_name: String,
         col_idx: usize,
         dimensions: usize,
@@ -700,6 +706,7 @@ impl Database {
             &self.tables,
             index_name,
             table_name,
+            table_lookup_name,
             column_name,
             col_idx,
             dimensions,
@@ -757,6 +764,11 @@ impl Database {
     /// # Arguments
     /// * `index_name` - Name for the new index
     /// * `table_name` - Name of the table containing the vector column
+    /// * `table_lookup_name` - Schema-qualified (or bare) name used to resolve the physical table
+    ///   the vectors are extracted from. May differ from `table_name` when the caller has already
+    ///   resolved the owning schema (e.g. an ATTACHed `aux.t`) — see
+    ///   [`crate::database::Operations::create_hnsw_index`] for why the split matters (issue
+    ///   #6502).
     /// * `column_name` - Name of the vector column to index
     /// * `col_idx` - Column index in the table schema
     /// * `dimensions` - Number of dimensions in the vectors
@@ -768,6 +780,7 @@ impl Database {
         &mut self,
         index_name: String,
         table_name: String,
+        table_lookup_name: &str,
         column_name: String,
         col_idx: usize,
         dimensions: usize,
@@ -781,6 +794,7 @@ impl Database {
             &self.tables,
             index_name,
             table_name,
+            table_lookup_name,
             column_name,
             col_idx,
             dimensions,

@@ -46,9 +46,15 @@ pub fn create_spatial_index(
         }
     })?;
 
-    // Extract MBRs from all existing rows (use unqualified name, database handles qualification)
+    // Extract MBRs from all existing rows. Resolve via `qualified_table_name`
+    // (e.g. `aux.t`), not the bare `table_name` — a bare lookup follows
+    // storage's own temp-then-current-then-attached search order and can
+    // silently land on an unrelated same-named table (e.g. `main.t`) instead
+    // of the table the validator already resolved the index against,
+    // building the spatial index from the wrong rows (issue #6502, the
+    // spatial/vector analogue of #6487).
     let table = database
-        .get_table(table_name)
+        .get_table(qualified_table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.to_string()))?;
 
     let mut entries = Vec::new();

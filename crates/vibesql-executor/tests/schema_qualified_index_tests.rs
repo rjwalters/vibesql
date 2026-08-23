@@ -21,7 +21,7 @@ use vibesql_executor::{
     CreateIndexExecutor, CreateTableExecutor, DropIndexExecutor, InsertExecutor,
 };
 use vibesql_parser::Parser;
-use vibesql_storage::{database::indexes::IndexData, Database};
+use vibesql_storage::{database::indexes::IndexData, Database, Row};
 use vibesql_types::SqlValue;
 
 fn exec_create_table(db: &mut Database, sql: &str) {
@@ -382,4 +382,147 @@ fn create_btree_index_main_schema_qualified_body_reflects_main_table_rows() {
 
     let keys = index_int_keys(&db, "i1");
     assert_eq!(keys, vec![1, 2], "index body should reflect main.t's own rows (1, 2)");
+}
+
+// ============================================================================
+// Regression tests for issue #6502: the spatial/vector-index analogue of
+// #6487. `CREATE SPATIAL INDEX <schema>.<idx> ON <t>(...)` and
+// `CREATE INDEX <schema>.<idx> ON <t> USING ivfflat/hnsw(...)` must build the
+// physical index body against the schema-qualified table the validator
+// resolved, not a bare-name-resolved (and possibly same-named `main`) table.
+// ============================================================================
+
+/// Spatial-index counterpart of #6487's Shape 2 (colliding column, silently
+/// wrong body): both `main.t` and `aux.t` have a geometry-shaped column
+/// named `g`, so the pre-fix `create_spatial_index` (which resolved the MBR
+/// scan via bare `table_name`) would have built the spatial index from
+/// `main.t`'s row instead of `aux.t`'s — invisible without inspecting the
+/// index body directly.
+#[test]
+fn create_spatial_index_attached_schema_builds_against_attached_table_not_main() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(id INTEGER, g VARCHAR(200))"); // main.t HAS g too
+    exec_insert(&mut db, "INSERT INTO t VALUES (1, 'POINT(1 1)')");
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(id INTEGER, g VARCHAR(200))");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES (10, 'POINT(50 50)')");
+    exec_insert(&mut db, "INSERT INTO aux.t VALUES (20, 'POINT(60 60)')");
+
+    let result = exec_create_index(&mut db, "CREATE SPATIAL INDEX aux.i1 ON t(g)");
+    assert!(
+        result.is_ok(),
+        "CREATE SPATIAL INDEX aux.i1 ON t(g) should succeed: {:?}",
+        result.err()
+    );
+
+    let idx = db.get_spatial_index("aux.i1").expect("aux.i1 in storage");
+    assert_eq!(
+        idx.len(),
+        2,
+        "spatial index body must reflect aux.t's 2 rows, not main.t's 1 colliding row"
+    );
+    assert_eq!(idx.locate_at_point(&[50.0, 50.0]).len(), 1, "aux.i1 must have POINT(50 50)");
+    assert_eq!(idx.locate_at_point(&[60.0, 60.0]).len(), 1, "aux.i1 must have POINT(60 60)");
+    assert!(
+        idx.locate_at_point(&[1.0, 1.0]).is_empty(),
+        "aux.i1 must NOT contain main.t's colliding POINT(1 1)"
+    );
+}
+
+/// Insert a row directly into a table's physical storage, bypassing the SQL
+/// INSERT path entirely. Used to populate VECTOR columns for the IVFFlat/HNSW
+/// regression tests below, since VibeSQL's INSERT grammar has no vector
+/// literal syntax (vector data is populated programmatically in real usage).
+fn insert_vector_row(db: &mut Database, qualified_table_name: &str, values: Vec<SqlValue>) {
+    let table = db
+        .get_table_mut(qualified_table_name)
+        .unwrap_or_else(|| panic!("table {qualified_table_name} not found"));
+    table
+        .insert(Row::new(values))
+        .unwrap_or_else(|e| panic!("insert into {qualified_table_name}: {e}"));
+}
+
+/// IVFFlat counterpart of #6487's Shape 2: both `main.t` and `aux.t` have a
+/// VECTOR column named `v`, so the pre-fix `create_ivfflat_index` (which
+/// resolved the vector-extraction scan via bare `table_name`, with no
+/// qualified-lookup parameter at all) would have built the index from
+/// `main.t`'s single decoy vector instead of `aux.t`'s two rows.
+#[test]
+fn create_ivfflat_index_attached_schema_builds_against_attached_table_not_main() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(id INTEGER, v VECTOR(3))"); // main.t HAS v too
+    insert_vector_row(
+        &mut db,
+        "main.t",
+        vec![SqlValue::Integer(1), SqlValue::Vector(vec![9.0, 9.0, 9.0])],
+    );
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(id INTEGER, v VECTOR(3))");
+    insert_vector_row(
+        &mut db,
+        "aux.t",
+        vec![SqlValue::Integer(10), SqlValue::Vector(vec![1.0, 0.0, 0.0])],
+    );
+    insert_vector_row(
+        &mut db,
+        "aux.t",
+        vec![SqlValue::Integer(20), SqlValue::Vector(vec![0.0, 1.0, 0.0])],
+    );
+
+    let result =
+        exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t USING ivfflat(v) WITH (lists = 1)");
+    assert!(
+        result.is_ok(),
+        "CREATE INDEX aux.i1 ON t USING ivfflat(v) should succeed: {:?}",
+        result.err()
+    );
+
+    let indexes = db.get_ivfflat_indexes_for_table("t");
+    assert_eq!(indexes.len(), 1, "exactly one IVFFlat index should exist for table 't'");
+    let (_, ivfflat) = indexes[0];
+    assert_eq!(
+        ivfflat.len(),
+        2,
+        "IVFFlat index body must reflect aux.t's 2 rows, not main.t's 1 colliding row"
+    );
+}
+
+/// HNSW counterpart of the same shape.
+#[test]
+fn create_hnsw_index_attached_schema_builds_against_attached_table_not_main() {
+    let mut db = Database::new();
+    exec_create_table(&mut db, "CREATE TABLE t(id INTEGER, v VECTOR(3))"); // main.t HAS v too
+    insert_vector_row(
+        &mut db,
+        "main.t",
+        vec![SqlValue::Integer(1), SqlValue::Vector(vec![9.0, 9.0, 9.0])],
+    );
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    exec_create_table(&mut db, "CREATE TABLE aux.t(id INTEGER, v VECTOR(3))");
+    insert_vector_row(
+        &mut db,
+        "aux.t",
+        vec![SqlValue::Integer(10), SqlValue::Vector(vec![1.0, 0.0, 0.0])],
+    );
+    insert_vector_row(
+        &mut db,
+        "aux.t",
+        vec![SqlValue::Integer(20), SqlValue::Vector(vec![0.0, 1.0, 0.0])],
+    );
+
+    let result = exec_create_index(&mut db, "CREATE INDEX aux.i1 ON t USING hnsw(v)");
+    assert!(
+        result.is_ok(),
+        "CREATE INDEX aux.i1 ON t USING hnsw(v) should succeed: {:?}",
+        result.err()
+    );
+
+    let indexes = db.get_hnsw_indexes_for_table("t");
+    assert_eq!(indexes.len(), 1, "exactly one HNSW index should exist for table 't'");
+    let (_, hnsw) = indexes[0];
+    assert_eq!(
+        hnsw.len(),
+        2,
+        "HNSW index body must reflect aux.t's 2 rows, not main.t's 1 colliding row"
+    );
 }
