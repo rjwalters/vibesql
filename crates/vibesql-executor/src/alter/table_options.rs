@@ -1,7 +1,7 @@
 //! Table-level operation executors for ALTER TABLE
 
 use vibesql_ast::{RenameTableStmt, TriggerAction, TriggerEvent};
-use vibesql_catalog::TriggerDefinition;
+use vibesql_catalog::{TableIdentifier, TriggerDefinition};
 use vibesql_storage::Database;
 
 use crate::{
@@ -42,14 +42,30 @@ pub(super) fn execute_rename_table(
         )));
     }
 
+    // SQLite's `RENAME TO` target is always an unqualified name — the table
+    // stays in whatever schema it already lived in. `stmt.table_name` may
+    // itself be schema-qualified (e.g. `aux.t1`), so carry that qualifier
+    // over to the new name; otherwise the renamed table would silently land
+    // in the *current* schema (typically `main`) instead of staying in
+    // `aux` (issue #6504).
+    let schema_qualifier = stmt.table_name.split_once('.').map(|(schema, _)| schema.to_string());
+    let new_table_identifier = match &schema_qualifier {
+        Some(schema) => TableIdentifier::qualified(schema, false, &stmt.new_table_name, false),
+        None => TableIdentifier::new(&stmt.new_table_name, false),
+    };
+    let qualified_new_table_name = match &schema_qualifier {
+        Some(schema) => format!("{schema}.{}", stmt.new_table_name),
+        None => stmt.new_table_name.clone(),
+    };
+
     // Check if the new name already names a table or an index. SQLite shares a
     // single object namespace for tables and indexes, so a RENAME TO collision
     // against either reports the same SQLite-compatible message
     // (`there is already another table or index with this name: <name>`).
-    if database.get_table(&stmt.new_table_name).is_some()
+    if database.get_table(&qualified_new_table_name).is_some()
         || database.index_exists(&stmt.new_table_name)
     {
-        return Err(ExecutorError::RenameTargetExists(stmt.new_table_name.clone()));
+        return Err(ExecutorError::RenameTargetExists(qualified_new_table_name));
     }
 
     // Get the old table to ensure it exists
@@ -107,7 +123,7 @@ pub(super) fn execute_rename_table(
         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
     database
-        .create_table(new_table.schema.clone())
+        .create_table_with_identifier(new_table.schema.clone(), new_table_identifier)
         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
     // Restore the triggers cascade-dropped above so `rewrite_triggers_for_rename`
@@ -119,8 +135,8 @@ pub(super) fn execute_rename_table(
 
     // Restore the data by getting the new table and setting its rows
     let restored_table = database
-        .get_table_mut(&stmt.new_table_name)
-        .ok_or_else(|| ExecutorError::TableAlreadyExists(stmt.new_table_name.clone()))?;
+        .get_table_mut(&qualified_new_table_name)
+        .ok_or_else(|| ExecutorError::TableAlreadyExists(qualified_new_table_name.clone()))?;
 
     for row in new_table.scan() {
         restored_table
@@ -159,7 +175,7 @@ pub(super) fn execute_rename_table(
     // The old table name's cache is invalidated since the table no longer exists,
     // and the new table name's cache is invalidated to ensure fresh columnar data.
     database.invalidate_columnar_cache(&stmt.table_name);
-    database.invalidate_columnar_cache(&stmt.new_table_name);
+    database.invalidate_columnar_cache(&qualified_new_table_name);
 
     Ok(format!("Table '{}' renamed to '{}'", stmt.table_name, stmt.new_table_name))
 }

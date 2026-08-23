@@ -27,7 +27,7 @@
 //! cases, SQLite's message echoes the *canonical* `sqlite_master` name, never
 //! the alias-qualified spelling the statement used.
 
-use vibesql_ast::{AlterTableStmt, AnalyzeStmt, RenameTableStmt, Statement};
+use vibesql_ast::Statement;
 use vibesql_executor::{
     AlterTableExecutor, AnalyzeExecutor, CreateIndexExecutor, DeleteExecutor, DropTableExecutor,
     ExecutorError, InsertExecutor, UpdateExecutor,
@@ -50,29 +50,24 @@ fn setup_with_attached_aux() -> Database {
     db
 }
 
-// NOTE: `ALTER TABLE aux.sqlite_master RENAME TO x` cannot be exercised via
-// `Parser::parse_sql` here — VibeSQL's ALTER TABLE parser (`parser/alter.rs`)
-// parses the table name with the single-token `parse_identifier()`, not
-// `parse_qualified_identifier()`, so it does not accept ANY schema-qualified
-// table name (`ALTER TABLE aux.t1 ...` fails to parse identically, for an
-// ordinary table). That is a separate, pre-existing parser gap outside this
-// issue's scope (#6451 is about the guard call sites, not the ALTER TABLE
-// grammar) — filed as a follow-up in #6504. The tests below construct the AST
-// directly to verify the guard itself (`alter/validation.rs`'s
-// `is_sqlite_schema_table_ref`, threaded through `AlterTableExecutor`),
-// which is exactly what the SQL-facing path will exercise once the parser
-// gap is fixed.
-fn rename_table_stmt(table_name: &str) -> AlterTableStmt {
-    AlterTableStmt::RenameTable(RenameTableStmt {
-        table_name: table_name.to_string(),
-        new_table_name: "x".to_string(),
-    })
+// `ALTER TABLE aux.sqlite_master RENAME TO x` is now exercised via
+// `Parser::parse_sql` — issue #6504 fixed the ALTER TABLE parser
+// (`parser/alter.rs::parse_alter_table`) to parse the table name with
+// `parse_table_ref()` (the same helper DROP TABLE already used) instead of
+// the single-token `parse_identifier()`, so schema-qualified names
+// (including `<alias>.sqlite_master`) now reach this guard end-to-end via
+// real SQL text.
+fn alter_table_rename_stmt(sql: &str) -> vibesql_ast::AlterTableStmt {
+    match Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse {sql:?}: {e:?}")) {
+        Statement::AlterTable(stmt) => stmt,
+        other => panic!("expected AlterTable, got {other:?}"),
+    }
 }
 
 #[test]
 fn alter_table_rejects_attached_alias_sqlite_master() {
     let mut db = setup_with_attached_aux();
-    let stmt = rename_table_stmt("aux.sqlite_master");
+    let stmt = alter_table_rename_stmt("ALTER TABLE aux.sqlite_master RENAME TO x");
     let err = AlterTableExecutor::execute(&stmt, &mut db).unwrap_err();
     assert_eq!(err.to_string(), "table sqlite_master may not be altered");
 }
@@ -80,7 +75,7 @@ fn alter_table_rejects_attached_alias_sqlite_master() {
 #[test]
 fn alter_table_rejects_attached_alias_sqlite_schema_case_insensitive() {
     let mut db = setup_with_attached_aux();
-    let stmt = rename_table_stmt("AUX.SQLITE_SCHEMA");
+    let stmt = alter_table_rename_stmt("ALTER TABLE AUX.SQLITE_SCHEMA RENAME TO x");
     let err = AlterTableExecutor::execute(&stmt, &mut db).unwrap_err();
     assert_eq!(err.to_string(), "table sqlite_master may not be altered");
 }
@@ -88,12 +83,42 @@ fn alter_table_rejects_attached_alias_sqlite_schema_case_insensitive() {
 #[test]
 fn alter_table_does_not_recognize_unattached_alias_as_sqlite_master() {
     let mut db = setup_with_attached_aux();
-    let stmt = rename_table_stmt("bogus.sqlite_master");
+    let stmt = alter_table_rename_stmt("ALTER TABLE bogus.sqlite_master RENAME TO x");
     let err = AlterTableExecutor::execute(&stmt, &mut db).unwrap_err();
     assert_ne!(
         err.to_string(),
         "table sqlite_master may not be altered",
         "an alias that was never attached must not trip the reserved-name guard: {err}"
+    );
+}
+
+/// Regression / new acceptance criterion (#6504): an ordinary
+/// attached-schema table (not the reserved schema table) now parses and
+/// executes correctly end-to-end via real SQL text — it must rename `t1`
+/// inside `aux`, not fall through to the guard.
+#[test]
+fn alter_table_rename_ordinary_attached_table_succeeds() {
+    let mut db = setup_with_attached_aux();
+    // `setup_with_attached_aux` creates `t1` in `main`; create the
+    // `aux`-scoped `t1` as well so the qualified rename has a real target.
+    let create =
+        match Parser::parse_sql("CREATE TABLE aux.t1(a INTEGER)").expect("parse CREATE TABLE") {
+            Statement::CreateTable(s) => s,
+            other => panic!("expected CreateTable, got {other:?}"),
+        };
+    vibesql_executor::CreateTableExecutor::execute(&create, &mut db).expect("CREATE TABLE aux.t1");
+
+    let stmt = alter_table_rename_stmt("ALTER TABLE aux.t1 RENAME TO t2");
+    AlterTableExecutor::execute(&stmt, &mut db)
+        .expect("ALTER TABLE aux.t1 RENAME TO t2 should succeed");
+
+    assert!(
+        db.catalog.table_exists("aux.t2"),
+        "renamed table should exist as aux.t2 in the catalog"
+    );
+    assert!(
+        !db.catalog.table_exists("aux.t1"),
+        "old table name aux.t1 should no longer exist in the catalog"
     );
 }
 
@@ -145,23 +170,47 @@ fn delete_rejects_attached_alias_sqlite_master() {
     assert_eq!(err.to_string(), "table sqlite_master may not be modified");
 }
 
-// NOTE: like ALTER TABLE above, `ANALYZE aux.sqlite_master` cannot be
-// exercised via `Parser::parse_sql` — the ANALYZE parser
-// (`parser/index.rs::parse_analyze_statement`) also parses the table name
-// with single-token `parse_identifier()`, and (unlike ALTER TABLE) doesn't
-// even reject the leftover `.sqlite_master` as trailing garbage: it silently
-// parses `ANALYZE aux.sqlite_master` as `ANALYZE aux` (table name "aux",
-// dropping the rest), which then fails with `TableNotFound("aux")` — a
-// different, and arguably worse, pre-existing bug than the one this issue
-// targets. Same root cause and same follow-up (#6504) as the ALTER TABLE
-// parser gap above. Constructing the AST directly verifies the guard itself.
+// `ANALYZE aux.sqlite_master` is now exercised via `Parser::parse_sql` —
+// issue #6504 fixed the ANALYZE parser
+// (`parser/index.rs::parse_analyze_statement`) to parse the table name with
+// `parse_table_ref()` instead of single-token `parse_identifier()`, and
+// added `expect_statement_end()` so trailing garbage is rejected instead of
+// silently truncating (previously `ANALYZE aux.sqlite_master` silently
+// became `ANALYZE aux`, later failing with `TableNotFound("aux")`).
+fn analyze_stmt(sql: &str) -> vibesql_ast::AnalyzeStmt {
+    match Parser::parse_sql(sql).unwrap_or_else(|e| panic!("parse {sql:?}: {e:?}")) {
+        Statement::Analyze(stmt) => stmt,
+        other => panic!("expected Analyze, got {other:?}"),
+    }
+}
+
 #[test]
 fn analyze_attached_alias_sqlite_master_is_a_no_op() {
     let mut db = setup_with_attached_aux();
-    let stmt = AnalyzeStmt { table_name: Some("aux.sqlite_master".to_string()), columns: None };
+    let stmt = analyze_stmt("ANALYZE aux.sqlite_master");
+    assert_eq!(stmt.table_name.as_deref(), Some("aux.sqlite_master"));
     // ANALYZE against the schema table is a no-op (sqlite_stat1 is virtual),
     // not an error — matching the bare/`main.`-qualified behavior.
     AnalyzeExecutor::execute(&stmt, &mut db).expect("ANALYZE aux.sqlite_master should succeed");
+}
+
+/// New acceptance criterion (#6504): an ordinary attached-schema table
+/// analyzes successfully via real SQL text instead of failing with
+/// `TableNotFound("aux")` (the pre-fix behavior, from silently truncating
+/// `aux.t1` down to just `aux`).
+#[test]
+fn analyze_ordinary_attached_table_succeeds() {
+    let mut db = setup_with_attached_aux();
+    let create =
+        match Parser::parse_sql("CREATE TABLE aux.t1(a INTEGER)").expect("parse CREATE TABLE") {
+            Statement::CreateTable(s) => s,
+            other => panic!("expected CreateTable, got {other:?}"),
+        };
+    vibesql_executor::CreateTableExecutor::execute(&create, &mut db).expect("CREATE TABLE aux.t1");
+
+    let stmt = analyze_stmt("ANALYZE aux.t1");
+    assert_eq!(stmt.table_name.as_deref(), Some("aux.t1"));
+    AnalyzeExecutor::execute(&stmt, &mut db).expect("ANALYZE aux.t1 should succeed");
 }
 
 #[test]
