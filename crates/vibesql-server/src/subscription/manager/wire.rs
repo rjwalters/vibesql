@@ -20,6 +20,50 @@ impl SubscriptionManager {
         self.wire_id_index.get(wire_id).map(|r| *r)
     }
 
+    /// Pause a subscription by its wire protocol ID (SubscriptionPause, 0xF5)
+    ///
+    /// While paused, the subscription remains registered (still counts toward
+    /// connection/global limits) but is skipped by the change-notification and
+    /// broadcast paths, so no `SubscriptionData`/`SubscriptionPartialData`
+    /// messages are sent to the client until it is resumed.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a subscription with this wire ID was found and paused,
+    /// `false` if no matching subscription exists (e.g. unknown or already
+    /// unsubscribed ID).
+    pub fn pause_subscription_by_wire_id(&self, wire_id: &[u8; 16]) -> bool {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.paused = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Resume a previously paused subscription by its wire protocol ID
+    /// (SubscriptionResume, 0xF6)
+    ///
+    /// After resuming, the client will again receive `SubscriptionData`
+    /// messages when underlying data changes. Per the protocol spec, the
+    /// client does not automatically receive the current state on resume —
+    /// only updates going forward.
+    ///
+    /// # Returns
+    ///
+    /// `true` if a subscription with this wire ID was found and resumed,
+    /// `false` if no matching subscription exists.
+    pub fn resume_subscription_by_wire_id(&self, wire_id: &[u8; 16]) -> bool {
+        if let Some(id) = self.wire_id_index.get(wire_id).map(|r| *r) {
+            if let Some(mut sub) = self.subscriptions.get_mut(&id) {
+                sub.paused = false;
+                return true;
+            }
+        }
+        false
+    }
+
     /// Get the subscription count for a specific connection
     ///
     /// # Arguments
@@ -65,6 +109,11 @@ impl SubscriptionManager {
             .into_iter()
             .filter_map(|id| {
                 self.subscriptions.get(&id).and_then(|sub| {
+                    // Paused subscriptions (SubscriptionPause, 0xF5) are skipped entirely —
+                    // no re-query, no notification — until SubscriptionResume (0xF6).
+                    if sub.paused {
+                        return None;
+                    }
                     sub.wire_subscription_id.map(|wire_id| {
                         (wire_id, sub.query.clone(), sub.last_result_hash, sub.last_result.clone())
                     })
@@ -104,6 +153,11 @@ impl SubscriptionManager {
             .into_iter()
             .filter_map(|id| {
                 self.subscriptions.get(&id).and_then(|sub| {
+                    // Paused subscriptions (SubscriptionPause, 0xF5) are skipped entirely —
+                    // no re-query, no notification — until SubscriptionResume (0xF6).
+                    if sub.paused {
+                        return None;
+                    }
                     // Only include subscriptions that belong to this connection
                     if sub.connection_id.as_deref() == Some(connection_id) {
                         sub.wire_subscription_id.map(|wire_id| {

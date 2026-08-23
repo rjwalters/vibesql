@@ -582,13 +582,19 @@ impl ConnectionHandler {
 
             FrontendMessage::SubscriptionPause { subscription_id } => {
                 debug!("SubscriptionPause: {:?}", subscription_id);
-                // TODO: Implement pause functionality
+                if !self.subscription_manager.pause_subscription_by_wire_id(&subscription_id) {
+                    debug!("SubscriptionPause: unknown subscription {:?}", subscription_id);
+                }
+                // No response per protocol spec (PROTOCOL.md § SubscriptionPause)
                 Ok(ClientMessageResult::Continue)
             }
 
             FrontendMessage::SubscriptionResume { subscription_id } => {
                 debug!("SubscriptionResume: {:?}", subscription_id);
-                // TODO: Implement resume functionality
+                if !self.subscription_manager.resume_subscription_by_wire_id(&subscription_id) {
+                    debug!("SubscriptionResume: unknown subscription {:?}", subscription_id);
+                }
+                // No response per protocol spec (PROTOCOL.md § SubscriptionResume)
                 Ok(ClientMessageResult::Continue)
             }
 

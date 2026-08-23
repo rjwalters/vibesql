@@ -132,6 +132,12 @@ pub struct Subscription {
     /// Per-subscription override for selective column update configuration
     /// If set, this overrides the server-level selective_updates config for this subscription
     pub selective_updates_override: Option<SelectiveColumnConfig>,
+    /// Whether this subscription is currently paused (SubscriptionPause/SubscriptionResume,
+    /// wire protocol messages 0xF5/0xF6). While paused, change notifications are skipped
+    /// entirely — the subscription remains registered (still counts toward limits, still
+    /// receives updates once resumed) but no `SubscriptionData`/`SubscriptionPartialData`
+    /// messages are sent to the client.
+    pub paused: bool,
 }
 
 impl Subscription {
@@ -170,6 +176,7 @@ impl Subscription {
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
             selective_updates_override: None,
+            paused: false,
         }
     }
 
@@ -199,6 +206,7 @@ impl Subscription {
             pk_columns: vec![0], // default: assume first column is PK
             selective_eligible: false,
             selective_updates_override: None,
+            paused: false,
         }
     }
 
@@ -262,6 +270,7 @@ impl Subscription {
             pk_columns,
             selective_eligible: false,
             selective_updates_override: None,
+            paused: false,
         }
     }
 

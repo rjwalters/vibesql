@@ -823,6 +823,56 @@ fn test_get_affected_subscriptions_for_wire_protocol() {
 }
 
 #[test]
+fn test_pause_resume_by_wire_id_gates_affected_subscriptions() {
+    let manager = SubscriptionManager::new();
+    let connection_id = "conn-1".to_string();
+
+    let (tx, _rx) = mpsc::channel(16);
+    let wire_id: [u8; 16] = [1u8; 16];
+    let tables: HashSet<String> = ["users".to_string()].into_iter().collect();
+
+    manager
+        .subscribe_for_connection(
+            "SELECT * FROM users".to_string(),
+            tx,
+            connection_id.clone(),
+            wire_id,
+            tables,
+            None,
+        )
+        .unwrap();
+
+    // Before pausing, the subscription shows up in both affected-subscription lookups.
+    assert_eq!(manager.get_affected_subscriptions_for_wire_protocol("users").len(), 1);
+    assert_eq!(manager.get_affected_subscriptions_for_connection("users", &connection_id).len(), 1);
+
+    // Pausing an unknown wire ID reports "not found".
+    assert!(!manager.pause_subscription_by_wire_id(&[0xFFu8; 16]));
+
+    // Pause the subscription.
+    assert!(manager.pause_subscription_by_wire_id(&wire_id));
+
+    // Paused subscriptions must be skipped entirely by both lookups (same-connection and
+    // wire-protocol paths), so no re-query / notification happens while paused.
+    assert!(manager.get_affected_subscriptions_for_wire_protocol("users").is_empty());
+    assert!(manager.get_affected_subscriptions_for_connection("users", &connection_id).is_empty());
+
+    // The subscription itself remains registered (still counts toward limits).
+    assert_eq!(manager.subscription_count(), 1);
+    assert_eq!(manager.connection_subscription_count(&connection_id), 1);
+
+    // Resuming an unknown wire ID reports "not found".
+    assert!(!manager.resume_subscription_by_wire_id(&[0xFFu8; 16]));
+
+    // Resume the subscription.
+    assert!(manager.resume_subscription_by_wire_id(&wire_id));
+
+    // Notifications flow again after resume.
+    assert_eq!(manager.get_affected_subscriptions_for_wire_protocol("users").len(), 1);
+    assert_eq!(manager.get_affected_subscriptions_for_connection("users", &connection_id).len(), 1);
+}
+
+#[test]
 fn test_update_result_by_wire_id() {
     let manager = SubscriptionManager::new();
     let connection_id = "conn-1".to_string();

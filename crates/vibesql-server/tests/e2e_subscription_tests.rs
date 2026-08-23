@@ -66,6 +66,33 @@ async fn send_unsubscribe(client: &mut TestClient, sub_id: [u8; 16]) -> std::io:
     Ok(())
 }
 
+/// Helper to send a SubscriptionPause request (0xF5)
+async fn send_subscription_pause(client: &mut TestClient, sub_id: [u8; 16]) -> std::io::Result<()> {
+    let mut buf = BytesMut::new();
+    buf.put_u8(0xF5); // SubscriptionPause message
+    buf.put_i32(16 + 4); // Length: 16 bytes for ID + 4 for length field
+    buf.extend_from_slice(&sub_id);
+
+    client.stream_write_all(&buf).await?;
+    client.stream_flush().await?;
+    Ok(())
+}
+
+/// Helper to send a SubscriptionResume request (0xF6)
+async fn send_subscription_resume(
+    client: &mut TestClient,
+    sub_id: [u8; 16],
+) -> std::io::Result<()> {
+    let mut buf = BytesMut::new();
+    buf.put_u8(0xF6); // SubscriptionResume message
+    buf.put_i32(16 + 4); // Length: 16 bytes for ID + 4 for length field
+    buf.extend_from_slice(&sub_id);
+
+    client.stream_write_all(&buf).await?;
+    client.stream_flush().await?;
+    Ok(())
+}
+
 // ============================================================================
 // BASIC FLOW TESTS
 // ============================================================================
@@ -322,6 +349,88 @@ async fn test_unsubscribe_stops_updates() {
     // Should NOT have any SubscriptionData message (0xF2) after unsubscribe
     let has_subscription_update = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
     assert!(!has_subscription_update, "Should not receive SubscriptionData after unsubscribe");
+
+    client.send_terminate().await.expect("Failed to send terminate");
+    server.shutdown();
+}
+
+/// test_pause_stops_updates_resume_restarts_them - SubscriptionPause/Resume (0xF5/0xF6, #6526)
+///
+/// Verifies that SubscriptionPause actually suppresses change notifications
+/// (rather than being a documented-but-silent no-op) and SubscriptionResume
+/// restores them:
+/// 1. Subscribe, receive initial data.
+/// 2. Pause the subscription.
+/// 3. Mutate the underlying table - assert NO SubscriptionData arrives.
+/// 4. Resume the subscription.
+/// 5. Mutate again - assert SubscriptionData DOES arrive.
+#[tokio::test]
+async fn test_pause_stops_updates_resume_restarts_them() {
+    let server = start_test_server().await;
+    let mut client = TestClient::connect(server.addr()).await.expect("Failed to connect");
+
+    // Complete handshake
+    client.send_startup("testuser", "testdb").await.expect("Failed to send startup");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read startup response");
+
+    // Create and populate test table
+    let table_name = "sub_pause_resume_test";
+    client
+        .send_query(&format!("CREATE TABLE IF NOT EXISTS {} (id INT, name VARCHAR)", table_name))
+        .await
+        .expect("Failed to create table");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read create response");
+
+    client
+        .send_query(&format!("INSERT INTO {} VALUES (1, 'Alice')", table_name))
+        .await
+        .expect("Failed to insert data");
+    let _ = client.read_until_message_type(b'Z').await.expect("Failed to read insert response");
+
+    // Subscribe
+    let select_query = format!("SELECT * FROM {}", table_name);
+    send_subscribe(&mut client, &select_query).await.expect("Failed to send subscribe");
+    let data = client
+        .read_until_message_type(MSG_SUBSCRIPTION_DATA)
+        .await
+        .expect("Failed to read subscription response");
+    let messages = parse_backend_messages(&data);
+    let sub_id = extract_subscription_id(&messages).expect("Failed to extract subscription ID");
+
+    // Pause the subscription - no response expected per protocol spec
+    send_subscription_pause(&mut client, sub_id).await.expect("Failed to send SubscriptionPause");
+
+    // Insert data while paused - should NOT trigger a subscription update
+    client
+        .send_query(&format!("INSERT INTO {} VALUES (2, 'Bob')", table_name))
+        .await
+        .expect("Failed to insert data while paused");
+    let data = client
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after insert while paused");
+    let messages = parse_backend_messages(&data);
+    let has_update_while_paused = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+    assert!(
+        !has_update_while_paused,
+        "Should NOT receive SubscriptionData while subscription is paused"
+    );
+
+    // Resume the subscription - no response expected per protocol spec
+    send_subscription_resume(&mut client, sub_id).await.expect("Failed to send SubscriptionResume");
+
+    // Insert data after resume - should trigger a subscription update again
+    client
+        .send_query(&format!("INSERT INTO {} VALUES (3, 'Charlie')", table_name))
+        .await
+        .expect("Failed to insert data after resume");
+    let data = client
+        .read_until_message_type(MSG_READY_FOR_QUERY)
+        .await
+        .expect("Failed to read after insert following resume");
+    let messages = parse_backend_messages(&data);
+    let has_update_after_resume = messages.iter().any(|m| m.msg_type == MSG_SUBSCRIPTION_DATA);
+    assert!(has_update_after_resume, "Should receive SubscriptionData after SubscriptionResume");
 
     client.send_terminate().await.expect("Failed to send terminate");
     server.shutdown();
