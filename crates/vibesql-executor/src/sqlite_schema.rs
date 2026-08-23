@@ -295,23 +295,22 @@ pub fn execute_sqlite_schema_query_for_schema(
 
     // Add views tagged to this schema. Temp views are tagged with the `temp`
     // schema (#5541) and surface only via sqlite_temp_master, so skip them
-    // here; the main schema is the default (`schema == None`).
-    for view_name in catalog.list_views() {
-        if let Some(view) = catalog.get_view(&view_name) {
-            if view.is_temp() {
-                continue;
-            }
-            if !schema_tag_belongs_to(view.schema.as_deref(), schema_name) {
-                continue;
-            }
-            let sql = generate_create_view_sql(view);
-            // tbl_name is same as name for views
-            collector.push(
-                schema_name,
-                &view.name,
-                schema_row("view", &view.name, &view.name, sql),
-            );
+    // here; the main schema is the default (`schema == None`). Iterate view
+    // definitions directly rather than via `list_views()` + `get_view()`:
+    // views are keyed per schema (#6490), so a name-only `get_view` resolves
+    // temp-first-then-main-then-attached and would drop (or duplicate) a
+    // `main` view that shares a name with an `aux`/`temp` view (view analogue
+    // of the trigger fix in issue #6296).
+    for view in catalog.iter_views() {
+        if view.is_temp() {
+            continue;
         }
+        if !schema_tag_belongs_to(view.schema.as_deref(), schema_name) {
+            continue;
+        }
+        let sql = generate_create_view_sql(view);
+        // tbl_name is same as name for views
+        collector.push(schema_name, &view.name, schema_row("view", &view.name, &view.name, sql));
     }
 
     // Add triggers tagged to this schema. Temp triggers are tagged with the
@@ -554,17 +553,18 @@ pub fn execute_sqlite_temp_schema_query(
         }
     }
 
-    // Add temp views. Views are stored flat in the catalog (not partitioned by
-    // schema), so filter on the per-view `temp` tag set at CREATE TEMP VIEW
-    // time (#5541).
-    for view_name in catalog.list_views() {
-        if let Some(view) = catalog.get_view(&view_name) {
-            if !view.is_temp() {
-                continue;
-            }
-            let sql = generate_create_view_sql(view);
-            rows.push(schema_row("view", &view.name, &view.name, sql));
+    // Add temp views. Filter on the per-view `temp` tag set at CREATE TEMP
+    // VIEW time (#5541). Iterate view definitions directly rather than via
+    // `list_views()` + `get_view()`: views are keyed per schema (#6490), and a
+    // name-only `get_view` resolves temp-first, so a `temp` view sharing a
+    // name with a `main`/attached-schema view would be dropped or duplicated
+    // (view analogue of the trigger fix in issue #6296).
+    for view in catalog.iter_views() {
+        if !view.is_temp() {
+            continue;
         }
+        let sql = generate_create_view_sql(view);
+        rows.push(schema_row("view", &view.name, &view.name, sql));
     }
 
     // Add temp triggers. Filter on the `temp` schema tag from CREATE TEMP

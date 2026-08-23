@@ -317,40 +317,37 @@ impl Database {
         // Export views
         writeln!(writer, "-- Views")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-        for view_name in self.catalog.list_views() {
-            if let Some(view_def) = self.catalog.get_view(&view_name) {
-                // Skip temp views (`CREATE TEMP VIEW`): they are session-scoped
-                // and must not survive into the next session via the SQL dump
-                // (issue #5940, Cluster A). Views in attached schemas are
-                // likewise session-scoped (#6310).
-                if view_def.is_temp()
-                    || view_def
-                        .schema
-                        .as_deref()
-                        .is_some_and(|s| self.catalog.is_attached_schema(s))
-                    // The schema may also be embedded in the stored name
-                    // (`CREATE VIEW aux.v1` stores the qualified name).
-                    || view_def
-                        .name
-                        .split_once('.')
-                        .is_some_and(|(s, _)| self.catalog.is_attached_schema(s))
-                {
-                    continue;
-                }
-                // Use stored SQL definition if available, otherwise create a minimal definition
-                let sql = view_def.sql_definition.as_ref().map_or_else(
-                    || {
-                        // Fallback: create a representation from the stored query
-                        // This is a minimal representation and may not be fully accurate
-                        format!("CREATE VIEW {} AS {:?}", view_def.name, view_def.query)
-                    },
-                    |s| s.clone(),
-                );
-                // Strip trailing semicolons before adding one
-                let sql = sql.trim_end_matches(';').trim();
-                writeln!(writer, "{};", sql)
-                    .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+        // Iterate view definitions directly rather than via `list_views()` +
+        // `get_view()`: views are keyed per schema (#6490), so a name-only
+        // `get_view` always resolves to the same (temp-then-main-then-attached
+        // priority) entry — iterating by name could write the same main-schema
+        // view's SQL twice whenever an attached schema holds a same-named view.
+        for view_def in self.catalog.iter_views() {
+            // Skip temp views (`CREATE TEMP VIEW`): they are session-scoped
+            // and must not survive into the next session via the SQL dump
+            // (issue #5940, Cluster A). Views in attached schemas are
+            // likewise session-scoped (#6310).
+            if view_def.is_temp()
+                || view_def.schema.as_deref().is_some_and(|s| self.catalog.is_attached_schema(s))
+                // The schema may also be embedded in the stored name (a
+                // legacy pre-#6490 snapshot stored the qualified name).
+                || view_def.name.split_once('.').is_some_and(|(s, _)| self.catalog.is_attached_schema(s))
+            {
+                continue;
             }
+            // Use stored SQL definition if available, otherwise create a minimal definition
+            let sql = view_def.sql_definition.as_ref().map_or_else(
+                || {
+                    // Fallback: create a representation from the stored query
+                    // This is a minimal representation and may not be fully accurate
+                    format!("CREATE VIEW {} AS {:?}", view_def.name, view_def.query)
+                },
+                |s| s.clone(),
+            );
+            // Strip trailing semicolons before adding one
+            let sql = sql.trim_end_matches(';').trim();
+            writeln!(writer, "{};", sql)
+                .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
         }
         writeln!(writer)
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
@@ -850,22 +847,26 @@ impl Database {
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
 
         // Views owned by this attached schema (#6407). A view created as
-        // `CREATE VIEW aux.v1 AS SELECT x FROM aux.t` stores the qualified
-        // name verbatim (views have no separate `schema` AST field like
-        // indexes/triggers do — see `ViewDefinition::name`), and its captured
-        // `sql_definition` text embeds the same qualifier throughout (name
-        // and any table references). Strip exactly the `schema_name.`
-        // qualifier so the emitted statement is schema-relative and
-        // standalone-loadable.
+        // `CREATE VIEW aux.v1 AS SELECT x FROM aux.t` is homed in the `aux`
+        // schema (`ViewDefinition::schema`, since #6490) with a bare
+        // (unqualified) `ViewDefinition::name`; its captured `sql_definition`
+        // text still embeds the qualifier throughout (name and any table
+        // references), so that is stripped below to make the emitted
+        // statement schema-relative and standalone-loadable. Iterate view
+        // definitions directly rather than via `list_views()` + `get_view()`:
+        // a name-only `get_view` always resolves to the same
+        // (temp-then-main-then-attached priority) entry, so iterating by name
+        // would silently skip every non-`main` schema's same-named view
+        // (issue #6296's trigger-listing bug, applied to views).
         writeln!(writer, "-- Views")
             .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
-        for view_name in self.catalog.list_views() {
-            let Some(view_def) = self.catalog.get_view(&view_name) else { continue };
+        for view_def in self.catalog.iter_views() {
             if view_def.is_temp() {
                 continue;
             }
-            let owned_by_schema =
-                view_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
+            let owned_by_schema = view_def.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(schema_name))
+                    // A legacy pre-#6490 snapshot may still carry the schema
+                    // embedded in the stored name.
                     || view_def
                         .name
                         .split_once('.')
