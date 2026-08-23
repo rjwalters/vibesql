@@ -337,7 +337,7 @@ fn test_expression_index_functional_after_binary_reload() {
     let expr = parse_index_expression("r + s");
     let columns =
         vec![IndexColumn::Expression { expr: Box::new(expr), direction: OrderDirection::Asc }];
-    create_expression_index(&mut db, "t3", "t3rs", &schema, &columns, false, None).unwrap();
+    create_expression_index(&mut db, "t3", "t3", "t3rs", &schema, &columns, false, None).unwrap();
 
     // Sanity: the index answers WHERE r+s = 3 with the two matching rows.
     let where_expr = parse_where_expression("r + s = 3");
