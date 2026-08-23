@@ -84,10 +84,11 @@ impl super::Catalog {
         self.schemas.remove(&canonical);
 
         // Remove schema objects that live in catalog-global maps but belong to
-        // the detached schema. Views may carry the schema either as a tag
-        // (`schema: Some("aux")`) or embedded in the stored name
-        // (`CREATE VIEW aux.v1` stores the qualified name verbatim today), so
-        // both forms are matched.
+        // the detached schema. Views are tagged with their schema
+        // (`schema: Some("aux")`, since #6490); the `name` prefix check below
+        // is a defensive fallback for any view whose qualified name was
+        // stored verbatim by a pre-#6490 build (before views round-tripped
+        // through a persisted snapshot get re-tagged on load).
         let name_prefix = format!("{canonical}.");
         self.views.retain(|_, v| {
             !v.schema.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&canonical))

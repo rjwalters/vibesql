@@ -13,19 +13,44 @@ pub enum ViewDropBehavior {
     Silent,
 }
 
+/// Compute the schema-scoped storage key for a view.
+///
+/// SQLite scopes view names *per schema*, exactly like tables and triggers:
+/// `main.v1` and `aux.v1` (an attached-database view) are two distinct views
+/// that may coexist. The catalog therefore keys views by `(schema, name)`
+/// rather than by bare `name`, so a `main` view and a `temp`/attached-schema
+/// view sharing a name no longer collide (issue #6490 — before this, `CREATE
+/// VIEW <alias>.<name>` against an attached alias could not even be
+/// represented correctly: the flat by-name map had no way to distinguish it
+/// from a same-named `main` view).
+///
+/// The schema component is normalized case-insensitively, with `None` and
+/// `main` collapsing to the default (`main`) schema. The name component
+/// respects `case_sensitive_identifiers` the same way the pre-existing bare-name
+/// key did. A control character separates the two parts so a schema/name that
+/// happens to contain a `.` cannot forge a different key.
+fn view_storage_key(schema: Option<&str>, name: &str, case_sensitive_identifiers: bool) -> String {
+    let schema =
+        schema.map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
+    let name_key = if case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
+    format!("{schema}\u{1f}{name_key}")
+}
+
 impl super::super::Catalog {
     // ============================================================================
     // View Management Methods
     // ============================================================================
 
-    /// Create a VIEW
+    /// Create a VIEW.
+    ///
+    /// The collision check is scoped to the view's own schema (see
+    /// [`view_storage_key`]): creating `aux.v1` when a `main.v1` already
+    /// exists succeeds, matching SQLite's per-schema view namespace.
     pub fn create_view(&mut self, view: ViewDefinition) -> Result<(), CatalogError> {
         let name = view.name.clone();
+        let key = view_storage_key(view.schema.as_deref(), &name, self.case_sensitive_identifiers);
 
-        // Normalize the key for case-insensitive storage
-        let key = if self.case_sensitive_identifiers { name.clone() } else { name.to_uppercase() };
-
-        // Check if view already exists
+        // Check if view already exists in this schema
         if self.views.contains_key(&key) {
             return Err(CatalogError::ViewAlreadyExists(name));
         }
@@ -36,34 +61,97 @@ impl super::super::Catalog {
         Ok(())
     }
 
-    /// Get a VIEW definition by name with optional case-insensitive lookup
+    /// Get a VIEW definition by (possibly schema-qualified) name.
+    ///
+    /// - A dotted `schema.name` is split and resolved directly in that schema (`temp`/`main`/an
+    ///   attached alias — mirrors [`Catalog::get_table`]'s qualified-name handling).
+    /// - An unqualified name is resolved in SQLite's unqualified search order: the `temp` schema
+    ///   first (temp views shadow main), then `main`, then each attached database in attachment
+    ///   order. A final linear fallback (any schema, first match) covers views created without
+    ///   going through [`Catalog::create_view`]'s normal schema tagging.
     pub fn get_view(&self, name: &str) -> Option<&ViewDefinition> {
-        // Normalize the key for lookup
-        let key =
-            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
+        if let Some((schema_part, name_part)) = name.split_once('.') {
+            return self.get_view_in_schema(name_part, Some(schema_part));
+        }
 
-        self.views.get(&key)
+        if let Some(view) = self.get_view_in_schema(name, Some("temp")) {
+            return Some(view);
+        }
+        if let Some(view) = self.get_view_in_schema(name, None) {
+            return Some(view);
+        }
+        for attached in &self.attached_databases {
+            if let Some(view) = self.get_view_in_schema(name, Some(&attached.name)) {
+                return Some(view);
+            }
+        }
+        self.views.values().find(|v| v.name == name)
     }
 
-    /// Get a mutable reference to a VIEW definition by name.
+    /// Get a VIEW definition scoped to a specific schema.
+    ///
+    /// `schema` is the logical schema label a view carries
+    /// ([`ViewDefinition::schema`]): `None`/`Some("main")` for the main
+    /// schema, `Some("temp")` for the temp schema, or an attached schema
+    /// name. This never falls through to another schema, so `main.v1` and
+    /// `aux.v1` are distinguishable.
+    pub fn get_view_in_schema(&self, name: &str, schema: Option<&str>) -> Option<&ViewDefinition> {
+        self.views.get(&view_storage_key(schema, name, self.case_sensitive_identifiers))
+    }
+
+    /// Returns true if a view of `name` exists in the given schema.
+    pub fn view_exists_in_schema(&self, name: &str, schema: Option<&str>) -> bool {
+        self.views.contains_key(&view_storage_key(schema, name, self.case_sensitive_identifiers))
+    }
+
+    /// Get a mutable reference to a VIEW definition by (possibly
+    /// schema-qualified) name.
     ///
     /// Used by `ALTER TABLE ... RENAME COLUMN` to rewrite a view's stored
     /// `sql_definition` text and its parsed `query` AST in place when a source
     /// column it references is renamed (mirrors SQLite re-resolving dependent
-    /// views). Case-insensitivity follows the same key normalization as
+    /// views). Name resolution follows the same rules as
     /// [`get_view`](Self::get_view).
     pub fn get_view_mut(&mut self, name: &str) -> Option<&mut ViewDefinition> {
-        let key =
-            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
-        self.views.get_mut(&key)
+        let case_sensitive = self.case_sensitive_identifiers;
+        if let Some((schema_part, name_part)) = name.split_once('.') {
+            let key = view_storage_key(Some(schema_part), name_part, case_sensitive);
+            return self.views.get_mut(&key);
+        }
+
+        let temp_key = view_storage_key(Some("temp"), name, case_sensitive);
+        if self.views.contains_key(&temp_key) {
+            return self.views.get_mut(&temp_key);
+        }
+        let main_key = view_storage_key(None, name, case_sensitive);
+        if self.views.contains_key(&main_key) {
+            return self.views.get_mut(&main_key);
+        }
+        self.views.values_mut().find(|v| v.name == name)
     }
 
-    /// List all VIEW names (returns original names, not normalized keys)
+    /// List all VIEW names (returns original names, not normalized keys).
+    ///
+    /// Since views are keyed per schema, the same bare name may appear more
+    /// than once (e.g. `main.v1` and `aux.v1`). Callers that need to
+    /// distinguish same-named views in different schemas should use
+    /// [`Catalog::iter_views`] instead.
     pub fn list_views(&self) -> Vec<String> {
         self.views.values().map(|v| v.name.clone()).collect()
     }
 
-    /// Drop a VIEW with specified behavior
+    /// Iterate over every view definition in the catalog, regardless of
+    /// schema. Preferred over `list_views()` + `get_view()` by callers that
+    /// must see *every* view unambiguously, since a name-only `get_view` can
+    /// only return one of several same-named views living in different
+    /// schemas (view analogue of the trigger fix in issue #6296).
+    pub fn iter_views(&self) -> impl Iterator<Item = &ViewDefinition> {
+        self.views.values()
+    }
+
+    /// Drop a VIEW with specified behavior, resolved by (possibly
+    /// schema-qualified) name using the same rules as
+    /// [`get_view`](Self::get_view).
     ///
     /// - `Cascade`: Drop dependent views recursively
     /// - `Restrict`: Fail if dependents exist
@@ -73,33 +161,30 @@ impl super::super::Catalog {
         name: &str,
         behavior: ViewDropBehavior,
     ) -> Result<(), CatalogError> {
-        // Normalize the key for case-insensitive lookup
-        let key =
-            if self.case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
-
-        // Check if view exists
-        if !self.views.contains_key(&key) {
-            return Err(CatalogError::ViewNotFound(name.to_string()));
-        }
+        let key = self
+            .resolve_view_key(name)
+            .ok_or_else(|| CatalogError::ViewNotFound(name.to_string()))?;
 
         match behavior {
             ViewDropBehavior::Cascade => {
-                // Find all views that depend on this view or table
-                // Use the original name for dependency checking (not the normalized key)
-                let dependent_views = self.find_dependent_views(name);
-                let views_to_drop = dependent_views.clone();
-                for dependent_view in views_to_drop {
+                // Find all views that depend on this view or table.
+                let dependent_views = self.find_dependent_views(&key);
+                for dependent_key in dependent_views {
                     // Recursively drop dependent views (they might have their own dependents)
-                    self.drop_view_with_behavior(&dependent_view, ViewDropBehavior::Cascade)?;
+                    self.drop_view_key_with_behavior(&dependent_key, ViewDropBehavior::Cascade)?;
                 }
             }
             ViewDropBehavior::Restrict => {
                 // Check for dependent views and fail if any exist
-                let dependent_views = self.find_dependent_views(name);
+                let dependent_views = self.find_dependent_views(&key);
                 if !dependent_views.is_empty() {
+                    let dependent_names = dependent_views
+                        .iter()
+                        .filter_map(|k| self.views.get(k).map(|v| v.name.clone()))
+                        .collect();
                     return Err(CatalogError::ViewInUse {
                         view_name: name.to_string(),
-                        dependent_views,
+                        dependent_views: dependent_names,
                     });
                 }
             }
@@ -109,7 +194,6 @@ impl super::super::Catalog {
             }
         }
 
-        // Finally, drop the view itself using the normalized key
         self.views.remove(&key);
         Ok(())
     }
@@ -123,26 +207,73 @@ impl super::super::Catalog {
         self.drop_view_with_behavior(name, behavior)
     }
 
-    /// Find all views that depend on a given view or table
-    fn find_dependent_views(&self, target_name: &str) -> Vec<String> {
+    /// Drop a VIEW addressed by its already-resolved internal storage key
+    /// (used for the recursive CASCADE case, where the dependent view's key
+    /// is already known and must not be re-resolved via the unqualified
+    /// search order — two different schemas may hold a same-named dependent
+    /// view).
+    fn drop_view_key_with_behavior(
+        &mut self,
+        key: &str,
+        behavior: ViewDropBehavior,
+    ) -> Result<(), CatalogError> {
+        if !self.views.contains_key(key) {
+            return Err(CatalogError::ViewNotFound(key.to_string()));
+        }
+        if behavior == ViewDropBehavior::Cascade {
+            for dependent_key in self.find_dependent_views(key) {
+                self.drop_view_key_with_behavior(&dependent_key, ViewDropBehavior::Cascade)?;
+            }
+        }
+        self.views.remove(key);
+        Ok(())
+    }
+
+    /// Resolve a (possibly schema-qualified) view name to its internal
+    /// storage key, using the same rules as [`get_view`](Self::get_view).
+    fn resolve_view_key(&self, name: &str) -> Option<String> {
+        let case_sensitive = self.case_sensitive_identifiers;
+        if let Some((schema_part, name_part)) = name.split_once('.') {
+            let key = view_storage_key(Some(schema_part), name_part, case_sensitive);
+            return self.views.contains_key(&key).then_some(key);
+        }
+
+        let temp_key = view_storage_key(Some("temp"), name, case_sensitive);
+        if self.views.contains_key(&temp_key) {
+            return Some(temp_key);
+        }
+        let main_key = view_storage_key(None, name, case_sensitive);
+        if self.views.contains_key(&main_key) {
+            return Some(main_key);
+        }
+        for attached in &self.attached_databases {
+            let key = view_storage_key(Some(&attached.name), name, case_sensitive);
+            if self.views.contains_key(&key) {
+                return Some(key);
+            }
+        }
+        self.views.iter().find(|(_, v)| v.name == name).map(|(k, _)| k.clone())
+    }
+
+    /// Find all views (by internal storage key) that depend on the view
+    /// stored under `target_key`.
+    fn find_dependent_views(&self, target_key: &str) -> Vec<String> {
         let mut dependent_views = Vec::new();
 
-        // Normalize target for key comparison
-        let target_key = if self.case_sensitive_identifiers {
-            target_name.to_string()
-        } else {
-            target_name.to_uppercase()
+        let Some(target_view) = self.views.get(target_key) else {
+            return dependent_views;
         };
+        let target_name = target_view.name.clone();
 
-        for (view_name, view_def) in &self.views {
-            if view_name == &target_key {
+        for (view_key, view_def) in &self.views {
+            if view_key == target_key {
                 // Skip the view itself
                 continue;
             }
 
             // Check if this view's query references the target
-            if self.select_references_table(&view_def.query, target_name) {
-                dependent_views.push(view_name.clone());
+            if self.select_references_table(&view_def.query, &target_name) {
+                dependent_views.push(view_key.clone());
             }
         }
 

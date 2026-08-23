@@ -10,6 +10,13 @@ use crate::errors::ExecutorError;
 pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(), ExecutorError> {
     use vibesql_catalog::ViewDefinition;
 
+    // Split off any schema qualifier (`<alias>.<name>`) so the view is homed
+    // in the right schema instead of literally storing the dotted name in
+    // the default schema (#6490).
+    let (schema, unqualified_name) =
+        crate::view_ddl::split_view_schema_qualifier(&stmt.view_name, stmt.temporary)?;
+    crate::view_ddl::validate_view_schema_qualifier(schema.as_deref(), db)?;
+
     // Check if view already exists
     let view_exists = db.catalog.get_view(&stmt.view_name).is_some();
 
@@ -96,14 +103,9 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         derived.map(dedup_view_column_names)
     };
 
-    // Tag temp views with the `temp` schema so they surface via
-    // sqlite_temp_master and are excluded from sqlite_master (#5541), mirroring
-    // the temp-trigger schema tag (#5532) and temp-index tag (#5513).
-    let schema = if stmt.temporary { Some("temp".to_string()) } else { None };
-
     let view = if let Some(ref sql) = stmt.sql_definition {
         ViewDefinition::new_with_sql(
-            stmt.view_name.clone(),
+            unqualified_name,
             columns,
             (*stmt.query).clone(),
             stmt.with_check_option,
@@ -111,7 +113,7 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
         )
     } else {
         ViewDefinition::new(
-            stmt.view_name.clone(),
+            unqualified_name,
             columns,
             (*stmt.query).clone(),
             stmt.with_check_option,

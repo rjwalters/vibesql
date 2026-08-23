@@ -337,20 +337,20 @@ impl Database {
             })
             .collect();
 
-        // Views - serialize view definitions
-        // Use view_def.name to preserve original case (list_views returns normalized keys)
+        // Views - serialize view definitions. Iterate view definitions
+        // directly rather than via `list_views()` + `get_view()`: views are
+        // keyed per schema (#6490), so a name-only `get_view` always
+        // resolves to the same entry and would duplicate it in the output
+        // whenever another schema holds a same-named view.
         let views = self
             .catalog
-            .list_views()
-            .into_iter()
-            .filter_map(|view_name| {
-                self.catalog.get_view(&view_name).map(|view_def| {
-                    let definition = view_def
-                        .sql_definition
-                        .clone()
-                        .unwrap_or_else(|| format!("{:#?}", view_def.query));
-                    JsonView { name: view_def.name.clone(), definition }
-                })
+            .iter_views()
+            .map(|view_def| {
+                let definition = view_def
+                    .sql_definition
+                    .clone()
+                    .unwrap_or_else(|| format!("{:#?}", view_def.query));
+                JsonView { name: view_def.name.clone(), definition }
             })
             .collect();
 
