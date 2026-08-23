@@ -29,6 +29,30 @@ If you ever run `cargo fmt` directly and see a "wide" diff across many
 unrelated files, do not commit it — that is this exact stable/nightly
 formatting-drift issue, not an intentional reformat.
 
+## Build Troubleshooting
+
+**Phantom type/borrow errors from `cargo test --no-run` that `cargo check`/`cargo build`
+never see:** if `cargo test -p <crate> --test <name> --no-run` reports an E0308 (or
+similar) type-mismatch error that does not reproduce under a plain `cargo check` or
+`cargo build` of the same crate, suspect stale incremental-compilation state rather
+than a real source bug — especially on hosts that share one `CARGO_TARGET_DIR` across
+multiple concurrent worktrees/builds (see `~/.cargo/config.toml`'s `target-dir`
+override, used here specifically because build output must not live on the same
+volume as the repo). Two known workarounds, in order of cost:
+
+```bash
+cargo clean -p <the-crate-named-in-the-phantom-error>   # cheapest: scoped clean
+CARGO_INCREMENTAL=0 cargo test -p <crate> --test <name> --no-run  # bypasses incremental cache entirely
+```
+
+This was investigated in #6510 after a reporter hit a phantom E0308 in
+`crates/vibesql-storage/src/database/table_api.rs` via `cargo test -p vibesql-executor
+--test schema_qualified_index_tests --no-run` that vanished under `CARGO_INCREMENTAL=0`.
+Three consecutive `cargo clean -p vibesql-storage` + rebuild cycles on a different host
+did not reproduce it, so the exact trigger (suspected sccache + incremental-cache
+interaction under the shared target dir) remains unconfirmed — but if you hit this
+class of error, don't assume it's a real type error before trying the above.
+
 ## Performance Profiling
 
 When debugging performance issues, see **[docs/performance/CPU_PROFILING.md](docs/performance/CPU_PROFILING.md)** for a decision tree that helps you choose the right tool:
