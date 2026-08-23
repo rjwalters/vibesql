@@ -885,8 +885,13 @@ impl Parser {
             // No table specified - analyze all tables
             None
         } else {
-            // Parse table name
-            Some(self.parse_identifier()?)
+            // Parse a (possibly schema-qualified) table name, e.g. `aux.t1`.
+            // `parse_table_ref()` (also used by DROP TABLE) understands
+            // `schema.table` syntax; the previous single-token
+            // `parse_identifier()` silently truncated `aux.t1` to `aux`
+            // instead of erroring or resolving the qualified name (issue
+            // #6504).
+            Some(self.parse_table_ref()?.full_name())
         };
 
         // Check for optional column list (only if table name is present)
@@ -909,6 +914,12 @@ impl Parser {
         } else {
             None
         };
+
+        // Reject trailing garbage after the table name / column list instead
+        // of silently ignoring it (issue #6504, mirroring the
+        // `expect_statement_end()` pattern applied to UPDATE/DELETE/INSERT
+        // per issue #5261).
+        self.expect_statement_end()?;
 
         Ok(vibesql_ast::AnalyzeStmt { table_name, columns })
     }

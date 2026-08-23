@@ -660,3 +660,85 @@ fn test_fallback_keywords_still_accepted_as_table_and_trigger_targets() {
         "fallback keyword `savepoint` should still parse as a DROP TABLE table name"
     );
 }
+
+// ========================================================================
+// Schema-Qualified Table Name Tests (issue #6504)
+// ========================================================================
+//
+// Previously `parse_alter_table` parsed the table name with the
+// single-token `parse_identifier()`, which rejected ANY schema-qualified
+// name outright: `ALTER TABLE aux.t1 RENAME TO x` failed with "Expected
+// ADD, DROP, ALTER, RENAME, MODIFY, or CHANGE after table name" because the
+// dot was never consumed. Fixed by switching to `parse_table_ref()`
+// (already used by DROP TABLE), which understands `schema.table` syntax.
+
+#[test]
+fn test_parse_alter_table_rename_to_schema_qualified() {
+    let result = Parser::parse_sql("ALTER TABLE aux.t1 RENAME TO t2");
+    assert!(result.is_ok(), "schema-qualified table name should parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameTable(rename)) => {
+            assert_eq!(rename.table_name, "aux.t1");
+            assert_eq!(rename.new_table_name, "t2");
+        }
+        other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_add_column_schema_qualified() {
+    let result = Parser::parse_sql("ALTER TABLE aux.t1 ADD COLUMN x INTEGER");
+    assert!(result.is_ok(), "schema-qualified table name should parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::AddColumn(add)) => {
+            assert_eq!(add.table_name, "aux.t1");
+            assert_eq!(add.column_def.name, "x");
+        }
+        other => panic!("Expected ALTER TABLE ADD COLUMN, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_rename_to_quoted_schema_qualified() {
+    let result = Parser::parse_sql(r#"ALTER TABLE "aux"."t1" RENAME TO t2"#);
+    assert!(result.is_ok(), "quoted schema-qualified table name should parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameTable(rename)) => {
+            assert_eq!(rename.table_name, "aux.t1");
+        }
+        other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_rename_to_unqualified_still_works() {
+    // Regression: the bare (unqualified) form must keep working exactly as
+    // before.
+    let result = Parser::parse_sql("ALTER TABLE t1 RENAME TO t2");
+    assert!(result.is_ok(), "unqualified table name should still parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameTable(rename)) => {
+            assert_eq!(rename.table_name, "t1");
+            assert_eq!(rename.new_table_name, "t2");
+        }
+        other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_alter_table_rename_to_main_qualified_still_works() {
+    // Regression: the `main.`-qualified form must keep working.
+    let result = Parser::parse_sql("ALTER TABLE main.t1 RENAME TO t2");
+    assert!(result.is_ok(), "main.-qualified table name should still parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameTable(rename)) => {
+            assert_eq!(rename.table_name, "main.t1");
+        }
+        other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
+    }
+}

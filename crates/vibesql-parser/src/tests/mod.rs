@@ -2,6 +2,7 @@ use super::*;
 
 mod aggregates;
 mod alter_table;
+mod analyze;
 mod arena_alter_table;
 mod arena_parser;
 mod assertion;

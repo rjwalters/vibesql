@@ -10,7 +10,12 @@ pub fn parse_alter_table(parser: &mut crate::Parser) -> Result<AlterTableStmt, P
     parser.expect_keyword(Keyword::Alter)?;
     parser.expect_keyword(Keyword::Table)?;
 
-    let table_name = parser.parse_identifier()?;
+    // Schema-qualified table name (e.g. `aux.t1`), matching how DROP TABLE /
+    // DELETE / UPDATE build their `table_name` field. `parse_table_ref()`
+    // (used by DROP TABLE in drop.rs) already understands `schema.table`
+    // syntax; previously the single-token `parse_identifier()` rejected any
+    // qualified name outright (issue #6504).
+    let table_name = parser.parse_table_ref()?.full_name();
 
     // Dispatch based on operation
     match parser.peek() {
