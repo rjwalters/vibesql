@@ -2150,6 +2150,159 @@ fn test_attach_reattach_round_trips_trigger() {
 }
 
 #[test]
+fn test_attach_reattach_views_preserve_creation_order_fresh_session() {
+    // Regression test for #6508: views created in a known order (v1, v2, v3)
+    // must list back in that same order from `<alias>.sqlite_master` after a
+    // fresh `ATTACH` in a brand-new session — not the non-deterministic order
+    // a `HashMap`-backed enumeration would produce. Tables are the control
+    // case (already correct via `IndexMap`); this pins the view analogue.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view_order.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE VIEW aux.v1 AS SELECT 1").unwrap();
+        ex.execute("CREATE VIEW aux.v2 AS SELECT 2").unwrap();
+        ex.execute("CREATE VIEW aux.v3 AS SELECT 3").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    // Fresh session, same files on disk.
+    let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    let result = ex.execute("SELECT name FROM aux.sqlite_master WHERE type='view'").unwrap();
+    let names: Vec<Option<String>> = result.rows.into_iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        names,
+        vec![Some("v1".to_string()), Some("v2".to_string()), Some("v3".to_string())],
+        "views must list back in creation order after a fresh re-attach"
+    );
+}
+
+#[test]
+fn test_attach_detach_reattach_views_preserve_creation_order_same_session() {
+    // Same guarantee as above, but exercised via DETACH/re-ATTACH within a
+    // single session rather than a fresh process (#6508 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_view_order_same_session.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    ex.execute("CREATE VIEW aux.v1 AS SELECT 1").unwrap();
+    ex.execute("CREATE VIEW aux.v2 AS SELECT 2").unwrap();
+    ex.execute("CREATE VIEW aux.v3 AS SELECT 3").unwrap();
+    ex.execute("DETACH aux").unwrap();
+
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    let result = ex.execute("SELECT name FROM aux.sqlite_master WHERE type='view'").unwrap();
+    let names: Vec<Option<String>> = result.rows.into_iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        names,
+        vec![Some("v1".to_string()), Some("v2".to_string()), Some("v3".to_string())],
+        "views must list back in creation order after a same-session DETACH/re-ATTACH"
+    );
+}
+
+#[test]
+fn test_attach_reattach_triggers_preserve_creation_order_fresh_session() {
+    // Regression test for #6508: same guarantee as the view test above, for
+    // triggers created in a known order (tr1, tr2, tr3).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_trigger_order.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t(a INTEGER)").unwrap();
+        ex.execute("CREATE TRIGGER aux.tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+        ex.execute("CREATE TRIGGER aux.tr2 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+        ex.execute("CREATE TRIGGER aux.tr3 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    // Fresh session, same files on disk.
+    let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    let result = ex.execute("SELECT name FROM aux.sqlite_master WHERE type='trigger'").unwrap();
+    let names: Vec<Option<String>> = result.rows.into_iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        names,
+        vec![Some("tr1".to_string()), Some("tr2".to_string()), Some("tr3".to_string())],
+        "triggers must list back in creation order after a fresh re-attach"
+    );
+}
+
+#[test]
+fn test_attach_detach_reattach_triggers_preserve_creation_order_same_session() {
+    // Same guarantee as above, but exercised via DETACH/re-ATTACH within a
+    // single session rather than a fresh process (#6508 acceptance criteria).
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_trigger_order_same_session.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    ex.execute("CREATE TABLE aux.t(a INTEGER)").unwrap();
+    ex.execute("CREATE TRIGGER aux.tr1 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+    ex.execute("CREATE TRIGGER aux.tr2 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+    ex.execute("CREATE TRIGGER aux.tr3 AFTER INSERT ON t BEGIN SELECT 1; END").unwrap();
+    ex.execute("DETACH aux").unwrap();
+
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    let result = ex.execute("SELECT name FROM aux.sqlite_master WHERE type='trigger'").unwrap();
+    let names: Vec<Option<String>> = result.rows.into_iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        names,
+        vec![Some("tr1".to_string()), Some("tr2".to_string()), Some("tr3".to_string())],
+        "triggers must list back in creation order after a same-session DETACH/re-ATTACH"
+    );
+}
+
+#[test]
+fn test_attach_reattach_tables_preserve_creation_order_regression() {
+    // Control case from #6508: tables were already correct (re-homed via the
+    // order-preserving `IndexMap`-backed `Schema.tables`). Pinned explicitly
+    // here — per the issue's acceptance criteria — so a future change cannot
+    // silently regress table ordering while "fixing" views/triggers.
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let main_path_str = main_path.to_str().unwrap().to_string();
+    let aux_path = dir.path().join("aux_table_order.vbsql");
+    let aux_path_str = aux_path.to_str().unwrap().to_string();
+
+    {
+        let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+        ex.execute("CREATE TABLE aux.t1(a INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.t2(a INTEGER)").unwrap();
+        ex.execute("CREATE TABLE aux.t3(a INTEGER)").unwrap();
+        ex.save_database(&main_path_str).unwrap();
+    }
+
+    let mut ex = SqlExecutor::new(Some(main_path_str.clone())).unwrap();
+    ex.execute(&format!("ATTACH '{}' AS aux", aux_path_str)).unwrap();
+    let result = ex.execute("SELECT name FROM aux.sqlite_master WHERE type='table'").unwrap();
+    let names: Vec<Option<String>> = result.rows.into_iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        names,
+        vec![Some("t1".to_string()), Some("t2".to_string()), Some("t3".to_string())],
+        "tables must list back in creation order after a fresh re-attach (control case)"
+    );
+}
+
+#[test]
 fn test_attach_reattach_view_binds_to_attached_schema_despite_main_collision() {
     // The round trip must preserve the view body's *schema binding*, not just
     // the view's existence (#6476 review). The writer persists the body

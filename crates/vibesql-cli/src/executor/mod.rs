@@ -2951,11 +2951,21 @@ impl SqlExecutor {
         // `<this session's alias>.<table>`; explicitly-qualified references
         // (`main.mt`, `other.u`) — which the writer never stripped — are left
         // alone.
-        for view_name in loaded.catalog.list_views() {
-            let Some(view_def) = loaded.catalog.get_view(&view_name) else { continue };
-            if view_def.is_temp() {
-                continue;
-            }
+        // Re-homed in the *loaded* standalone catalog's own creation order
+        // (#6508), not `iter_views()`'s underlying `HashMap` iteration order.
+        // Each re-homed view gets a fresh `creation_seq` ordinal in *this*
+        // session the moment it is re-created below, so the order this loop
+        // iterates in is exactly the order views come back from
+        // `<alias>.sqlite_master` afterward.
+        let mut view_defs: Vec<&vibesql_catalog::ViewDefinition> =
+            loaded.catalog.iter_views().filter(|v| !v.is_temp()).collect();
+        view_defs.sort_by_key(|view_def| {
+            loaded
+                .catalog
+                .creation_seq(vibesql_catalog::DEFAULT_SCHEMA, &view_def.name)
+                .unwrap_or(u64::MAX)
+        });
+        for view_def in view_defs {
             let qualified_name = format!("{}.{}", schema_name, view_def.name);
             let mut query = view_def.query.clone();
             schema_qualify::qualify_unqualified_tables(&mut query, schema_name);
@@ -2995,10 +3005,17 @@ impl SqlExecutor {
         // body's names in the trigger's own schema, which is #6477's job.
         // `test_attach_reattach_trigger_body_binds_to_main_on_name_collision`
         // pins the actual behavior so it cannot change unnoticed.
-        for trigger_def in loaded.catalog.iter_triggers() {
-            if trigger_def.is_temp() {
-                continue;
-            }
+        // Re-homed in the *loaded* standalone catalog's own creation order
+        // (#6508) — same rationale as the views loop above.
+        let mut trigger_defs: Vec<&vibesql_catalog::TriggerDefinition> =
+            loaded.catalog.iter_triggers().filter(|t| !t.is_temp()).collect();
+        trigger_defs.sort_by_key(|trigger_def| {
+            loaded
+                .catalog
+                .creation_seq(vibesql_catalog::DEFAULT_SCHEMA, &trigger_def.name)
+                .unwrap_or(u64::MAX)
+        });
+        for trigger_def in trigger_defs {
             let create_stmt = vibesql_ast::CreateTriggerStmt {
                 if_not_exists: false,
                 schema: Some(schema_name.to_string()),
