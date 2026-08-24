@@ -22,11 +22,20 @@
 //! ## Heuristics
 //!
 //! The execution model is selected based on:
-//! 1. Query hints (`/* COLUMNAR */` or `/* ROW_ORIENTED */`)
-//! 2. Aggregation presence (GROUP BY, aggregate functions)
-//! 3. Arithmetic expression complexity
-//! 4. Join pattern simplicity (equijoins only)
-//! 5. Projection selectivity (column count)
+//! 1. Aggregation presence (GROUP BY, aggregate functions)
+//! 2. Arithmetic expression complexity
+//! 3. Join pattern simplicity (equijoins only)
+//! 4. Projection selectivity (column count)
+//!
+//! Query-comment hints (`/* COLUMNAR */` / `/* ROW_ORIENTED */`) are not
+//! supported: the lexer discards comments during tokenization (and never
+//! implemented `/* ... */` block comments at all — see
+//! `crates/vibesql-parser/src/lexer/mod.rs`), so no comment text reaches the
+//! parsed `SelectStmt` for this function to inspect. Implementing this would
+//! require adding block-comment lexing plus threading hint metadata through
+//! the AST (`SelectStmt` is constructed at ~140 call sites), which is a
+//! separate, substantial parser change — not a small heuristic tweak. See
+//! issue #6534.
 //!
 //! ## Example
 //!
@@ -50,12 +59,10 @@
 use vibesql_ast::SelectStmt;
 
 mod expression;
-mod hints;
 mod patterns;
 mod query;
 pub mod strategy;
 
-use hints::extract_query_hint;
 use patterns::has_analytical_pattern;
 // Re-export strategy types for external use
 pub use strategy::{choose_execution_strategy, ExecutionStrategy, StrategyContext};
@@ -105,11 +112,6 @@ pub enum ExecutionModel {
 /// assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
 /// ```
 pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
-    // Check for query hints first (manual override)
-    if let Some(hint) = extract_query_hint(query) {
-        return hint;
-    }
-
     // Apply heuristics to detect analytical patterns
     if has_analytical_pattern(query) {
         ExecutionModel::Columnar
