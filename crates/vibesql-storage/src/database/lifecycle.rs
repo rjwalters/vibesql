@@ -10,7 +10,6 @@ use crate::Table;
 /// Manages database lifecycle: creation, opening, closing, and state reset
 #[derive(Debug, Clone)]
 pub struct Lifecycle {
-    tables: HashMap<String, Table>,
     transaction_manager: TransactionManager,
     current_role: Option<String>,
     security_enabled: bool,
@@ -23,7 +22,6 @@ impl Lifecycle {
     /// Call `enable_security()` to turn on access control enforcement.
     pub fn new() -> Self {
         Lifecycle {
-            tables: HashMap::new(),
             transaction_manager: TransactionManager::new(),
             current_role: None,
             security_enabled: false,
@@ -35,21 +33,9 @@ impl Lifecycle {
     /// Clears all tables and clears all transactions.
     /// Useful for test scenarios where you need to reuse a Database instance.
     pub fn reset(&mut self) {
-        self.tables.clear();
         self.transaction_manager = TransactionManager::new();
         self.current_role = None;
         self.security_enabled = false;
-    }
-
-    // Getters for internal access
-    #[allow(dead_code)]
-    pub fn tables(&self) -> &HashMap<String, Table> {
-        &self.tables
-    }
-
-    #[allow(dead_code)]
-    pub fn tables_mut(&mut self) -> &mut HashMap<String, Table> {
-        &mut self.tables
     }
 
     pub fn transaction_manager(&self) -> &TransactionManager {
