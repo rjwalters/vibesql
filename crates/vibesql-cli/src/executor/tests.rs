@@ -3742,3 +3742,148 @@ fn test_create_temp_view_unqualified_body_still_prefers_temp() {
         "a TEMP view's unqualified body must keep resolving against temp (shadowing main)"
     );
 }
+
+// ============================================================================
+// ATTACH + WAL/checkpoint recovery (#6531)
+// ============================================================================
+//
+// ATTACH used to read the raw `.vbsql` snapshot only, skipping the
+// checkpoint-archive + WAL replay a direct `main` open performs, so the two
+// access paths to one file diverged in both directions. These tests pin both
+// directions plus the crash (uncheckpointed WAL) case.
+
+/// Helper: a WAL-active, file-backed executor for the #6531 ATTACH tests.
+fn wal_executor(path: &std::path::Path) -> SqlExecutor {
+    SqlExecutor::new_with_options(
+        Some(path.to_string_lossy().to_string()),
+        DbOpenOptions { wal: true, ..DbOpenOptions::default() },
+    )
+    .unwrap()
+}
+
+fn save(ex: &mut SqlExecutor, path: &std::path::Path) {
+    let p = path.to_string_lossy().to_string();
+    ex.save_database(&p).unwrap();
+}
+
+/// #6531 direction 1 (pragma4-4.1.6): a DROP performed through a *direct*
+/// WAL-active open of the attached file must be visible to a later ATTACH of
+/// that same path. Before the fix the drop landed in the checkpoint archive
+/// while ATTACH kept reading the stale snapshot, so `aux.t2` came back from
+/// the dead.
+#[test]
+fn test_attach_sees_state_written_through_a_direct_wal_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    // Deliberately a `.db2` name: this is the SQLite TCL corpus convention and
+    // also exercises the collision-safe sibling derivation.
+    let aux_path = dir.path().join("test.db2");
+
+    // Session 1: create the attached database through an alias.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute("CREATE TABLE t1(a INTEGER)").unwrap();
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        ex.execute("CREATE TABLE aux.t2(d INTEGER)").unwrap();
+        ex.execute("INSERT INTO aux.t2 VALUES (1)").unwrap();
+        save(&mut ex, &main_path);
+    }
+
+    // Session 2: a DIRECT open of the aux file must see it, and drops t2.
+    {
+        let mut ex = wal_executor(&aux_path);
+        assert!(
+            ex.db.list_tables().iter().any(|t| t == "t2"),
+            "a direct open must see the attached-alias write"
+        );
+        ex.execute("DROP TABLE t2").unwrap();
+        save(&mut ex, &aux_path);
+    }
+
+    // Session 3: re-ATTACH must reflect the drop, not the stale snapshot.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        assert!(
+            ex.execute("SELECT * FROM aux.t2").is_err(),
+            "t2 was dropped through a direct open of the same file; ATTACH must not resurrect it"
+        );
+    }
+}
+
+/// #6531 direction 2 (pragma4-4.4.3): once the attached file has a checkpoint
+/// archive (created by a direct open), writes made through the alias must
+/// still be visible to a later direct open. Before the fix the alias wrote a
+/// snapshot that the WAL-active direct open ignored entirely.
+#[test]
+fn test_attached_alias_write_is_visible_to_a_later_direct_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let aux_path = dir.path().join("test.db2");
+
+    // Session 1: create the aux file through a DIRECT open, so it gains a
+    // checkpoint archive that would otherwise shadow any alias-side write.
+    {
+        let mut ex = wal_executor(&aux_path);
+        ex.execute("CREATE TABLE t2(d INTEGER)").unwrap();
+        save(&mut ex, &aux_path);
+    }
+
+    // Session 2: write through the alias.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        ex.execute("INSERT INTO aux.t2 VALUES (42)").unwrap();
+        ex.execute("CREATE TABLE aux.t3(e INTEGER)").unwrap();
+        ex.execute("CREATE INDEX aux.i2 ON t2(d)").unwrap();
+        save(&mut ex, &main_path);
+    }
+
+    // Session 3: the direct open must see every alias-side write.
+    {
+        let mut ex = wal_executor(&aux_path);
+        assert_eq!(
+            ex.execute("SELECT d FROM t2").unwrap().rows,
+            vec![vec![Some("42".to_string())]],
+            "an alias-side INSERT must reach a later direct open"
+        );
+        assert!(
+            ex.db.list_tables().iter().any(|t| t == "t3"),
+            "an alias-side CREATE TABLE must reach a later direct open"
+        );
+        // The alias-side CREATE INDEX must be droppable from the direct open
+        // (this is literally pragma4-4.4.3's `DROP INDEX i2` on db2).
+        ex.execute("DROP INDEX i2").unwrap();
+    }
+}
+
+/// #6531 crash case: a direct open that writes and then dies without
+/// checkpointing leaves its work in the WAL only. A later ATTACH must replay
+/// that WAL, exactly as a later direct open would.
+#[test]
+fn test_attach_replays_uncheckpointed_wal_from_a_crashed_direct_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let aux_path = dir.path().join("crashed.db2");
+
+    // Session 1: write through a direct open and "crash" — sync the WAL but
+    // never checkpoint, then drop the executor without saving.
+    {
+        let mut ex = wal_executor(&aux_path);
+        ex.execute("CREATE TABLE survivor(x INTEGER)").unwrap();
+        ex.execute("INSERT INTO survivor VALUES (7)").unwrap();
+        ex.db.sync_persistence().unwrap();
+        // No save_database() — simulates SIGKILL between the write and a save.
+    }
+
+    // Session 2: ATTACH must replay the WAL rather than see nothing.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        assert_eq!(
+            ex.execute("SELECT x FROM aux.survivor").unwrap().rows,
+            vec![vec![Some("7".to_string())]],
+            "ATTACH must replay an uncheckpointed WAL, matching a direct open's recovery"
+        );
+    }
+}

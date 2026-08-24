@@ -125,6 +125,17 @@ pub struct SqlExecutor {
     /// When `Some`, `save_database` checkpoints + truncates the WAL instead of
     /// writing a full snapshot. `None` preserves the default snapshot behavior.
     wal_state: Option<wal::WalState>,
+    /// Highest LSN observed when each file-backed attachment was loaded
+    /// (canonical alias -> LSN), or 0 when nothing was recovered for it
+    /// (#6531).
+    ///
+    /// Keyed by the lowercase alias this session attached the file under.
+    /// Used to stamp the attachment's own checkpoint at a strictly higher LSN
+    /// on save/detach, so the checkpoint the attachment writes always wins
+    /// recovery's newest-checkpoint selection instead of losing to a
+    /// checkpoint or WAL tail this session already recovered from (#5766's
+    /// monotonicity hazard, applied to attachments).
+    attached_recovered_lsn: std::collections::HashMap<String, u64>,
     /// Path of the file-backed database, if any. Used by `PRAGMA database_list`
     /// to report the `main` schema's backing file (SQLite reports the absolute
     /// path here, or an empty string for `:memory:` / no-path sessions).
@@ -408,6 +419,75 @@ fn load_database_file(db_path: &str) -> anyhow::Result<Database> {
     }
 }
 
+/// True when `path` carries WAL durability siblings — a checkpoint archive
+/// holding at least one `.vchk`, or a non-empty WAL file (#6531).
+///
+/// Either one means the raw file at `path` is NOT the freshest state of that
+/// database: a WAL-active session writes its state into the checkpoint
+/// archive and leaves the snapshot file untouched. `ATTACH` must therefore
+/// consult the siblings exactly like a direct `main` open does, rather than
+/// deserializing the (possibly arbitrarily stale) snapshot.
+fn has_wal_siblings(paths: &wal::WalPaths) -> bool {
+    paths.has_checkpoint_files()
+        || std::fs::metadata(&paths.wal_path).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+/// Load an attached database file the way a direct `main` open of that same
+/// path would (#6531).
+///
+/// When the path has WAL durability siblings (see [`has_wal_siblings`]) this
+/// runs the same checkpoint-load + WAL-replay recovery
+/// `SqlExecutor::new_with_options`'s WAL-active branch runs
+/// (`RecoveryManager::recover_with_base`), including the legacy
+/// snapshot-as-base rule from #5807: a raw snapshot is used as the recovery
+/// base only while no checkpoint exists yet, since checkpoints are the newer
+/// truth once any exists. Without siblings it falls back to the plain
+/// snapshot/dump load ([`load_database_file`]).
+///
+/// This is unconditional — it does not depend on whether *this* session is
+/// WAL-active. The freshest state of the attached file is a property of that
+/// file, not of the attaching session, so a snapshot-only session must not
+/// read a stale view of a WAL-active database either.
+///
+/// Recovery strictness matches a `main` open's default: an unreadable newest
+/// checkpoint is a hard error rather than a silent fall back to older state
+/// (`--recover-fallback` is a `main`-open opt-in and deliberately does not
+/// extend to attachments).
+///
+/// Returns the loaded database plus the highest LSN recovery observed (0 when
+/// no recovery ran); the caller records it so the attachment's own checkpoint
+/// can be stamped past it.
+fn load_attached_database_file(path: &str) -> anyhow::Result<(Database, u64)> {
+    let paths = wal::WalPaths::derive(path);
+    if !has_wal_siblings(&paths) {
+        return Ok((load_database_file(path)?, 0));
+    }
+
+    let has_checkpoints = paths.has_checkpoint_files();
+    let base = if !has_checkpoints && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+    {
+        Some(load_database_file(path)?)
+    } else {
+        None
+    };
+
+    let manager =
+        vibesql_storage::wal::RecoveryManager::new(&paths.checkpoint_dir).with_wal(&paths.wal_path);
+    let (mut db, stats) = manager.recover_with_base(base).map_err(|e| {
+        anyhow::anyhow!("Failed to recover attached WAL-backed database at {}: {}", path, e)
+    })?;
+
+    // Same post-load repair a `main` open performs: the snapshot/checkpoint
+    // loader cannot evaluate index expressions, so expression-index bodies
+    // come back empty and must be rebuilt or they silently return no rows
+    // (#5784).
+    vibesql_executor::rebuild_pending_expression_indexes(&mut db).map_err(|e| {
+        anyhow::anyhow!("Failed to rebuild expression indexes after recovering {}: {}", path, e)
+    })?;
+
+    Ok((db, stats.last_lsn))
+}
+
 /// Translate a catalog-level [`vibesql_catalog::IndexType`] (the type
 /// actually recorded for an index) into the AST-level
 /// [`vibesql_ast::IndexType`] a synthetic `CreateIndexStmt` needs (#6407).
@@ -642,6 +722,7 @@ impl SqlExecutor {
                     application_id: 0,
                     schema_version: 0,
                     wal_state: Some(wal_state),
+                    attached_recovered_lsn: std::collections::HashMap::new(),
                     db_path: Some(db_path.clone()),
                     _db_lock: db_lock,
                     automatic_index: true,
@@ -702,6 +783,7 @@ impl SqlExecutor {
             application_id: 0,
             schema_version: 0,
             wal_state: None,
+            attached_recovered_lsn: std::collections::HashMap::new(),
             db_path,
             _db_lock: db_lock,
             automatic_index: true,
@@ -1290,16 +1372,55 @@ impl SqlExecutor {
             if attached.path == ":memory:" || attached.path.is_empty() {
                 continue;
             }
-            self.db.save_attached_schema_sql_dump(&attached.name, &attached.path).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to save attached database '{}' to {}: {}",
-                    attached.name,
-                    attached.path,
-                    e
-                )
-            })?;
+            self.persist_attached_schema(&attached.name, &attached.path)?;
         }
         Ok(())
+    }
+
+    /// Persist one file-backed attached schema to its own path.
+    ///
+    /// Two artifacts, deliberately (#6362 + #6531):
+    ///
+    /// 1. The self-contained SQL dump at `path` — the snapshot form a snapshot-only session (or a
+    ///    session with no checkpoint archive present) reads back.
+    /// 2. When this session is WAL-active, a **checkpoint** in that path's own checkpoint archive,
+    ///    stamped past everything this session recovered from it. This is what gives an alias-side
+    ///    write the same durability a `main`-schema write has: a WAL-active *direct* open of the
+    ///    path recovers from the checkpoint archive and ignores the raw snapshot entirely, so
+    ///    writing only the dump left the two access paths permanently diverged (#6531,
+    ///    pragma4-4.4.3).
+    ///
+    /// Both artifacts are written from the same state, so whichever one a
+    /// later open consults it sees the same database. Step 2 materializes
+    /// that state by re-loading the dump written in step 1 — by construction
+    /// exactly what a later `ATTACH` (or direct open) would reconstruct from
+    /// it, so the checkpoint can never disagree with the snapshot beside it.
+    ///
+    /// Ordering is fail-safe: the dump is written atomically (temp + rename)
+    /// first, and the checkpoint only afterwards, so a failure at any point
+    /// leaves a readable database behind.
+    fn persist_attached_schema(&self, alias: &str, path: &str) -> anyhow::Result<()> {
+        self.db.save_attached_schema_sql_dump(alias, path).map_err(|e| {
+            anyhow::anyhow!("Failed to save attached database '{}' to {}: {}", alias, path, e)
+        })?;
+
+        let Some(wal_state) = self.wal_state.as_ref() else {
+            return Ok(());
+        };
+
+        let standalone = load_database_file(path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to re-read the just-written dump for attached database '{}' at {} \
+                 while checkpointing it: {}",
+                alias,
+                path,
+                e
+            )
+        })?;
+        let recovered_lsn = self.attached_recovered_lsn.get(alias).copied().unwrap_or(0);
+        wal_state.checkpoint_attached(&standalone, path, recovered_lsn).map_err(|e| {
+            anyhow::anyhow!("Failed to checkpoint attached database '{}' at {}: {}", alias, path, e)
+        })
     }
 
     /// Execute SHOW TABLES statement
@@ -2715,9 +2836,17 @@ impl SqlExecutor {
             return Err(anyhow::anyhow!("cannot ATTACH database within transaction"));
         }
 
+        // "Has existing state to load" is NOT just "the snapshot file is
+        // non-empty" (#6531): a WAL-active session writes its state into the
+        // checkpoint archive and never rewrites the snapshot, so a database
+        // whose whole content lives in `<file>-checkpoints/` + `<file>.wal`
+        // has an absent or 0-byte snapshot file. Treat the durability
+        // siblings as existing state too, exactly as a direct `main` open does.
         let existing_nonempty = stmt.filename != ":memory:" && !stmt.filename.is_empty() && {
             let path = std::path::Path::new(&stmt.filename);
-            path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false)
+            let snapshot_nonempty =
+                path.exists() && std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false);
+            snapshot_nonempty || has_wal_siblings(&wal::WalPaths::derive(&stmt.filename))
         };
 
         self.db.catalog.attach_database(&stmt.schema_name, &stmt.filename).map_err(
@@ -2731,18 +2860,28 @@ impl SqlExecutor {
             },
         )?;
 
+        let canonical = stmt.schema_name.to_ascii_lowercase();
+        // A never-loaded attachment starts at LSN 0; its first checkpoint is
+        // stamped at 1 (or past whatever the archive already holds).
+        self.attached_recovered_lsn.insert(canonical.clone(), 0);
+
         if existing_nonempty {
-            let canonical = stmt.schema_name.to_ascii_lowercase();
-            if let Err(e) = self.load_attached_schema_from_file(&canonical, &stmt.filename) {
-                // Roll back the just-created (possibly partially populated)
-                // attachment so a failed load never leaves a half-registered
-                // schema behind — mirrors execute_detach's own cleanup order
-                // (tables first, then the registry entry).
-                for table in self.db.catalog.attached_table_names(&canonical) {
-                    let _ = self.db.drop_table(&format!("{}.{}", canonical, table));
+            match self.load_attached_schema_from_file(&canonical, &stmt.filename) {
+                Ok(recovered_lsn) => {
+                    self.attached_recovered_lsn.insert(canonical.clone(), recovered_lsn);
                 }
-                let _ = self.db.catalog.detach_database(&canonical);
-                return Err(e);
+                Err(e) => {
+                    // Roll back the just-created (possibly partially populated)
+                    // attachment so a failed load never leaves a half-registered
+                    // schema behind — mirrors execute_detach's own cleanup order
+                    // (tables first, then the registry entry).
+                    for table in self.db.catalog.attached_table_names(&canonical) {
+                        let _ = self.db.drop_table(&format!("{}.{}", canonical, table));
+                    }
+                    let _ = self.db.catalog.detach_database(&canonical);
+                    self.attached_recovered_lsn.remove(&canonical);
+                    return Err(e);
+                }
             }
         }
 
@@ -2752,9 +2891,11 @@ impl SqlExecutor {
     /// Load an existing on-disk database file into a newly-attached schema
     /// (#6362 Phase 2, #6407).
     ///
-    /// Loads `path` via [`load_database_file`] (format auto-detection: SQL
-    /// dump, binary/JSON snapshot, or SQLite import) into a standalone
-    /// `Database`, then re-homes each of its default-schema tables
+    /// Loads `path` via [`load_attached_database_file`] (checkpoint-archive
+    /// load plus WAL replay when the path carries durability siblings,
+    /// otherwise format auto-detection: SQL dump, binary/JSON snapshot, or
+    /// SQLite import) into a standalone `Database`, then re-homes each of its
+    /// default-schema tables
     /// (definition + live row data), indexes, views, and triggers into
     /// `schema_name` of the live session. `schema_name` must already be an
     /// empty, freshly-attached schema (the caller creates it via
@@ -2792,12 +2933,16 @@ impl SqlExecutor {
     ///   warning rather than rebuilt, because the storage-side body build binds by bare name — see
     ///   the `KNOWN LIMITATION (#6487)` note at the index loop below. The attachment's tables,
     ///   rows, views, and triggers still re-home normally; only the index is absent.
+    ///
+    /// Returns the highest LSN recovery observed for `path` (0 when no WAL
+    /// recovery ran), which the caller records so the attachment's own
+    /// checkpoint can be stamped past it (#6531).
     fn load_attached_schema_from_file(
         &mut self,
         schema_name: &str,
         path: &str,
-    ) -> anyhow::Result<()> {
-        let mut loaded = load_database_file(path)?;
+    ) -> anyhow::Result<u64> {
+        let (mut loaded, recovered_lsn) = load_attached_database_file(path)?;
 
         let table_names = loaded
             .catalog
@@ -3036,7 +3181,7 @@ impl SqlExecutor {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
-        Ok(())
+        Ok(recovered_lsn)
     }
 
     /// Execute `DETACH [DATABASE] schema-name` (#6310 Phase 1, #6362 Phase 2).
@@ -3060,20 +3205,16 @@ impl SqlExecutor {
         // Persist BEFORE dropping tables (#6362): the drop loop below removes
         // row data from in-memory storage, so it must run after the flush or
         // there would be nothing left to persist.
-        if let Some(attached) =
-            self.db.catalog.attached_databases().iter().find(|a| a.name == canonical)
-        {
-            if attached.path != ":memory:" && !attached.path.is_empty() {
-                let path = attached.path.clone();
-                self.db.save_attached_schema_sql_dump(&canonical, &path).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to save attached database '{}' to {}: {}",
-                        canonical,
-                        path,
-                        e
-                    )
-                })?;
-            }
+        let attached_path = self
+            .db
+            .catalog
+            .attached_databases()
+            .iter()
+            .find(|a| a.name == canonical)
+            .map(|a| a.path.clone())
+            .filter(|p| p != ":memory:" && !p.is_empty());
+        if let Some(path) = attached_path {
+            self.persist_attached_schema(&canonical, &path)?;
         }
 
         // Drop the schema's tables from storage (row data lives there); WAL
@@ -3083,6 +3224,7 @@ impl SqlExecutor {
             self.db.drop_table(&qualified).map_err(|e| anyhow::anyhow!("{}", e))?;
         }
 
+        self.attached_recovered_lsn.remove(&canonical);
         self.db.catalog.detach_database(&canonical).map_err(|e| anyhow::anyhow!("{}", e))
     }
 

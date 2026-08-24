@@ -19,6 +19,19 @@
 // mydata-checkpoints/   — checkpoint archive directory (checkpoint_*.vchk)
 // ```
 //
+// Only the canonical `.vbsql` extension is stripped when deriving those
+// siblings; a file with any other extension keeps its full name as the base
+// (`test.db2` -> `test.db2.wal` / `test.db2-checkpoints/`) so two databases
+// differing only by extension can never share one WAL or checkpoint archive
+// (#6531). See [`WalPaths::derive`].
+//
+// ## ATTACH
+//
+// `ATTACH` reaches the same file through the same derivation and the same
+// `RecoveryManager`, so an attached view of a database and a direct `main`
+// open of it never diverge (#6531). See `load_attached_database_file` and
+// [`WalState::checkpoint_attached`] in `super`.
+//
 // ## Durability model
 //
 // On open (when WAL is active), `RecoveryManager::recover()` loads the latest
@@ -46,28 +59,70 @@ use vibesql_storage::{
 /// Sibling paths derived from a database file path for WAL-active mode.
 #[derive(Debug, Clone)]
 pub struct WalPaths {
-    /// Active write-ahead log file (`<stem>.wal`).
+    /// Active write-ahead log file (`<base>.wal`, see [`WalPaths::derive`]
+    /// for how `<base>` is derived).
     pub wal_path: PathBuf,
-    /// Checkpoint archive directory (`<stem>-checkpoints/`).
+    /// Checkpoint archive directory (`<base>-checkpoints/`).
     pub checkpoint_dir: PathBuf,
 }
 
+/// The canonical VibeSQL database-file extension.
+///
+/// Paths carrying it keep the historical *stem*-based sibling layout so every
+/// database written by an earlier VibeSQL still finds its WAL and checkpoint
+/// archive after the #6531 collision fix (and so the documented layout in
+/// `CLAUDE.md` / the module header above stays true).
+const CANONICAL_DB_EXTENSION: &str = "vbsql";
+
 impl WalPaths {
-    /// Derive WAL sibling paths from the main database file path.
+    /// Derive WAL sibling paths from a database file path.
     ///
     /// `mydata.vbsql` -> `{ wal: mydata.wal, checkpoints: mydata-checkpoints/ }`
+    ///
+    /// **Collision safety (#6531).** The derivation used to drop *any*
+    /// extension (`with_extension("wal")` for the WAL, `file_stem()` for the
+    /// checkpoint dir), so `test.db2` and `test.db3` in one directory both
+    /// resolved to `test.wal` + `test-checkpoints/` and would clobber each
+    /// other's durability files. That became directly reachable once `ATTACH`
+    /// started routing through this derivation, because `test.db2`/`test.db3`
+    /// is exactly how SQLite's TCL corpus names auxiliary databases.
+    ///
+    /// Only the canonical [`CANONICAL_DB_EXTENSION`] is stripped now; every
+    /// other path keeps its **full file name** as the sibling base:
+    ///
+    /// ```text
+    /// mydata.vbsql -> mydata.wal        mydata-checkpoints/     (unchanged)
+    /// mydata       -> mydata.wal        mydata-checkpoints/     (unchanged)
+    /// test.db2     -> test.db2.wal      test.db2-checkpoints/   (was test.wal)
+    /// test.db3     -> test.db3.wal      test.db3-checkpoints/   (was test.wal)
+    /// ```
+    ///
+    /// Both access paths to one file — a direct `main` open and an `ATTACH` —
+    /// go through this single function, so they always agree on where a
+    /// file's durability siblings live.
     pub fn derive(db_path: &str) -> Self {
         let path = Path::new(db_path);
-        let wal_path = path.with_extension("wal");
 
-        // `<stem>-checkpoints/` as a sibling of the database file.
-        let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        let checkpoint_dir = match path.parent() {
-            Some(parent) => parent.join(format!("{stem}-checkpoints")),
-            None => PathBuf::from(format!("{stem}-checkpoints")),
-        };
+        // Sibling base name: the stem for the canonical `.vbsql` extension
+        // (backward compatibility), the full file name otherwise.
+        let is_canonical =
+            path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case(CANONICAL_DB_EXTENSION));
+        let base = if is_canonical { path.file_stem() } else { path.file_name() }
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-        WalPaths { wal_path, checkpoint_dir }
+        let wal_name = format!("{base}.wal");
+        let checkpoint_name = format!("{base}-checkpoints");
+        match path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(parent) => WalPaths {
+                wal_path: parent.join(wal_name),
+                checkpoint_dir: parent.join(checkpoint_name),
+            },
+            None => WalPaths {
+                wal_path: PathBuf::from(wal_name),
+                checkpoint_dir: PathBuf::from(checkpoint_name),
+            },
+        }
     }
 
     /// True when the checkpoint archive directory contains at least one
@@ -269,6 +324,70 @@ impl WalState {
 
         Ok(())
     }
+
+    /// Publish an **attached** database's current state into that file's own
+    /// checkpoint archive (#6531).
+    ///
+    /// This is the attachment-side counterpart of [`WalState::checkpoint`]:
+    /// it gives writes made through an attached alias the same
+    /// checkpoint/WAL durability a `main`-schema write gets, so an
+    /// alias-side write is visible to a later direct open of that path (and
+    /// vice versa — see `load_attached_database_file`, which recovers an
+    /// attachment through the same archive).
+    ///
+    /// `attached_db` is the standalone database the attached file now
+    /// represents (its objects live in the default schema, exactly as a
+    /// direct open of the path would reconstruct them). `recovered_lsn` is
+    /// the highest LSN this session observed when it loaded the attachment
+    /// (0 when nothing was recovered).
+    ///
+    /// **LSN monotonicity.** The checkpoint is stamped one past the highest
+    /// of `recovered_lsn` and the newest checkpoint currently in the archive,
+    /// so it always wins recovery's newest-checkpoint selection and can never
+    /// resurrect pre-mutation state (the #5766 hazard).
+    ///
+    /// **Fail-safe ordering.** The WAL is truncated only after the checkpoint
+    /// is durably written — same invariant as [`WalState::checkpoint`]
+    /// (#5832). Checkpoint pruning is best-effort and never turns a
+    /// successful checkpoint into a failure (#6023).
+    ///
+    /// Note that an attached schema's individual statements are still not
+    /// WAL-logged as they execute (the `Database` carries one persistence
+    /// engine, which belongs to `main`); durability for an attachment is
+    /// established at each save/detach/exit checkpoint boundary.
+    pub fn checkpoint_attached(
+        &self,
+        attached_db: &Database,
+        path: &str,
+        recovered_lsn: u64,
+    ) -> Result<(), StorageError> {
+        let paths = WalPaths::derive(path);
+        let mut writer = CheckpointWriter::new(&paths.checkpoint_dir)?;
+
+        let latest_lsn = writer.latest_checkpoint()?.map(|info| info.lsn).unwrap_or(0);
+        let checkpoint_lsn = recovered_lsn.max(latest_lsn).saturating_add(1);
+
+        let data = attached_db.to_uncompressed_bytes()?;
+        let num_tables = attached_db.list_tables().len() as u32;
+        writer.create_checkpoint(checkpoint_lsn, &data, num_tables)?;
+
+        // Truncate only a WAL that actually has a header to read: a 0-byte
+        // WAL (nothing ever written through a direct open) would fail the
+        // header read (#5785).
+        if std::fs::metadata(&paths.wal_path).map(|m| m.len() > 0).unwrap_or(false) {
+            truncate_wal(&paths.wal_path, checkpoint_lsn, Some(0))?;
+        }
+
+        if let Err(e) = writer.cleanup_old_checkpoints(self.keep_checkpoints) {
+            eprintln!(
+                "WARNING: failed to prune old checkpoints in {} (checkpoint itself succeeded): {}",
+                paths.checkpoint_dir.display(),
+                e
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -294,6 +413,49 @@ mod tests {
         let p = WalPaths::derive("/tmp/mydata");
         assert_eq!(p.wal_path, PathBuf::from("/tmp/mydata.wal"));
         assert_eq!(p.checkpoint_dir, PathBuf::from("/tmp/mydata-checkpoints"));
+    }
+
+    /// Regression for #6531: two database files in the same directory that
+    /// differ only by extension must NOT share one WAL / checkpoint archive.
+    ///
+    /// Before the fix both `test.db2` and `test.db3` derived `test.wal` +
+    /// `test-checkpoints/` (the WAL name came from `with_extension`, the
+    /// checkpoint dir from `file_stem`), so opening both WAL-actively would
+    /// have each clobbering the other's durability files. `test.db2` /
+    /// `test.db3` is exactly the naming convention SQLite's own TCL corpus
+    /// uses for auxiliary databases, and routing ATTACH through this
+    /// derivation makes the collision directly reachable.
+    #[test]
+    fn test_derive_paths_distinct_extensions_do_not_collide() {
+        let db2 = WalPaths::derive("/tmp/test.db2");
+        let db3 = WalPaths::derive("/tmp/test.db3");
+
+        assert_ne!(db2.wal_path, db3.wal_path, "test.db2 and test.db3 must not share a WAL file");
+        assert_ne!(
+            db2.checkpoint_dir, db3.checkpoint_dir,
+            "test.db2 and test.db3 must not share a checkpoint archive"
+        );
+
+        // The non-canonical-extension layout keeps the FULL file name.
+        assert_eq!(db2.wal_path, PathBuf::from("/tmp/test.db2.wal"));
+        assert_eq!(db2.checkpoint_dir, PathBuf::from("/tmp/test.db2-checkpoints"));
+        assert_eq!(db3.wal_path, PathBuf::from("/tmp/test.db3.wal"));
+        assert_eq!(db3.checkpoint_dir, PathBuf::from("/tmp/test.db3-checkpoints"));
+    }
+
+    /// The canonical `.vbsql` extension keeps its historical stem-based
+    /// layout (`mydata.vbsql` -> `mydata.wal` / `mydata-checkpoints/`) so
+    /// databases written by earlier VibeSQL versions still find their WAL and
+    /// checkpoint archive after the #6531 collision fix. Distinct `.vbsql`
+    /// files never collide with each other, since their stems differ.
+    #[test]
+    fn test_derive_paths_canonical_extension_layout_is_unchanged() {
+        let a = WalPaths::derive("/tmp/one.vbsql");
+        let b = WalPaths::derive("/tmp/two.vbsql");
+        assert_eq!(a.wal_path, PathBuf::from("/tmp/one.wal"));
+        assert_eq!(a.checkpoint_dir, PathBuf::from("/tmp/one-checkpoints"));
+        assert_ne!(a.wal_path, b.wal_path);
+        assert_ne!(a.checkpoint_dir, b.checkpoint_dir);
     }
 
     /// Regression for #5785: the very first checkpoint on a freshly-opened
