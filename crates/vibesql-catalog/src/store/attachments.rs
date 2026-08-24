@@ -15,6 +15,23 @@
 //! vibesql-storage) — independent of the *registry entry*, which still never
 //! persists.
 //!
+//! #6531 makes that load/store path *durability-aware*, so an attached view
+//! of a file and a direct `main` open of it can no longer diverge:
+//!
+//! * **Load** goes through `load_attached_database_file` (vibesql-cli), which runs the same
+//!   checkpoint-archive + WAL-replay recovery a direct open runs whenever the attached path has
+//!   durability siblings, instead of unconditionally deserializing the (possibly arbitrarily stale)
+//!   snapshot.
+//! * **Store** additionally publishes the attachment's saved state into that path's own checkpoint
+//!   archive (`WalState::checkpoint_attached`) when the session is WAL-active, so an alias-side
+//!   write is visible to a later direct open rather than being ignored in favor of the checkpoint
+//!   archive.
+//!
+//! Per-statement WAL emission is still suppressed for tables inside an
+//! attached schema (the `Database` carries one persistence engine, and it
+//! belongs to `main`); an attachment's durability is established at each
+//! `\save`/exit/`DETACH` checkpoint boundary.
+//!
 //! Attachment names are stored ASCII-lowercased, matching how SQLite compares
 //! database names case-insensitively and how VibeSQL canonicalizes unquoted
 //! identifiers.

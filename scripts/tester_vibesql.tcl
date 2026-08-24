@@ -2449,8 +2449,11 @@ proc track_pragma_setting {sql} {
 # WAL is on by default (#5760). For a database file `<root>.vbsql`, committed
 # state lives in sibling paths derived by `crates/vibesql-cli/src/executor/wal.rs`:
 #
-#   <root>.wal            — active write-ahead log   (path.with_extension("wal"))
-#   <root>-checkpoints/   — checkpoint archive dir   (<stem>-checkpoints/)
+#   <root>.wal            — active write-ahead log
+#   <root>-checkpoints/   — checkpoint archive dir
+#
+# where <root> is the file stem for the canonical `.vbsql` extension and the
+# FULL file name otherwise (#6531) — see wal_sibling_paths below.
 #
 # A piped CLI invocation may write committed rows ONLY to these siblings and
 # not to the `.vbsql` snapshot at all (the snapshot is written on checkpoint /
@@ -2460,11 +2463,24 @@ proc track_pragma_setting {sql} {
 # both siblings so the destination sees the full committed database.
 
 proc wal_sibling_paths {db_path} {
-    # Mirror WalPaths::derive: <root>.wal and <root>-checkpoints/.
-    # `file rootname` strips the final extension, matching Rust's
-    # `with_extension("wal")` / `file_stem` + "-checkpoints".
-    set root [file rootname $db_path]
-    return [list "${root}.wal" "${root}-checkpoints"]
+    # Mirror WalPaths::derive (crates/vibesql-cli/src/executor/wal.rs).
+    #
+    # Only the canonical `.vbsql` extension is stripped; every other path
+    # keeps its FULL file name as the sibling base (#6531), so `test.db2` and
+    # `test.db3` no longer collide on one `test.wal` / `test-checkpoints/`:
+    #
+    #   mydata.vbsql -> mydata.wal    mydata-checkpoints/
+    #   mydata       -> mydata.wal    mydata-checkpoints/
+    #   test.db2     -> test.db2.wal  test.db2-checkpoints/
+    #
+    # Keep this in lockstep with the Rust derivation — the shim copies and
+    # deletes exactly the files the engine reads.
+    if {[string equal -nocase [file extension $db_path] ".vbsql"]} {
+        set base [file rootname $db_path]
+    } else {
+        set base $db_path
+    }
+    return [list "${base}.wal" "${base}-checkpoints"]
 }
 
 proc copy_db_with_wal {from to} {
@@ -6697,7 +6713,6 @@ array set vibesql_skip_tests {
     e_createtable-1.9.1 "Downstream of the e_createtable-1.7.2.4 cross-schema existence-check engine gap: earlier statements in this section silently land in (or collide with) the wrong schema, so by the time this test runs, MAIN no longer has the index state SQLite expects and the test's asserted 'there is already an index named i1' error never fires. Re-skipped rather than allowed to regress; engine-level fix tracked separately (#6404)."
     e_createtable-1.11.2.2 "Downstream of the same cross-schema unqualified-name-resolution engine gap (#6404): DROP TABLE IF EXISTS resolves an unqualified name against the wrong attached schema during the file's earlier drop_all_tables cleanup calls (which only clean the MAIN schema, per drop_all_tables's own scope — the shim never attempts to also clean ATTACHed schemas), leaving stale/mismatched state that surfaces here as a spurious 'no such table: t2'. Re-skipped rather than allowed to regress; engine-level fix tracked separately."
 
-    pragma4-4.1.6 "Genuine VibeSQL ENGINE gap surfaced by fixing the proc sqlite3/reset_db force-delete race (#6482), confirmed via direct CLI reproduction with no shim involved (#6531): an attached database is loaded from the raw .vbsql SNAPSHOT only and never gets the WAL/checkpoint recovery a direct 'main' open performs, so the attached and direct views of one file diverge. 4.1.4's 'DROP TABLE t2' through a DIRECT open of test.db2 genuinely succeeds (the drop lands in test.wal/test-checkpoints/; the snapshot is left byte-for-byte unchanged, verified by md5), but this test's 'PRAGMA table_info(t2)' — issued on the primary connection, which reaches the same file through its replayed aux attachment — still reads the pre-drop snapshot and reports t2's three columns instead of nothing. Was passing before #6482 ONLY because the shim force-deleted test.db2 out from under the live connection, which made this PRAGMA trivially empty for the wrong reason (and made 4.1.4 itself fail with 'no such table: t2'). Skipped rather than allowed to regress; engine-level fix tracked in #6531 (not a TCL-shim issue). pragma4-4.4.3 is the same #6531 divergence in the opposite direction (an aux-side 'CREATE INDEX aux.i2' invisible to a direct-open 'DROP INDEX i2') but was already failing before #6482, so it is deliberately left FAILING and visible rather than skipped. NOTE for future editors: this reason string deliberately contains no ALL-CAPS spelling of the a-t-t-a-c-h keyword. omit_test turns any reason matching that all-caps spelling into ::attach_skipped, which would be a FALSE attribution here (the aux database IS live; nothing about this skip is an unrun attach setup) and would wrongly re-cascade pragma4's 4.5.x/4.6.x sections into 'cascading from skipped ...' skips, hiding 4 genuine passes and 3 genuine failures. Keep it lowercase if you reword this."
 
     e_changes-1.1.6 "Pre-existing TCL-shim gap unmasked (not caused) by fixing the proc sqlite3/reset_db force-delete race (#6482), tracked in #6532: the shim stores 'db changes' in the PROCESS-GLOBAL ::last_changes rather than per-connection, so the secondary connection's INSERT in the preceding 1.1.5 overwrites the primary connection's count and this test reads 1 where real SQLite reads 4. That is exactly the requirement 1.1.5/1.1.6 exist to assert ('changes made by other connections do not show up in the return value of sqlite3_changes()'). It was passing before #6482 ONLY for the wrong reason: 'sqlite3 db2 test.db' force-deleted the live database, so 1.1.5's 'execsql {INSERT ...} db2' errored and never wrote the global. With the race fixed, 1.1.5, 1.1.8 and 1.1.10 genuinely pass for the first time and this one fails honestly. Skipped rather than allowed to regress; shim-level fix tracked in #6532."
     e_changes-1.2.6 "Same process-global ::last_changes gap as e_changes-1.1.6 above, in the WITHOUT ROWID arm of the same foreach loop (#6532, unmasked by #6482). Skipped rather than allowed to regress."
@@ -7413,16 +7428,23 @@ array set vibesql_attach_rescue_always {
 #     tables to build on) flip to passing, and the 4.5.x/4.6.x sections stop
 #     cascading as skipped.
 #
-#     Two of the five residual failures are a DIFFERENT, deeper gap that the
+#     Two of the five residual failures were a DIFFERENT, deeper gap that the
 #     fix unmasked rather than caused — a genuine ENGINE bug (#6531): ATTACH
-#     loads the raw .vbsql SNAPSHOT and never runs the WAL/checkpoint recovery
+#     loaded the raw .vbsql SNAPSHOT and never ran the WAL/checkpoint recovery
 #     a direct "main" open performs, so the ATTACHed and direct views of one
-#     file diverge. 4.4.3 was already failing pre-fix and is left FAILING and
+#     file diverged. 4.4.3 was already failing pre-fix and was left FAILING and
 #     visible; 4.1.6 was PASSING pre-fix only because the force-delete had
 #     emptied test.db2 (making its `PRAGMA table_info(t2)` trivially empty for
-#     the wrong reason) and is individually skip-listed with the full
-#     reproduction in vibesql_skip_tests, per the same "re-skip rather than
-#     let it regress" convention #6404 established above.
+#     the wrong reason) and was individually skip-listed.
+#
+#     BOTH ARE NOW FIXED by #6531: ATTACH runs the same checkpoint-archive +
+#     WAL-replay recovery a direct open runs, and an attached schema's saved
+#     state is published into that file's own checkpoint archive, so the two
+#     access paths agree in both directions. The pragma4-4.1.6 skip entry has
+#     been REMOVED from vibesql_skip_tests and 4.4.3 passes; measured on
+#     pragma4.test: 16 passed / 5 failed / 62 skipped -> 18 passed / 4 failed /
+#     61 skipped. The four residual failures (pragma4-2.100 EXPLAIN-of-PRAGMA
+#     plus 4.5.3/4.6.2/4.6.3 "no such table: c2") are unrelated to #6531.
 
 # e_dropview-3.5.0/3.5.1/3.5.2 and e_dropview-5.1/5.2/5.3 (#6459): unlike
 # e_createtable-1.0/table-14.3/autoinc-5.1 above, being merely in
@@ -10404,8 +10426,19 @@ proc forcedelete {args} {
         # NOTE: $root eq $f (extensionless target, e.g. `forcedelete testdb`
         # in main.test) is a VALID database path whose siblings are
         # testdb.wal / testdb.lock / testdb-checkpoints — the engine derives
-        # them via with_extension("wal") etc., so extensionless files must
-        # NOT be skipped here.
+        # them via wal_sibling_paths, so extensionless files must NOT be
+        # skipped here.
+        #
+        # Delete BOTH derivations (#6531): the engine now keeps the full file
+        # name for any non-`.vbsql` path (`test.db2` -> `test.db2.wal` /
+        # `test.db2-checkpoints/`), while the legacy stem-based names
+        # (`test.wal` / `test-checkpoints/`) may still be lying around from a
+        # pre-#6531 run. A leftover sibling of either shape resurrects a
+        # "deleted" database on the next open, so purge both. `.lock` is
+        # still stem-derived engine-side (vibesql-storage's lock_path_for).
+        lassign [wal_sibling_paths $f] f_wal f_ckpt
+        catch {file delete -force $f_wal}
+        catch {file delete -force $f_ckpt}
         catch {file delete -force "${root}.wal"}
         catch {file delete -force "${root}.lock"}
         catch {file delete -force "${root}-checkpoints"}
