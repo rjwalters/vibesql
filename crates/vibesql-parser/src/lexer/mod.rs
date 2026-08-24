@@ -173,7 +173,7 @@ impl<'a> Lexer<'a> {
         let mut tokens = Vec::with_capacity(estimated_tokens);
 
         loop {
-            self.skip_whitespace_and_comments();
+            self.skip_whitespace_and_comments()?;
 
             if self.is_eof() {
                 tokens.push(Token::Eof);
@@ -197,7 +197,7 @@ impl<'a> Lexer<'a> {
         let mut tokens = Vec::with_capacity(estimated_tokens);
 
         loop {
-            self.skip_whitespace_and_comments();
+            self.skip_whitespace_and_comments()?;
 
             let start = self.byte_pos;
 
@@ -363,8 +363,21 @@ impl<'a> Lexer<'a> {
     }
 
     /// Skip whitespace and SQL comments.
-    /// SQL supports line comments starting with -- until end of line.
-    fn skip_whitespace_and_comments(&mut self) {
+    ///
+    /// SQL supports two comment forms, both consumed like whitespace:
+    /// - Line comments: `-- ...` until end of line (or end of input).
+    /// - Block comments: `/* ... */`, which may span multiple lines.
+    ///
+    /// Block comments do **not** nest (matching the SQL standard and
+    /// SQLite/PostgreSQL/MySQL behavior): the first `*/` encountered closes
+    /// the comment, even if a `/*` appeared inside it. An unterminated block
+    /// comment (`/*` with no matching `*/` before EOF) is a lexer error
+    /// rather than being silently accepted or treated as a no-op — it
+    /// reports a pre-formatted `unterminated block comment` diagnostic
+    /// (see [`LexerError::preformatted`]) rather than the `near "X": syntax
+    /// error` form, since the offending run has no single closing token to
+    /// point at.
+    fn skip_whitespace_and_comments(&mut self) -> Result<(), LexerError> {
         loop {
             self.skip_whitespace();
 
@@ -385,9 +398,37 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // Check for /* block comment */
+            if self.peek_byte(0) == Some(b'/') && self.peek_byte(1) == Some(b'*') {
+                let start = self.byte_pos;
+                self.byte_pos += 2; // consume "/*"
+
+                let mut terminated = false;
+                while let Some(b) = self.peek_byte(0) {
+                    if b == b'*' && self.peek_byte(1) == Some(b'/') {
+                        self.byte_pos += 2; // consume "*/"
+                        terminated = true;
+                        break;
+                    }
+                    self.advance();
+                }
+
+                if !terminated {
+                    return Err(LexerError::preformatted(
+                        "unterminated block comment".to_string(),
+                        start,
+                    ));
+                }
+
+                // Continue loop to skip any following whitespace/comments
+                continue;
+            }
+
             // No more whitespace or comments
             break;
         }
+
+        Ok(())
     }
 
     /// Get current character without advancing.
