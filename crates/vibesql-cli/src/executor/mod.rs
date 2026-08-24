@@ -3435,11 +3435,23 @@ impl SqlExecutor {
             }
         }
 
-        // Collect tables to check
+        // Collect tables to check. The no-argument form checks every table in
+        // every schema VibeSQL knows about — not just `main` — so an
+        // ATTACHed schema's tables are included too (issue #6536's
+        // no-argument edge case). Unqualified bare names are used throughout
+        // this function (matching SQLite's own `table`-column output, which
+        // never schema-qualifies), and are resolved back to their owning
+        // schema the same way `PRAGMA table_info` etc. already do: via
+        // `Catalog::get_table` / `Database::get_table`'s temp -> main ->
+        // attached (in attachment order) search path.
         let tables_to_check: Vec<String> = if let Some(ref name) = table_name {
             vec![name.clone()]
         } else {
-            self.db.catalog.list_tables()
+            let mut all = self.db.catalog.list_tables();
+            for attached in self.db.catalog.attached_databases() {
+                all.extend(self.db.catalog.list_tables_in_schema(&attached.name));
+            }
+            all
         };
 
         for tbl_name in &tables_to_check {
@@ -3454,12 +3466,12 @@ impl SqlExecutor {
                 continue;
             }
 
-            // Get all rows from the child table
-            // Note: tables are stored with qualified names (schema.table)
-            let qualified_name = format!("{}.{}", self.db.catalog.get_current_schema(), tbl_name);
-            let child_rows: Vec<_> = if let Some(table) = self.db.tables.get(&qualified_name) {
-                table.scan_live().map(|(id, row)| (id, row.clone())).collect()
-            } else if let Some(table) = self.db.tables.get(tbl_name.as_str()) {
+            // Get all rows from the child table. Resolve via `Database::get_table`
+            // rather than a hand-rolled `main.<name>` lookup so a table that lives
+            // in an ATTACHed schema (e.g. `aux.c2`) is found the same way its
+            // schema lookup above was (#6536) — that helper already implements
+            // the temp -> main -> attached search path.
+            let child_rows: Vec<_> = if let Some(table) = self.db.get_table(tbl_name) {
                 table.scan_live().map(|(id, row)| (id, row.clone())).collect()
             } else {
                 continue;
@@ -3509,13 +3521,12 @@ impl SqlExecutor {
                         &self.db, fk,
                     );
 
-                // Get parent table data
-                let parent_qualified =
-                    format!("{}.{}", self.db.catalog.get_current_schema(), &fk.parent_table);
+                // Get parent table data. Same rationale as the child-row lookup
+                // above: resolve through `Database::get_table`'s temp -> main ->
+                // attached search path instead of a `main.<name>`-only lookup, so
+                // a parent table living in an ATTACHed schema is found too (#6536).
                 let parent_rows: Vec<_> =
-                    if let Some(parent_table) = self.db.tables.get(&parent_qualified) {
-                        parent_table.scan_live().map(|(_, row)| row.clone()).collect()
-                    } else if let Some(parent_table) = self.db.tables.get(&fk.parent_table) {
+                    if let Some(parent_table) = self.db.get_table(&fk.parent_table) {
                         parent_table.scan_live().map(|(_, row)| row.clone()).collect()
                     } else {
                         // Parent table doesn't exist - every row whose FK columns are all

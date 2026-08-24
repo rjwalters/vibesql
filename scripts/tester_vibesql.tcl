@@ -7360,6 +7360,8 @@ array set vibesql_attach_ok {
     pragma4-4.2.1 1
     pragma4-4.3.1 1
     pragma4-4.4.0 1
+    pragma4-4.5.0 1
+    pragma4-4.6.0 1
     e_dropview-3.5.0 1
     e_dropview-3.5.1 1
     e_dropview-3.5.2 1
@@ -7421,6 +7423,24 @@ array set vibesql_attach_rescue_always {
 # already-diagnosed shim/engine gaps rather than regressing anything that
 # previously passed.
 
+# pragma4-4.5.0 and pragma4-4.6.0 (#6536) were added for the same reason as
+# pragma4-4.4.0 immediately below: each is a `do_execsql_test` setup block
+# (blank expected result) whose body creates an `aux.`-qualified object —
+# `CREATE UNIQUE INDEX aux.i2 ON t2(d)` / `CREATE TABLE aux.c2 (...)`
+# respectively — so without an allow-list entry, uses_sqlite_internals'
+# ATTACH-setup rescue (#6193) silently stripped those lines and ran only the
+# main-schema remainder, meaning `aux.c2` (and the UNIQUE index the
+# subsequent FK-mismatch check needs) never actually existed by the time
+# 4.6.1/4.6.2 ran. Verified directly: `pragma4-4.6.2`'s failure changed from
+# "no such table: c2" (aux.c2 never created) to a downstream engine-level
+# symptom once these entries let the aux DDL run for real — see #6536 for
+# the root-cause chain and why 4.6.2 itself remains a documented #6531
+# follow-up rather than green. Measured net effect: two previously-failing
+# tests (4.5.3, 4.6.3 — both `do_test` blocks in the same 4.5.x/4.6.x
+# sections) flip to passing with zero regressions among previously-passing
+# tests, once these two entries let their setup blocks' aux tables/indexes
+# genuinely persist for the DROP TABLE attempts later in the file to find.
+#
 # pragma4-4.4.0 (#6482) was added to vibesql_attach_ok later than the three
 # 4.x.1 setup blocks below, for the same "the `aux.` text lives inside the
 # do_test body" reason: `CREATE INDEX main.i1 ON t1(b, c); CREATE INDEX aux.i2
