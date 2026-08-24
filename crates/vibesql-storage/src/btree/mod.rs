@@ -33,11 +33,14 @@
 //! The `BTreeIndex::bulk_load()` method provides optimized index creation from pre-sorted data.
 //! This is significantly faster than incremental inserts for large datasets.
 //!
-//! ## Usage Example (once #1473 is integrated):
+//! ## Usage Example (as used by CREATE INDEX and disk-spill index rebuilds):
+//!
+//! See the real call sites in
+//! `database/indexes/index_maintenance/create.rs` (CREATE INDEX) and
+//! `database/indexes/index_manager.rs` (spilling an in-memory index to disk),
+//! both of which sort entries by key and then call `BTreeIndex::bulk_load`:
 //!
 //! ```text
-//! // In CREATE INDEX executor:
-//!
 //! // 1. Collect and sort all rows by index key(s)
 //! let mut sorted_entries = Vec::new();
 //! for (row_idx, row) in table.rows().iter().enumerate() {
@@ -80,8 +83,6 @@ use vibesql_types::DataType;
 use crate::page::{PageId, PAGE_SIZE};
 
 // Page type identifiers
-#[allow(dead_code)] // Reserved for future use when implementing BTreeIndex::load()
-const PAGE_TYPE_METADATA: u8 = 0;
 const PAGE_TYPE_INTERNAL: u8 = 1;
 const PAGE_TYPE_LEAF: u8 = 2;
 
@@ -249,37 +250,75 @@ mod tests {
         assert_eq!(degree, 5, "Minimum degree of 5 should be enforced");
     }
 
-    /// Integration test: Bulk load vs incremental insert should produce equivalent trees
+    /// Integration test: a bulk-loaded index is actually searchable.
     ///
-    /// This test will be used once #1473 (IndexManager integration) is complete
-    /// to verify that bulk loading produces correct results
+    /// Builds an index via `BTreeIndex::bulk_load()` and verifies every key
+    /// is findable via `lookup`/`multi_lookup`, that `range_scan` and
+    /// `range_scan_reverse` return the expected row IDs in order, and that a
+    /// nonexistent key correctly misses.
     #[test]
     fn test_bulk_load_produces_searchable_index() {
         use std::sync::Arc;
 
         use node::BTreeIndex;
         use tempfile::TempDir;
+        use vibesql_types::SqlValue;
 
         let temp_dir = TempDir::new().unwrap();
         let storage = Arc::new(crate::NativeStorage::new(temp_dir.path()).unwrap());
         let page_manager = Arc::new(crate::page::PageManager::new("test.db", storage).unwrap());
 
-        // Create sorted test data
+        // Create sorted test data: keys 0, 10, 20, ..., 990 with row_id == i
         let key_schema = vec![DataType::Integer];
-        let sorted_entries: Vec<(Vec<vibesql_types::SqlValue>, usize)> = (0..100)
-            .map(|i| (vec![vibesql_types::SqlValue::Integer(i * 10)], i as usize))
-            .collect();
+        let sorted_entries: Vec<(Vec<SqlValue>, usize)> =
+            (0..100).map(|i| (vec![SqlValue::Integer(i * 10)], i as usize)).collect();
 
         // Build index using bulk load
         let index = BTreeIndex::bulk_load(sorted_entries, key_schema, page_manager).unwrap();
 
-        // Verify basic properties
+        // Verify basic tree-shape properties
         assert!(index.height() >= 1);
         assert!(index.degree() >= 5);
 
-        // TODO: Once search operations are implemented in #1473:
-        // - Verify all keys are searchable
-        // - Test range scans work correctly
-        // - Compare results with incremental insert
+        // Every inserted key must be individually searchable via lookup()
+        for i in 0..100 {
+            let key = vec![SqlValue::Integer(i * 10)];
+            let row_ids = index.lookup(&key).unwrap();
+            assert_eq!(row_ids, vec![i as usize], "lookup mismatch for key {}", i * 10);
+        }
+
+        // A key that was never inserted must return no results
+        assert!(index.lookup(&vec![SqlValue::Integer(5)]).unwrap().is_empty());
+
+        // multi_lookup should find all requested keys, in the order requested
+        let keys: Vec<Vec<SqlValue>> = vec![
+            vec![SqlValue::Integer(0)],
+            vec![SqlValue::Integer(500)],
+            vec![SqlValue::Integer(990)],
+        ];
+        let row_ids = index.multi_lookup(&keys).unwrap();
+        assert_eq!(row_ids, vec![0, 50, 99]);
+
+        // range_scan should return matching row_ids in ascending key order
+        let range_rows = index
+            .range_scan(
+                Some(&vec![SqlValue::Integer(100)]),
+                Some(&vec![SqlValue::Integer(150)]),
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(range_rows, vec![10, 11, 12, 13, 14, 15]);
+
+        // range_scan_reverse should return matching row_ids in descending key order
+        let reverse_rows = index
+            .range_scan_reverse(
+                Some(&vec![SqlValue::Integer(100)]),
+                Some(&vec![SqlValue::Integer(150)]),
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(reverse_rows, vec![15, 14, 13, 12, 11, 10]);
     }
 }
