@@ -374,6 +374,7 @@ mod tests {
     #[test]
     fn test_extract_simple_table_select_valid() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -403,6 +404,7 @@ mod tests {
     #[test]
     fn test_extract_simple_table_select_with_where() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -432,6 +434,7 @@ mod tests {
     #[test]
     fn test_extract_simple_table_select_with_distinct() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: true,
             select_list: vec![SelectItem::Wildcard { alias: None }],

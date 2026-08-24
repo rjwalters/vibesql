@@ -51,6 +51,7 @@ fn test_table_local_predicate_applied_at_scan() {
     // Query: SELECT * FROM t1 WHERE a = 5
     // Should return only 1 row
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -132,6 +133,7 @@ fn test_multi_table_with_local_predicates() {
     // Without pushdown: 10 × 10 × 10 = 1000 rows → filter → 1 row
     // With pushdown: 1 × 1 × 10 = 10 rows (much better!)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -288,6 +290,7 @@ fn test_table_local_predicate_with_explicit_join() {
     // SELECT * FROM orders JOIN customers ON orders.customer_id = customers.customer_id
     // WHERE orders.amount > 110
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -405,6 +408,7 @@ fn test_table_local_predicate_with_multiple_conditions() {
 
     // Query: SELECT * FROM products WHERE price > 50 AND stock > 5
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

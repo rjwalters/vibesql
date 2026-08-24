@@ -644,6 +644,7 @@ mod tests {
     fn test_expressions_equal_scalar_subquery() {
         // Create minimal SelectStmt instances
         let subq1 = Expression::ScalarSubquery(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],
@@ -661,6 +662,7 @@ mod tests {
             values: None,
         }));
         let subq2 = Expression::ScalarSubquery(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],

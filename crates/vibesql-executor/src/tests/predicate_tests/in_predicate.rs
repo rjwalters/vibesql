@@ -31,6 +31,7 @@ fn test_in_list_basic() {
 
     // SELECT * FROM test WHERE val IN (1, 3, 5)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -91,6 +92,7 @@ fn test_not_in_list() {
 
     // SELECT * FROM test WHERE val NOT IN (1, 3, 5)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -149,6 +151,7 @@ fn test_in_list_with_null_value() {
 
     // SELECT * FROM test WHERE val IN (1, 3, 5)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -207,6 +210,7 @@ fn test_in_list_with_null_in_list() {
     // SELECT * FROM test WHERE val IN (1, NULL, 5)
     // Should return no rows because 2 doesn't match 1 or 5, and NULL comparison is unknown
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -266,6 +270,7 @@ fn test_empty_in_list() {
     // SELECT * FROM test WHERE val IN ()
     // Should return no rows (empty IN always returns false)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -321,6 +326,7 @@ fn test_empty_not_in_list() {
     // SELECT * FROM test WHERE val NOT IN ()
     // Should return all rows (empty NOT IN always returns true)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -375,6 +381,7 @@ fn test_null_in_empty_subquery() {
     // Expected: 0 (FALSE), per SQLite behavior
     // NULL IN empty set returns FALSE, not NULL
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -383,6 +390,7 @@ fn test_null_in_empty_subquery() {
             expr: vibesql_ast::Expression::In {
                 expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 subquery: Box::new(vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     set_operation: None,
                     values: None,
@@ -448,6 +456,7 @@ fn test_null_not_in_empty_subquery() {
     // Expected: 1 (TRUE), per SQLite behavior
     // NULL NOT IN empty set returns TRUE, not NULL
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -456,6 +465,7 @@ fn test_null_not_in_empty_subquery() {
             expr: vibesql_ast::Expression::In {
                 expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Null)),
                 subquery: Box::new(vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     set_operation: None,
                     values: None,
@@ -520,6 +530,7 @@ fn test_value_in_empty_subquery() {
     // SELECT 1 IN (SELECT * FROM empty_table)
     // Expected: 0 (FALSE) - should already work, this is a regression test
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -530,6 +541,7 @@ fn test_value_in_empty_subquery() {
                     1,
                 ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     set_operation: None,
                     values: None,

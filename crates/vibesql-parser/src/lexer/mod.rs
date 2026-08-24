@@ -9,6 +9,8 @@
 
 use std::fmt;
 
+use vibesql_ast::QueryHint;
+
 use crate::token::Token;
 
 mod identifiers;
@@ -111,6 +113,15 @@ pub struct Lexer<'a> {
     prev_kind: PrevTokenKind,
     /// Classification of the token emitted before [`Self::prev_kind`].
     prev_prev_kind: PrevTokenKind,
+    /// Recognized hint comments captured while skipping whitespace and
+    /// comments, in source order, each paired with the byte span of the
+    /// full `/* ... */` comment (delimiters included). Populated only for
+    /// comments whose trimmed body exactly matches a [`QueryHint`] keyword
+    /// — every other `/* ... */` comment is discarded exactly as before
+    /// (see [`QueryHint`]'s docs for the recognized syntax). The parser
+    /// consumes these via [`Self::take_hints`] to decide which ones attach
+    /// to the AST.
+    hints: Vec<(QueryHint, Span)>,
 }
 
 impl<'a> Lexer<'a> {
@@ -122,7 +133,15 @@ impl<'a> Lexer<'a> {
             byte_pos: 0,
             prev_kind: PrevTokenKind::Start,
             prev_prev_kind: PrevTokenKind::Start,
+            hints: Vec::new(),
         }
+    }
+
+    /// Take the recognized hint comments captured so far, leaving this
+    /// lexer's internal accumulator empty. See [`Self::hints`] for what
+    /// qualifies as a recognized hint comment.
+    pub fn take_hints(&mut self) -> Vec<(QueryHint, Span)> {
+        std::mem::take(&mut self.hints)
     }
 
     /// Classify a just-emitted token for unary/binary `-` disambiguation.
@@ -377,6 +396,12 @@ impl<'a> Lexer<'a> {
     /// (see [`LexerError::preformatted`]) rather than the `near "X": syntax
     /// error` form, since the offending run has no single closing token to
     /// point at.
+    ///
+    /// A block comment whose trimmed body exactly matches a recognized
+    /// [`QueryHint`] keyword (e.g. `/* COLUMNAR */`) is additionally
+    /// captured into [`Self::hints`] before being discarded like any other
+    /// comment — the token stream is unaffected either way, so this is
+    /// purely a side channel the parser can read via [`Self::take_hints`].
     fn skip_whitespace_and_comments(&mut self) -> Result<(), LexerError> {
         loop {
             self.skip_whitespace();
@@ -418,6 +443,16 @@ impl<'a> Lexer<'a> {
                         "unterminated block comment".to_string(),
                         start,
                     ));
+                }
+
+                // Recognize a hint comment: the comment's trimmed body must
+                // exactly match a `QueryHint` keyword (case-insensitive).
+                // An incidental comment that merely mentions the keyword
+                // (e.g. `/* uses COLUMNAR storage */`) is not a match and
+                // is discarded exactly as before — see `QueryHint::parse`.
+                let inner = &self.input[start + 2..self.byte_pos - 2];
+                if let Some(hint) = QueryHint::parse(inner) {
+                    self.hints.push((hint, Span::new(start, self.byte_pos)));
                 }
 
                 // Continue loop to skip any following whitespace/comments

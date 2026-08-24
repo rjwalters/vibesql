@@ -27,6 +27,7 @@ fn test_count_star_in_multiplication() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -94,6 +95,7 @@ fn test_count_star_in_addition() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -193,6 +195,7 @@ fn test_count_star_complex_expression() {
     };
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -285,6 +288,7 @@ fn test_count_star_with_unary_operators() {
     };
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -360,6 +364,7 @@ fn test_count_star_with_negative_unary() {
     };
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

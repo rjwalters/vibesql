@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use vibesql_ast::{FromClause, SelectStmt};
+use vibesql_ast::{FromClause, QueryHint, SelectStmt};
 
 use super::{
     patterns::has_analytical_pattern,
@@ -129,9 +129,10 @@ impl StrategyScore {
 
 /// Primary reason for strategy selection
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Some variants are for future use (query hints, etc.)
+#[allow(dead_code)] // SingleTableScan is not yet produced by any selector
 pub enum StrategyReason {
-    /// User override via query hint (/* COLUMNAR */, /* ROW_ORIENTED */)
+    /// User override via query hint (/* COLUMNAR */, /* ROW_ORIENTED */).
+    /// Produced by `try_hinted_strategy` from `SelectStmt::hints` (#6547).
     QueryHint(String),
     /// Table has columnar storage available
     ColumnarStorageAvailable,
@@ -221,6 +222,16 @@ impl<'a> StrategyContext<'a> {
 pub fn choose_execution_strategy(ctx: &StrategyContext<'_>) -> ExecutionStrategy {
     let stmt = ctx.stmt;
 
+    // Check 0: An explicit query-comment hint overrides the heuristics
+    // below. Multiple hints use last-one-wins precedence (see `QueryHint`
+    // docs). A hint is only honored when the query shape actually supports
+    // it — e.g. `/* COLUMNAR */` on a query with no FROM clause, or a
+    // multi-table JOIN with no columnar path available, falls through to
+    // the normal heuristics rather than forcing an invalid strategy.
+    if let Some(strategy) = try_hinted_strategy(ctx) {
+        return strategy;
+    }
+
     // Check 1: No FROM clause → ExpressionOnly
     if stmt.from.is_none() {
         return ExecutionStrategy::ExpressionOnly {
@@ -246,6 +257,49 @@ pub fn choose_execution_strategy(ctx: &StrategyContext<'_>) -> ExecutionStrategy
 
     // Check 5: Default to row-oriented
     make_row_oriented(stmt, StrategyReason::Fallback)
+}
+
+/// Try to honor an explicit query-comment hint (`/* COLUMNAR */` /
+/// `/* ROW_ORIENTED */`) captured on `ctx.stmt.hints`.
+///
+/// Returns `None` (falling through to the normal heuristics in
+/// [`choose_execution_strategy`]) when there is no hint, or when a
+/// `/* COLUMNAR */` hint's query shape doesn't support any columnar path
+/// (no FROM clause, a multi-table JOIN, or a GROUP BY with native-columnar
+/// disabled) — forcing an execution strategy the query shape can't
+/// actually satisfy would be worse than falling back to the heuristics.
+/// `/* ROW_ORIENTED */` has no such restriction: row-oriented execution
+/// always supports every query shape.
+fn try_hinted_strategy(ctx: &StrategyContext<'_>) -> Option<ExecutionStrategy> {
+    let stmt = ctx.stmt;
+    let hint = *stmt.hints.last()?;
+    let reason = StrategyReason::QueryHint(hint.as_str().to_string());
+
+    match hint {
+        QueryHint::RowOriented => Some(make_row_oriented(stmt, reason)),
+        QueryHint::Columnar => {
+            if stmt.from.is_none() || !ctx.cte_results.is_empty() || stmt.set_operation.is_some() {
+                return None;
+            }
+            if ctx.native_columnar_enabled && is_single_table(stmt) {
+                if let Some(FromClause::Table { name, .. }) = &stmt.from {
+                    return Some(ExecutionStrategy::NativeColumnar {
+                        table: name.clone(),
+                        score: StrategyScore::new(reason),
+                    });
+                }
+            }
+            if stmt.group_by.is_none() && is_single_table(stmt) {
+                return Some(ExecutionStrategy::StandardColumnar {
+                    score: StrategyScore::new(reason),
+                });
+            }
+            // No columnar path supports this query's shape (e.g. a JOIN, or
+            // GROUP BY without native-columnar enabled) — fall through to
+            // the normal heuristics rather than forcing an invalid strategy.
+            None
+        }
+    }
 }
 
 /// Try to select NativeColumnar strategy
@@ -333,6 +387,7 @@ mod tests {
 
     fn make_simple_table_query(table: &str) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -359,6 +414,7 @@ mod tests {
 
     fn make_aggregate_query(table: &str) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -404,6 +460,7 @@ mod tests {
     #[test]
     fn test_expression_only_for_no_from() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -519,5 +576,77 @@ mod tests {
             score: StrategyScore::new(StrategyReason::NoFromClause),
         };
         assert_eq!(expr.name(), "ExpressionOnly");
+    }
+
+    #[test]
+    fn test_row_oriented_hint_overrides_native_columnar_eligible_query() {
+        // Heuristics alone (native columnar enabled, single-table
+        // aggregate) would pick NativeColumnar, but an explicit
+        // /* ROW_ORIENTED */ hint forces RowOriented, and the reason is the
+        // (previously dead) QueryHint variant.
+        let mut stmt = make_aggregate_query("orders");
+        stmt.hints = vec![QueryHint::RowOriented];
+        let cte_results = HashMap::new();
+        let ctx = StrategyContext::new(&stmt, &cte_results, true);
+        let strategy = choose_execution_strategy(&ctx);
+
+        match strategy {
+            ExecutionStrategy::RowOriented { score, .. } => {
+                assert_eq!(score.reason, StrategyReason::QueryHint("ROW_ORIENTED".to_string()));
+            }
+            other => panic!("expected RowOriented, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_columnar_hint_forces_native_columnar_when_eligible() {
+        // Heuristics alone (no native-columnar feature check needed here —
+        // a simple table query with no analytical pattern) would pick
+        // RowOriented, but an explicit /* COLUMNAR */ hint forces a
+        // columnar strategy given native columnar is enabled.
+        let mut stmt = make_simple_table_query("users");
+        stmt.hints = vec![QueryHint::Columnar];
+        let cte_results = HashMap::new();
+        let ctx = StrategyContext::new(&stmt, &cte_results, true);
+        let strategy = choose_execution_strategy(&ctx);
+
+        match strategy {
+            ExecutionStrategy::NativeColumnar { table, score } => {
+                assert_eq!(table, "users");
+                assert_eq!(score.reason, StrategyReason::QueryHint("COLUMNAR".to_string()));
+            }
+            other => panic!("expected NativeColumnar, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_columnar_hint_falls_back_when_no_from_clause() {
+        // /* COLUMNAR */ on a FROM-less query has no columnar path to force
+        // — falls through to the normal ExpressionOnly heuristic rather
+        // than panicking or forcing an invalid strategy.
+        let mut stmt = make_simple_table_query("users");
+        stmt.from = None;
+        stmt.hints = vec![QueryHint::Columnar];
+        let cte_results = HashMap::new();
+        let ctx = StrategyContext::new(&stmt, &cte_results, true);
+        let strategy = choose_execution_strategy(&ctx);
+
+        assert!(matches!(strategy, ExecutionStrategy::ExpressionOnly { .. }));
+    }
+
+    #[test]
+    fn test_conflicting_hints_last_one_wins() {
+        let mut stmt = make_aggregate_query("orders");
+        stmt.hints = vec![QueryHint::Columnar, QueryHint::RowOriented];
+        let cte_results = HashMap::new();
+        let ctx = StrategyContext::new(&stmt, &cte_results, true);
+        assert!(matches!(choose_execution_strategy(&ctx), ExecutionStrategy::RowOriented { .. }));
+
+        stmt.hints = vec![QueryHint::RowOriented, QueryHint::Columnar];
+        let ctx = StrategyContext::new(&stmt, &cte_results, true);
+        assert!(matches!(
+            choose_execution_strategy(&ctx),
+            ExecutionStrategy::NativeColumnar { .. }
+        ));
     }
 }

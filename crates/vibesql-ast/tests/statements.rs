@@ -8,6 +8,7 @@ use vibesql_types::{SqlValue, StringValue};
 #[test]
 fn test_create_select_statement() {
     let stmt = Statement::Select(Box::new(SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],

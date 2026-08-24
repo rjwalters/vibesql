@@ -66,6 +66,7 @@ fn test_scalar_subquery_in_where_clause() {
 
     // Build subquery: SELECT AVG(salary) FROM employees
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -101,6 +102,7 @@ fn test_scalar_subquery_in_where_clause() {
 
     // Build main query: SELECT * FROM employees WHERE salary > (subquery)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -193,6 +195,7 @@ fn test_scalar_subquery_in_select_list() {
 
     // Build subquery: SELECT MAX(salary) FROM employees
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -228,6 +231,7 @@ fn test_scalar_subquery_in_select_list() {
 
     // Build main query: SELECT name, salary, (subquery) as max_sal FROM employees
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -312,6 +316,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
 
     // Build subquery that returns no rows: SELECT id FROM employees WHERE id = 999
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -351,6 +356,7 @@ fn test_scalar_subquery_returns_null_when_empty() {
 
     // Build main query: SELECT (subquery) as missing_id FROM employees
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

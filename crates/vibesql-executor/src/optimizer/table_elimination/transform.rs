@@ -73,6 +73,7 @@ pub(super) fn build_exists_checks(eliminated: &[EliminatedTable]) -> Vec<Express
         .iter()
         .map(|table| {
             let subquery = SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {

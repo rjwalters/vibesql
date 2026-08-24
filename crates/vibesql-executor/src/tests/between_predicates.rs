@@ -70,6 +70,7 @@ fn test_between_integer() {
     // Test: age BETWEEN 28 AND 36
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -188,6 +189,7 @@ fn test_not_between() {
     // Test: price NOT BETWEEN 10 AND 20
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -269,6 +271,7 @@ fn test_between_boundary_inclusive() {
     // Test: BETWEEN is inclusive of boundaries
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -368,6 +371,7 @@ fn test_between_with_column_references() {
     // Test: value BETWEEN min_val AND max_val
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

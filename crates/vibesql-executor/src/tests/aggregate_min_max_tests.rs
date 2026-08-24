@@ -50,6 +50,7 @@ fn test_min_function() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -134,6 +135,7 @@ fn test_max_function() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -221,6 +223,7 @@ fn test_min_max_on_strings() {
 
     // Test MIN
     let stmt_min = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -263,6 +266,7 @@ fn test_min_max_on_strings() {
 
     // Test MAX
     let stmt_max = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

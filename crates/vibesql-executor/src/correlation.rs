@@ -618,6 +618,7 @@ mod tests {
         // SELECT col0 FROM tab0 WHERE col4 = 97.5
         // This is non-correlated - only references columns from its own FROM clause
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -663,6 +664,7 @@ mod tests {
         // SELECT 1 WHERE outer_table.col3 = 5
         // This references a column from the outer schema
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -744,6 +746,7 @@ mod tests {
         };
 
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -833,6 +836,7 @@ mod tests {
         };
 
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -896,6 +900,7 @@ mod tests {
         // clause VALUES. `c` is not defined in the subquery's own scope
         // (no FROM), so it must resolve to the outer alias.
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],
@@ -929,6 +934,7 @@ mod tests {
         let outer_schema = make_outer_schema();
 
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],
@@ -966,6 +972,7 @@ mod tests {
         };
 
         let subquery = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

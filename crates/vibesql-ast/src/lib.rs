@@ -151,6 +151,7 @@ mod ddl;
 mod dml;
 mod expression;
 mod grant;
+mod hints;
 mod identifier;
 mod introspection;
 mod operators;
@@ -193,6 +194,7 @@ pub use expression::{
     WindowFunctionSpec, WindowSpec,
 };
 pub use grant::{GrantStmt, ObjectType, PrivilegeType};
+pub use hints::QueryHint;
 // SQL Identifiers with SQL:1999 case sensitivity handling
 pub use identifier::{ColumnIdentifier, FunctionIdentifier, Identifier, TableIdentifier};
 pub use introspection::{

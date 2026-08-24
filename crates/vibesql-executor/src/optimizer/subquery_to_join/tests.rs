@@ -62,6 +62,7 @@ fn column_ref(column: &str) -> Expression {
 
 fn simple_select(table: &str, column: &str) -> SelectStmt {
     SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
@@ -645,6 +646,7 @@ fn test_exists_self_join_column_qualification() {
     // Create outer query: SELECT * FROM lineitem l1
     let outer_from = table_from_with_alias("lineitem", "l1");
     let mut stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -666,6 +668,7 @@ fn test_exists_self_join_column_qualification() {
     // EXISTS (SELECT * FROM lineitem l2 WHERE l2.l_orderkey = l1.l_orderkey AND l2.l_suppkey <>
     // l1.l_suppkey)
     let exists_subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -771,6 +774,7 @@ fn test_not_exists_self_join_column_qualification() {
     // Create outer query: SELECT * FROM lineitem l1
     let outer_from = table_from_with_alias("lineitem", "l1");
     let mut stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -792,6 +796,7 @@ fn test_not_exists_self_join_column_qualification() {
     // NOT EXISTS (SELECT * FROM lineitem l3 WHERE l3.l_orderkey = l1.l_orderkey AND
     // l3.l_receiptdate > l3.l_commitdate)
     let not_exists_subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -900,6 +905,7 @@ fn test_conjunction_exists_to_semi_join() {
     // WHERE o_orderdate >= '1993-07-01' AND o_orderdate < '1993-10-01' AND EXISTS (...)
     let outer_from = simple_table_from("orders");
     let mut stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -919,6 +925,7 @@ fn test_conjunction_exists_to_semi_join() {
 
     // Create correlated EXISTS subquery
     let exists_subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {
@@ -992,6 +999,7 @@ fn test_conjunction_not_exists_to_anti_join() {
     // Test NOT EXISTS inside a Conjunction
     let outer_from = simple_table_from("orders");
     let mut stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -1011,6 +1019,7 @@ fn test_conjunction_not_exists_to_anti_join() {
 
     // Create correlated NOT EXISTS subquery
     let not_exists_subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Expression {

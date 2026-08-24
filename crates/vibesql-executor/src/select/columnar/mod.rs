@@ -877,6 +877,7 @@ mod tests {
 
         // SELECT SUM(price) FROM test WHERE quantity IN (SELECT ...) - unsupported
         let filter = Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],

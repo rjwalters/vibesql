@@ -48,6 +48,7 @@ fn test_update_where_in_subquery() {
 
     // Build subquery: SELECT dept_id FROM active_depts
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -149,6 +150,7 @@ fn test_update_where_not_in_subquery() {
 
     // Subquery
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -243,6 +245,7 @@ fn test_update_where_subquery_empty_result() {
 
     // Subquery returns empty result
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -347,6 +350,7 @@ fn test_update_where_complex_subquery_condition() {
 
     // Subquery: SELECT dept_id FROM departments WHERE budget > 80000
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -459,6 +463,7 @@ fn test_update_where_multiple_rows_in_subquery() {
 
     // Subquery returns multiple rows (valid for IN)
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {

@@ -415,6 +415,7 @@ mod tests {
             name: vibesql_ast::FunctionIdentifier::new("SUM"),
             distinct: false,
             args: vec![Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![],

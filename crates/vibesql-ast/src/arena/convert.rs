@@ -458,6 +458,11 @@ impl<'a, 'arena> Converter<'a, 'arena> {
                     .map(|row| row.iter().map(|e| self.convert_expression(e)).collect())
                     .collect()
             }),
+            // The arena AST has no concept of query-comment hints; the
+            // top-level statement's leading hint (if any) is attached
+            // separately by `parse_with_arena_fallback` after conversion
+            // (#6547).
+            hints: Vec::new(),
         }
     }
 

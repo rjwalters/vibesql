@@ -509,6 +509,7 @@ mod tests {
     #[test]
     fn test_no_aggregates() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -540,6 +541,7 @@ mod tests {
     #[test]
     fn test_simple_group_by() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![
@@ -579,6 +581,7 @@ mod tests {
     #[test]
     fn test_having_clause() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![

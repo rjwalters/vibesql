@@ -216,6 +216,7 @@ mod tests {
     /// Helper to create a simple SELECT statement for testing
     fn simple_select(table: &str, column: &str) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -631,6 +632,7 @@ mod tests {
     /// Helper to create a SELECT statement with alias
     fn simple_select_with_alias(table: &str, alias: &str, column: &str) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

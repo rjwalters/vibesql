@@ -43,6 +43,7 @@ fn test_select_star() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -114,6 +115,7 @@ fn test_select_specific_columns() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

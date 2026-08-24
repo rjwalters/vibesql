@@ -15,6 +15,7 @@ fn test_position_found() {
 
     // SELECT POSITION('world' IN 'hello world')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -56,6 +57,7 @@ fn test_position_not_found() {
 
     // SELECT POSITION('xyz' IN 'hello world')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -97,6 +99,7 @@ fn test_position_null_substring() {
 
     // SELECT POSITION(NULL IN 'hello world')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -138,6 +141,7 @@ fn test_position_null_string() {
 
     // SELECT POSITION('world' IN NULL)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

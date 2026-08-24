@@ -240,6 +240,7 @@ pub fn execute_update_from_join(
 
     // Build the synthetic SELECT statement
     let select_stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: stmt.with_clause.clone(),
         select_list,
         distinct: false,

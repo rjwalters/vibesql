@@ -1617,6 +1617,7 @@ mod tests {
     /// Create a minimal SelectStmt for testing purposes
     fn create_minimal_select_stmt() -> vibesql_ast::SelectStmt {
         vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

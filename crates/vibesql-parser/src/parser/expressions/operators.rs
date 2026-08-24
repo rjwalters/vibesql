@@ -433,6 +433,7 @@ impl Parser {
 
                         // Create a SELECT * FROM table_name subquery
                         let subquery = vibesql_ast::SelectStmt {
+                            hints: Vec::new(),
                             with_clause: None,
                             distinct: false,
                             select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -713,6 +714,7 @@ impl Parser {
 
                     // Create a SELECT * FROM table_name subquery
                     let subquery = vibesql_ast::SelectStmt {
+                        hints: Vec::new(),
                         with_clause: None,
                         distinct: false,
                         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

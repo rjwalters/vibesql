@@ -1212,6 +1212,7 @@ mod tests {
     /// Build an empty SelectStmt scaffold.
     fn empty_select_stmt() -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: Vec::new(),

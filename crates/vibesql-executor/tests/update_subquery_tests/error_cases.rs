@@ -37,6 +37,7 @@ fn test_update_with_subquery_multiple_rows_uses_first() {
     // UPDATE employees SET salary = (SELECT amount FROM salaries)
     // SQLite uses the first row (60000)
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
 
         distinct: false,
@@ -128,6 +129,7 @@ fn test_update_with_subquery_multiple_columns_error() {
 
     // UPDATE employees SET salary = (SELECT min_amt, max_amt FROM salaries) -- ERROR: 2 columns
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
 
         distinct: false,

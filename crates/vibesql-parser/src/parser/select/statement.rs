@@ -438,6 +438,7 @@ impl Parser {
         }
 
         Ok(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause,
             distinct,
             select_list,
@@ -817,6 +818,7 @@ impl Parser {
         }
 
         Ok(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![],

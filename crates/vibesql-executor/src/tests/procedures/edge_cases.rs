@@ -370,6 +370,7 @@ fn test_procedural_select_into_single_column() {
                 default_value: None,
             },
             ProceduralStatement::Sql(Box::new(Statement::Select(Box::new(SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
@@ -454,6 +455,7 @@ fn test_procedural_select_into_multiple_columns() {
                 default_value: None,
             },
             ProceduralStatement::Sql(Box::new(Statement::Select(Box::new(SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![
@@ -539,6 +541,7 @@ fn test_procedural_select_into_error_no_rows() {
                 default_value: None,
             },
             ProceduralStatement::Sql(Box::new(Statement::Select(Box::new(SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
@@ -628,6 +631,7 @@ fn test_procedural_select_into_error_multiple_rows() {
                 default_value: None,
             },
             ProceduralStatement::Sql(Box::new(Statement::Select(Box::new(SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![SelectItem::Expression {
@@ -698,6 +702,7 @@ fn test_procedural_select_into_error_column_count_mismatch() {
                 default_value: None,
             },
             ProceduralStatement::Sql(Box::new(Statement::Select(Box::new(SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![

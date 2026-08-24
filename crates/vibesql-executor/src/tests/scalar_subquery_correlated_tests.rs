@@ -77,6 +77,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
     // Build correlated subquery with UPPERCASE identifiers (as parser would produce):
     // SELECT AVG(J.I_CURRENT_PRICE) FROM ITEM J WHERE J.I_CATEGORY = I.I_CATEGORY
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -123,6 +124,7 @@ fn test_correlated_subquery_uppercase_identifiers_issue_4111() {
     // Build main query: SELECT I_ITEM_SK FROM ITEM I WHERE I.I_CURRENT_PRICE > (correlated
     // subquery)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -263,6 +265,7 @@ fn test_correlated_subquery_basic() {
 
     // Build correlated subquery: SELECT AVG(salary) FROM employees WHERE department = e.department
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -306,6 +309,7 @@ fn test_correlated_subquery_basic() {
 
     // Build main query: SELECT name, salary FROM employees e WHERE salary > (correlated subquery)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

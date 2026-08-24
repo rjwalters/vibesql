@@ -250,6 +250,7 @@ fn try_convert_complex_exists_to_join(
     // Build the derived table SELECT statement
     // SELECT DISTINCT <subquery_columns> FROM <subquery_from> WHERE <internal_preds>
     let derived_select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: true, // DISTINCT to deduplicate for semi-join semantics
         select_list: subquery_columns

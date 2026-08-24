@@ -3,7 +3,7 @@
 //! This module contains all types related to SELECT queries including
 //! SELECT items, FROM clauses, JOINs, and ORDER BY.
 
-use crate::{Expression, WindowSpec};
+use crate::{Expression, QueryHint, WindowSpec};
 
 // ============================================================================
 // Named Window Definitions (WINDOW clause)
@@ -105,6 +105,15 @@ pub struct SelectStmt {
     /// When this is Some, the statement represents a VALUES clause like `VALUES(1),(2),(3)`
     /// Each inner Vec is a row of expressions
     pub values: Option<Vec<Vec<Expression>>>,
+    /// Optimizer hints captured from recognized `/* ... */` comments
+    /// immediately following this statement's leading `SELECT` keyword
+    /// (e.g. `SELECT /* COLUMNAR */ * FROM t`). Empty in the
+    /// overwhelmingly common case where no recognized hint comment was
+    /// present, or the comment was in a non-recognized syntax/position (an
+    /// ordinary comment, discarded like whitespace). See
+    /// [`QueryHint`] for the recognized syntax and the scope/precedence
+    /// rules that govern when a hint attaches here.
+    pub hints: Vec<QueryHint>,
 }
 
 // ============================================================================

@@ -15,6 +15,7 @@ fn test_cast_integer_to_varchar() {
 
     // SELECT CAST(123 AS VARCHAR(10))
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -53,6 +54,7 @@ fn test_cast_varchar_to_integer() {
 
     // SELECT CAST('456' AS INTEGER)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -91,6 +93,7 @@ fn test_cast_null() {
 
     // SELECT CAST(NULL AS INTEGER)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -127,6 +130,7 @@ fn test_cast_integer_to_unsigned() {
 
     // SELECT CAST(42 AS UNSIGNED)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -165,6 +169,7 @@ fn test_cast_negative_integer_to_unsigned() {
 
     // SELECT CAST(-1 AS UNSIGNED) - should wrap around (MySQL behavior)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -204,6 +209,7 @@ fn test_cast_varchar_to_unsigned() {
 
     // SELECT CAST('123' AS UNSIGNED)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -246,6 +252,7 @@ fn test_cast_float_to_unsigned() {
 
     // SELECT CAST(5.7 AS UNSIGNED) - should round to nearest (MySQL behavior)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -285,6 +292,7 @@ fn test_cast_as_signed_positive() {
 
     // SELECT CAST(42 AS SIGNED) - should produce Bigint
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -326,6 +334,7 @@ fn test_cast_as_signed_negative() {
 
     // SELECT CAST(-4 AS SIGNED) - should produce Bigint with integer format
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -371,6 +380,7 @@ fn test_cast_as_signed_from_float() {
 
     // SELECT CAST(5.7 AS SIGNED) - should round to Bigint (MySQL behavior)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -418,6 +428,7 @@ fn test_cast_negative_float_to_signed_rounds() {
     // SELECT CAST(-0.7 AS SIGNED) - should round to -1 (MySQL behavior)
     // This is the exact case from issue #2639
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -462,6 +473,7 @@ fn test_cast_rounding_edge_cases() {
     // Helper to run CAST and extract result
     let cast_to_signed = |value: f64| -> i64 {
         let stmt = vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             set_operation: None,
             values: None,

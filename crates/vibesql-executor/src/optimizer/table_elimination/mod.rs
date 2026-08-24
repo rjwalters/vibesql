@@ -313,5 +313,6 @@ pub fn eliminate_unused_tables(stmt: &SelectStmt) -> SelectStmt {
         offset: stmt.offset.clone(),
         set_operation: stmt.set_operation.clone(),
         values: stmt.values.clone(),
+        hints: stmt.hints.clone(),
     }
 }

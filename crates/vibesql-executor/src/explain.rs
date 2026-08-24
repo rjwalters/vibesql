@@ -1209,6 +1209,7 @@ impl ExplainExecutor {
 
         // Add left-most subquery
         let left_stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: stmt.with_clause.clone(),
             distinct: stmt.distinct,
             select_list: stmt.select_list.clone(),
@@ -1248,6 +1249,7 @@ impl ExplainExecutor {
 
             // Create plan for right side of set operation
             let right_stmt = SelectStmt {
+                hints: Vec::new(),
                 with_clause: set_op.right.with_clause.clone(),
                 distinct: set_op.right.distinct,
                 select_list: set_op.right.select_list.clone(),

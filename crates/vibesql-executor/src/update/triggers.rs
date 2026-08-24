@@ -313,6 +313,7 @@ fn collect_view_updates_with_from(
     };
 
     let select_stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: stmt.with_clause.clone(),
         select_list,
         distinct: false,

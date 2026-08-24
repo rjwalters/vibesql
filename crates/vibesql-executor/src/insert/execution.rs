@@ -182,6 +182,7 @@ fn materialize_window_values_rows(
             })
             .collect();
         let temp_stmt = vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list,

@@ -50,6 +50,7 @@ fn test_select_with_where() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -140,6 +141,7 @@ fn test_select_with_and_condition() {
     let executor = SelectExecutor::new(&db);
     // WHERE price > 50 AND stock > 0
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -236,6 +238,7 @@ fn test_select_with_or_condition() {
     let executor = SelectExecutor::new(&db);
     // WHERE category = 'electronics' OR category = 'books'
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -330,6 +333,7 @@ fn test_select_with_null_in_where() {
     let executor = SelectExecutor::new(&db);
     // WHERE value > 50 - should filter out NULL (NULL comparisons are unknown)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

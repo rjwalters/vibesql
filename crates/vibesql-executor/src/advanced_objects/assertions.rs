@@ -77,6 +77,7 @@ impl AssertionChecker {
         // Build a SELECT statement that evaluates the check condition
         // SELECT (check_condition) -- should return TRUE if assertion holds
         let select_stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

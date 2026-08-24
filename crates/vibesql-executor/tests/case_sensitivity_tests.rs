@@ -221,6 +221,7 @@ fn test_view_lookup_case_insensitive_when_enabled() {
 
     // Create a view with lowercase
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         distinct: false,
         select_list: vec![
             vibesql_ast::SelectItem::Expression {
@@ -295,6 +296,7 @@ fn test_drop_view_case_insensitive_when_enabled() {
 
     // Create view
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
@@ -362,6 +364,7 @@ fn test_view_case_sensitive_mode() {
 
     // Create view with lowercase
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(

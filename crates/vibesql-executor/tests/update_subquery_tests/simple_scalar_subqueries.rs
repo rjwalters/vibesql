@@ -50,6 +50,7 @@ fn create_data_table(db: &mut Database, name: &str, column_name: &str, nullable:
 
 fn create_scalar_subquery(table_name: &str, column_name: &str) -> Box<vibesql_ast::SelectStmt> {
     Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -87,6 +88,7 @@ fn create_aggregate_subquery(
     func_name: &str,
 ) -> Box<vibesql_ast::SelectStmt> {
     Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {

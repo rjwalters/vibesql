@@ -358,6 +358,7 @@ mod tests {
             .collect();
 
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: true,
             select_list,

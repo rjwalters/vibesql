@@ -309,6 +309,7 @@ pub(super) fn try_convert_scalar_comparison_to_join(
 
     // Create the decorrelated subquery
     let decorrelated_subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list,
@@ -784,6 +785,7 @@ mod tests {
     /// SELECT <select_expr> FROM lineitem WHERE l_partkey = ps_partkey
     fn correlated_lineitem_subquery(select_expr: Expression) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

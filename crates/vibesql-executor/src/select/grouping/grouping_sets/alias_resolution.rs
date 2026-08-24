@@ -783,6 +783,7 @@ fn resolve_outer_aliases_in_subquery(
         offset: subquery.offset.clone(),
         set_operation: subquery.set_operation.clone(),
         values: subquery.values.clone(),
+        hints: subquery.hints.clone(),
     }
 }
 

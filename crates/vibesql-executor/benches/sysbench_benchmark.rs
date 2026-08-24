@@ -167,6 +167,7 @@ fn bind_select(stmt: &SelectStmt, params: &[SqlValue]) -> SelectStmt {
         offset: stmt.offset.clone(),
         set_operation: stmt.set_operation.clone(),
         values: stmt.values.clone(),
+        hints: stmt.hints.clone(),
     }
 }
 

@@ -294,6 +294,7 @@ fn test_insert_select_invalidates_cache() {
 
     // INSERT INTO products SELECT * FROM source_products
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

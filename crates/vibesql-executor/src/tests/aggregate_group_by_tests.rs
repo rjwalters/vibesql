@@ -65,6 +65,7 @@ fn test_group_by_select_alias() {
     // SELECT dept AS department, COUNT(*) FROM sales GROUP BY department
     // GROUP BY uses alias "department" which should resolve to column "dept"
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -193,6 +194,7 @@ fn test_group_by_numeric_position() {
     // SELECT dept, COUNT(*) FROM sales GROUP BY 1
     // GROUP BY 1 refers to the first SELECT item (dept)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -313,6 +315,7 @@ fn test_group_by_with_count() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

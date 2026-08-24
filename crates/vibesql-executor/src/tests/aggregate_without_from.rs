@@ -12,6 +12,7 @@ fn test_max_constant_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -51,6 +52,7 @@ fn test_count_star_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -90,6 +92,7 @@ fn test_aggregate_in_expression_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -137,6 +140,7 @@ fn test_count_distinct_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -176,6 +180,7 @@ fn test_multiple_aggregates_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -245,6 +250,7 @@ fn test_sum_avg_without_from() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

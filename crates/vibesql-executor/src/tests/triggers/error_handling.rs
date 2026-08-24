@@ -57,6 +57,7 @@ fn test_trigger_failure_causes_rollback() {
 
     // Verify row was NOT inserted (rollback occurred)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

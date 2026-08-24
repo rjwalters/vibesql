@@ -5,6 +5,7 @@
 use super::super::*;
 fn make_pagination_stmt(limit: Option<usize>, offset: Option<usize>) -> vibesql_ast::SelectStmt {
     vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -218,6 +219,7 @@ fn test_limit_with_inner_join() {
     // Test with LIMIT 3
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -335,6 +337,7 @@ fn test_offset_with_inner_join() {
     // INNER JOIN produces 8 rows, OFFSET 5 should return 3 rows
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -452,6 +455,7 @@ fn test_limit_offset_with_inner_join() {
     // INNER JOIN produces 10 rows, LIMIT 3 OFFSET 2 should return rows 3-5
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
