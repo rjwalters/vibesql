@@ -99,6 +99,7 @@ pub(super) fn create_users_table(db: &mut Database) {
 /// Helper to count rows in audit log
 pub(super) fn count_audit_rows(db: &Database) -> usize {
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

@@ -49,6 +49,7 @@ fn test_all_greater_than_basic() {
     // Build query: SELECT x FROM t1 WHERE x > ALL (SELECT y FROM t2)
     // Only 15 and 20 are greater than ALL values in t2 (8, 12)
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -79,6 +80,7 @@ fn test_all_greater_than_basic() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -162,6 +164,7 @@ fn test_any_less_than_basic() {
     // Build query: SELECT x FROM t1 WHERE x < ANY (SELECT y FROM t2)
     // 5 and 10 are less than 12
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -192,6 +195,7 @@ fn test_any_less_than_basic() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -276,6 +280,7 @@ fn test_some_equals_basic() {
 
     // Build query: SELECT x FROM t1 WHERE x = SOME (SELECT y FROM t2)
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -306,6 +311,7 @@ fn test_some_equals_basic() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -384,6 +390,7 @@ fn test_all_with_empty_subquery() {
     }
 
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -414,6 +421,7 @@ fn test_all_with_empty_subquery() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -492,6 +500,7 @@ fn test_any_with_empty_subquery() {
     }
 
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -522,6 +531,7 @@ fn test_any_with_empty_subquery() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -607,6 +617,7 @@ fn test_all_with_null_in_subquery() {
     // 10 > 5 (TRUE), 10 > NULL (NULL), 10 > 20 (FALSE)
     // Result should be FALSE (not NULL) because we have a definite FALSE
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -637,6 +648,7 @@ fn test_all_with_null_in_subquery() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -711,6 +723,7 @@ fn test_all_with_null_left_value() {
         .unwrap();
 
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -741,6 +754,7 @@ fn test_all_with_null_left_value() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

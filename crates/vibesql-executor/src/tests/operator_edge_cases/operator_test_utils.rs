@@ -13,6 +13,7 @@ use crate::*;
 /// ```
 pub fn create_select_stmt(expr: vibesql_ast::Expression, alias: &str) -> vibesql_ast::SelectStmt {
     vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

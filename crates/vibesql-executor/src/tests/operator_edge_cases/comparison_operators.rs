@@ -24,6 +24,7 @@ fn test_nested_comparisons() {
 
     // SELECT * FROM test WHERE (val > 10) AND (val < 20)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

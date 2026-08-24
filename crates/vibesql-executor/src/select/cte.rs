@@ -1400,6 +1400,7 @@ fn strip_compound_term(stmt: &vibesql_ast::SelectStmt) -> vibesql_ast::SelectStm
         offset: None,
         set_operation: None,
         values: stmt.values.clone(),
+        hints: stmt.hints.clone(),
     }
 }
 

@@ -59,6 +59,7 @@ fn test_not_in_select_where() {
     // SELECT pk FROM tab0 WHERE NOT (col0 < 542)
     // Should return rows where col0 >= 542 (pk=2 and pk=3)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -146,6 +147,7 @@ fn test_not_with_equality() {
     let executor = select::SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -270,6 +272,7 @@ fn test_not_in_delete_where() {
     // Verify only row with pk=1 remains by selecting all rows
     let executor = select::SelectExecutor::new(&db);
     let verify_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -342,6 +345,7 @@ fn test_not_with_null() {
     // SELECT pk FROM tab0 WHERE NOT (col0 < 542)
     // Row with NULL should be filtered out (NULL propagates)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

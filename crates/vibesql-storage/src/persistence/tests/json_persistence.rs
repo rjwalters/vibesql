@@ -921,6 +921,7 @@ fn test_json_view_preservation() {
 
     // Create a view manually (simulating CREATE VIEW)
     let select_stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![
@@ -1020,6 +1021,7 @@ fn test_json_view_preservation_without_sql_definition() {
 
     // Create a view without SQL definition (using the old constructor)
     let select_stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![SelectItem::Wildcard { alias: None }],

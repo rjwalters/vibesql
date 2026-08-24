@@ -386,6 +386,7 @@ mod tests {
     /// (`(SELECT projected)`), with no FROM/WHERE/etc.
     fn scalar_subquery(projected: Expression) -> Expression {
         let select = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

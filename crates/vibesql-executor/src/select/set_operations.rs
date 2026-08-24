@@ -315,6 +315,7 @@ mod tests {
     /// statement is sufficient.
     fn empty_select() -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: Vec::new(),

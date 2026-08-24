@@ -46,6 +46,7 @@ fn test_like_wildcard_percent() {
 
     // SELECT * FROM test WHERE name LIKE 'Al%'
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -120,6 +121,7 @@ fn test_like_wildcard_underscore() {
 
     // SELECT * FROM test WHERE name LIKE '_at'
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -194,6 +196,7 @@ fn test_not_like() {
 
     // SELECT * FROM test WHERE name NOT LIKE 'Al%'
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -255,6 +258,7 @@ fn test_like_null_pattern() {
 
     // SELECT * FROM test WHERE name LIKE NULL
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -314,6 +318,7 @@ fn test_like_null_value() {
 
     // SELECT * FROM test WHERE name LIKE 'Al%'
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -383,6 +388,7 @@ fn test_like_multibyte_percent_underscore_row_path_issue_6016() {
 
         let executor = SelectExecutor::new(&db);
         let stmt = vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             set_operation: None,
             values: None,

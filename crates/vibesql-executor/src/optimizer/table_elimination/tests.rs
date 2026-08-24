@@ -151,6 +151,7 @@ mod eliminate_unused_tables_tests {
     fn single_table_unchanged() {
         // Single table should not be eliminated
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -180,6 +181,7 @@ mod eliminate_unused_tables_tests {
     fn table_in_select_not_eliminated() {
         // Table referenced in SELECT should not be eliminated
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![
@@ -220,6 +222,7 @@ mod eliminate_unused_tables_tests {
     fn table_in_equijoin_not_eliminated() {
         // Table in equijoin should not be eliminated
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -258,6 +261,7 @@ mod eliminate_unused_tables_tests {
         // Table not in SELECT and not in equijoin should be eliminated
         // with its filter converted to EXISTS
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -309,6 +313,7 @@ mod eliminate_unused_tables_tests {
     fn select_literal_subquery_unchanged() {
         // SELECT 1 FROM ... subqueries should not be optimized
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -341,6 +346,7 @@ mod eliminate_unused_tables_tests {
     #[test]
     fn no_from_clause_unchanged() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -370,6 +376,7 @@ mod eliminate_unused_tables_tests {
     fn select_star_references_all_tables() {
         // SELECT * should reference all tables, preventing elimination
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -402,6 +409,7 @@ mod eliminate_unused_tables_tests {
         // Example: SELECT 86 * - cor0.col2 FROM tab1, tab2 AS cor0
         // This should return 9 rows (3x3), not 3 rows.
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             // SELECT only references cor0.col2
@@ -450,6 +458,7 @@ mod eliminate_unused_tables_tests {
         // This ensures WHERE clauses like NULL IS NOT NULL work correctly.
         // Example: SELECT - 0 FROM tab0, tab0 cor0 WHERE NULL IS NOT NULL
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             // SELECT with literal (no column refs)

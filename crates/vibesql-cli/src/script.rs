@@ -369,7 +369,10 @@ fn is_modification_statement(sql: &str) -> bool {
 ///
 /// This implementation:
 /// 1. Removes single-line comments (lines starting with --)
-/// 2. Removes multi-line comments (/* ... */)
+/// 2. Recognizes multi-line comments (/* ... */) so their contents can't be mistaken for a
+///    statement terminator, quote, etc. — but (#6547), unlike single-line comments, their text is
+///    preserved verbatim in the split statement, not stripped, so a recognized query-comment hint
+///    (e.g. `/* COLUMNAR */`) reaches the parser's lexer unchanged
 /// 3. Splits on semicolons, but respects string literals and comments
 /// 4. Handles escaped quotes within strings ('' for SQL)
 /// 5. Treats newlines as delimiters for dot-commands (SQLite compatibility)
@@ -402,15 +405,26 @@ fn parse_statements(script: &str) -> Vec<String> {
     while let Some(ch) = chars.next() {
         let in_quoted_ident = in_double_quote || in_bracket;
 
-        // Handle multi-line comments
+        // Handle multi-line comments. Unlike single-line `--` comments below,
+        // the comment text (including its `/* */` delimiters) is preserved
+        // in `current_statement` rather than discarded: a recognized query
+        // hint (e.g. `/* COLUMNAR */`, see `vibesql_ast::QueryHint`) must
+        // reach the parser's lexer unchanged for #6547's hint plumbing to
+        // work through this splitting layer — only the multiline-comment
+        // *state* (so its contents can't be mistaken for a statement
+        // terminator, quote, etc.) is consumed here, not the characters.
         if !in_string && !in_quoted_ident && ch == '/' && chars.peek() == Some(&'*') {
+            current_statement.push(ch);
+            current_statement.push('*');
             chars.next(); // consume '*'
             in_multiline_comment = true;
             continue;
         }
 
         if in_multiline_comment {
+            current_statement.push(ch);
             if ch == '*' && chars.peek() == Some(&'/') {
+                current_statement.push('/');
                 chars.next(); // consume '/'
                 in_multiline_comment = false;
             }
@@ -719,10 +733,26 @@ mod tests {
 
     #[test]
     fn test_parse_multiline_comment() {
+        // The comment is not a statement terminator/quote, so it doesn't
+        // affect statement splitting — but (#6547) its text IS preserved in
+        // the split statement, unlike `--` line comments below, so a
+        // recognized query hint reaches the parser's lexer unchanged.
         let script = "/* This is a\nmulti-line comment */\nSELECT 1;";
         let stmts = parse_statements(script);
         assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT 1;");
+        assert_eq!(stmts[0], "/* This is a\nmulti-line comment */\nSELECT 1;");
+    }
+
+    #[test]
+    fn test_parse_multiline_comment_hint_preserved() {
+        // Regression test for #6547: a query-comment hint must survive this
+        // splitting layer verbatim so it reaches `Parser::parse_sql` /
+        // `parse_with_arena_fallback`'s lexer, which is what actually
+        // recognizes and attaches it.
+        let script = "SELECT /* COLUMNAR */ * FROM t;";
+        let stmts = parse_statements(script);
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT /* COLUMNAR */ * FROM t;");
     }
 
     #[test]

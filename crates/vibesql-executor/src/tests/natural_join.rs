@@ -113,6 +113,7 @@ fn test_natural_join_single_common_column() {
     // Execute NATURAL JOIN query
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -260,6 +261,7 @@ fn test_natural_join_respects_collation() {
     // Execute NATURAL JOIN query - should match 'Alice' with 'ALICE' due to NOCASE collation
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -370,6 +372,7 @@ fn test_using_join_respects_collation() {
     // Execute JOIN USING query - should match 'bob' with 'BOB' due to NOCASE collation
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -554,6 +557,7 @@ fn test_issue_4843_inner_join_using_with_nested_left_join_nulls() {
 
     // SELECT t2.a, t3.a, t4.a, t5.a FROM ... ORDER BY t2.a
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

@@ -2338,6 +2338,7 @@ mod tests {
     // Helper to build a bare scalar subquery with a given SELECT list.
     fn make_bare_subquery(select_list: Vec<SelectItem>) -> Expression {
         Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list,
@@ -2523,6 +2524,7 @@ mod tests {
         group_by: Option<vibesql_ast::GroupByClause>,
     ) -> vibesql_ast::SelectStmt {
         vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list,

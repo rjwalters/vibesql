@@ -38,7 +38,41 @@ pub use lexer::{Lexer, LexerError, Span};
 pub use parser::{ParseError, Parser};
 pub use token::Token;
 pub use trigger_body::split_trigger_body_statements;
-use vibesql_ast::Statement;
+use vibesql_ast::{QueryHint, Statement};
+
+/// Determine which captured hint comments qualify as the *leading* hint for
+/// a `SELECT` statement, per the scope rule documented on
+/// [`vibesql_ast::QueryHint`]: `SELECT` must be the statement's very first
+/// token, and a qualifying hint's span must fall entirely within the token
+/// gap between that leading `SELECT` and whatever token follows it (so
+/// `SELECT /* COLUMNAR */ * FROM t` qualifies, but a hint after `FROM`, or
+/// on a `WITH ... SELECT` / `INSERT ... SELECT` statement, does not).
+///
+/// Returns the qualifying hints in source order; multiple qualifying hints
+/// are legal (e.g. two back-to-back comments) and callers apply
+/// last-one-wins precedence by reading `.last()`.
+pub(crate) fn leading_select_hints(
+    tokens: &[Token],
+    spans: &[Span],
+    hints: &[(QueryHint, Span)],
+) -> Vec<QueryHint> {
+    if hints.is_empty() {
+        return Vec::new();
+    }
+    if !matches!(tokens.first(), Some(Token::Keyword { keyword: Keyword::Select, .. })) {
+        return Vec::new();
+    }
+    let Some(select_span) = spans.first() else {
+        return Vec::new();
+    };
+    let next_start = spans.get(1).map(|s| s.start).unwrap_or(usize::MAX);
+
+    hints
+        .iter()
+        .filter(|(_, span)| span.start >= select_span.end && span.end <= next_start)
+        .map(|(hint, _)| *hint)
+        .collect()
+}
 
 /// Returns `true` if `name` is a SQL keyword (case-insensitive).
 ///
@@ -99,9 +133,15 @@ pub fn is_keyword(name: &str) -> bool {
 /// let insert = parse_with_arena_fallback("INSERT INTO users VALUES (1, 'Alice')").unwrap();
 /// ```
 pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
-    // Tokenize to detect statement type
+    // Tokenize (with spans) to detect statement type and, for SELECT,
+    // recover any leading query-comment hint (see `leading_select_hints`).
+    // Spans are needed here (not just `tokenize()`) so a hint's position can
+    // be checked against the leading `SELECT` keyword's token gap.
     let mut lexer = Lexer::new(sql);
-    let tokens = lexer.tokenize().map_err(|e| ParseError { message: e.to_string() })?;
+    let tokens_with_spans =
+        lexer.tokenize_with_spans().map_err(|e| ParseError { message: e.to_string() })?;
+    let hints = lexer.take_hints();
+    let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
 
     // Check first token to determine statement type
     if let Some(first_token) = tokens.first() {
@@ -112,7 +152,8 @@ pub fn parse_with_arena_fallback(sql: &str) -> Result<Statement, ParseError> {
         ) {
             // Use arena parsing for SELECT statements (including WITH CTEs)
             match arena_parser::parse_select_to_owned(sql) {
-                Ok(select_stmt) => {
+                Ok(mut select_stmt) => {
+                    select_stmt.hints = leading_select_hints(&tokens, &spans, &hints);
                     return Ok(Statement::Select(Box::new(select_stmt)));
                 }
                 Err(_) => {

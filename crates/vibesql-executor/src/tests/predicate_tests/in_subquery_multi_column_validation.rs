@@ -40,6 +40,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
     // SELECT 1 FROM t1 WHERE 1 IN (SELECT * FROM t1)
     // This should FAIL because SELECT * expands to 2 columns
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -59,6 +60,7 @@ fn test_in_subquery_wildcard_multi_column_rejected() {
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 set_operation: None,
                 values: None,
@@ -138,6 +140,7 @@ fn test_in_subquery_explicit_multi_column_rejected() {
     // SELECT 1 FROM t1 WHERE 1 IN (SELECT x, y FROM t1)
     // This should FAIL because subquery returns 2 columns
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -157,6 +160,7 @@ fn test_in_subquery_explicit_multi_column_rejected() {
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 set_operation: None,
                 values: None,
@@ -251,6 +255,7 @@ fn test_in_subquery_single_column_accepted() {
     // SELECT 1 FROM t1 WHERE 1 IN (SELECT x FROM t1)
     // This should SUCCEED because subquery returns 1 column
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -270,6 +275,7 @@ fn test_in_subquery_single_column_accepted() {
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 set_operation: None,
                 values: None,
@@ -351,12 +357,14 @@ fn test_scalar_subquery_wildcard_multi_column_rejected() {
     // SELECT (SELECT * FROM t1) FROM t1
     // This should FAIL because scalar subquery expands to 2 columns
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
             expr: vibesql_ast::Expression::ScalarSubquery(Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 set_operation: None,
                 values: None,

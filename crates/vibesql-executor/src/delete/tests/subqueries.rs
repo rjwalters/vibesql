@@ -185,6 +185,7 @@ mod in_subquery {
 
         // Subquery: SELECT dept_id FROM inactive_depts
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -259,6 +260,7 @@ mod in_subquery {
 
         // Subquery
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -340,6 +342,7 @@ mod scalar_subquery {
 
         // Subquery: SELECT AVG(salary) FROM employees
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -427,6 +430,7 @@ mod scalar_subquery {
 
         // Subquery: SELECT MAX(price) FROM items
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -508,6 +512,7 @@ mod scalar_subquery {
 
         // Subquery returns NULL (empty result)
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -586,6 +591,7 @@ mod empty_subquery {
 
         // Subquery returns empty result
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,
@@ -669,6 +675,7 @@ mod complex_subquery {
 
         // Subquery: SELECT customer_id FROM inactive_customers WHERE status = 'inactive'
         let subquery = Box::new(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             into_table: None,
             into_variables: None,
             with_clause: None,

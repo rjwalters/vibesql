@@ -103,6 +103,7 @@ fn test_index_ordering() {
 
     // Query with ORDER BY
     let select_stmt = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {

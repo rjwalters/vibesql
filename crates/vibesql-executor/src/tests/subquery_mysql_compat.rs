@@ -56,6 +56,7 @@ fn test_mysql_null_in_empty_subquery() {
     // Query: SELECT * FROM test WHERE val IN (SELECT id FROM empty)
     // MySQL returns: 0 rows (NULL IN empty set = FALSE)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -73,6 +74,7 @@ fn test_mysql_null_in_empty_subquery() {
                 vibesql_ast::ColumnIdentifier::simple("val", false),
             )),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -151,6 +153,7 @@ fn test_mysql_null_not_in_empty_subquery() {
     // Query: SELECT * FROM test WHERE val NOT IN (SELECT id FROM empty)
     // MySQL returns: 1 row (NULL NOT IN empty set = TRUE)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -168,6 +171,7 @@ fn test_mysql_null_not_in_empty_subquery() {
                 vibesql_ast::ColumnIdentifier::simple("val", false),
             )),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -255,6 +259,7 @@ fn test_mysql_null_in_non_empty_without_null() {
     // Query: SELECT * FROM test WHERE val IN (SELECT id FROM values)
     // MySQL returns: 0 rows (NULL IN (1,2,3) = NULL, which is not TRUE)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -272,6 +277,7 @@ fn test_mysql_null_in_non_empty_without_null() {
                 vibesql_ast::ColumnIdentifier::simple("val", false),
             )),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -394,6 +400,7 @@ fn test_mysql_triple_nested_subquery() {
     // Outer: SELECT * FROM t1 WHERE val < 100 = returns the row
 
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -413,6 +420,7 @@ fn test_mysql_triple_nested_subquery() {
             op: vibesql_ast::BinaryOperator::LessThan,
             right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                 vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     distinct: false,
                     select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -438,6 +446,7 @@ fn test_mysql_triple_nested_subquery() {
                         op: vibesql_ast::BinaryOperator::GreaterThan,
                         right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                             vibesql_ast::SelectStmt {
+                                hints: Vec::new(),
                                 with_clause: None,
                                 distinct: false,
                                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -565,6 +574,7 @@ fn test_mysql_exists_short_circuit() {
 
     // Query: SELECT * FROM customers WHERE EXISTS (SELECT 1 FROM orders WHERE customer_id = 1)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -579,6 +589,7 @@ fn test_mysql_exists_short_circuit() {
         }),
         where_clause: Some(vibesql_ast::Expression::Exists {
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -696,6 +707,7 @@ fn test_mysql_scalar_within_exists() {
     //   SELECT 1 FROM products p WHERE p.price > (SELECT avg FROM average_price)
     // )
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -710,6 +722,7 @@ fn test_mysql_scalar_within_exists() {
         }),
         where_clause: Some(vibesql_ast::Expression::Exists {
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 distinct: false,
                 select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -733,6 +746,7 @@ fn test_mysql_scalar_within_exists() {
                     op: vibesql_ast::BinaryOperator::GreaterThan,
                     right: Box::new(vibesql_ast::Expression::ScalarSubquery(Box::new(
                         vibesql_ast::SelectStmt {
+                            hints: Vec::new(),
                             with_clause: None,
                             distinct: false,
                             select_list: vec![vibesql_ast::SelectItem::Expression {

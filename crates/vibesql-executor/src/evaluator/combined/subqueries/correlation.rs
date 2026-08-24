@@ -740,6 +740,7 @@ mod tests {
 
     fn subquery_with_where(where_clause: Expression) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

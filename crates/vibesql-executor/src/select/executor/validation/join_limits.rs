@@ -80,6 +80,7 @@ mod tests {
             };
         }
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -128,6 +129,7 @@ mod tests {
             };
         }
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -160,6 +162,7 @@ mod tests {
     fn test_join_table_limit_no_from_clause() {
         // SELECT 1 (no FROM clause) - should pass
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

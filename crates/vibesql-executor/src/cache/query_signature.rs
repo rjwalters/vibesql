@@ -1172,6 +1172,7 @@ mod tests {
 
         // SELECT col0 FROM tab WHERE col1 > 5
         let stmt1 = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1207,6 +1208,7 @@ mod tests {
 
         // SELECT col0 FROM tab WHERE col1 > 10 (different literal)
         let stmt2 = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1256,6 +1258,7 @@ mod tests {
 
         // SELECT col0 FROM tab WHERE col1 > 5
         let stmt1 = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1291,6 +1294,7 @@ mod tests {
 
         // SELECT col0 FROM tab WHERE col1 < 5 (different operator)
         let stmt2 = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

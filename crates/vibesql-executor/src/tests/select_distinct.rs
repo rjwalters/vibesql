@@ -62,6 +62,7 @@ fn test_distinct_removes_duplicate_rows() {
 
     // SELECT DISTINCT category FROM products
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -177,6 +178,7 @@ fn test_distinct_with_multiple_columns() {
 
     // SELECT DISTINCT customer_id, status FROM orders
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -280,6 +282,7 @@ fn test_distinct_with_null_values() {
 
     // SELECT DISTINCT description FROM items
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -355,6 +358,7 @@ fn test_distinct_false_preserves_duplicates() {
 
     // SELECT category FROM products (without DISTINCT)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -441,6 +445,7 @@ fn test_distinct_with_where_clause() {
 
     // SELECT DISTINCT role FROM users WHERE id > 1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -541,6 +546,7 @@ fn test_distinct_with_order_by() {
 
     // SELECT DISTINCT category FROM products ORDER BY category
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

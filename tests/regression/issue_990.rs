@@ -29,6 +29,7 @@ fn test_issue_990_multiple_unary_plus() {
 
     // Build the exact expression from the issue: + + 5 + 92 * COUNT(*)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -118,6 +119,7 @@ fn test_issue_990_simpler_case() {
 
     // Build: 5 + 92 * COUNT(*)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

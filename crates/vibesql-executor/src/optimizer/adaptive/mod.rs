@@ -27,15 +27,13 @@
 //! 3. Join pattern simplicity (equijoins only)
 //! 4. Projection selectivity (column count)
 //!
-//! Query-comment hints (`/* COLUMNAR */` / `/* ROW_ORIENTED */`) are not
-//! supported: the lexer discards comments during tokenization (and never
-//! implemented `/* ... */` block comments at all — see
-//! `crates/vibesql-parser/src/lexer/mod.rs`), so no comment text reaches the
-//! parsed `SelectStmt` for this function to inspect. Implementing this would
-//! require adding block-comment lexing plus threading hint metadata through
-//! the AST (`SelectStmt` is constructed at ~140 call sites), which is a
-//! separate, substantial parser change — not a small heuristic tweak. See
-//! issue #6534.
+//! Query-comment hints (`/* COLUMNAR */` / `/* ROW_ORIENTED */`) override
+//! the heuristics below when present. The lexer captures a recognized hint
+//! comment and the parser attaches it to `SelectStmt::hints` when it
+//! appears immediately after a leading `SELECT` keyword (see
+//! `vibesql_ast::QueryHint` for the exact recognized syntax and
+//! scope/precedence rules — multiple hints use last-one-wins). See
+//! issue #6534 (original stub removal) and #6547 (this plumbing).
 //!
 //! ## Example
 //!
@@ -56,7 +54,7 @@
 //! }
 //! ```
 
-use vibesql_ast::SelectStmt;
+use vibesql_ast::{QueryHint, SelectStmt};
 
 mod expression;
 mod patterns;
@@ -112,6 +110,15 @@ pub enum ExecutionModel {
 /// assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
 /// ```
 pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
+    // An explicit query-comment hint overrides the heuristics entirely.
+    // Multiple hints use last-one-wins precedence (see `QueryHint` docs).
+    if let Some(hint) = query.hints.last() {
+        return match hint {
+            QueryHint::Columnar => ExecutionModel::Columnar,
+            QueryHint::RowOriented => ExecutionModel::RowOriented,
+        };
+    }
+
     // Apply heuristics to detect analytical patterns
     if has_analytical_pattern(query) {
         ExecutionModel::Columnar
@@ -123,7 +130,8 @@ pub fn choose_execution_model(query: &SelectStmt) -> ExecutionModel {
 #[cfg(test)]
 mod tests {
     use vibesql_ast::{
-        BinaryOperator, Expression, FromClause, GroupByClause, JoinType, SelectItem, SelectStmt,
+        BinaryOperator, Expression, FromClause, GroupByClause, JoinType, QueryHint, SelectItem,
+        SelectStmt,
     };
     use vibesql_types::SqlValue;
 
@@ -133,6 +141,7 @@ mod tests {
     fn test_row_oriented_for_point_lookup() {
         // SELECT * FROM users WHERE id = 123
         let query = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -171,6 +180,7 @@ mod tests {
         // SELECT region, SUM(price * quantity) FROM orders GROUP BY region
         // Phase 6: GROUP BY with aggregation is now supported in columnar execution
         let query = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![
@@ -232,6 +242,7 @@ mod tests {
         // SELECT SUM(price * quantity) FROM orders
         // Phase 5 supports aggregation WITHOUT GROUP BY
         let query = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -281,6 +292,7 @@ mod tests {
     fn test_row_oriented_for_many_joins() {
         // SELECT * FROM t1 JOIN t2 JOIN t3 JOIN t4 (4 tables)
         let query = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -353,6 +365,7 @@ mod tests {
     #[test]
     fn test_has_aggregate_functions() {
         let query_with_count = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -392,6 +405,7 @@ mod tests {
     #[test]
     fn test_has_arithmetic_expressions() {
         let query_with_arithmetic = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -434,6 +448,7 @@ mod tests {
     fn test_selective_projection() {
         // SELECT id, name (2 columns)
         let selective = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![
@@ -474,6 +489,7 @@ mod tests {
 
         // SELECT * (wildcard)
         let non_selective = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
@@ -498,5 +514,91 @@ mod tests {
         };
 
         assert!(!query::has_selective_projection(&non_selective));
+    }
+
+    /// A minimal point-lookup query that the heuristics alone would select
+    /// `RowOriented` for (mirrors `test_row_oriented_for_point_lookup`).
+    fn point_lookup_query(hints: Vec<QueryHint>) -> SelectStmt {
+        SelectStmt {
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Wildcard { alias: None }],
+            into_table: None,
+            into_variables: None,
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "users".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: Some(Expression::BinaryOp {
+                left: Box::new(Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "id", false,
+                ))),
+                op: BinaryOperator::Equal,
+                right: Box::new(Expression::Literal(SqlValue::Integer(123))),
+            }),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+            hints,
+        }
+    }
+
+    #[test]
+    fn test_columnar_hint_overrides_row_oriented_heuristic() {
+        // Heuristics alone would pick RowOriented (point lookup), but an
+        // explicit /* COLUMNAR */ hint forces Columnar.
+        let query = point_lookup_query(vec![QueryHint::Columnar]);
+        assert_eq!(choose_execution_model(&query), ExecutionModel::Columnar);
+    }
+
+    #[test]
+    fn test_row_oriented_hint_overrides_columnar_heuristic() {
+        // Heuristics alone would pick Columnar (GROUP BY aggregation), but
+        // an explicit /* ROW_ORIENTED */ hint forces RowOriented.
+        let mut query = point_lookup_query(vec![QueryHint::RowOriented]);
+        query.where_clause = None;
+        query.select_list = vec![SelectItem::Expression {
+            expr: Expression::AggregateFunction {
+                name: vibesql_ast::FunctionIdentifier::new("SUM"),
+                distinct: false,
+                args: vec![Expression::ColumnRef(vibesql_ast::ColumnIdentifier::simple(
+                    "price", false,
+                ))],
+                order_by: None,
+                filter: None,
+            },
+            alias: None,
+            source_text: None,
+        }];
+        query.group_by = Some(GroupByClause::Simple(vec![Expression::ColumnRef(
+            vibesql_ast::ColumnIdentifier::simple("region", false),
+        )]));
+
+        assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
+    }
+
+    #[test]
+    fn test_conflicting_hints_last_one_wins() {
+        // Multiple hints: the last one in source order takes precedence.
+        let query = point_lookup_query(vec![QueryHint::RowOriented, QueryHint::Columnar]);
+        assert_eq!(choose_execution_model(&query), ExecutionModel::Columnar);
+
+        let query = point_lookup_query(vec![QueryHint::Columnar, QueryHint::RowOriented]);
+        assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
+    }
+
+    #[test]
+    fn test_no_hint_falls_back_to_heuristic() {
+        // No hints present: behaves exactly as before (heuristic-driven).
+        let query = point_lookup_query(vec![]);
+        assert_eq!(choose_execution_model(&query), ExecutionModel::RowOriented);
     }
 }

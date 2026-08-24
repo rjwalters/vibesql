@@ -78,6 +78,7 @@ fn test_hash_join_from_where_equijoin_no_on_clause() {
     // This should use hash join via Phase 3.1
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -208,6 +209,7 @@ fn test_hash_join_multiple_equijoins_in_where() {
     // Hash join should use the first one and filter with the second
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -329,6 +331,7 @@ fn test_cascading_joins_with_where_equijoins() {
 
     // Build nested join manually
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -501,6 +504,7 @@ fn test_hash_join_with_on_clause_and_where_equijoins() {
     // Should prefer ON clause for hash join
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -648,6 +652,7 @@ fn test_multi_column_hash_join_composite_keys() {
     // Query with composite key join: region_id AND product_id
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -819,6 +824,7 @@ fn test_star_join_select5_pattern() {
     //   Total: 50 intermediate rows (22,000× reduction!)
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

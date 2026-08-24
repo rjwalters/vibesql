@@ -16,6 +16,7 @@ fn test_trim_both_default() {
 
     // SELECT TRIM('  hello  ')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -58,6 +59,7 @@ fn test_trim_leading() {
 
     // SELECT TRIM(LEADING FROM '  hello  ')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -100,6 +102,7 @@ fn test_trim_trailing() {
 
     // SELECT TRIM(TRAILING FROM '  hello  ')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -142,6 +145,7 @@ fn test_trim_custom_char() {
 
     // SELECT TRIM('x' FROM 'xxxhelloxxx')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -186,6 +190,7 @@ fn test_trim_null_string() {
 
     // SELECT TRIM(NULL)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -223,6 +228,7 @@ fn test_trim_null_removal_char() {
 
     // SELECT TRIM(NULL FROM 'hello')
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

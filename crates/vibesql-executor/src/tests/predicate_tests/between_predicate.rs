@@ -28,6 +28,7 @@ fn test_between_with_null_expr() {
 
     // SELECT * FROM test WHERE val BETWEEN 1 AND 10
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -87,6 +88,7 @@ fn test_not_between() {
 
     // SELECT * FROM test WHERE val NOT BETWEEN 10 AND 20
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -145,6 +147,7 @@ fn test_between_boundary_values() {
 
     // SELECT * FROM test WHERE val BETWEEN 10 AND 20
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -206,6 +209,7 @@ fn test_not_between_with_null_bound() {
     // For val=5: (5 < 10) OR (5 > NULL) = TRUE OR NULL = TRUE (included)
     // For val=15: (15 < 10) OR (15 > NULL) = FALSE OR NULL = NULL (filtered)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -266,6 +270,7 @@ fn test_between_with_null_bound() {
     // SELECT * FROM test WHERE val BETWEEN NULL AND 20
     // SQL standard: BETWEEN returns NULL, WHERE NULL excludes all rows (0 rows)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -329,6 +334,7 @@ fn test_not_between_with_null_lower_bound() {
     // For val=25: (25 < NULL) OR (25 > 20) = NULL OR TRUE = TRUE (included)
     // For val=5,15: (val < NULL) OR (val > 20) = NULL OR FALSE = NULL (filtered)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -394,6 +400,7 @@ fn test_not_negative_literal_between_null_bounds() {
     // SELECT * FROM tab0 WHERE NOT - 78 BETWEEN NULL AND ( 25 )
     // SQLite behavior: returns 0 rows
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

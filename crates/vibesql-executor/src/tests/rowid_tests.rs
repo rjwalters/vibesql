@@ -50,6 +50,7 @@ fn test_select_rowid() {
 
     // SELECT rowid, a, b FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -130,6 +131,7 @@ fn test_select_underscore_rowid() {
 
     // SELECT _rowid_ FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -185,6 +187,7 @@ fn test_select_oid() {
 
     // SELECT oid FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -240,6 +243,7 @@ fn test_rowid_case_insensitive() {
 
     // SELECT ROWID (uppercase) FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -311,6 +315,7 @@ fn test_real_rowid_column_takes_precedence() {
 
     // SELECT rowid FROM t1 - should return 999 (the column value), not 0 (the row index)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -369,6 +374,7 @@ fn test_rowid_with_table_alias() {
 
     // SELECT t.rowid FROM t1 AS t
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -429,6 +435,7 @@ fn test_explicit_rowid_preserved() {
 
     // SELECT rowid, x FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -510,6 +517,7 @@ fn test_mixed_explicit_and_auto_rowid() {
 
     // SELECT rowid, x FROM t1
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -596,6 +604,7 @@ fn test_order_by_rowid() {
 
     // SELECT x FROM t1 ORDER BY rowid ASC
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -665,6 +674,7 @@ fn test_order_by_rowid_desc() {
 
     // SELECT x FROM t1 ORDER BY _rowid_ DESC
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

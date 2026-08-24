@@ -231,10 +231,16 @@ impl Parser {
         let tokens_with_spans = lexer
             .tokenize_with_spans()
             .map_err(|e| ParseError { message: format!("Lexer error: {}", e) })?;
+        let hints = lexer.take_hints();
         let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
+        let leading_hints = crate::leading_select_hints(&tokens, &spans, &hints);
 
         let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
-        parser.parse_statement()
+        let mut stmt = parser.parse_statement()?;
+        if let vibesql_ast::Statement::Select(ref mut select_stmt) = stmt {
+            select_stmt.hints = leading_hints;
+        }
+        Ok(stmt)
     }
 
     /// Parse SQL and, for a `CREATE TABLE`, also return the verbatim source text
@@ -1249,6 +1255,7 @@ impl Parser {
         }
 
         Ok(vibesql_ast::SelectStmt {
+            hints: Vec::new(),
             with_clause: None, // Will be set by caller
             distinct,
             select_list,

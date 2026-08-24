@@ -213,6 +213,7 @@ fn try_decorrelate_subquery(
     // The CTE keeps the original table alias to ensure column references in the
     // aggregate function still work
     let cte_select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![
@@ -629,6 +630,7 @@ mod tests {
     /// Helper to create a bare SELECT statement for testing
     fn select_stmt(from: Option<FromClause>) -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

@@ -1383,6 +1383,9 @@ pub fn transform_select<V: ExpressionMutVisitor>(visitor: &mut V, stmt: SelectSt
                 .map(|row| row.into_iter().map(|e| transform_expression(visitor, e)).collect())
                 .collect()
         }),
+        // Hints are query-comment metadata, not an expression tree node —
+        // preserve them unchanged through the transform (#6547).
+        hints: stmt.hints,
     }
 }
 
@@ -2000,6 +2003,7 @@ mod tests {
     #[test]
     fn test_visit_expressions_closure() {
         let select = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

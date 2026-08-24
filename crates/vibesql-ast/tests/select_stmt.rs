@@ -8,6 +8,7 @@ use vibesql_types::SqlValue;
 #[test]
 fn test_select_star() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -35,6 +36,7 @@ fn test_select_star() {
 #[test]
 fn test_select_with_columns() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -69,6 +71,7 @@ fn test_select_with_columns() {
 #[test]
 fn test_select_with_alias() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -99,6 +102,7 @@ fn test_select_with_alias() {
 #[test]
 fn test_select_from_table() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -131,6 +135,7 @@ fn test_select_from_table() {
 #[test]
 fn test_select_with_where() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -166,6 +171,7 @@ fn test_select_with_where() {
 #[test]
 fn test_select_with_order_by() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -204,6 +210,7 @@ fn test_select_with_order_by() {
 #[test]
 fn test_select_distinct() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -236,6 +243,7 @@ fn test_select_distinct() {
 #[test]
 fn test_select_with_group_by() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -274,6 +282,7 @@ fn test_select_with_group_by() {
 #[test]
 fn test_select_with_having() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -314,6 +323,7 @@ fn test_select_with_having() {
 #[test]
 fn test_select_with_limit() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -342,6 +352,7 @@ fn test_select_with_limit() {
 #[test]
 fn test_select_with_offset() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -370,6 +381,7 @@ fn test_select_with_offset() {
 #[test]
 fn test_order_by_desc() {
     let select = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -564,6 +576,7 @@ fn test_cross_join() {
 #[test]
 fn test_from_subquery() {
     let subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

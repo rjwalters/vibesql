@@ -572,6 +572,7 @@ mod tests {
 
         // SELECT col0 FROM tab WHERE col1 > 25 AND col2 = 'John'
         let stmt = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -630,6 +631,7 @@ mod tests {
 
         // SELECT * FROM tab WHERE id IN (1, 2, 3)
         let stmt = Statement::Select(Box::new(SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],

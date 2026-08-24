@@ -33,6 +33,7 @@ fn test_update_where_scalar_subquery_equal() {
 
     // Subquery: SELECT min_salary FROM config
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -124,6 +125,7 @@ fn test_update_where_scalar_subquery_less_than() {
 
     // Subquery: SELECT AVG(salary) FROM employees
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -219,6 +221,7 @@ fn test_update_where_subquery_returns_null() {
 
     // Subquery returns NULL (empty result)
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -314,6 +317,7 @@ fn test_update_where_subquery_with_aggregate() {
 
     // Subquery: SELECT MAX(price) FROM items
     let subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -428,6 +432,7 @@ fn test_update_where_and_set_both_use_subqueries() {
 
     // SET subquery
     let set_subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -457,6 +462,7 @@ fn test_update_where_and_set_both_use_subqueries() {
 
     // WHERE subquery
     let where_subquery = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {

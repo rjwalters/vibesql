@@ -10,6 +10,7 @@ fn test_select_literal_integers() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -57,6 +58,7 @@ fn test_select_literal_mixed_types() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -108,6 +110,7 @@ fn test_select_arithmetic_expression() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -165,6 +168,7 @@ fn test_select_function_call() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -206,6 +210,7 @@ fn test_select_star_without_from_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -235,6 +240,7 @@ fn test_column_reference_without_from_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -276,6 +282,7 @@ fn test_is_null_with_column_reference_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -319,6 +326,7 @@ fn test_between_with_column_reference_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -369,6 +377,7 @@ fn test_cast_with_column_reference_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -412,6 +421,7 @@ fn test_like_with_column_reference_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -459,6 +469,7 @@ fn test_in_list_with_column_reference_fails() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -509,6 +520,7 @@ fn test_bare_column_ref_error_preserves_source_case() {
     let executor = SelectExecutor::new(&db);
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -556,6 +568,7 @@ fn test_hex_literal_in_subquery_without_from() {
     // SELECT x'303132' IN (SELECT * FROM t1)
     // This should work now that hex literals are properly parsed as literals, not column references
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -566,6 +579,7 @@ fn test_hex_literal_in_subquery_without_from() {
                     arcstr::ArcStr::from("012"),
                 ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     set_operation: None,
                     values: None,
@@ -618,6 +632,7 @@ fn test_hex_literal_simple() {
 
     // SELECT x'48656C6C6F' (should return "Hello")
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -668,6 +683,7 @@ fn test_binary_literal_in_subquery_without_from() {
 
     // SELECT b'01010101' IN (SELECT * FROM t1)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -678,6 +694,7 @@ fn test_binary_literal_in_subquery_without_from() {
                     arcstr::ArcStr::from("U"),
                 ))),
                 subquery: Box::new(vibesql_ast::SelectStmt {
+                    hints: Vec::new(),
                     with_clause: None,
                     set_operation: None,
                     values: None,
@@ -754,6 +771,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
     // This should ERROR because SELECT * FROM t1 returns 2 columns, not 1
     // Even though t1 is empty, the column count validation must still run
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -773,6 +791,7 @@ fn test_in_subquery_multi_column_empty_table_should_error() {
         where_clause: Some(vibesql_ast::Expression::In {
             expr: Box::new(vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Integer(1))),
             subquery: Box::new(vibesql_ast::SelectStmt {
+                hints: Vec::new(),
                 with_clause: None,
                 set_operation: None,
                 values: None,

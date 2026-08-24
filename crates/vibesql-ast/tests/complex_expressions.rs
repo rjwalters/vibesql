@@ -58,6 +58,7 @@ fn test_case_expression_searched() {
 #[test]
 fn test_scalar_subquery() {
     let subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -101,6 +102,7 @@ fn test_scalar_subquery() {
 #[test]
 fn test_in_expression() {
     let subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -147,6 +149,7 @@ fn test_in_expression() {
 #[test]
 fn test_not_in_expression() {
     let subquery = SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

@@ -213,6 +213,7 @@ fn test_before_trigger_executes_first() {
 
     // Verify counter was incremented (BEFORE trigger executed)
     let select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -248,6 +249,7 @@ fn test_before_trigger_executes_first() {
 
     // Verify user was actually inserted (main operation completed)
     let user_select = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

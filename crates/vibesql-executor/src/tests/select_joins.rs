@@ -83,6 +83,7 @@ fn test_inner_join_two_tables() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -215,6 +216,7 @@ fn test_right_outer_join() {
     // RIGHT OUTER JOIN should include all orders, with NULLs for missing users
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -354,6 +356,7 @@ fn test_full_outer_join() {
     // - Order 2 with NULL user
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -496,6 +499,7 @@ fn test_cross_join() {
     // CROSS JOIN should produce cartesian product: 2 * 3 = 6 rows
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -577,6 +581,7 @@ fn test_cross_join_with_condition_works_like_inner_join() {
     // CROSS JOIN with ON condition should work like INNER JOIN (SQLite compatibility)
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -710,6 +715,7 @@ fn test_inner_join_null_values_dont_match() {
     // NULL values should NOT match (NULL = NULL is NULL, not TRUE)
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

@@ -51,6 +51,7 @@ fn test_order_by_single_column_asc() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -151,6 +152,7 @@ fn test_order_by_multiple_columns() {
 
     let executor = SelectExecutor::new(&db);
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -265,6 +267,7 @@ fn test_order_by_with_join_issue_4552() {
     let executor = SelectExecutor::new(&db);
     // SELECT * FROM t1, t2 WHERE d=a ORDER BY e
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_variables: None,
         into_table: None,
         with_clause: None,
@@ -380,6 +383,7 @@ fn test_order_by_preserved_in_derived_table_issue_4734() {
     // Query: SELECT * FROM (SELECT * FROM t1 ORDER BY a) AS derived
     // The ORDER BY inside the derived table should be preserved
     let inner_query = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -410,6 +414,7 @@ fn test_order_by_preserved_in_derived_table_issue_4734() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -499,6 +504,7 @@ fn test_outer_order_by_takes_precedence_issue_4734() {
     // Query: SELECT * FROM (SELECT * FROM t1 ORDER BY a) AS derived ORDER BY b
     // Outer ORDER BY (b) should take precedence over inner ORDER BY (a)
     let inner_query = Box::new(vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,
@@ -529,6 +535,7 @@ fn test_outer_order_by_takes_precedence_issue_4734() {
     });
 
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         into_table: None,
         into_variables: None,
         with_clause: None,

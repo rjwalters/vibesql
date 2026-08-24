@@ -1303,6 +1303,7 @@ mod tests {
     #[test]
     fn test_simple_select() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1335,6 +1336,7 @@ mod tests {
     #[test]
     fn test_select_with_where() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![
@@ -1379,6 +1381,7 @@ mod tests {
     #[test]
     fn test_select_distinct_with_order() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: true,
             select_list: vec![SelectItem::Expression {
@@ -1420,6 +1423,7 @@ mod tests {
     #[test]
     fn test_union_with_order_by_renders_order_by_after_set_operation() {
         let right = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1441,6 +1445,7 @@ mod tests {
             values: None,
         };
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {
@@ -1638,6 +1643,7 @@ mod tests {
     #[test]
     fn test_select_with_window_clause_round_trips() {
         let stmt = SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Expression {

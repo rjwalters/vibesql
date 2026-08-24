@@ -16,6 +16,7 @@ fn test_nested_arithmetic() {
 
     // SELECT ((5 + 3) * 2) - (10 / 2)
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,
@@ -80,6 +81,7 @@ fn test_integer_division_basic() {
 
     // SELECT 81 DIV 31
     let stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         set_operation: None,
         values: None,

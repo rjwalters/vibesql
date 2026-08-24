@@ -57,6 +57,7 @@ fn test_select_into_single_row() {
 
     // Execute SELECT INTO
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![
@@ -104,6 +105,7 @@ fn test_select_into_single_row() {
     // Verify row was inserted
     let executor = SelectExecutor::new(&db);
     let query = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],
@@ -166,6 +168,7 @@ fn test_select_into_no_rows_error() {
 
     // Execute SELECT INTO (should fail - no rows)
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -249,6 +252,7 @@ fn test_select_into_multiple_rows_error() {
 
     // Execute SELECT INTO (should fail - multiple rows)
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -327,6 +331,7 @@ fn test_select_into_with_expressions() {
 
     // Execute SELECT INTO with expression and alias
     let select_stmt = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Expression {
@@ -368,6 +373,7 @@ fn test_select_into_with_expressions() {
     // Verify table was created with correct column name
     let executor = SelectExecutor::new(&db);
     let query = vibesql_ast::SelectStmt {
+        hints: Vec::new(),
         with_clause: None,
         distinct: false,
         select_list: vec![vibesql_ast::SelectItem::Wildcard { alias: None }],

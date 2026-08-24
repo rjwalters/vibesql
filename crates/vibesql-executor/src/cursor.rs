@@ -323,6 +323,7 @@ mod tests {
 
     fn create_select_stmt() -> SelectStmt {
         SelectStmt {
+            hints: Vec::new(),
             with_clause: None,
             distinct: false,
             select_list: vec![SelectItem::Wildcard { alias: None }],
