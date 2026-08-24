@@ -170,43 +170,79 @@ proc emit_test_detail {status name {expected ""} {actual ""}} {
 # Since each SQL execution is a separate process, we need to track changes ourselves.
 # Real SQLite's sqlite3_changes()/sqlite3_total_changes() are PER-CONNECTION, so a
 # secondary connection's DML must not clobber the primary connection's counters
-# (#6532). Keyed the same way resolve_db_file already keys ::db_file_map: the
-# default connection (handle "" or "db") shares the ::last_changes/::total_changes
-# slot below; each named connection (db2, db3, ...) gets its own slot in
-# ::last_changes_map($handle)/::total_changes_map($handle) via
-# set_last_changes/get_last_changes/get_total_changes below.
-set ::last_changes 0
-set ::total_changes 0
+# (#6532).
+#
+# Originally (per #6532) this special-cased the literal string "db" to share
+# one pair of ::last_changes/::total_changes scalars, mirroring how
+# resolve_db_file keys ::db_file_map. That broke under the
+# `rename db db2; sqlite3 db :memory:; ...` idiom (e_expr.test's connection-
+# swap pattern): `interp alias`'s bound leading argument is fixed at
+# alias-creation time and does NOT follow a later `rename` of the command
+# itself, so both the renamed-away original connection (now named "db2") and
+# the freshly-opened replacement (named "db") kept resolving to the same
+# literal handle "db" and shared one counter slot (#6537).
+#
+# Fixed by keying on a synthetic per-connection id instead of the command
+# name: every connection-open site (proc sqlite3's secondary-connection
+# alias, and the default "db" alias below) mints a fresh id via
+# tcltest_next_conn_id and binds THAT (not the name) as the interp alias's
+# literal argument. Because the id never changes across a rename, it
+# uniquely and stably identifies the underlying connection regardless of
+# what Tcl command name currently refers to it -- so the maps below are
+# keyed unconditionally by id, with no more special-casing of "db".
+# tcltest_conn_id resolves a plain connection NAME (as passed to execsql
+# etc.) to its current id by asking the live command itself, which always
+# reflects whatever alias currently answers to that name.
+set ::tcltest_conn_id_counter 0
 array set ::last_changes_map {}
 array set ::total_changes_map {}
 
-proc set_last_changes {db count} {
-    # Record $count as the most recent changes() result for connection $db,
-    # and fold it into that connection's running total_changes() sum.
-    if {$db ne "" && $db ne "db"} {
-        set ::last_changes_map($db) $count
-        if {![info exists ::total_changes_map($db)]} {
-            set ::total_changes_map($db) 0
-        }
-        set ::total_changes_map($db) [expr {$::total_changes_map($db) + $count}]
-    } else {
-        set ::last_changes $count
-        set ::total_changes [expr {$::total_changes + $count}]
-    }
+proc tcltest_next_conn_id {} {
+    incr ::tcltest_conn_id_counter
+    return $::tcltest_conn_id_counter
 }
 
-proc get_last_changes {db} {
-    if {$db ne "" && $db ne "db" && [info exists ::last_changes_map($db)]} {
-        return $::last_changes_map($db)
+# Resolve a connection NAME (e.g. "", "db", "db2" -- as passed by execsql and
+# friends) to the synthetic id currently bound to that name's alias. Routed
+# through the live command itself (not `interp alias {} $name` introspection,
+# which stops finding the alias entry entirely once the command has been
+# renamed) so this always reflects the CURRENT binding, matching how a direct
+# `db2 changes` call already resolves correctly after a rename (#6537).
+proc tcltest_conn_id {db} {
+    set name [expr {$db eq "" ? "db" : $db}]
+    if {[llength [info commands $name]] == 0} {
+        # No live connection command under this name -- fall back to the name
+        # itself so callers still get a deterministic (if degenerate) bucket
+        # instead of a Tcl error from calling a nonexistent command.
+        return $name
     }
-    return $::last_changes
+    return [$name __tcltest_conn_id]
 }
 
-proc get_total_changes {db} {
-    if {$db ne "" && $db ne "db" && [info exists ::total_changes_map($db)]} {
-        return $::total_changes_map($db)
+proc set_last_changes {id count} {
+    # Record $count as the most recent changes() result for connection $id,
+    # and fold it into that connection's running total_changes() sum. $id
+    # must already be a resolved synthetic connection id (see tcltest_conn_id),
+    # not a raw connection name.
+    set ::last_changes_map($id) $count
+    if {![info exists ::total_changes_map($id)]} {
+        set ::total_changes_map($id) 0
     }
-    return $::total_changes
+    set ::total_changes_map($id) [expr {$::total_changes_map($id) + $count}]
+}
+
+proc get_last_changes {id} {
+    if {[info exists ::last_changes_map($id)]} {
+        return $::last_changes_map($id)
+    }
+    return 0
+}
+
+proc get_total_changes {id} {
+    if {[info exists ::total_changes_map($id)]} {
+        return $::total_changes_map($id)
+    }
+    return 0
 }
 
 # Track last_insert_rowid across process invocations (#5843): each SQL
@@ -4253,17 +4289,17 @@ proc execsql {sql {db ""}} {
         # (do NOT strip or collapse it). Track last/total changes from the final
         # emitted count so `db changes` / `db total_changes` stay consistent.
         if {[llength $parsed] > 0} {
-            set_last_changes $db [lindex $parsed end]
+            set_last_changes [tcltest_conn_id $db] [lindex $parsed end]
         }
     } elseif {$is_dml && $is_insert && [llength $parsed] >= 2} {
         # The last value is last_insert_rowid(), the one before it changes()
         set ::last_insert_rowid [lindex $parsed end]
-        set_last_changes $db [lindex $parsed end-1]
+        set_last_changes [tcltest_conn_id $db] [lindex $parsed end-1]
         # Remove the two appended values from the result
         set parsed [lrange $parsed 0 end-2]
     } elseif {$is_dml && [llength $parsed] > 0} {
         # The last value should be the changes() result
-        set_last_changes $db [lindex $parsed end]
+        set_last_changes [tcltest_conn_id $db] [lindex $parsed end]
         # Remove the changes count from the result
         set parsed [lrange $parsed 0 end-1]
     }
@@ -9986,11 +10022,16 @@ proc sqlite3 {db args} {
     # (#6172). Checking real existence handles both the fresh-name and the
     # renamed-away cases uniformly.
     if {[llength [info commands $db]] == 0} {
-        # Bind $db as the alias's leading argument so ::tcltest_db_master can
-        # tell which connection handle invoked it (e.g. `db2 changes` vs
-        # `db changes`) -- needed to key per-connection counters like
-        # ::last_changes_map (#6532).
-        interp alias {} $db {} ::tcltest_db_master $db
+        # Bind a freshly-minted synthetic connection id (NOT $db itself) as
+        # the alias's leading argument, so ::tcltest_db_master can tell which
+        # connection invoked it (e.g. `db2 changes` vs `db changes`) --
+        # needed to key per-connection counters like ::last_changes_map
+        # (#6532). Using an id instead of the name means the binding stays
+        # correct even if this command is later renamed (e.g. e_expr.test's
+        # `rename db db2; sqlite3 db :memory:` connection-swap idiom), since
+        # a rename changes the command's NAME but never the alias's already-
+        # bound literal argument (#6537).
+        interp alias {} $db {} ::tcltest_db_master [tcltest_next_conn_id]
     }
 }
 
@@ -10001,6 +10042,18 @@ proc ::tcltest_db_master {handle cmd args} {
     # db eval SQL varname script     - iterates over rows, setting varname array
     # db one SQL                     - returns first column of first row
     switch $cmd {
+        __tcltest_conn_id {
+            # Internal-only subcommand (not part of the real sqlite3 TCL
+            # interface): returns this connection's synthetic identity, i.e.
+            # the literal argument bound at `interp alias` creation time.
+            # Used by tcltest_conn_id to resolve a plain connection NAME
+            # string (as passed to execsql etc.) to the CURRENT id for
+            # whatever connection that name presently refers to -- routing
+            # through the live command itself, rather than introspecting
+            # `interp alias`, is what keeps this correct across a `rename`
+            # (#6537).
+            return $handle
+        }
         eval {
             set sql [lindex $args 0]
             # Substitute TCL variables using stack-walking substitution
@@ -10291,10 +10344,12 @@ proc ::tcltest_db_master {handle cmd args} {
 # same way proc sqlite3 creates aliases for secondary connections (db2, db3,
 # ...). See the "rename db db2" idiom note above proc sqlite3's alias check
 # (#6172) for why this must be a real alias rather than making "db" itself
-# the master proc's literal name. Bind "db" as the leading argument, same as
-# the secondary-connection alias above, so ::tcltest_db_master can tell this
-# is the default connection (#6532).
-interp alias {} db {} ::tcltest_db_master db
+# the master proc's literal name. Bind a freshly-minted synthetic connection
+# id (not the literal string "db") as the leading argument, same as the
+# secondary-connection alias above, so ::tcltest_db_master can tell this is
+# the default connection (#6532) in a way that survives a later `rename`
+# (#6537).
+interp alias {} db {} ::tcltest_db_master [tcltest_next_conn_id]
 
 #-----------------------------------------------------------------------------
 # Utility commands
