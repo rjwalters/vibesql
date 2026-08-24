@@ -167,9 +167,48 @@ proc emit_test_detail {status name {expected ""} {actual ""}} {
 }
 
 # Track row changes for db changes command
-# Since each SQL execution is a separate process, we need to track changes ourselves
+# Since each SQL execution is a separate process, we need to track changes ourselves.
+# Real SQLite's sqlite3_changes()/sqlite3_total_changes() are PER-CONNECTION, so a
+# secondary connection's DML must not clobber the primary connection's counters
+# (#6532). Keyed the same way resolve_db_file already keys ::db_file_map: the
+# default connection (handle "" or "db") shares the ::last_changes/::total_changes
+# slot below; each named connection (db2, db3, ...) gets its own slot in
+# ::last_changes_map($handle)/::total_changes_map($handle) via
+# set_last_changes/get_last_changes/get_total_changes below.
 set ::last_changes 0
 set ::total_changes 0
+array set ::last_changes_map {}
+array set ::total_changes_map {}
+
+proc set_last_changes {db count} {
+    # Record $count as the most recent changes() result for connection $db,
+    # and fold it into that connection's running total_changes() sum.
+    if {$db ne "" && $db ne "db"} {
+        set ::last_changes_map($db) $count
+        if {![info exists ::total_changes_map($db)]} {
+            set ::total_changes_map($db) 0
+        }
+        set ::total_changes_map($db) [expr {$::total_changes_map($db) + $count}]
+    } else {
+        set ::last_changes $count
+        set ::total_changes [expr {$::total_changes + $count}]
+    }
+}
+
+proc get_last_changes {db} {
+    if {$db ne "" && $db ne "db" && [info exists ::last_changes_map($db)]} {
+        return $::last_changes_map($db)
+    }
+    return $::last_changes
+}
+
+proc get_total_changes {db} {
+    if {$db ne "" && $db ne "db" && [info exists ::total_changes_map($db)]} {
+        return $::total_changes_map($db)
+    }
+    return $::total_changes
+}
+
 # Track last_insert_rowid across process invocations (#5843): each SQL
 # execution is a separate process, so `SELECT last_insert_rowid()` in a fresh
 # process always returns 0. Instead, INSERT/REPLACE blocks in the direct
@@ -4198,20 +4237,17 @@ proc execsql {sql {db ""}} {
         # (do NOT strip or collapse it). Track last/total changes from the final
         # emitted count so `db changes` / `db total_changes` stay consistent.
         if {[llength $parsed] > 0} {
-            set ::last_changes [lindex $parsed end]
-            set ::total_changes [expr {$::total_changes + $::last_changes}]
+            set_last_changes $db [lindex $parsed end]
         }
     } elseif {$is_dml && $is_insert && [llength $parsed] >= 2} {
         # The last value is last_insert_rowid(), the one before it changes()
         set ::last_insert_rowid [lindex $parsed end]
-        set ::last_changes [lindex $parsed end-1]
-        set ::total_changes [expr {$::total_changes + $::last_changes}]
+        set_last_changes $db [lindex $parsed end-1]
         # Remove the two appended values from the result
         set parsed [lrange $parsed 0 end-2]
     } elseif {$is_dml && [llength $parsed] > 0} {
         # The last value should be the changes() result
-        set ::last_changes [lindex $parsed end]
-        set ::total_changes [expr {$::total_changes + $::last_changes}]
+        set_last_changes $db [lindex $parsed end]
         # Remove the changes count from the result
         set parsed [lrange $parsed 0 end-1]
     }
@@ -6698,9 +6734,6 @@ array set vibesql_skip_tests {
     e_createtable-1.11.2.2 "Downstream of the same cross-schema unqualified-name-resolution engine gap (#6404): DROP TABLE IF EXISTS resolves an unqualified name against the wrong attached schema during the file's earlier drop_all_tables cleanup calls (which only clean the MAIN schema, per drop_all_tables's own scope — the shim never attempts to also clean ATTACHed schemas), leaving stale/mismatched state that surfaces here as a spurious 'no such table: t2'. Re-skipped rather than allowed to regress; engine-level fix tracked separately."
 
     pragma4-4.1.6 "Genuine VibeSQL ENGINE gap surfaced by fixing the proc sqlite3/reset_db force-delete race (#6482), confirmed via direct CLI reproduction with no shim involved (#6531): an attached database is loaded from the raw .vbsql SNAPSHOT only and never gets the WAL/checkpoint recovery a direct 'main' open performs, so the attached and direct views of one file diverge. 4.1.4's 'DROP TABLE t2' through a DIRECT open of test.db2 genuinely succeeds (the drop lands in test.wal/test-checkpoints/; the snapshot is left byte-for-byte unchanged, verified by md5), but this test's 'PRAGMA table_info(t2)' — issued on the primary connection, which reaches the same file through its replayed aux attachment — still reads the pre-drop snapshot and reports t2's three columns instead of nothing. Was passing before #6482 ONLY because the shim force-deleted test.db2 out from under the live connection, which made this PRAGMA trivially empty for the wrong reason (and made 4.1.4 itself fail with 'no such table: t2'). Skipped rather than allowed to regress; engine-level fix tracked in #6531 (not a TCL-shim issue). pragma4-4.4.3 is the same #6531 divergence in the opposite direction (an aux-side 'CREATE INDEX aux.i2' invisible to a direct-open 'DROP INDEX i2') but was already failing before #6482, so it is deliberately left FAILING and visible rather than skipped. NOTE for future editors: this reason string deliberately contains no ALL-CAPS spelling of the a-t-t-a-c-h keyword. omit_test turns any reason matching that all-caps spelling into ::attach_skipped, which would be a FALSE attribution here (the aux database IS live; nothing about this skip is an unrun attach setup) and would wrongly re-cascade pragma4's 4.5.x/4.6.x sections into 'cascading from skipped ...' skips, hiding 4 genuine passes and 3 genuine failures. Keep it lowercase if you reword this."
-
-    e_changes-1.1.6 "Pre-existing TCL-shim gap unmasked (not caused) by fixing the proc sqlite3/reset_db force-delete race (#6482), tracked in #6532: the shim stores 'db changes' in the PROCESS-GLOBAL ::last_changes rather than per-connection, so the secondary connection's INSERT in the preceding 1.1.5 overwrites the primary connection's count and this test reads 1 where real SQLite reads 4. That is exactly the requirement 1.1.5/1.1.6 exist to assert ('changes made by other connections do not show up in the return value of sqlite3_changes()'). It was passing before #6482 ONLY for the wrong reason: 'sqlite3 db2 test.db' force-deleted the live database, so 1.1.5's 'execsql {INSERT ...} db2' errored and never wrote the global. With the race fixed, 1.1.5, 1.1.8 and 1.1.10 genuinely pass for the first time and this one fails honestly. Skipped rather than allowed to regress; shim-level fix tracked in #6532."
-    e_changes-1.2.6 "Same process-global ::last_changes gap as e_changes-1.1.6 above, in the WITHOUT ROWID arm of the same foreach loop (#6532, unmasked by #6482). Skipped rather than allowed to regress."
 
     table-19.1 "Genuine VibeSQL engine gap surfaced by enabling ATTACH replay for table.test (#6404), confirmed via direct single-session CLI reproduction (not a shim artifact): once a second database is ATTACHed, an unqualified 'CREATE TABLE t19 AS SELECT * FROM sqlite_master' (CTAS) fails with 'no such table: sqlite_master', even though a plain 'SELECT * FROM sqlite_master' with the identical ATTACH state resolves fine — i.e. the gap is specific to CTAS's query-planning path losing the unqualified-name-to-MAIN-schema resolution once any ATTACHed database exists, not a general sqlite_master/ATTACH interaction. Was passing before ATTACH replay was enabled for this file only because aux was never genuinely attached in the per-batch CLI process reaching this test (table-14.3/14.4 above, the file's only ATTACH statement, previously hit the file-scope ATTACH skip). Re-skipped rather than allowed to regress; engine-level fix tracked separately (not a TCL-shim issue)."
 }
@@ -9931,11 +9964,15 @@ proc sqlite3 {db args} {
     # (#6172). Checking real existence handles both the fresh-name and the
     # renamed-away cases uniformly.
     if {[llength [info commands $db]] == 0} {
-        interp alias {} $db {} ::tcltest_db_master
+        # Bind $db as the alias's leading argument so ::tcltest_db_master can
+        # tell which connection handle invoked it (e.g. `db2 changes` vs
+        # `db changes`) -- needed to key per-connection counters like
+        # ::last_changes_map (#6532).
+        interp alias {} $db {} ::tcltest_db_master $db
     }
 }
 
-proc ::tcltest_db_master {cmd args} {
+proc ::tcltest_db_master {handle cmd args} {
     # Default db command - supports multiple call patterns:
     # db eval SQL                    - returns results as list
     # db eval SQL script             - iterates over rows, setting column names as local vars
@@ -10085,14 +10122,17 @@ proc ::tcltest_db_master {cmd args} {
             return [sqlite3_complete [lindex $args 0]]
         }
         changes {
-            # Return number of rows changed by last statement
-            # We track this ourselves since each SQL execution is a separate process
-            return $::last_changes
+            # Return number of rows changed by last statement on THIS connection.
+            # We track this ourselves since each SQL execution is a separate
+            # process; keyed per-connection so a secondary connection's DML
+            # does not clobber the primary connection's count (#6532).
+            return [get_last_changes $handle]
         }
         total_changes {
-            # Return total number of rows changed
-            # We track this ourselves since each SQL execution is a separate process
-            return $::total_changes
+            # Return total number of rows changed on THIS connection.
+            # We track this ourselves since each SQL execution is a separate
+            # process; keyed per-connection, same as `changes` above (#6532).
+            return [get_total_changes $handle]
         }
         exists {
             # Check if query returns any rows
@@ -10229,8 +10269,10 @@ proc ::tcltest_db_master {cmd args} {
 # same way proc sqlite3 creates aliases for secondary connections (db2, db3,
 # ...). See the "rename db db2" idiom note above proc sqlite3's alias check
 # (#6172) for why this must be a real alias rather than making "db" itself
-# the master proc's literal name.
-interp alias {} db {} ::tcltest_db_master
+# the master proc's literal name. Bind "db" as the leading argument, same as
+# the secondary-connection alias above, so ::tcltest_db_master can tell this
+# is the default connection (#6532).
+interp alias {} db {} ::tcltest_db_master db
 
 #-----------------------------------------------------------------------------
 # Utility commands
