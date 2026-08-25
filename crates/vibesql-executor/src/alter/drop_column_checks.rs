@@ -673,8 +673,15 @@ fn find_trigger_resolution_error(
     let statements = crate::trigger_execution::TriggerFirer::parse_trigger_sql(sql).ok()?;
 
     // 1) A body statement that reads from / writes to a non-existent table aborts the ALTER,
-    //    matching SQLite's schema re-parse (`error in trigger <name>: no such table: main.<t>`).
-    if let Some(missing) = find_missing_table_in_statements(&statements, sim.db) {
+    //    matching SQLite's schema re-parse (`error in trigger <name>: no such table: main.<t>`). An
+    //    unqualified missing name is only prefixed with the implicit `main.` schema when the
+    //    *trigger itself* lives in the main schema; a trigger living in the `temp` schema (either
+    //    an explicit `CREATE TEMP TRIGGER`, or one implicitly bound to a TEMP table) reports the
+    //    bare name instead (altercol/alter.test 17.1 vs 17.3: `error in trigger u7t: no such table:
+    //    main.u8` for a main-schema trigger, but `error in trigger uu7t: no such table: u8` for the
+    //    TEMP-schema namesake — verified against sqlite3 3.51.0).
+    if let Some(missing) = find_missing_table_in_statements(&statements, sim.db, trigger.is_temp())
+    {
         return Some(format!("no such table: {}", missing));
     }
 
@@ -729,12 +736,19 @@ fn find_missing_pseudo_in_trigger(
 
 /// First base-table reference in `statements` (INSERT/UPDATE/DELETE targets and
 /// FROM-clause tables, in SQL text order) that resolves to neither a table nor a
-/// view — named the way SQLite's `no such table:` message spells it (an
-/// unqualified name is reported as `main.<name>`). CTE names in scope are
-/// excluded (they are not base tables), and the check is skipped (returns
-/// `None`) for anything it cannot judge — conservative in the direction that
-/// never blocks an ALTER SQLite allows.
-fn find_missing_table_in_statements(statements: &[Statement], db: &Database) -> Option<String> {
+/// view — named the way SQLite's `no such table:` message spells it. An
+/// unqualified name is reported as `main.<name>` when `owner_is_temp` is
+/// `false` (the referencing trigger lives in the main schema), or bare
+/// `<name>` when `owner_is_temp` is `true` (the referencing trigger lives in
+/// the `temp` schema — see the call site in [`find_trigger_resolution_error`]).
+/// CTE names in scope are excluded (they are not base tables), and the check
+/// is skipped (returns `None`) for anything it cannot judge — conservative in
+/// the direction that never blocks an ALTER SQLite allows.
+fn find_missing_table_in_statements(
+    statements: &[Statement],
+    db: &Database,
+    owner_is_temp: bool,
+) -> Option<String> {
     let mut refs: Vec<String> = Vec::new();
     let mut cte_names: Vec<String> = Vec::new();
     for stmt in statements {
@@ -756,7 +770,11 @@ fn find_missing_table_in_statements(statements: &[Statement], db: &Database) -> 
         {
             continue;
         }
-        return Some(if name.contains('.') { name } else { format!("main.{}", name) });
+        return Some(if name.contains('.') || owner_is_temp {
+            name
+        } else {
+            format!("main.{}", name)
+        });
     }
     None
 }

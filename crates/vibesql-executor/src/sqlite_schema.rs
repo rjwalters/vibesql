@@ -719,8 +719,31 @@ fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
                     format!("{}{}{}", column_name, prefix_str, order_str)
                 }
                 vibesql_catalog::IndexedColumn::Expression { expr, .. } => {
-                    // For expression indexes, wrap the expression in parentheses
-                    format!("({}){}", expr.to_sql(), order_str)
+                    // SQLite echoes an expression-index column exactly as the
+                    // user wrote it (verified against sqlite3 3.51.0): a bare
+                    // compound expression like `t1(b+b+b+b, c)` round-trips
+                    // WITHOUT an added outer paren layer (altercol-1.12.4),
+                    // while an already-function-call expression like
+                    // `t1(lower(a))` carries its own parens and needs no
+                    // extra wrap either. VibeSQL does not retain the original
+                    // source text for indexes (unlike triggers/views, which
+                    // store verbatim `sql_definition`), so a bare column
+                    // reference is the one shape that DOES need a synthetic
+                    // wrap: `IndexedColumn::Expression` only ever holds a
+                    // lone `ColumnRef` when the user wrote explicit
+                    // disambiguating parens around a plain column (`t1((a))`,
+                    // altercorrupt-style tests) — rendering it unwrapped would
+                    // round-trip back through the parser as a plain
+                    // `IndexedColumn::Column` instead, silently changing the
+                    // index's on-disk metadata shape. Every other expression
+                    // shape (binary/unary ops, function calls, CASE, etc.) is
+                    // rendered as-is with no synthetic wrap.
+                    let needs_wrap = matches!(expr.as_ref(), vibesql_ast::Expression::ColumnRef(_));
+                    if needs_wrap {
+                        format!("({}){}", expr.to_sql(), order_str)
+                    } else {
+                        format!("{}{}", expr.to_sql(), order_str)
+                    }
                 }
             }
         })
@@ -1493,6 +1516,66 @@ mod tests {
 
         let sql = generate_create_index_sql(&index);
         assert_eq!(sql, "CREATE UNIQUE INDEX idx_email ON users(email(50))");
+    }
+
+    /// Regression test for altercol-1.12.4: a compound-expression index
+    /// column (e.g. `t1(b+b+b+b, c)`) must round-trip through
+    /// `sqlite_master.sql` WITHOUT gaining a synthetic outer paren layer —
+    /// verified against sqlite3 3.51.0, which echoes exactly what the user
+    /// wrote (`CREATE INDEX t1i ON t1(b+b+b+b, c) WHERE b>0`, no `((...))`).
+    #[test]
+    fn test_generate_create_index_sql_compound_expression_no_extra_parens() {
+        use vibesql_ast::{BinaryOperator, ColumnIdentifier, Expression};
+
+        let col_ref = |name: &str| Expression::ColumnRef(ColumnIdentifier::simple(name, false));
+        let expr = Expression::BinaryOp {
+            op: BinaryOperator::Plus,
+            left: Box::new(Expression::BinaryOp {
+                op: BinaryOperator::Plus,
+                left: Box::new(Expression::BinaryOp {
+                    op: BinaryOperator::Plus,
+                    left: Box::new(col_ref("b")),
+                    right: Box::new(col_ref("b")),
+                }),
+                right: Box::new(col_ref("b")),
+            }),
+            right: Box::new(col_ref("b")),
+        };
+
+        let index = IndexMetadata::new(
+            "t1i".to_string(),
+            "t1".to_string(),
+            IndexType::BTree,
+            vec![
+                IndexedColumn::Expression { expr: Box::new(expr), order: SortOrder::Ascending },
+                IndexedColumn::new_column("c".to_string(), SortOrder::Ascending),
+            ],
+            false,
+        );
+
+        let sql = generate_create_index_sql(&index);
+        assert_eq!(sql, "CREATE INDEX t1i ON t1(b+b+b+b, c)");
+    }
+
+    /// A lone parenthesized column reference (`t1((a))`) DOES need the
+    /// synthetic wrap: without it, re-parsing the generated SQL would produce
+    /// a plain `IndexedColumn::Column` instead of an `Expression`, silently
+    /// changing the index's on-disk metadata shape.
+    #[test]
+    fn test_generate_create_index_sql_bare_column_ref_keeps_wrap() {
+        use vibesql_ast::{ColumnIdentifier, Expression};
+
+        let expr = Expression::ColumnRef(ColumnIdentifier::simple("a", false));
+        let index = IndexMetadata::new(
+            "i3".to_string(),
+            "t1".to_string(),
+            IndexType::BTree,
+            vec![IndexedColumn::Expression { expr: Box::new(expr), order: SortOrder::Ascending }],
+            false,
+        );
+
+        let sql = generate_create_index_sql(&index);
+        assert_eq!(sql, "CREATE INDEX i3 ON t1((a))");
     }
 
     /// Regression test for #5579: `sqlite_master` must report the index name and
