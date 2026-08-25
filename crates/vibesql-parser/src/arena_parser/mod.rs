@@ -53,6 +53,15 @@ pub struct ArenaParser<'arena> {
     input: &'arena str,
     position: usize,
     placeholder_count: usize,
+    /// Highest SQL parameter/variable number assigned so far while parsing
+    /// the current statement. Mirrors [`crate::Parser::max_variable_number`]
+    /// — see that field's doc comment for the full rationale (unified
+    /// numbering space shared by `?`, `?NNN`, `:name`, `@name`, `$name`).
+    max_variable_number: usize,
+    /// Named parameters already seen in the current statement, mapped to
+    /// their assigned variable number. Mirrors
+    /// [`crate::Parser::named_variable_numbers`].
+    named_variable_numbers: std::collections::HashMap<String, usize>,
     arena: &'arena Bump,
     interner: ArenaInterner<'arena>,
 }
@@ -71,6 +80,8 @@ impl<'arena> ArenaParser<'arena> {
             input,
             position: 0,
             placeholder_count: 0,
+            max_variable_number: 0,
+            named_variable_numbers: std::collections::HashMap::new(),
             arena,
             interner: ArenaInterner::new(arena),
         }
@@ -85,6 +96,8 @@ impl<'arena> ArenaParser<'arena> {
             input: "",         // No original input
             position: 0,
             placeholder_count: 0,
+            max_variable_number: 0,
+            named_variable_numbers: std::collections::HashMap::new(),
             arena,
             interner: ArenaInterner::new(arena),
         }
@@ -618,6 +631,46 @@ impl<'arena> ArenaParser<'arena> {
         let index = self.placeholder_count;
         self.placeholder_count += 1;
         index
+    }
+
+    /// SQLite's default `SQLITE_MAX_VARIABLE_NUMBER`. Mirrors
+    /// `crate::parser::Parser::MAX_VARIABLE_NUMBER`.
+    const MAX_VARIABLE_NUMBER: usize = 999;
+
+    /// Record that an explicit `?NNN` placeholder with variable number `n`
+    /// was parsed. Mirrors `crate::parser::Parser::record_explicit_variable_number`.
+    pub(crate) fn record_explicit_variable_number(&mut self, n: usize) {
+        if n > self.max_variable_number {
+            self.max_variable_number = n;
+        }
+    }
+
+    /// Assign the next auto-numbered variable slot, raising SQLite's
+    /// `too many SQL variables` error once the running total would exceed
+    /// `SQLITE_MAX_VARIABLE_NUMBER`. Mirrors
+    /// `crate::parser::Parser::next_auto_variable_number`.
+    pub(crate) fn next_auto_variable_number(&mut self) -> Result<usize, ParseError> {
+        let next = self.max_variable_number + 1;
+        if next > Self::MAX_VARIABLE_NUMBER {
+            return Err(ParseError { message: "too many SQL variables".to_string() });
+        }
+        self.max_variable_number = next;
+        Ok(next)
+    }
+
+    /// Resolve the variable number for a named placeholder, reusing a
+    /// number already assigned to `name` earlier in this statement. Mirrors
+    /// `crate::parser::Parser::resolve_named_variable_number`.
+    pub(crate) fn resolve_named_variable_number(
+        &mut self,
+        name: &str,
+    ) -> Result<usize, ParseError> {
+        if let Some(&n) = self.named_variable_numbers.get(name) {
+            return Ok(n);
+        }
+        let n = self.next_auto_variable_number()?;
+        self.named_variable_numbers.insert(name.to_string(), n);
+        Ok(n)
     }
 
     // ========================================================================
