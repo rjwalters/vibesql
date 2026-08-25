@@ -167,7 +167,13 @@ impl ForeignKeyValidator {
                 continue;
             }
 
-            let should_defer = in_txn && (fk.initially_deferred || session_defer);
+            // NOT DEFERRABLE constraints are always checked immediately
+            // regardless of any (meaningless-but-parseable) INITIALLY
+            // DEFERRED clause; `defer_foreign_keys` is a blanket override
+            // that is not gated on `is_deferrable` (see foreign_key_check.rs
+            // for the full rationale, e_fkey-34.*, fkey6-1.8).
+            let should_defer =
+                in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
             if should_defer {
                 deferred.push(DeferredFkViolation {
                     child_table: table_name.to_string(),
@@ -558,7 +564,13 @@ impl ForeignKeyValidator {
                             // #5085). When deferred, queue every
                             // orphaned child row for COMMIT-time
                             // re-validation; otherwise fail immediately.
-                            let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                            // NOT DEFERRABLE constraints ignore any
+                            // INITIALLY DEFERRED clause (see
+                            // foreign_key_check.rs / e_fkey-34.*); the
+                            // session `defer_foreign_keys` override is not
+                            // gated on `is_deferrable`.
+                            let should_defer = in_txn
+                                && (session_defer || (fk.is_deferrable && fk.initially_deferred));
                             if should_defer {
                                 deferred_parent_orphans.push((
                                     table_name.clone(),
@@ -627,7 +639,12 @@ impl ForeignKeyValidator {
                         // 3.51 (#5465). Immediate FK -> raise now (statement
                         // savepoint rolls the statement back); deferred FK ->
                         // queue the surviving OLD row for the COMMIT re-check.
-                        let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                        // NOT DEFERRABLE constraints ignore any INITIALLY
+                        // DEFERRED clause (see foreign_key_check.rs /
+                        // e_fkey-34.*); the session `defer_foreign_keys`
+                        // override is not gated on `is_deferrable`.
+                        let should_defer = in_txn
+                            && (session_defer || (fk.is_deferrable && fk.initially_deferred));
                         if should_defer {
                             db.queue_deferred_fk_violation(DeferredFkViolation {
                                 child_table: table_name.clone(),

@@ -278,7 +278,13 @@ fn check_child_references_impl(
                 // every orphaned child row so that COMMIT-time re-check
                 // verifies each one finds a parent. If not deferred,
                 // fail immediately as before.
-                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                // NOT DEFERRABLE constraints ignore any INITIALLY DEFERRED
+                // clause (e_fkey-34.*: only a `DEFERRABLE INITIALLY
+                // DEFERRED` constraint may be violated mid-transaction);
+                // the session `defer_foreign_keys` override is not gated
+                // on `is_deferrable` (EVIDENCE-OF R-18981-16292, fkey6-1.8).
+                let should_defer =
+                    in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
                 if should_defer {
                     queue_orphaned_children(db, &child_table_name, &fk, fk_idx, &parent_key_values);
                 } else {
@@ -496,7 +502,11 @@ pub(crate) fn cascade_delete(
                 //     back.
                 //   - deferred FK (INITIALLY DEFERRED or session defer_foreign_keys=ON inside a
                 //     txn) -> queue the surviving row for the COMMIT-time re-check.
-                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                // NOT DEFERRABLE constraints ignore any INITIALLY DEFERRED
+                // clause (see foreign_key_check.rs / e_fkey-34.*); the
+                // session override is not gated on `is_deferrable`.
+                let should_defer =
+                    in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
                 if should_defer {
                     db.queue_deferred_fk_violation(DeferredFkViolation {
                         child_table: child_table_name.to_string(),
@@ -765,7 +775,11 @@ fn apply_cascade_child_updates(
                 // child still references the parent key being deleted, so it
                 // becomes an orphan that must trip the statement-end FK
                 // check, exactly as sqlite3 3.51 does (#5465).
-                let should_defer = in_txn && (fk.initially_deferred || session_defer);
+                // NOT DEFERRABLE constraints ignore any INITIALLY DEFERRED
+                // clause (see foreign_key_check.rs / e_fkey-34.*); the
+                // session override is not gated on `is_deferrable`.
+                let should_defer =
+                    in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
                 if should_defer {
                     db.queue_deferred_fk_violation(DeferredFkViolation {
                         child_table: child_table_name.to_string(),

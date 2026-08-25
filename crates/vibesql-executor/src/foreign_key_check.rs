@@ -585,7 +585,18 @@ pub(crate) fn check_fk_row_existence(
     // reaching this helper.
     let session_defer = db.defer_foreign_keys();
     let in_txn = db.in_transaction();
-    let should_defer = in_txn && (fk.initially_deferred || session_defer);
+    // NOT DEFERRABLE constraints are always checked immediately regardless
+    // of any (meaningless-but-parseable) INITIALLY DEFERRED clause — SQLite
+    // grammar allows "NOT DEFERRABLE INITIALLY DEFERRED" but the INITIALLY
+    // clause only takes effect when the constraint is actually DEFERRABLE
+    // (e_fkey-34.*: only a `DEFERRABLE INITIALLY DEFERRED` constraint may be
+    // violated mid-transaction; all six other DEFERRABLE/NOT DEFERRABLE x
+    // INITIALLY DEFERRED/IMMEDIATE combinations must error immediately).
+    // `PRAGMA defer_foreign_keys=ON` is a blanket per-transaction override
+    // that defers *every* constraint regardless of its own DEFERRABLE
+    // status (EVIDENCE-OF R-18981-16292, fkey6-1.8), so `session_defer` is
+    // intentionally NOT gated on `fk.is_deferrable`.
+    let should_defer = in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
     if should_defer {
         return Ok(FkRowCheck::Deferred(DeferredFkViolation {
             child_table: table_name.to_string(),
@@ -874,6 +885,32 @@ mod tests {
             }
             other => panic!("expected Deferred, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn check_fk_row_existence_not_deferrable_initially_deferred_in_txn_is_immediate() {
+        // NOT DEFERRABLE INITIALLY DEFERRED (SQLite grammar allows this
+        // combination, but NOT DEFERRABLE always wins: the INITIALLY
+        // DEFERRED clause is a no-op unless the constraint is actually
+        // DEFERRABLE). Even inside an open transaction with no session
+        // `defer_foreign_keys` override, this must violate immediately —
+        // not queue as deferred (e_fkey-34.*, fkey2#6170).
+        let (mut db, mut fk) = setup_parent_child(&[1]);
+        fk.is_deferrable = false;
+        fk.initially_deferred = true;
+
+        db.begin_transaction().unwrap();
+        assert!(db.in_transaction());
+
+        let full_row = vec![SqlValue::Integer(10), SqlValue::Integer(999)];
+        let fk_values = vec![SqlValue::Integer(999)];
+
+        let outcome = check_fk_row_existence(&db, "c", &fk, 0, &fk_values, &full_row, &[]).unwrap();
+        assert!(
+            matches!(outcome, FkRowCheck::Violation),
+            "NOT DEFERRABLE INITIALLY DEFERRED must violate immediately even in a transaction, got {:?}",
+            outcome
+        );
     }
 
     #[test]
