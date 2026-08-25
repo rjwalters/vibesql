@@ -1043,3 +1043,59 @@ fn drop_table_referenced_parent_allowed_when_fk_disabled() {
     exec(&mut db, "DROP TABLE t1").unwrap();
     assert!(!db.catalog.table_exists("t1"));
 }
+
+/// A `NOT DEFERRABLE INITIALLY DEFERRED` foreign key (SQLite grammar allows
+/// this contradictory-looking combination) must still be checked immediately
+/// on DELETE, even inside an open transaction: `NOT DEFERRABLE` always wins
+/// and the `INITIALLY DEFERRED` clause is a no-op unless the constraint is
+/// actually `DEFERRABLE` (e_fkey-34.*, #6170). Regression test for a bug
+/// where the DELETE-side `should_defer` computation only consulted
+/// `initially_deferred`, silently deferring a NOT DEFERRABLE constraint to
+/// COMMIT instead of raising immediately.
+#[test]
+fn delete_not_deferrable_initially_deferred_violates_immediately_in_txn() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent(x, y, z, PRIMARY KEY(x, y, z))").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE c1(a, b, c, FOREIGN KEY(a, b, c) REFERENCES parent NOT DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES('a', 'b', 'c')").unwrap();
+    exec(&mut db, "INSERT INTO c1 VALUES('a', 'b', 'c')").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+    let result = exec(&mut db, "DELETE FROM parent WHERE x = 'a'");
+    assert!(
+        result.is_err(),
+        "NOT DEFERRABLE INITIALLY DEFERRED must violate immediately, not defer to COMMIT"
+    );
+    assert!(db.in_transaction(), "the failed DELETE must keep the transaction open");
+    db.rollback_transaction().expect("ROLLBACK");
+}
+
+/// Sibling of the above for a genuinely `DEFERRABLE INITIALLY DEFERRED`
+/// constraint: the DELETE must succeed inside the transaction (the
+/// violation is queued), and only surface at COMMIT.
+#[test]
+fn delete_deferrable_initially_deferred_defers_to_commit() {
+    let mut db = fresh_db();
+    exec(&mut db, "CREATE TABLE parent(x, y, z, PRIMARY KEY(x, y, z))").unwrap();
+    exec(
+        &mut db,
+        "CREATE TABLE c7(a, b, c, FOREIGN KEY(a, b, c) REFERENCES parent DEFERRABLE INITIALLY DEFERRED)",
+    )
+    .unwrap();
+    exec(&mut db, "INSERT INTO parent VALUES('s', 't', 'u')").unwrap();
+    exec(&mut db, "INSERT INTO c7 VALUES('s', 't', 'u')").unwrap();
+
+    db.begin_transaction().expect("BEGIN");
+    exec(&mut db, "DELETE FROM parent WHERE x = 's'")
+        .expect("DEFERRABLE INITIALLY DEFERRED must not violate immediately");
+    assert!(db.in_transaction());
+    // The deferred-FK re-check runs in `CommitExecutor` (not inside
+    // `Database::commit_transaction` itself), so COMMIT must go through the
+    // same executor a real `COMMIT` statement would use.
+    let commit_result = crate::CommitExecutor::execute(&vibesql_ast::CommitStmt, &mut db);
+    assert!(commit_result.is_err(), "the queued violation must surface at COMMIT");
+}
