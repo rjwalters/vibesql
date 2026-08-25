@@ -21,6 +21,7 @@ impl Parser {
         // Try to parse as a placeholder (?)
         if matches!(self.peek(), Token::Placeholder) {
             self.advance();
+            self.next_auto_variable_number()?;
             let index = self.placeholder_count;
             self.placeholder_count += 1;
             return Ok(vibesql_ast::Expression::Placeholder(index));
@@ -30,6 +31,7 @@ impl Parser {
         if let Token::NumberedPlaceholder(n) = self.peek() {
             let index = *n;
             self.advance();
+            self.record_explicit_variable_number(index);
             return Ok(vibesql_ast::Expression::NumberedPlaceholder(index));
         }
 
@@ -37,6 +39,7 @@ impl Parser {
         if let Token::NamedPlaceholder(name) = self.peek() {
             let param_name = name.clone();
             self.advance();
+            self.resolve_named_variable_number(&param_name)?;
             return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
         }
 
@@ -53,6 +56,7 @@ impl Parser {
         if let Token::UserVariable(name) = self.peek() {
             let param_name = name.clone();
             self.advance();
+            self.resolve_named_variable_number(&param_name)?;
             return Ok(vibesql_ast::Expression::NamedPlaceholder(param_name));
         }
 

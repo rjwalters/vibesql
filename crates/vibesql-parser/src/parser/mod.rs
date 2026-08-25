@@ -65,6 +65,20 @@ pub struct Parser {
     /// Counter for placeholder parameters (?)
     /// Incremented each time a placeholder is parsed, providing 0-indexed parameter positions
     placeholder_count: usize,
+    /// Highest SQL parameter/variable number assigned so far while parsing
+    /// the current statement, per SQLite's unified numbering space shared by
+    /// `?`, `?NNN`, `:name`, `@name`, and `$name` (R-33670-36097,
+    /// R-11370-04520: "Named parameters are also numbered"). Distinct from
+    /// `placeholder_count` (which only tracks 0-indexed *positional* binding
+    /// order for anonymous `?`); this field feeds the
+    /// `SQLITE_MAX_VARIABLE_NUMBER` ("too many SQL variables") check in
+    /// [`Parser::next_auto_variable_number`].
+    max_variable_number: usize,
+    /// Named parameters (`:name`, `@name`, `$name`) already seen while
+    /// parsing the current statement, mapped to their assigned variable
+    /// number. A name seen again reuses its previously assigned number
+    /// rather than consuming a new numbering slot (R-11370-04520).
+    named_variable_numbers: std::collections::HashMap<String, usize>,
     /// Whether the parser is currently inside a `CREATE TRIGGER` body
     /// (a trigger-program). SQLite only permits the `RAISE()` expression
     /// within a trigger-program and rejects it at prepare/parse time
@@ -109,6 +123,8 @@ impl Parser {
             tokens,
             position: 0,
             placeholder_count: 0,
+            max_variable_number: 0,
+            named_variable_numbers: std::collections::HashMap::new(),
             in_trigger_body: false,
             source: String::new(),
             spans: Vec::new(),
@@ -127,6 +143,8 @@ impl Parser {
             tokens,
             position: 0,
             placeholder_count: 0,
+            max_variable_number: 0,
+            named_variable_numbers: std::collections::HashMap::new(),
             in_trigger_body: false,
             source,
             spans,
@@ -138,6 +156,55 @@ impl Parser {
     /// Current token index (cursor position within the token stream).
     pub(crate) fn current_position(&self) -> usize {
         self.position
+    }
+
+    /// SQLite's default `SQLITE_MAX_VARIABLE_NUMBER`. See
+    /// [`Parser::next_auto_variable_number`] and the sibling constant in
+    /// `crate::lexer` (which caps the *literal* value of an explicit `?NNN`).
+    const MAX_VARIABLE_NUMBER: usize = 999;
+
+    /// Record that an explicit `?NNN` placeholder with variable number `n`
+    /// was parsed, updating the running "highest number assigned so far"
+    /// tracker used to auto-number subsequent anonymous `?` and named
+    /// placeholders (R-33670-36097 / R-11370-04520). The lexer already
+    /// rejects `n` outside `1..=999` for the literal itself, so this never
+    /// needs to raise an error here.
+    pub(crate) fn record_explicit_variable_number(&mut self, n: usize) {
+        if n > self.max_variable_number {
+            self.max_variable_number = n;
+        }
+    }
+
+    /// Assign the next auto-numbered variable slot — for an anonymous `?` or
+    /// a named placeholder seen for the first time in this statement —
+    /// raising SQLite's `too many SQL variables` error once the running
+    /// total would exceed `SQLITE_MAX_VARIABLE_NUMBER`
+    /// (R-42938-07030 / R-42620-22184).
+    pub(crate) fn next_auto_variable_number(&mut self) -> Result<usize, ParseError> {
+        let next = self.max_variable_number + 1;
+        if next > Self::MAX_VARIABLE_NUMBER {
+            return Err(ParseError { message: "too many SQL variables".to_string() });
+        }
+        self.max_variable_number = next;
+        Ok(next)
+    }
+
+    /// Resolve the variable number for a named placeholder (`:name`,
+    /// `@name`, `$name`), reusing the number already assigned to `name`
+    /// earlier in this statement (R-11370-04520: "Named parameters are also
+    /// numbered ... the number assigned is one greater than the largest
+    /// parameter number already assigned") or auto-numbering it as a new
+    /// slot otherwise.
+    pub(crate) fn resolve_named_variable_number(
+        &mut self,
+        name: &str,
+    ) -> Result<usize, ParseError> {
+        if let Some(&n) = self.named_variable_numbers.get(name) {
+            return Ok(n);
+        }
+        let n = self.next_auto_variable_number()?;
+        self.named_variable_numbers.insert(name.to_string(), n);
+        Ok(n)
     }
 
     /// Return the verbatim source text of the token at index `pos`, including

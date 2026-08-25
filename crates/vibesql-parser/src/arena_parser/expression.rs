@@ -750,6 +750,7 @@ impl<'arena> ArenaParser<'arena> {
         // Placeholder (?)
         if matches!(self.peek(), Token::Placeholder) {
             self.advance();
+            self.next_auto_variable_number()?;
             let index = self.next_placeholder();
             return Ok(Expression::Placeholder(index));
         }
@@ -758,6 +759,7 @@ impl<'arena> ArenaParser<'arena> {
         if let Token::NumberedPlaceholder(n) = self.peek() {
             let index = *n;
             self.advance();
+            self.record_explicit_variable_number(index);
             return Ok(Expression::NumberedPlaceholder(index));
         }
 
@@ -765,6 +767,7 @@ impl<'arena> ArenaParser<'arena> {
         if let Token::NamedPlaceholder(name) = self.peek() {
             let name = name.clone();
             self.advance();
+            self.resolve_named_variable_number(&name)?;
             let name = self.intern(&name);
             return Ok(Expression::NamedPlaceholder(name));
         }
@@ -777,6 +780,7 @@ impl<'arena> ArenaParser<'arena> {
         if let Token::UserVariable(name) = self.peek() {
             let name = name.clone();
             self.advance();
+            self.resolve_named_variable_number(&name)?;
             let name = self.intern(&name);
             return Ok(Expression::NamedPlaceholder(name));
         }
