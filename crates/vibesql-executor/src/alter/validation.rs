@@ -35,11 +35,30 @@ pub(super) fn is_sqlite_schema_table_ref(catalog: &vibesql_catalog::Catalog, nam
     matches!(object, "sqlite_master" | "sqlite_schema") && catalog.is_attached_schema(qualifier)
 }
 
-/// Whether `column` participates in any UNIQUE constraint of `schema`
-/// (case-insensitive). Used to reject `DROP COLUMN` of a UNIQUE column, matching
-/// SQLite's `cannot drop UNIQUE column` rejection.
+/// Whether `column` is the sole column of a single-column UNIQUE constraint of
+/// `schema` (case-insensitive). Used to reject `DROP COLUMN` of a UNIQUE
+/// column, matching SQLite's `cannot drop UNIQUE column` rejection.
+///
+/// SQLite only raises this specific error for a column-level `UNIQUE`
+/// constraint (tracked internally via `Column.colFlags & COLFLAG_UNIQUE`,
+/// set while parsing an inline `col UNIQUE` definition); dropping a column
+/// referenced by a *multi-column* table-level `UNIQUE(a, b)` constraint
+/// instead falls through to the generic post-drop schema re-parse and
+/// reports `error in table <t> after drop column: no such column: <c>`
+/// (verified against sqlite3 3.51.0: `CREATE TABLE x1(a PRIMARY KEY, b, c,
+/// UNIQUE(b, c)); ALTER TABLE x1 DROP COLUMN c` raises the generic message,
+/// not `cannot drop UNIQUE column`). VibeSQL's `unique_constraints` doesn't
+/// currently distinguish inline column-level `UNIQUE` from a single-column
+/// table-level `UNIQUE(b)` (both store as a length-1 `Vec<String>`), so this
+/// only restricts by column count — it correctly excludes multi-column
+/// constraints (the case exercised by `alterdropcol2.test`'s `2.2.2`) but
+/// does not yet fully replicate SQLite's inline-vs-table-level distinction
+/// for the single-column table-level case. See issue #6174.
 pub(super) fn column_in_unique_constraint(schema: &TableSchema, column: &str) -> bool {
-    schema.unique_constraints.iter().any(|cols| cols.iter().any(|c| c.eq_ignore_ascii_case(column)))
+    schema
+        .unique_constraints
+        .iter()
+        .any(|cols| cols.len() == 1 && cols.iter().any(|c| c.eq_ignore_ascii_case(column)))
 }
 
 /// Whether `index` references `column` — either directly (a plain indexed

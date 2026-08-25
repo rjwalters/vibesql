@@ -189,3 +189,52 @@ fn test_is_column_collate_still_a_comparison() {
         expr
     );
 }
+
+// --- Single-quoted strings as identifiers in CREATE INDEX / DROP COLUMN
+// (issue #6174, alterdropcol2.test 2.3.1) ---
+
+#[test]
+fn test_create_index_on_single_quoted_table_name() {
+    // alterdropcol2-2.3.1: CREATE INDEX idx ON 'one two'('z 1')
+    let sql = "CREATE INDEX idx ON 'one two'('z 1')";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.table_name, "one two");
+            assert_eq!(stmt.columns.len(), 1);
+            assert_eq!(stmt.columns[0].column_name(), Some("z 1"));
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_unique_index_on_single_quoted_table_name() {
+    // The UNIQUE-index dispatch path (`parse_create_index_columns`) has its
+    // own table-name parse, separate from the plain-index path above.
+    let sql = "CREATE UNIQUE INDEX idx ON 'one two'('z 1')";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.table_name, "one two");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_alter_table_drop_column_single_quoted_name() {
+    // alterdropcol2-2.3.1: ALTER TABLE 'one two' DROP COLUMN 'z 1'
+    let sql = "ALTER TABLE 'one two' DROP COLUMN 'z 1'";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::DropColumn(stmt)) => {
+            assert_eq!(stmt.table_name, "one two");
+            assert_eq!(stmt.column_name, "z 1");
+        }
+        other => panic!("Expected AlterTable(DropColumn), got: {:?}", other),
+    }
+}

@@ -82,8 +82,13 @@ impl Parser {
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
 
-        // Parse table name
-        let table_name = self.parse_identifier()?;
+        // Parse table name. `parse_qualified_identifier` (not the plain
+        // `parse_identifier`) so a single-quoted string is accepted as a
+        // table name here too, matching SQLite's "string as identifier"
+        // fallback quirk already honored in `FROM`/`INTO`/`ALTER TABLE`
+        // position (`CREATE INDEX idx ON 'one two'(...)`,
+        // alterdropcol2.test 2.3.1; verified against sqlite3 3.51.0).
+        let table_name = self.parse_qualified_identifier()?;
 
         // Check for USING clause (PostgreSQL-style index method specification)
         if self.peek_keyword(Keyword::Using) {
@@ -743,8 +748,11 @@ impl Parser {
         // Expect ON keyword
         self.expect_keyword(Keyword::On)?;
 
-        // Parse table name
-        let table_name = self.parse_identifier()?;
+        // Parse table name. See the sibling `CREATE INDEX` path in
+        // `parse_create_index_with_using_clause` above for why this is
+        // `parse_qualified_identifier` rather than `parse_identifier`
+        // (single-quoted-string-as-identifier fallback).
+        let table_name = self.parse_qualified_identifier()?;
 
         // Expect opening parenthesis
         self.expect_token(Token::LParen)?;
