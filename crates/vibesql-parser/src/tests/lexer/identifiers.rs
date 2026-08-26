@@ -389,11 +389,14 @@ fn test_tokenize_delimited_identifier_with_escaped_quotes() {
 }
 
 #[test]
-fn test_tokenize_empty_delimited_identifier_error() {
+fn test_tokenize_empty_double_quoted_identifier_allowed() {
+    // SQLite's tokenizer does not reject a zero-length double-quoted
+    // identifier — it lexes to a TK_ID token naming the empty string, which
+    // ordinary column resolution then fails ("no such column"), but the
+    // token itself is valid (quote.test 2.2/3.4: `t1("w"||"")`).
     let mut lexer = Lexer::new(r#""""#);
-    let result = lexer.tokenize();
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("Empty delimited identifier"));
+    let tokens = lexer.tokenize().unwrap();
+    assert_eq!(tokens[0], Token::DelimitedIdentifier(String::new()));
 }
 
 #[test]

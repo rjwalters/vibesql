@@ -54,7 +54,7 @@ impl ExpressionVisitor for ParameterFinder {
 /// `"null"` as the string `'null'`. Only applied to unqualified references:
 /// a table-qualified miss (`t2.x` naming a foreign table) is a different
 /// failure class with no such hint in SQLite (check-3.5).
-fn quoted_column_display(col_id: &vibesql_ast::ColumnIdentifier) -> String {
+pub(crate) fn quoted_column_display(col_id: &vibesql_ast::ColumnIdentifier) -> String {
     if col_id.table_canonical().is_none() && col_id.is_column_quoted() {
         format!("\"{}\" - should this be a string literal in single-quotes?", col_id.display())
     } else {
