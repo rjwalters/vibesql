@@ -169,6 +169,17 @@ pub fn validate_create_index(
         .ok_or_else(|| ExecutorError::TableNotFound(qualified_table_name.clone()))?
         .clone();
 
+    // Use the table's own canonical stored name (whatever case it was
+    // CREATE TABLE'd with) rather than the literal case the CREATE INDEX
+    // statement happened to reference it with. SQLite's catalog lookup is
+    // case-insensitive, but `sqlite_master.tbl_name` for the new index row
+    // must echo the table's actual catalog name, not the statement's literal
+    // spelling — otherwise `CREATE INDEX t1i1 ON T1(b)` (table actually named
+    // `t1`) stores `tbl_name='T1'`, which both misrepresents the schema and
+    // sorts inconsistently against the table's own row under binary
+    // collation (`'T'` < `'t'`). See issue #6596.
+    let table_name = table_schema.name.clone();
+
     // Validate no window functions in index expressions or WHERE clause (#4985)
     // Window functions cannot be used in CREATE INDEX statements
     validate_no_window_functions_in_index(stmt)?;
