@@ -57,6 +57,7 @@ impl CreateIndexExecutor {
     ///         direction: OrderDirection::Asc,
     ///         prefix_length: None,
     ///         collation: None,
+    ///         is_quoted: false,
     ///     }],
     ///     where_clause: None,
     /// };
@@ -211,6 +212,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -242,6 +244,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -268,12 +271,14 @@ mod tests {
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
                 IndexColumn::Column {
                     column_name: "name".to_string(),
                     direction: OrderDirection::Desc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
             ],
             where_clause: None,
@@ -299,6 +304,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -328,6 +334,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -353,13 +360,59 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
         assert!(result.is_err());
-        assert!(matches!(result, Err(ExecutorError::ColumnNotFound { .. })));
+        // SQLite-compatible "no such column: <name>" (issue #6560) — not the
+        // generic ColumnNotFound wording. `is_quoted: false` above means no
+        // "should this be a string literal in single-quotes?" hint.
+        match result {
+            Err(ExecutorError::NoSuchColumn { column_ref }) => {
+                assert_eq!(column_ref, "nonexistent_column");
+            }
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_create_index_on_nonexistent_quoted_column_gets_sqlite_hint() {
+        // quote.test 2.1.3: `CREATE INDEX i3 ON t1("w")` where `w` names no
+        // column -> `is_quoted: true` (set at parse time for a genuinely
+        // delimited identifier) must earn SQLite's "should this be a string
+        // literal in single-quotes?" hint (issue #6560).
+        let mut db = Database::new();
+        create_test_table(&mut db);
+
+        let stmt = CreateIndexStmt {
+            index_name: "idx_users_quoted_nonexistent".to_string(),
+            schema: None,
+            if_not_exists: false,
+            table_name: "users".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::Column {
+                column_name: "nonexistent_column".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+                collation: None,
+                is_quoted: true,
+            }],
+            where_clause: None,
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        match result {
+            Err(ExecutorError::NoSuchColumn { column_ref }) => {
+                assert_eq!(
+                    column_ref,
+                    "\"nonexistent_column\" - should this be a string literal in single-quotes?"
+                );
+            }
+            other => panic!("expected NoSuchColumn, got {other:?}"),
+        }
     }
 
     #[test]
@@ -378,6 +431,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -408,6 +462,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -425,6 +480,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -450,6 +506,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -518,6 +575,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         }
@@ -599,6 +657,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -683,6 +742,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -714,6 +774,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -742,6 +803,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -771,6 +833,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -801,12 +864,14 @@ mod tests {
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
                 IndexColumn::Column {
                     column_name: "id".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
             ],
             where_clause: None,
@@ -836,6 +901,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -915,6 +981,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -959,6 +1026,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -995,6 +1063,7 @@ mod tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };

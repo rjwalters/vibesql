@@ -1491,6 +1491,7 @@ mod tests {
                     order: SortOrder::Descending,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
             ],
             false, // not unique

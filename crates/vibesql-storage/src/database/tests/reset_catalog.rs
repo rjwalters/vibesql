@@ -46,6 +46,7 @@ fn test_reset_clears_catalog_and_indexes() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -97,6 +98,7 @@ fn test_reset_clears_catalog_and_indexes() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -237,6 +239,7 @@ fn test_reset_preserves_database_config() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -281,6 +284,7 @@ fn test_reset_multiple_tables_and_indexes() {
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 }],
             )
             .unwrap();

@@ -69,6 +69,7 @@ fn test_unique_index_basic_insert_enforcement() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -127,6 +128,7 @@ fn test_unique_index_null_values_allowed() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -188,12 +190,14 @@ fn test_unique_index_composite_key() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -280,12 +284,14 @@ fn test_unique_index_composite_with_null() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "last_name".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -336,6 +342,7 @@ fn test_unique_index_update_enforcement() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -405,6 +412,7 @@ fn test_unique_index_update_same_value_allowed() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -451,6 +459,7 @@ fn test_unique_index_update_to_different_value() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -500,6 +509,7 @@ fn test_unique_index_update_to_null() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -548,6 +558,7 @@ fn test_unique_index_multiple_indexes_on_table() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -561,6 +572,7 @@ fn test_unique_index_multiple_indexes_on_table() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

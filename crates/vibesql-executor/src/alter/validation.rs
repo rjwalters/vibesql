@@ -82,6 +82,85 @@ pub(super) fn index_references_column(index: &IndexMetadata, column: &str) -> bo
     index.where_clause.as_ref().is_some_and(|expr| expression_references_column(expr, column))
 }
 
+/// Whether `index`'s reference to `column` was written as a delimited
+/// identifier (double-quoted/backtick/bracket) in the original `CREATE
+/// INDEX` statement that defined `index` — either a directly quoted plain
+/// indexed column, or a quoted `ColumnIdentifier` matching `column` inside
+/// an expression/partial-index WHERE predicate.
+///
+/// Drives the "should this be a string literal in single-quotes?" hint on
+/// the `ALTER TABLE ... DROP COLUMN` dependent-index error
+/// (`error in index <name> after drop column: no such column: <col>`).
+/// Deliberately keyed on the INDEX's stored quoting bit from CREATE INDEX
+/// time (persisted on `IndexedColumn`/carried through the expression AST),
+/// never on anything about the column being dropped — quote.test 3.3 (index
+/// defined with a single-quoted alias `'b'`) must NOT get the hint even
+/// though the dropped column itself is later spelled `"b"` at CREATE TABLE
+/// time. See issue #6560.
+pub(super) fn index_reference_is_quoted(index: &IndexMetadata, column: &str) -> bool {
+    for indexed_col in &index.columns {
+        if let Some(name) = indexed_col.column_name() {
+            if name.eq_ignore_ascii_case(column) {
+                return indexed_col.is_quoted();
+            }
+        } else if let Some(expr) = indexed_col.get_expression() {
+            if let Some(quoted) = expression_column_quoted(expr, column) {
+                return quoted;
+            }
+        }
+    }
+    if let Some(expr) = index.where_clause.as_deref() {
+        if let Some(quoted) = expression_column_quoted(expr, column) {
+            return quoted;
+        }
+    }
+    false
+}
+
+/// Recursively search `expr` for a `ColumnIdentifier` matching the
+/// (unqualified) column `column`, comparing case-insensitively. Returns
+/// `Some(is_column_quoted)` for the first matching reference found, or
+/// `None` if `expr` contains no reference to `column`. Mirrors
+/// [`expression_references_column`]'s traversal shape but additionally
+/// reports the matched reference's quoting bit. See issue #6560.
+fn expression_column_quoted(expr: &Expression, column: &str) -> Option<bool> {
+    match expr {
+        Expression::ColumnRef(col_id) => col_id
+            .column_canonical()
+            .eq_ignore_ascii_case(column)
+            .then(|| col_id.is_column_quoted()),
+        Expression::BinaryOp { left, right, .. }
+        | Expression::IsDistinctFrom { left, right, .. } => expression_column_quoted(left, column)
+            .or_else(|| expression_column_quoted(right, column)),
+        Expression::Conjunction(children) | Expression::Disjunction(children) => {
+            children.iter().find_map(|c| expression_column_quoted(c, column))
+        }
+        Expression::UnaryOp { expr, .. }
+        | Expression::IsNull { expr, .. }
+        | Expression::IsTruthValue { expr, .. } => expression_column_quoted(expr, column),
+        Expression::Function { args, .. } => {
+            args.iter().find_map(|a| expression_column_quoted(a, column))
+        }
+        Expression::AggregateFunction { args, filter, .. } => args
+            .iter()
+            .find_map(|a| expression_column_quoted(a, column))
+            .or_else(|| filter.as_deref().and_then(|f| expression_column_quoted(f, column))),
+        Expression::Case { operand, when_clauses, else_result } => operand
+            .as_deref()
+            .and_then(|o| expression_column_quoted(o, column))
+            .or_else(|| {
+                when_clauses.iter().find_map(|w| {
+                    w.conditions
+                        .iter()
+                        .find_map(|c| expression_column_quoted(c, column))
+                        .or_else(|| expression_column_quoted(&w.result, column))
+                })
+            })
+            .or_else(|| else_result.as_deref().and_then(|e| expression_column_quoted(e, column))),
+        _ => None,
+    }
+}
+
 /// Recursively test whether `expr` contains a reference to the (unqualified)
 /// column `column`, comparing case-insensitively. Conservative: expression
 /// shapes not enumerated here return `false` (they cannot reference the column

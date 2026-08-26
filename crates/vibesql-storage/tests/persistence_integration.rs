@@ -628,6 +628,7 @@ fn test_index_data_populated_after_load() {
             direction: vibesql_ast::OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

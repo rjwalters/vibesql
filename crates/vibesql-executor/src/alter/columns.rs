@@ -473,9 +473,20 @@ pub(super) fn execute_drop_column(
     // by the UNIQUE check above and skipped here.
     for index in database.catalog.get_table_indexes(table_name) {
         if !is_auto_index(&index.name) && super::validation::index_references_column(index, col) {
+            // SQLite appends "- should this be a string literal in
+            // single-quotes?" when the index's ORIGINAL definition quoted
+            // this column reference (a delimited identifier, e.g. `CREATE
+            // INDEX x1 on t1("b")`) — never based on anything about the
+            // column being dropped (quote.test 3.0-3.2/3.4 vs. 3.3, issue
+            // #6560).
+            let column_ref = if super::validation::index_reference_is_quoted(index, col) {
+                format!("\"{}\" - should this be a string literal in single-quotes?", col)
+            } else {
+                col.to_string()
+            };
             return Err(ExecutorError::Other(format!(
                 "error in index {} after drop column: no such column: {}",
-                index.name, col
+                index.name, column_ref
             )));
         }
     }

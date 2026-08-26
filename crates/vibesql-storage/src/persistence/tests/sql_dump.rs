@@ -379,6 +379,7 @@ fn test_sql_dump_with_indexes() {
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
         collation: None,
+        is_quoted: false,
     };
     db.create_index("idx_name".to_string(), "test_indexes".to_string(), false, vec![idx1]).unwrap();
 
@@ -387,6 +388,7 @@ fn test_sql_dump_with_indexes() {
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
         collation: None,
+        is_quoted: false,
     };
     db.create_index("idx_email_unique".to_string(), "test_indexes".to_string(), true, vec![idx2])
         .unwrap();
@@ -445,12 +447,14 @@ fn test_sql_dump_index_quoted_identifiers_roundtrip() {
             direction: vibesql_ast::OrderDirection::Desc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         },
         vibesql_ast::IndexColumn::Column {
             column_name: "c".to_string(),
             direction: vibesql_ast::OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         },
     ];
     db.create_index("i3".to_string(), "t1'x1".to_string(), false, cols).unwrap();
@@ -508,6 +512,7 @@ fn test_sql_dump_preserves_index_name_case() {
         direction: vibesql_ast::OrderDirection::Asc,
         prefix_length: None,
         collation: None,
+        is_quoted: false,
     }];
     db.create_index("MyIdx".to_string(), "t".to_string(), false, cols1).unwrap();
 
@@ -519,12 +524,14 @@ fn test_sql_dump_preserves_index_name_case() {
             direction: vibesql_ast::OrderDirection::Desc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         },
         vibesql_ast::IndexColumn::Column {
             column_name: "c".to_string(),
             direction: vibesql_ast::OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         },
     ];
     db.create_index("x1 (b Asc, c Asc)".to_string(), "t".to_string(), false, cols2).unwrap();

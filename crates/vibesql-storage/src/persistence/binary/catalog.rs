@@ -221,6 +221,17 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                         None => write_bool(writer, false)?,
                     }
                 }
+
+                // v18+: per-key-part quoting bit, column-type parts only
+                // (issue #6560). Whether `column_name` was written as a
+                // delimited identifier in the original CREATE INDEX text —
+                // drives the "should this be a string literal in
+                // single-quotes?" hint on a later DROP COLUMN dependent-index
+                // error. Expression parts have no separate quoting bit; any
+                // quoting inside them round-trips through their SQL text.
+                if let IndexColumn::Column { is_quoted, .. } = col {
+                    write_bool(writer, *is_quoted)?;
+                }
             }
 
             // v8+: persist partial-index WHERE clause (if any). Catalog-side
@@ -752,11 +763,16 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                         } else {
                             None
                         };
+                        // v18+ appends a quoting bit after the collation field
+                        // (issue #6560); v17 and earlier omit it, so absence
+                        // defaults to "not quoted" (prior behavior).
+                        let is_quoted = if version >= 18 { read_bool(reader)? } else { false };
                         vibesql_ast::IndexColumn::Column {
                             column_name: content,
                             direction,
                             prefix_length: None,
                             collation,
+                            is_quoted,
                         }
                     }
                     1 => {
@@ -801,6 +817,7 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
                     direction,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 }
             };
 
@@ -1139,7 +1156,11 @@ fn convert_ast_columns_to_catalog(
                     vibesql_catalog::IndexedColumn::new_expression((**expr).clone(), order)
                 }
                 vibesql_ast::IndexColumn::Column {
-                    column_name, prefix_length, collation, ..
+                    column_name,
+                    prefix_length,
+                    collation,
+                    is_quoted,
+                    ..
                 } => {
                     if let Some(prefix) = prefix_length {
                         vibesql_catalog::IndexedColumn::new_column_with_prefix(
@@ -1148,9 +1169,11 @@ fn convert_ast_columns_to_catalog(
                             *prefix,
                         )
                         .with_collation(collation.clone())
+                        .with_quoted(*is_quoted)
                     } else {
                         vibesql_catalog::IndexedColumn::new_column(column_name.clone(), order)
                             .with_collation(collation.clone())
+                            .with_quoted(*is_quoted)
                     }
                 }
             }

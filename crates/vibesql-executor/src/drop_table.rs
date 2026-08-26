@@ -562,6 +562,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -578,6 +579,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -660,6 +662,7 @@ mod tests {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };

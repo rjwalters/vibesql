@@ -98,6 +98,16 @@ pub enum IndexedColumn {
         /// to `BINARY`). Reported verbatim (case-preserving, matching
         /// SQLite) by `PRAGMA index_xinfo`'s `coll` column — see issue #6175.
         collation: Option<String>,
+        /// Whether the column name was written as a delimited identifier
+        /// (double-quoted/backtick/bracket) in the original `CREATE INDEX`
+        /// statement that defined this index, e.g. `CREATE INDEX i3 ON
+        /// t1("w")`. Carried over from `vibesql_ast::IndexColumn` at index
+        /// creation and persisted with the index's catalog metadata so a
+        /// later `ALTER TABLE ... DROP COLUMN` dependent-index check can key
+        /// its "should this be a string literal in single-quotes?" hint on
+        /// how the index was *originally* defined — not on anything about the
+        /// column being dropped (issue #6560).
+        is_quoted: bool,
     },
     /// Expression index (functional index)
     /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
@@ -112,7 +122,13 @@ pub enum IndexedColumn {
 impl IndexedColumn {
     /// Create a new simple column index
     pub fn new_column(column_name: String, order: SortOrder) -> Self {
-        IndexedColumn::Column { column_name, order, prefix_length: None, collation: None }
+        IndexedColumn::Column {
+            column_name,
+            order,
+            prefix_length: None,
+            collation: None,
+            is_quoted: false,
+        }
     }
 
     /// Create a new column index with prefix length
@@ -126,6 +142,7 @@ impl IndexedColumn {
             order,
             prefix_length: Some(prefix_length),
             collation: None,
+            is_quoted: false,
         }
     }
 
@@ -134,6 +151,15 @@ impl IndexedColumn {
     pub fn with_collation(mut self, collation: Option<String>) -> Self {
         if let IndexedColumn::Column { collation: c, .. } = &mut self {
             *c = collation;
+        }
+        self
+    }
+
+    /// Attach the original-source quoting bit (builder-style chaining). A
+    /// no-op on an `Expression` column. See issue #6560.
+    pub fn with_quoted(mut self, is_quoted: bool) -> Self {
+        if let IndexedColumn::Column { is_quoted: q, .. } = &mut self {
+            *q = is_quoted;
         }
         self
     }
@@ -174,6 +200,17 @@ impl IndexedColumn {
         match self {
             IndexedColumn::Column { collation, .. } => collation.as_deref(),
             IndexedColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Whether this column was written as a delimited identifier
+    /// (double-quoted/backtick/bracket) in the `CREATE INDEX` statement that
+    /// defined this index. Always `false` for an `Expression` column. See
+    /// issue #6560.
+    pub fn is_quoted(&self) -> bool {
+        match self {
+            IndexedColumn::Column { is_quoted, .. } => *is_quoted,
+            IndexedColumn::Expression { .. } => false,
         }
     }
 

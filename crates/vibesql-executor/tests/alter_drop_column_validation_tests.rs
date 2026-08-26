@@ -124,6 +124,53 @@ fn drop_column_referenced_by_plain_index_is_rejected() {
     );
 }
 
+/// quote.test 3.0: a plain index created against a *delimited* identifier
+/// (`CREATE INDEX x1 on t1("b")`) earns SQLite's "should this be a string
+/// literal in single-quotes?" hint on the DROP-COLUMN dependent-index error
+/// (issue #6560). Contrast with `drop_column_referenced_by_plain_index_is_rejected`
+/// above, whose unquoted `t2(y)` reference gets no hint.
+#[test]
+fn drop_column_referenced_by_quoted_plain_index_gets_sqlite_hint() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a,b)");
+    create_index(&mut db, "CREATE INDEX x1 on t1(\"b\")");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE t1 DROP COLUMN b"),
+        "error in index x1 after drop column: no such column: \"b\" - should this be a string literal in single-quotes?"
+    );
+}
+
+/// quote.test 3.3 (negative control): the hint is keyed on how the INDEX's
+/// own `CREATE INDEX` text referenced the column, never on how the dropped
+/// column itself was declared. Here the index instead uses a single-quoted
+/// alias (`'b'`, SQLite's "string as identifier" fallback quirk, which is
+/// NOT a delimited identifier) even though the table column was declared
+/// with double quotes -- so no hint.
+#[test]
+fn drop_column_referenced_by_single_quoted_alias_index_gets_no_hint() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a,\"b\")");
+    create_index(&mut db, "CREATE INDEX x1 on t1('b')");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE t1 DROP COLUMN b"),
+        "error in index x1 after drop column: no such column: b"
+    );
+}
+
+/// quote.test 3.4: the quoting bit also drives the hint when the dropped
+/// column is referenced inside an *expression* index (`"a"||"b"`), not just
+/// a direct column reference.
+#[test]
+fn drop_column_referenced_by_quoted_expression_index_gets_sqlite_hint() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a, b, c)");
+    create_index(&mut db, "CREATE INDEX x1 ON t1(\"a\"||\"b\")");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE t1 DROP COLUMN b"),
+        "error in index x1 after drop column: no such column: \"b\" - should this be a string literal in single-quotes?"
+    );
+}
+
 #[test]
 fn drop_column_referenced_by_expression_index_is_rejected() {
     let mut db = Database::new();

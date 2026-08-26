@@ -186,6 +186,7 @@ impl Parser {
         self.expect_token(Token::LParen)?;
 
         // Parse column name
+        let column_is_quoted = matches!(self.peek(), Token::DelimitedIdentifier(_));
         let column_name = self.parse_column_name()?;
 
         // Parse optional operator class (vector_l2_ops, vector_cosine_ops, vector_ip_ops)
@@ -265,6 +266,7 @@ impl Parser {
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
             collation: None,
+            is_quoted: column_is_quoted,
         }];
 
         Ok(vibesql_ast::CreateIndexStmt {
@@ -293,6 +295,7 @@ impl Parser {
         self.expect_token(Token::LParen)?;
 
         // Parse column name
+        let column_is_quoted = matches!(self.peek(), Token::DelimitedIdentifier(_));
         let column_name = self.parse_column_name()?;
 
         // Parse optional operator class (vector_l2_ops, vector_cosine_ops, vector_ip_ops)
@@ -393,6 +396,7 @@ impl Parser {
             direction: vibesql_ast::OrderDirection::Asc, // Not meaningful for vector indexes
             prefix_length: None,
             collation: None,
+            is_quoted: column_is_quoted,
         }];
 
         Ok(vibesql_ast::CreateIndexStmt {
@@ -539,6 +543,15 @@ impl Parser {
                 // Parse column name (use parse_alias_name to allow SQLite-style single-quoted
                 // identifiers)
                 // SQLite allows: CREATE INDEX i1xy ON t1(`x`,'y' ASC); -- 'y' is a column name
+                //
+                // Record whether the name was a genuinely delimited identifier
+                // (double-quote/backtick/bracket) as opposed to a plain
+                // unquoted name or a single-quoted string used as an
+                // identifier (SQLite's "string as identifier" fallback quirk).
+                // Only the former earns the "should this be a string literal
+                // in single-quotes?" hint on a later "no such column" error
+                // (quote.test 2.1.3, 3.0-3.2/3.4 vs. 3.3 — issue #6560).
+                let column_is_quoted = matches!(self.peek(), Token::DelimitedIdentifier(_));
                 let column_name = self.parse_alias_name()?;
 
                 // Check if this is actually an expression (has an operator after identifier)
@@ -713,6 +726,7 @@ impl Parser {
                     direction,
                     prefix_length,
                     collation,
+                    is_quoted: column_is_quoted,
                 });
             }
 

@@ -99,6 +99,7 @@ fn test_index_scan_with_email_index() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -138,6 +139,7 @@ fn test_index_scan_with_age_index() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -205,6 +207,7 @@ fn test_index_scan_with_comparison_operator() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -250,6 +253,7 @@ fn test_index_scan_with_and_condition() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -284,6 +288,7 @@ fn test_unique_index_enforcement() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     );
 
@@ -344,6 +349,7 @@ fn test_index_scan_where_order_by_no_double_filtering() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

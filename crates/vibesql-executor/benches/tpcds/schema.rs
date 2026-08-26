@@ -4560,6 +4560,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4573,6 +4574,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4586,6 +4588,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4599,6 +4602,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4612,6 +4616,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4625,6 +4630,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4640,12 +4646,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "ss_ticket_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4661,6 +4669,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4674,6 +4683,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4687,6 +4697,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4701,6 +4712,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4714,6 +4726,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4727,6 +4740,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4740,6 +4754,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4755,12 +4770,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "sr_ticket_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4775,6 +4792,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4788,6 +4806,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4802,6 +4821,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4815,6 +4835,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4828,6 +4849,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4843,12 +4865,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "cs_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4863,6 +4887,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4876,6 +4901,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4891,12 +4917,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "cr_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4911,6 +4939,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4926,12 +4955,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "ws_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4946,6 +4977,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4959,6 +4991,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -4974,12 +5007,14 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "wr_order_number".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -4994,6 +5029,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -5008,6 +5044,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -5022,6 +5059,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -5036,6 +5074,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -5050,6 +5089,7 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -5065,18 +5105,21 @@ fn create_tpcds_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "inv_item_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "inv_warehouse_sk".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )

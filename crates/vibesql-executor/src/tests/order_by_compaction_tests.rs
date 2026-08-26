@@ -156,6 +156,7 @@ fn test_order_by_secondary_index_after_compaction_5524() {
             prefix_length: None,
             direction: vibesql_ast::OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

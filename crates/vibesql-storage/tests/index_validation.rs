@@ -132,6 +132,7 @@ mod adaptive_backend_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 
@@ -176,6 +177,7 @@ mod adaptive_backend_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -189,6 +191,7 @@ mod adaptive_backend_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -202,6 +205,7 @@ mod adaptive_backend_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -242,6 +246,7 @@ mod correctness_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 
@@ -289,6 +294,7 @@ mod correctness_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 
@@ -330,6 +336,7 @@ mod correctness_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 
@@ -392,12 +399,14 @@ mod correctness_tests {
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
                 IndexColumn::Column {
                     column_name: "first_name".to_string(),
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 },
             ],
         );
@@ -444,6 +453,7 @@ mod correctness_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -499,6 +509,7 @@ mod persistence_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 
@@ -526,6 +537,7 @@ mod persistence_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -564,6 +576,7 @@ mod index_operations_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -602,6 +615,7 @@ mod index_operations_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -615,6 +629,7 @@ mod index_operations_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -656,6 +671,7 @@ mod index_operations_tests {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         );
 

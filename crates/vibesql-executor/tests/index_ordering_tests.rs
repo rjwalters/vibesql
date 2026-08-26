@@ -95,6 +95,7 @@ fn test_index_ordering() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         where_clause: None,
     };
