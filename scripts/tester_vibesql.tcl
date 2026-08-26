@@ -7024,7 +7024,36 @@ array set vibesql_skip_tests {
 #     writable_schema=1`; VibeSQL does not reload the live table layout from
 #     that, so alter2-1.3/1.4../1.10, 3.4, 3.6, 7.3, 7.4, 8.2, 8.3, 9.2,
 #     10.2../10.4 fail with "no such column: ...". A real in-scope engine gap.
-#   * Bucket 4 (#6596) — alter-1.2/1.6/2.3 schema-state mismatches.
+#   * Bucket 4 (#6596): alter-1.2/1.6/2.3 originally failed as wholesale
+#     schema-state mismatches (index loss across RENAME + reload). #6599 and
+#     #6608 fixed tbl_name retargeting and exact-case survival, and #6607
+#     fixed implicit `sqlite_autoindex_<table>_<n>` name regeneration on
+#     RENAME — alter-1.2 and alter-2.3 now PASS unskipped. Only alter-1.6
+#     remains, and its residual diff is no longer a schema-state mismatch: it
+#     is `TempTab`/`objlist` (both TEMP tables) leaking into the persistent
+#     `sqlite_master` listing after this test's `db close; sqlite3 db
+#     test.db` simulated reconnect. Root-caused to this shim's own
+#     TEMP-TABLE-emulation strategy (`strip_temp_table_keyword`, above): it
+#     demotes `CREATE TEMP TABLE` to a genuinely persistent `CREATE TABLE`
+#     (permanently, for the rest of the file — see `::temp_demoted_names`),
+#     which has no way to distinguish a real `db close`/reconnect boundary
+#     from an ordinary same-connection batch, so a demoted name never goes
+#     away the way a real TEMP table would on reconnect. Confirmed
+#     non-regressive at the engine level: `Database` save/reload round-trips
+#     (this repo's closest analogue to a fresh connection) correctly drop
+#     every TEMP table, including a renamed one — see
+#     `temp_table_does_not_leak_into_sqlite_master_after_binary_reload` in
+#     `crates/vibesql-executor/tests/alter_rename_table_index_tests.rs`. NOT
+#     skip-listed here: alter-1.6 populates the `$DB` API-pointer variable
+#     (`stepsql`) and the TEMP `objlist` table that the very next test,
+#     alter-1.7, reuses — skipping alter-1.6 would strand alter-1.7 (an
+#     unrelated, currently-PASSING RENAME assertion) with no `$DB`/`objlist`,
+#     the same cascade-avoidance reasoning as the alter-3.3.3 note above.
+#     Fixing this at the shim level (making `db close` a real reset point for
+#     `::temp_demoted_names`) is a materially larger, cross-cutting change to
+#     the TCL-shim's TEMP-table emulation than this file's other harness
+#     skips — tracked separately as #6609 rather than folded into #6607.
+#     Part of #6574.
 #   * Bucket 5 (#6597) — alter-6.2../6.6 identifier-escaping failures.
 #   * alter2-4.3/4.5 ("invalid command name sqlite3_errcode") and alter2-4.4
 #     (expects "unsupported file format" from the format-5 image alter2-4.1

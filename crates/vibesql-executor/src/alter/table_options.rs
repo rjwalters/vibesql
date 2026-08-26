@@ -12,6 +12,40 @@ use crate::{
     },
 };
 
+/// If `index_name` is an implicit SQLite autoindex name minted for
+/// `old_table_name` (`sqlite_autoindex_<old_table_name>_<n>`, where `<n>` is
+/// the ordinal `create_implicit_indexes`
+/// (`crates/vibesql-executor/src/create_table.rs`) assigned at CREATE TABLE
+/// time), returns the name it should carry after the owning table is renamed
+/// to `new_table_name` — `sqlite_autoindex_<new_table_name>_<n>` — preserving
+/// the ordinal.
+///
+/// SQLite's `sqlite_rename_table` regenerates these implicit index names on
+/// `ALTER TABLE ... RENAME TO ...` in addition to retargeting `tbl_name`,
+/// since an implicit index's own name embeds the table's identity at the
+/// point its PRIMARY KEY/UNIQUE constraint was minted (issue #6607). An
+/// explicit, user-named index (`CREATE INDEX i ON t(...)`, or a `WITHOUT
+/// ROWID` PK's internal name — see `WITHOUT_ROWID_PK_INDEX_PREFIX`) is left
+/// untouched by RENAME in both SQLite and here, so this only matches the
+/// exact `sqlite_autoindex_<old_table_name>_<digits>` shape — a
+/// coincidentally-prefixed user index name (e.g. one explicitly named
+/// `sqlite_autoindex_<old_table_name>_1` — which SQLite itself would reject
+/// at CREATE INDEX time as a reserved name, but VibeSQL may not) is
+/// indistinguishable from a real implicit one by name alone and is treated
+/// the same way, matching the only signal available post-hoc.
+fn renamed_autoindex_name(
+    index_name: &str,
+    old_table_name: &str,
+    new_table_name: &str,
+) -> Option<String> {
+    let prefix = format!("sqlite_autoindex_{old_table_name}_");
+    let ordinal = index_name.strip_prefix(&prefix)?;
+    if ordinal.is_empty() || !ordinal.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(format!("sqlite_autoindex_{new_table_name}_{ordinal}"))
+}
+
 /// Execute RENAME TABLE
 pub(super) fn execute_rename_table(
     stmt: &RenameTableStmt,
@@ -48,12 +82,34 @@ pub(super) fn execute_rename_table(
     // over to the new name; otherwise the renamed table would silently land
     // in the *current* schema (typically `main`) instead of staying in
     // `aux` (issue #6504).
+    //
+    // An *unqualified* `stmt.table_name` needs the same treatment when it
+    // resolves — via the catalog's ordinary shadowing order (session temp
+    // schema shadows main, which shadows each ATTACHed database;
+    // #5505/#6310) — to some schema OTHER than the current schema: e.g.
+    // `ALTER TABLE <temp_table_name> RENAME TO ...` with no explicit `temp.`
+    // qualifier (the common form, since "temp" shadows "main" for
+    // unqualified lookups). Without this, the rebuild below targets the
+    // *current* schema (`main`) instead of the table's actual (temp) schema —
+    // silently promoting a session-scoped TEMP table into a persistent one on
+    // RENAME (issue #6607, gap 2). Gated on "differs from current schema" so
+    // the overwhelmingly common case — an unqualified rename of an ordinary
+    // main-schema table, which already resolves to the current schema — is
+    // completely unaffected and keeps producing the same bare (unqualified)
+    // `qualified_new_table_name`/error-message text as before this fix.
     let schema_qualifier = stmt.table_name.split_once('.').map(|(schema, _)| schema.to_string());
-    let new_table_identifier = match &schema_qualifier {
+    let resolved_schema_qualifier: Option<String> = match &schema_qualifier {
+        Some(schema) => Some(schema.clone()),
+        None => database
+            .catalog
+            .resolve_table_schema_name(&stmt.table_name)
+            .filter(|resolved| resolved != database.catalog.get_current_schema()),
+    };
+    let new_table_identifier = match &resolved_schema_qualifier {
         Some(schema) => TableIdentifier::qualified(schema, false, &stmt.new_table_name, false),
         None => TableIdentifier::new(&stmt.new_table_name, false),
     };
-    let qualified_new_table_name = match &schema_qualifier {
+    let qualified_new_table_name = match &resolved_schema_qualifier {
         Some(schema) => format!("{schema}.{}", stmt.new_table_name),
         None => stmt.new_table_name.clone(),
     };
@@ -64,14 +120,15 @@ pub(super) fn execute_rename_table(
     // `sqlite_master` like a fresh CREATE TABLE instead of keeping its
     // original position, unlike real SQLite (fkey2-14.2.2.2, #6170). Resolves
     // the same schema namespace `create_table_with_identifier` will target for
-    // the new name below: the explicit qualifier if `stmt.table_name` carried
-    // one, else the catalog's current schema.
-    let rename_seq_schema: String = match &schema_qualifier {
+    // the new name below: the schema resolved above, or the catalog's current
+    // schema when unqualified resolution landed on it (or came up empty; the
+    // pre-existing not-found error is raised a few lines below regardless).
+    let rename_seq_schema: String = match &resolved_schema_qualifier {
         Some(schema) => schema.clone(),
         None => database.catalog.get_current_schema().to_string(),
     };
-    let rename_seq_old_bare_name: &str = match &schema_qualifier {
-        Some(_) => stmt.table_name.split_once('.').map(|(_, t)| t).unwrap_or(&stmt.table_name),
+    let rename_seq_old_bare_name: &str = match stmt.table_name.split_once('.') {
+        Some((_, bare)) => bare,
         None => stmt.table_name.as_str(),
     };
     let old_creation_seq =
@@ -91,6 +148,15 @@ pub(super) fn execute_rename_table(
     let old_table = database
         .get_table(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
+
+    // The table's own bare (unqualified, exact-case) name as it was created —
+    // this is exactly the text `create_implicit_indexes`
+    // (`crates/vibesql-executor/src/create_table.rs`) embedded when minting
+    // any `sqlite_autoindex_<table>_<n>` name for this table's implicit
+    // PRIMARY KEY/UNIQUE indexes. Captured before the drop+create below so
+    // `renamed_autoindex_name` can recognize and retarget those implicit
+    // names onto the new table identity (issue #6607, gap 1).
+    let old_table_bare_name = old_table.schema.name.clone();
 
     // Clone the table and update its schema name
     let mut new_table = old_table.clone();
@@ -166,7 +232,24 @@ pub(super) fn execute_rename_table(
             (idx, seq)
         })
         .collect();
-    let physical_indexes_on_renamed_table = database.take_indexes_for_table(&stmt.table_name);
+    let mut physical_indexes_on_renamed_table = database.take_indexes_for_table(&stmt.table_name);
+    // Regenerate implicit `sqlite_autoindex_<table>_<n>` names to match the new
+    // table identity, mirroring SQLite's `sqlite_rename_table` (issue #6607,
+    // gap 1). Only implicit autoindex names minted for the *old* table name
+    // are eligible — an explicit, user-named index survives RENAME under its
+    // original name in both SQLite and here. The physical body's `index_name`
+    // is the storage key `restore_indexes_for_table` re-inserts under below,
+    // so renaming it here (rather than after) is what actually moves the
+    // index to its new key instead of just retargeting `table_name`.
+    for (index_meta, _) in physical_indexes_on_renamed_table.iter_mut() {
+        if let Some(new_name) = renamed_autoindex_name(
+            &index_meta.index_name,
+            &old_table_bare_name,
+            &stmt.new_table_name,
+        ) {
+            index_meta.index_name = new_name;
+        }
+    }
 
     // Drop old table and create new one with the renamed schema
     // This handles spatial indexes via CASCADE (regular/UNIQUE indexes were
@@ -193,6 +276,17 @@ pub(super) fn execute_rename_table(
     database.restore_indexes_for_table(physical_indexes_on_renamed_table, &stmt.new_table_name);
     for (mut index_meta, seq) in indexes_on_renamed_table {
         index_meta.table_name = stmt.new_table_name.clone();
+        // Mirror the physical-index rename above: an implicit
+        // `sqlite_autoindex_<table>_<n>` catalog name is retargeted onto the
+        // new table identity so `sqlite_master`/introspection reports the
+        // same name SQLite would after RENAME (issue #6607, gap 1). Must stay
+        // in sync with the physical rename so the catalog's `name` and the
+        // physical storage's `index_name` key never diverge.
+        if let Some(new_name) =
+            renamed_autoindex_name(&index_meta.name, &old_table_bare_name, &stmt.new_table_name)
+        {
+            index_meta.name = new_name;
+        }
         let index_schema = index_meta.schema.clone();
         let index_name = index_meta.name.clone();
         // The physical body was already restored above; a re-add failure

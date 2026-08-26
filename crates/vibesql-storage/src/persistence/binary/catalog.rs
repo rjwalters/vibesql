@@ -183,7 +183,17 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
 
     for index_name in index_names {
         if let Some(metadata) = db.get_index(&index_name) {
-            write_string(writer, &index_name)?;
+            // Emit the index name with its original case, mirroring the
+            // SQL-dump persistence path's `quote_identifier(&metadata.index_name)`
+            // (issue #5579). `index_name` here is `IndexManager`'s *storage
+            // key*, which `make_index_key` normalizes to lowercase for a
+            // main-schema index (issue #5540) — writing it directly silently
+            // lowercased every index name (including a table's implicit
+            // `sqlite_autoindex_*` names retargeted by `ALTER TABLE ... RENAME
+            // TO ...`, issue #6607) across a binary save/reload cycle.
+            // `metadata.index_name` is the exact-case name `create_index`
+            // stored in the VALUE (not the key), so it survives the round trip.
+            write_string(writer, &metadata.index_name)?;
             write_string(writer, &metadata.table_name)?;
             write_bool(writer, metadata.unique)?;
 
