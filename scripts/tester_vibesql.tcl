@@ -11624,6 +11624,22 @@ proc run_test_file {filename} {
         sqlite3 db $unique_db
     "
     regsub {source \$testdir/tester\.tcl} $content $tester_vars content
+    # unhex.test is the sole file in the suite (of 1174) that spells the
+    # tester.tcl source line as `source [file join $testdir tester.tcl]`
+    # instead of the common `source $testdir/tester.tcl` idiom above, so it
+    # slips past that regsub untouched and genuinely sources SQLite's real
+    # 2600+-line tester.tcl. That file's own do_test/do_execsql_test/
+    # finish_test definitions (and everything else this shim substitutes)
+    # would silently clobber ours if it loaded successfully — but it doesn't
+    # even get that far: line 102 unconditionally calls
+    # `sqlite3_test_control_pending_byte`, a real-testfixture C command this
+    # shim never stubbed (only the generic `sqlite3_test_control` is stubbed),
+    # so it aborts immediately with "invalid command name" and the
+    # eval_file_resilient per-command recovery records it as
+    # unhex-filescope-err.1 before any of the file's own tests run (#6172).
+    # Catch this alternate idiom the same way as the common one, substituting
+    # the same $tester_vars block so the file never reaches real tester.tcl.
+    regsub {source \[file join \$testdir tester\.tcl\]} $content $tester_vars content
 
     # Execute the modified content at GLOBAL level, but command-by-command so
     # that ONE bad file-scope statement does not truncate the whole file.
