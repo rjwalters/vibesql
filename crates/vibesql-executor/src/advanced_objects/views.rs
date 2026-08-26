@@ -88,19 +88,31 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                 // (`Catalog::scoped_unqualified_resolution_restriction`,
                 // trigger_execution.rs, #6477) rather than reinventing it.
                 //
+                // "TEMP view" here means *effectively* homed in the temp
+                // schema, not merely spelled with the `TEMP`/`TEMPORARY`
+                // keyword: `CREATE VIEW temp.v AS ...` (dot-qualified into
+                // the temp schema, no `TEMP` keyword — `stmt.temporary` is
+                // `false`) is exactly as much a temp view as `CREATE TEMP
+                // VIEW v AS ...`, and its body must get the same
+                // temp-shadows-main fallback rather than being hard-scoped to
+                // temp-only (which made a temp view over an ordinary `main`
+                // table fail to resolve that table at all — altercol.test
+                // 16.2.1/16.2.3, verified against sqlite3 3.51.0).
+                //
                 // The restriction is thread-local and established through an
                 // RAII guard, so concurrent executions never share it and the
                 // previous value is restored even on the early `return Err`
                 // paths in the `match` below (#6506).
-                let restriction = if stmt.temporary {
-                    None
-                } else {
-                    let owning_schema = schema
-                        .as_deref()
-                        .map(|s| db.catalog.canonical_schema_name(s))
-                        .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
-                    Some(owning_schema)
-                };
+                let owning_schema = schema
+                    .as_deref()
+                    .map(|s| db.catalog.canonical_schema_name(s))
+                    .unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+                let restriction =
+                    if stmt.temporary || owning_schema == db.catalog.temp_schema_name() {
+                        None
+                    } else {
+                        Some(owning_schema)
+                    };
                 let restriction_guard =
                     db.catalog.scoped_unqualified_resolution_restriction(restriction);
                 let executor = SelectExecutor::new(db);

@@ -148,6 +148,7 @@ mod select_without_from;
 mod set_operations_associativity;
 mod sql_mode_tests;
 mod subquery_mysql_compat;
+mod temp_qualified_view_resolution_tests;
 mod timeout_enforcement;
 mod transaction_tests;
 mod trigger_body_name_resolution_tests;
