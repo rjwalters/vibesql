@@ -913,6 +913,7 @@ fn try_index_optimized_in_subquery(
         // Strategy 1: Use index scan with predicate pushdown
         use crate::select::scan::index_scan::predicate::{
             coerce_index_predicate_for_affinity, extract_index_predicate,
+            index_predicate_needs_exact_reverification,
         };
 
         // Try to extract index predicate (range or IN)
@@ -924,6 +925,18 @@ fn try_index_optimized_in_subquery(
         let index_pred = extract_index_predicate(where_expr, column_name);
         let index_pred =
             coerce_index_predicate_for_affinity(index_pred, column_name, &table.schema);
+
+        // Issue #6586: an out-of-f64-precision literal makes the storage-layer
+        // probe a candidate *superset* (index keys are lossily normalized to
+        // `Double`, so a rounded literal can collide with a differently-valued
+        // stored key). Unlike `execute_index_scan`, this path has no WHERE
+        // post-filter to re-verify candidates against the rows' original
+        // values, so the only correct move is to decline the index
+        // optimization and let the caller evaluate the subquery normally.
+        if index_pred.as_ref().is_some_and(index_predicate_needs_exact_reverification) {
+            return Ok(None);
+        }
+
         if let Some(index_pred) = index_pred {
             // Get row indices using index predicate
             let row_indices: Vec<usize> = match index_pred {

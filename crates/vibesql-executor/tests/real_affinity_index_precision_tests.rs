@@ -481,3 +481,93 @@ fn covering_index_plan_is_selected_for_out_of_precision_range_predicate() {
          from index columns a, b), got:\n{output}"
     );
 }
+
+// ===========================================================================
+// Issue #6586: equality / IN-list point-lookup false-equality
+// ===========================================================================
+
+/// Primary repro from issue #6586: `c0 = 3175546974276630385` on a
+/// REAL-affinity UNIQUE-indexed column must return **no** rows, matching the
+/// general (unindexed) evaluator, which correctly reports the comparison as
+/// false because the stored REAL rounded up to 3175546974276630528.
+#[test]
+fn indexed_equality_matches_unindexed_for_out_of_precision_literal() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t0(c0 REAL UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t0(c0) VALUES (3175546974276630385)").unwrap();
+
+    // Sanity: the general evaluator says the values are NOT equal.
+    let eval_rows = select_rows(&db, "SELECT c0 = 3175546974276630385 FROM t0");
+    assert_eq!(eval_rows.len(), 1);
+    assert_eq!(eval_rows[0].get(0).unwrap(), &vibesql_types::SqlValue::Boolean(false));
+
+    let where_rows = select_rows(&db, "SELECT 1 FROM t0 WHERE c0 = 3175546974276630385");
+    assert_eq!(
+        where_rows.len(),
+        0,
+        "indexed equality probe must not falsely match a row whose exact value differs"
+    );
+}
+
+/// IN-list variant of the same repro (`multi_lookup` probe path).
+#[test]
+fn indexed_in_list_matches_unindexed_for_out_of_precision_literal() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t0(c0 REAL UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t0(c0) VALUES (3175546974276630385)").unwrap();
+
+    let where_rows = select_rows(&db, "SELECT 1 FROM t0 WHERE c0 IN (3175546974276630385)");
+    assert_eq!(where_rows.len(), 0, "indexed IN-list probe must not falsely match");
+
+    // Multi-element IN list exercises the dedup + multi-key path.
+    let multi = select_rows(&db, "SELECT 1 FROM t0 WHERE c0 IN (1, 3175546974276630385, 2)");
+    assert_eq!(multi.len(), 0, "indexed multi-value IN-list probe must not falsely match");
+}
+
+/// Positive control: probing with the *exact* stored REAL value must still
+/// find the row through both the equality and IN-list index paths.
+#[test]
+fn indexed_equality_still_matches_exact_real_value() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t0(c0 REAL UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t0(c0) VALUES (3175546974276630385)").unwrap();
+
+    // 3175546974276630528 is the f64 the INTEGER literal rounds to, so it is
+    // the exact stored REAL value and must match.
+    let eq = select_rows(&db, "SELECT 1 FROM t0 WHERE c0 = 3175546974276630528");
+    assert_eq!(eq.len(), 1, "equality against the exact stored value must still match");
+
+    let in_list = select_rows(&db, "SELECT 1 FROM t0 WHERE c0 IN (3175546974276630528)");
+    assert_eq!(in_list.len(), 1, "IN-list against the exact stored value must still match");
+}
+
+/// No false *negatives*: an INTEGER-affinity column storing an
+/// out-of-f64-precision integer must still be found by an exact equality /
+/// IN-list probe with that same integer literal.
+#[test]
+fn indexed_equality_on_integer_column_still_matches_huge_integer() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t2(c0 INTEGER UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t2(c0) VALUES (3175546974276630385)").unwrap();
+
+    let eq = select_rows(&db, "SELECT 1 FROM t2 WHERE c0 = 3175546974276630385");
+    assert_eq!(eq.len(), 1, "INTEGER column must still match its own exact value");
+
+    let in_list = select_rows(&db, "SELECT 1 FROM t2 WHERE c0 IN (3175546974276630385)");
+    assert_eq!(in_list.len(), 1, "INTEGER column IN-list must still match its own exact value");
+}
+
+/// Small-magnitude values (well inside f64 safe-integer range) are unaffected
+/// by the exact re-verification and must keep matching through both paths.
+#[test]
+fn indexed_equality_unaffected_for_in_precision_values() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t3(c0 REAL UNIQUE)").unwrap();
+    exec(&mut db, "INSERT INTO t3(c0) VALUES (42)").unwrap();
+    exec(&mut db, "INSERT INTO t3(c0) VALUES (2.5)").unwrap();
+
+    assert_eq!(select_rows(&db, "SELECT 1 FROM t3 WHERE c0 = 42").len(), 1);
+    assert_eq!(select_rows(&db, "SELECT 1 FROM t3 WHERE c0 = 2.5").len(), 1);
+    assert_eq!(select_rows(&db, "SELECT 1 FROM t3 WHERE c0 IN (42, 2.5)").len(), 2);
+    assert_eq!(select_rows(&db, "SELECT 1 FROM t3 WHERE c0 = 43").len(), 0);
+}

@@ -17,5 +17,8 @@ pub use sql_mode::{
     types::{TypeBehavior, ValueType},
     ConcatOperator, DivisionBehavior, MySqlModeFlags, OperatorBehavior, SqlMode,
 };
-pub use sql_value::{total_order_cmp, SqlValue, StringValue};
+pub use sql_value::{
+    exact_mixed_numeric_cmp, exceeds_f64_exact_integer_range, total_order_cmp, SqlValue,
+    StringValue,
+};
 pub use temporal::{Date, Interval, IntervalField, Time, Timestamp};

@@ -13,9 +13,9 @@ use super::predicate::{
     coerce_prefix_result_for_affinity, coerce_prefix_with_range_result_for_affinity,
     extract_composite_predicates_with_in, extract_index_predicate_for_indexed_column,
     extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
-    generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
-    where_clause_fully_satisfied_by_indexed_column, CompositePredicateType, IndexPredicate,
-    PrefixPredicateResult, PrefixWithRangeResult,
+    generate_composite_keys, index_predicate_needs_exact_reverification,
+    where_clause_fully_satisfied_by_composite_key, where_clause_fully_satisfied_by_indexed_column,
+    CompositePredicateType, IndexPredicate, PrefixPredicateResult, PrefixWithRangeResult,
 };
 use crate::{
     errors::ExecutorError, optimizer::PredicatePlan, schema::CombinedSchema, select::cte::CteResult,
@@ -37,6 +37,51 @@ fn column_has_nonbinary_collation(schema: &vibesql_catalog::TableSchema, col_nam
         .find(|c| c.name.eq_ignore_ascii_case(col_name))
         .and_then(|c| c.collation.as_deref())
         .is_some_and(|coll| !coll.eq_ignore_ascii_case("binary"))
+}
+
+/// Issue #6586: an index probe compares the *normalized* key
+/// (`normalize_for_comparison`'s lossy `as f64` cast), so a probe literal
+/// outside f64's exact-integer range can collide with a stored key whose true
+/// value is different — an equality/IN-list probe then reports a match that
+/// the general (exact) expression evaluator correctly calls false.
+///
+/// Return true when **any** literal this scan will push into the index has
+/// that property, for whichever probe shape was selected. Callers treat a
+/// true result as "the index answer is a candidate superset" and force the
+/// general WHERE evaluator to re-verify each candidate row against its
+/// original stored column values (see `point_probe_needs_exact_reverification`).
+///
+/// The probe never under-returns (the same lossy cast is applied to the stored
+/// value at insert time and to the literal at probe time, so a genuinely equal
+/// value always normalizes onto the same key), which is what makes a
+/// post-filter a complete fix rather than a partial one.
+fn index_probe_needs_exact_reverification(
+    composite_keys: Option<&Vec<Vec<vibesql_types::SqlValue>>>,
+    prefix_with_range: Option<&PrefixWithRangeResult>,
+    prefix: Option<&PrefixPredicateResult>,
+    index_predicate: Option<&IndexPredicate>,
+) -> bool {
+    use vibesql_storage::database::indexes::point_probe_needs_exact_reverification as lossy;
+
+    if let Some(keys) = composite_keys {
+        if keys.iter().flatten().any(lossy) {
+            return true;
+        }
+    }
+    if let Some(pr) = prefix_with_range {
+        if pr.prefix_key.iter().any(lossy)
+            || pr.lower_bound.as_ref().is_some_and(lossy)
+            || pr.upper_bound.as_ref().is_some_and(lossy)
+        {
+            return true;
+        }
+    }
+    if let Some(p) = prefix {
+        if p.prefix_key.iter().any(lossy) {
+            return true;
+        }
+    }
+    index_predicate.is_some_and(index_predicate_needs_exact_reverification)
 }
 
 /// Execute an index scan
@@ -320,6 +365,29 @@ pub(crate) fn execute_index_scan(
             (Some(where_expr), Some(_), None) => (true, Some((*where_expr).clone())), /* No indexed column found */
             (None, _, _) => (false, None), // No WHERE clause
         }
+    };
+
+    // Issue #6586: if any literal pushed into the index is outside f64's
+    // exact-integer range, the storage-layer probe answered with a *candidate*
+    // set rather than an exact one (its BTreeMap keys are lossily normalized,
+    // so a rounded literal can collide with a differently-valued stored key).
+    // Widen back to the full WHERE clause and let the general evaluator —
+    // which compares the row's *original* stored value with exact
+    // integer-vs-float semantics — re-verify every candidate. This costs an
+    // extra filter pass only for the rare out-of-precision literal; every
+    // ordinary probe keeps its index-satisfies-WHERE fast path untouched.
+    let (need_where_filter, effective_where) = match where_clause {
+        Some(where_expr)
+            if index_probe_needs_exact_reverification(
+                composite_keys.as_ref(),
+                prefix_with_range_result.as_ref(),
+                prefix_result.as_ref(),
+                index_predicate.as_ref(),
+            ) =>
+        {
+            (true, Some((*where_expr).clone()))
+        }
+        _ => (need_where_filter, effective_where),
     };
 
     // ==========================================================================

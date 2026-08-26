@@ -52,6 +52,26 @@ pub(crate) enum IndexPredicate {
     In(Vec<SqlValue>),
 }
 
+/// Issue #6586: true when any literal in this predicate is outside f64's
+/// exact-integer range, so the storage-layer probe it drives can only answer
+/// with a *candidate superset* (the index's BTreeMap keys are lossily
+/// normalized to `Double`, so a rounded literal can collide with a
+/// differently-valued stored key).
+///
+/// Callers must either re-verify each candidate row against its original
+/// stored value with exact comparison semantics, or decline the index
+/// optimization entirely when they have no post-filter available.
+pub(crate) fn index_predicate_needs_exact_reverification(pred: &IndexPredicate) -> bool {
+    use vibesql_storage::database::indexes::point_probe_needs_exact_reverification as lossy;
+
+    match pred {
+        IndexPredicate::Range(range) => {
+            range.start.as_ref().is_some_and(lossy) || range.end.as_ref().is_some_and(lossy)
+        }
+        IndexPredicate::In(values) => values.iter().any(lossy),
+    }
+}
+
 // Re-export composite index functions
 // Test-only re-export (function kept for backward compatibility with tests)
 // Re-export WHERE-clause literal affinity coercion (issue #6555)

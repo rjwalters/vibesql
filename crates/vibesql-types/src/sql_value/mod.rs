@@ -5,7 +5,7 @@ mod display;
 mod hash;
 mod total_order;
 
-pub use total_order::total_order_cmp;
+pub use total_order::{exact_mixed_numeric_cmp, exceeds_f64_exact_integer_range, total_order_cmp};
 
 use crate::{
     temporal::{Date, Interval, IntervalField, Time, Timestamp},

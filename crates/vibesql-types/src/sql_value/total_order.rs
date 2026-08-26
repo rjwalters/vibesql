@@ -133,6 +133,62 @@ fn cmp_int_f64(i: i128, f: f64) -> Ordering {
     }
 }
 
+/// Magnitude beyond which `as f64` stops round-tripping integers (2^53).
+const F64_EXACT_INTEGER_LIMIT: f64 = 9_007_199_254_740_992.0;
+
+/// True when `v` is a numeric value whose magnitude leaves f64's
+/// exact-integer range (`|v| > 2^53`), i.e. the point beyond which the
+/// `as f64` casts used by fast numeric paths stop round-tripping and two
+/// *distinct* values can compare (or hash, or index) as equal.
+///
+/// Returns false for NaN (which no integer collides with), for every numeric
+/// at or below 2^53 in magnitude, and for every non-numeric storage class.
+///
+/// Used to gate the rare, exact-but-slower comparison path in code that would
+/// otherwise cast through f64 — see [`exact_mixed_numeric_cmp`] (issue #6586).
+pub fn exceeds_f64_exact_integer_range(v: &SqlValue) -> bool {
+    match numeric_repr(v) {
+        Some(Num::Int(i)) => i.unsigned_abs() > (1u128 << 53),
+        Some(Num::Float(f)) => f.abs() > F64_EXACT_INTEGER_LIMIT,
+        None => false,
+    }
+}
+
+/// Issue #6586: exact ordering for the one pairing where an `as f64`-based
+/// numeric comparison is unsound — a **mixed** integer-class/float-class pair
+/// in which at least one side leaves f64's exact-integer range.
+///
+/// Returns `None` for every other pairing, so a caller can keep its existing
+/// fast arms untouched:
+///
+/// ```ignore
+/// if let Some(ord) = exact_mixed_numeric_cmp(a, b) {
+///     return ord == Ordering::Equal;   // or apply the range operator to `ord`
+/// }
+/// // ... existing `as f64` fast paths ...
+/// ```
+///
+/// Same-class pairs need no help: two integers compare exactly as integers,
+/// and two floats compare exactly as floats. Only the mixed pair has to
+/// reconcile the two representations, and above 2^53 the customary
+/// "promote the integer to f64" shortcut rounds the integer onto a
+/// neighbouring float — reporting `3175546974276630385 = 3175546974276630528.0`
+/// as true. Delegating to [`total_order_cmp`] gives SQLite's
+/// `sqlite3IntFloatCompare` semantics instead, which is what VibeSQL's general
+/// expression evaluator already produces; routing the fast paths through it
+/// keeps them observationally identical to the general evaluator.
+pub fn exact_mixed_numeric_cmp(a: &SqlValue, b: &SqlValue) -> Option<Ordering> {
+    let (na, nb) = (numeric_repr(a)?, numeric_repr(b)?);
+    let mixed = matches!((&na, &nb), (Num::Int(_), Num::Float(_)) | (Num::Float(_), Num::Int(_)));
+    if !mixed {
+        return None;
+    }
+    if !exceeds_f64_exact_integer_range(a) && !exceeds_f64_exact_integer_range(b) {
+        return None;
+    }
+    Some(cmp_num(na, nb))
+}
+
 fn cmp_num(a: Num, b: Num) -> Ordering {
     match (a, b) {
         (Num::Int(x), Num::Int(y)) => x.cmp(&y),
