@@ -102,6 +102,11 @@ pub(crate) fn check_fk_definition_error(
 ///      at all).
 ///   2. DML against the *parent* side of a broken FK — SQLite reports the same error when preparing
 ///      a statement against the referenced table, not just the referencing one.
+///   3. DML against a table several cascade-action hops away from the broken FK
+///      (fkey2-20150416-100, Part of #6170): preparing DML against `t1` must also detect that `t0`
+///      (which references `t1` via an `ON DELETE`/`ON UPDATE` action) has its own child, `t`, whose
+///      FK definition is broken — SQLite recursively re-validates a cascade child's schema while
+///      compiling the cascade action, so the error surfaces transitively, not just one hop away.
 pub fn validate_fk_schema_for_dml(
     db: &Database,
     table_name: &str,
@@ -110,44 +115,63 @@ pub fn validate_fk_schema_for_dml(
         return Ok(());
     }
 
-    let Some(schema) = db.catalog.get_table(table_name) else {
+    if db.catalog.get_table(table_name).is_none() {
         return Ok(());
-    };
-
-    // 1. This table's own outgoing FKs.
-    for fk in &schema.foreign_keys {
-        if let Some(err) = check_fk_definition_error(db, table_name, fk) {
-            return Err(err);
-        }
     }
 
-    // 2. Other tables' FKs that reference this table as their parent. Skip the O(tables) scan
-    //    entirely when nothing in the schema declares any FK at all (the overwhelmingly common
-    //    case).
+    // Skip the O(tables) walk entirely when nothing in the schema declares
+    // any FK at all (the overwhelmingly common case).
     let has_any_fks = db
         .catalog
         .list_tables()
         .iter()
         .any(|t| db.catalog.get_table(t).map(|s| !s.foreign_keys.is_empty()).unwrap_or(false));
+
+    // 1. This table's own outgoing FKs.
+    if let Some(schema) = db.catalog.get_table(table_name) {
+        for fk in &schema.foreign_keys {
+            if let Some(err) = check_fk_definition_error(db, table_name, fk) {
+                return Err(err);
+            }
+        }
+    }
+
     if !has_any_fks {
         return Ok(());
     }
 
-    for other_name in db.catalog.list_tables() {
-        if other_name.eq_ignore_ascii_case(table_name) {
-            // Self-referential FKs are already covered by step 1.
-            continue;
-        }
-        let Some(other_schema) = db.catalog.get_table(&other_name) else {
-            continue;
-        };
-        for fk in &other_schema.foreign_keys {
-            if !fk.parent_table.eq_ignore_ascii_case(table_name) {
+    // 2. Transitive closure of tables that reference `table_name`, either directly or via a chain
+    //    ("X references Y references table_name"). A `visited` set guards against infinite loops on
+    //    FK reference cycles and avoids re-checking the same table twice in a diamond shape.
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    visited.insert(table_name.to_ascii_lowercase());
+    let mut frontier = vec![table_name.to_string()];
+    while let Some(current) = frontier.pop() {
+        for other_name in db.catalog.list_tables() {
+            let key = other_name.to_ascii_lowercase();
+            if visited.contains(&key) {
                 continue;
             }
-            if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
-                return Err(err);
+            let Some(other_schema) = db.catalog.get_table(&other_name) else {
+                continue;
+            };
+            let references_current = other_schema
+                .foreign_keys
+                .iter()
+                .any(|fk| fk.parent_table.eq_ignore_ascii_case(&current));
+            if !references_current {
+                continue;
             }
+            visited.insert(key);
+            for fk in &other_schema.foreign_keys {
+                if !fk.parent_table.eq_ignore_ascii_case(&current) {
+                    continue;
+                }
+                if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
+                    return Err(err);
+                }
+            }
+            frontier.push(other_name.clone());
         }
     }
 
