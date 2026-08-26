@@ -456,7 +456,44 @@ set ::temp_created_this_batch [dict create]  ;# names whose CREATE TEMP TABLE is
 # `CREATE TEMP TABLE t2`, which the loop above demotes to `CREATE TABLE t2`,
 # leaving `temp.t2` referencing a non-existent "temp" schema). See the rewrite
 # pass at the end of strip_temp_table_keyword. (#6170)
+#
+# "Never expires" above is deliberately NOT absolute (#6609): a demoted
+# name's persistence is meant to emulate a real TEMP table's whole-FILE
+# visibility, but a real TEMP table is still connection-scoped, so it must
+# stop existing once the TCL script's logical connection is closed and
+# reopened (`db close; sqlite3 db <same file>`). See ::db_close_pending /
+# ::pending_temp_drop_names below for that reconnect-boundary reset.
 set ::temp_demoted_names [dict create]
+
+# Reconnect-boundary TEMP-table reset (#6609). The shim's demotion strategy
+# above keeps an emulated TEMP table alive as an ordinary persistent table
+# for the rest of the TCL script — correct for surviving the shim's own
+# per-batch CLI-process respawns, but wrong across a *genuine* connection
+# close/reopen: real SQLite drops every TEMP table when the connection
+# closes, so a name demoted before `db close` must behave as gone once
+# `sqlite3 db <same file>` reopens (proven engine-side, independent of this
+# shim, by `temp_table_does_not_leak_into_sqlite_master_after_binary_reload`
+# in crates/vibesql-executor/tests/alter_rename_table_index_tests.rs).
+#
+# ::db_close_pending: set unconditionally whenever ANY connection's `close`
+# runs (see the `close` case in ::tcltest_db_master). Left armed across any
+# number of unrelated opens (e.g. a secondary `sqlite3 db2 ...`) until
+# `proc sqlite3` observes a matching reopen of the PRIMARY "db" connection
+# against the SAME file that was live before the close — matching real
+# SQLite, where closing "db" ends that logical session regardless of what
+# else happens before "db" is reopened.
+set ::db_close_pending 0
+
+# ::pending_temp_drop_names: one-shot queue of (lowercase, trimmed) table
+# names to DROP as a prelude to the very next batch issued after a detected
+# reconnect. Populated from ::temp_demoted_names by `proc sqlite3` at the
+# moment the reconnect is recognized, then consumed (emitted + cleared) by
+# build_pragma_prefix so the DROPs run exactly once, ahead of that batch's
+# own SQL, in the SAME freshly-spawned CLI process — there is no live
+# process to run them against synchronously at close/reopen time, since this
+# shim has no persistent connection at all (see the file-level TEMP TABLE
+# emulation comment above).
+set ::pending_temp_drop_names [dict create]
 
 # TEMP VIEW / TEMP TRIGGER replay (#5940 cluster B).
 #
@@ -1172,6 +1209,35 @@ proc extract_create_table_body {after} {
     }
 }
 
+proc track_demoted_name_rename {sql} {
+    # Keep ::temp_demoted_names' keys in sync with `ALTER TABLE <old> RENAME
+    # TO <new>` (#6609). A demoted TEMP table's underlying persistent table
+    # can be renamed just like any other table (alter.test alter-1.3 renames
+    # `[temp table]` -> `TempTab`); without this, ::pending_temp_drop_names
+    # would later try to DROP the STALE pre-rename name at a reconnect
+    # boundary, which is a silent no-op against a table that no longer has
+    # that name, leaving the renamed table leaked into sqlite_master forever.
+    #
+    # Matches only the "RENAME TO <name>" form (table rename), not
+    # "RENAME [COLUMN] <old> TO <new>" (column rename) — the latter always
+    # has an identifier between RENAME and TO, so requiring TO immediately
+    # after RENAME disambiguates the two without needing to recognize the
+    # optional COLUMN keyword explicitly.
+    if {[dict size $::temp_demoted_names] == 0} {
+        return
+    }
+    set idpat {\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*}
+    set pat "\\yALTER\\s+TABLE\\s+($idpat)\\s+RENAME\\s+TO\\s+($idpat)"
+    foreach {- oldname newname} [regexp -all -inline -nocase $pat $sql] {
+        set oldkey [string tolower [string trim $oldname {[]"`}]]
+        set newkey [string tolower [string trim $newname {[]"`}]]
+        if {[dict exists $::temp_demoted_names $oldkey]} {
+            dict unset ::temp_demoted_names $oldkey
+            dict set ::temp_demoted_names $newkey 1
+        }
+    }
+}
+
 proc strip_temp_table_keyword {sql} {
     # Demote every `CREATE TEMP[ORARY] TABLE <name>` to a plain `CREATE TABLE`,
     # keeping <name> unchanged, and prepend `DROP TABLE IF EXISTS <name>;` to
@@ -1192,6 +1258,12 @@ proc strip_temp_table_keyword {sql} {
     # Reset per-batch tracking of TEMP tables created in THIS batch (so the
     # prelude does not redundantly re-create what the batch itself creates).
     set ::temp_created_this_batch [dict create]
+
+    # Retarget ::temp_demoted_names for any `ALTER TABLE ... RENAME TO ...`
+    # in this batch BEFORE the demotion scan below, so a rename-then-
+    # redemote sequence within the same batch (unusual, but not impossible)
+    # sees the up-to-date key too (#6609).
+    track_demoted_name_rename $sql
 
     # Names with a plain (non-TEMP) `CREATE TABLE <name>` in this batch — a
     # coexisting main table that must not be clobbered by demotion.
@@ -2018,10 +2090,36 @@ proc apply_dqs_mode_conversion {sql} {
 }
 
 # Build PRAGMA prefix to prepend to SQL for consistent session state
+proc quote_sql_identifier {name} {
+    # Double-quote a bare identifier for safe reuse in generated SQL (#6609),
+    # doubling any embedded `"` per standard SQL identifier-quoting rules.
+    # ::temp_demoted_names keys are stored lowercase/trimmed of their
+    # original quoting (see strip_temp_table_keyword), so callers that need
+    # to reference the underlying table again (e.g. a reconnect-boundary
+    # DROP TABLE) must re-quote here rather than splice the bare key in
+    # unquoted — a demoted name may contain spaces or other characters that
+    # are not valid in an unquoted identifier (e.g. alter.test's
+    # `"temp table"`).
+    return "\"[string map {\" \"\"} $name]\""
+}
+
 proc build_pragma_prefix {} {
     set prefix ""
     # Always set SQLite mode for TCL tests (integer division, etc.)
     append prefix "SET sql_mode='sqlite';\n"
+    # Reconnect-boundary TEMP-table cleanup (#6609). One-shot: consumed
+    # (cleared) immediately so these DROPs run exactly once, as a prefix to
+    # the very first batch issued after `proc sqlite3` detected a
+    # `db close; sqlite3 db <same file>` reconnect — never replayed into any
+    # later batch. Placed before the ATTACH/temp replay below since a
+    # dropped name should not still be considered "live" state for that
+    # replay to reconstruct.
+    if {[dict size $::pending_temp_drop_names] > 0} {
+        foreach name [dict keys $::pending_temp_drop_names] {
+            append prefix "DROP TABLE IF EXISTS [quote_sql_identifier $name];\n"
+        }
+        set ::pending_temp_drop_names [dict create]
+    }
     # Replay ATTACH for every still-attached alias (#6363) so a later batch's
     # fresh CLI process can resolve aux.*-qualified references before this
     # batch's own SQL runs. Placed FIRST among the replayed state — ahead of
@@ -10288,6 +10386,28 @@ proc sqlite3 {db args} {
         unset -nocomplain ::pragma_page_size_cookie($new_file)
     }
 
+    # Reconnect-boundary TEMP-table reset (#6609). Recognize the
+    # `db close; sqlite3 db <same file>` idiom — by far the dominant
+    # reconnect pattern across the TCL suite (over a thousand sites use
+    # `db close` immediately followed by a `sqlite3 db ...` reopen) — as the
+    # point where every name in ::temp_demoted_names must behave as gone,
+    # matching real SQLite's connection-scoped TEMP-table lifetime. Scoped to
+    # the PRIMARY "db" connection reopening the SAME file that was live
+    # before the close: $::db_file still holds that pre-close value here,
+    # since the assignment that would overwrite it runs just below. Only
+    # queue the drops (real DROP TABLE statements, since this shim has no
+    # live process to execute them against right now) — the DROPs themselves
+    # are emitted as a one-shot prefix by build_pragma_prefix, ahead of the
+    # very next batch issued against this reopened connection.
+    if {$::db_close_pending && ($db eq "" || $db eq "db")
+            && [info exists ::db_file] && $new_file eq $::db_file} {
+        foreach name [dict keys $::temp_demoted_names] {
+            dict set ::pending_temp_drop_names $name 1
+        }
+        set ::temp_demoted_names [dict create]
+        set ::db_close_pending 0
+    }
+
     # Only the default "db" connection (and an empty/unspecified name) tracks
     # the global ::db_file — matching `resolve_db_file`'s own documented
     # contract just above (#5946) and the cookie-replay/prefix-building code
@@ -10524,6 +10644,21 @@ proc ::tcltest_db_master {handle cmd args} {
             set ::savepoint_stack {}
             set ::txn_opened_by_savepoint 0
             teardown_txn_trial_db
+            # Arm the reconnect-boundary TEMP-table reset (#6609): a fresh
+            # `sqlite3 db <same file>` reopen after this close must treat
+            # every name in ::temp_demoted_names as gone (see proc sqlite3
+            # and build_pragma_prefix). Unconditional, matching every other
+            # reset in this branch — closing ANY connection ends its
+            # session, and this shim only tracks one logical "primary db"
+            # TEMP-table namespace regardless of which command name (db,
+            # db2, ...) issued the close.
+            set ::db_close_pending 1
+            # `close` must return an empty result, matching real SQLite's
+            # TCL interface (alter-5.3 asserts `db2 close` returns {}) — a
+            # bare `set` above as this arm's last statement would otherwise
+            # leak the value just assigned (#6609 regression, caught by
+            # alter-5.3 during this fix's own before/after verification).
+            return {}
         }
         nullvalue {
             # Sets the string used for NULL values
