@@ -398,7 +398,8 @@ impl<'a> RowValidator<'a> {
             // date(), 'localtime'/'utc') are rejected at evaluation time
             // (SQLite, date2-110/600/603).
             let evaluator = crate::evaluator::ExpressionEvaluator::new(self.schema)
-                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
+                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint)
+                .with_dqs_dml_fallback(self.db.dqs_dml());
 
             for (constraint_name, check_expr) in &self.schema.check_constraints {
                 let result = evaluator.eval(check_expr, &row)?;

@@ -655,9 +655,14 @@ impl ExpressionEvaluator<'_> {
             )),
 
             // Column reference - look up column index and get value from row
-            vibesql_ast::Expression::ColumnRef(col_id) => {
-                self.eval_column_ref(col_id.schema_canonical(), col_id.table_canonical(), col_id.column_canonical(), row)
-            }
+            vibesql_ast::Expression::ColumnRef(col_id) => self.eval_column_ref(
+                col_id.schema_canonical(),
+                col_id.table_canonical(),
+                col_id.column_canonical(),
+                col_id.column_display(),
+                col_id.is_column_quoted(),
+                row,
+            ),
 
             // Binary operations
             vibesql_ast::Expression::BinaryOp { left, op, right } => {
@@ -1277,7 +1282,7 @@ impl ExpressionEvaluator<'_> {
         // Collect text values from the specified columns
         let mut text_values: Vec<arcstr::ArcStr> = Vec::new();
         for column_name in columns {
-            match self.eval_column_ref(None, None, column_name, row) {
+            match self.eval_column_ref(None, None, column_name, column_name, false, row) {
                 Ok(SqlValue::Varchar(s)) | Ok(SqlValue::Character(s)) => text_values.push(s),
                 Ok(SqlValue::Null) => {
                     // NULL values are treated as empty strings in MATCH
@@ -1298,11 +1303,14 @@ impl ExpressionEvaluator<'_> {
 
     /// Evaluate column reference
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn eval_column_ref(
         &self,
         schema_qualifier: Option<&str>,
         table_qualifier: Option<&str>,
         column: &str,
+        column_display: &str,
+        is_quoted: bool,
         row: &vibesql_storage::Row,
     ) -> Result<vibesql_types::SqlValue, ExecutorError> {
         // Handle schema qualifier (three-part names like schema.table.column)
@@ -1523,6 +1531,45 @@ impl ExpressionEvaluator<'_> {
                     .cloned()
                     .ok_or(ExecutorError::ColumnIndexOutOfBounds { index: col_index });
             }
+        }
+
+        // SQLite's SQLITE_DBCONFIG_DQS_DML runtime fallback (#6561): an
+        // unqualified, originally-quoted identifier that fails ordinary
+        // column resolution is treated as the text literal named by the
+        // identifier, instead of raising "no such column". Deliberately
+        // scoped to the UNQUALIFIED fallback only — a qualified reference
+        // like `t1."x"` that fails resolution still raises the normal error
+        // above, matching SQLite.
+        //
+        // Two independent gates enable this, matching two distinct real
+        // SQLite behaviors:
+        //
+        // 1. `self.dqs_dml_fallback` — the CURRENT session has `SQLITE_DBCONFIG_DQS_DML` explicitly
+        //    ON (SQLite's own connection default is OFF). This mirrors DQS_DML's role for ordinary,
+        //    freshly-typed DML text (SELECT/INSERT/UPDATE/DELETE) parsed under the live
+        //    connection's current flags.
+        //
+        // 2. `self.schema_context == SchemaExprContext::CheckConstraint` — ALWAYS on, regardless of
+        //    the current session's DQS_DML state. A CHECK constraint's source text is stored
+        //    verbatim in the schema (sqlite_master) and re-parsed fresh by SQLite every time the
+        //    schema loads for a connection — and SQLite's *schema loading* parser unconditionally
+        //    tolerates this legacy double-quoted-string-literal fallback ("SQLite can load such a
+        //    schema from disk", quote.test's own comment above its `2.x` section), independent of
+        //    the CURRENT connection's DQS_DML setting. This was empirically verified against
+        //    quote.test 2.3.1/2.3.2: the schema is created under `sqlite3_db_config db
+        //    SQLITE_DBCONFIG_DQS_DML 1`, but the CHECK constraint is then evaluated on a *freshly
+        //    reopened* connection (`db close; sqlite3 db test.db`) that never re-applies DQS_DML —
+        //    yet the fallback must still apply for 2.3.1 to succeed and 2.3.2 to fail with "CHECK
+        //    constraint failed" rather than "no such column". Gating #2 on session state would
+        //    incorrectly fail both. This is deliberately scoped to `CheckConstraint` only (not the
+        //    sibling `Index` schema context, which covers index expressions/partial-index
+        //    predicates) — that is a separate code path this issue's Dependencies section defers to
+        //    a sibling issue (#6558).
+        if is_quoted
+            && (self.dqs_dml_fallback
+                || self.schema_context == crate::evaluator::SchemaExprContext::CheckConstraint)
+        {
+            return Ok(vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from(column_display)));
         }
 
         // Column not found - collect available columns for suggestions

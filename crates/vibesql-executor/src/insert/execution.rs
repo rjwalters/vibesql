@@ -2120,7 +2120,8 @@ fn check_would_violate_constraints(
     // Check CHECK constraints
     if !schema.check_constraints.is_empty() {
         let row = vibesql_storage::Row::new(row_values.to_vec());
-        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema);
+        let evaluator =
+            crate::evaluator::ExpressionEvaluator::new(schema).with_dqs_dml_fallback(db.dqs_dml());
 
         for (_constraint_name, check_expr) in &schema.check_constraints {
             if let Ok(result) = evaluator.eval(check_expr, &row) {

@@ -692,6 +692,7 @@ impl ForeignKeyValidator {
                 let child_schema_for_check = db.catalog.get_table(&table_name).unwrap().clone();
                 crate::update::constraints::ConstraintValidator::new(&child_schema_for_check)
                     .with_check_constraints_ignored(db.ignore_check_constraints())
+                    .with_dqs_dml_fallback(db.dqs_dml())
                     .validate_row_skip_uniqueness(&table_name, &new_row)?;
 
                 // SET DEFAULT in particular can rewrite the FK column(s) to a
