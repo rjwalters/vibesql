@@ -11,7 +11,7 @@
 //! - [`type_funcs`]: Type inspection and conversion (TYPEOF, TOREAL, TOINTEGER, INTREAL)
 //! - [`blob_funcs`]: Blob and encoding operations (HEX, UNHEX, ZEROBLOB, RANDOMBLOB, QUOTE)
 //! - [`string_funcs`]: String manipulation (CHAR, UNICODE, CONCAT_WS, PRINTF)
-//! - [`conditional_funcs`]: Conditional logic (IIF, IFNULL)
+//! - [`conditional_funcs`]: Conditional logic (IIF, IFNULL, ERROR)
 //! - [`math_funcs`]: Math and query hints (RANDOM, LIKELY, UNLIKELY, LIKELIHOOD)
 //! - [`pattern_funcs`]: Pattern matching (LIKE, GLOB, REGEXP/REGEXPI)
 //! - [`json_funcs`]: JSON functions (json, json_array, json_object, etc.)
@@ -28,9 +28,9 @@ mod type_funcs;
 // Re-export type functions
 // Re-export blob/encoding functions
 pub(super) use blob_funcs::{hex, quote, randomblob, unhex, zeroblob};
-pub(super) use conditional_funcs::ifnull;
 // Re-export conditional functions
 pub(super) use conditional_funcs::iif;
+pub(super) use conditional_funcs::{error_func, ifnull};
 // Re-export JSON functions
 pub(super) use json_funcs::{
     json, json_array, json_array_length, json_error_position, json_extract, json_insert,
