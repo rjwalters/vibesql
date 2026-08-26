@@ -9463,6 +9463,35 @@ array set ::stmt_result_row {}
 array set ::stmt_has_row {}
 array set ::stmt_result_types {}
 
+# Pre-declare the handful of global ::STMT-family variable names the vendored
+# suite uses (fkey4.test's ::STMT1/::STMT2, tkt2854.test's ::STMT1..::STMT5,
+# malloc3/shared's ::STMT/::STMT32 — the complete set across all 1,174 .test
+# files). A do_test body that assigns one of these (e.g. `set ::STMT1
+# [sqlite3_prepare_v2 ...]`) is unconditionally skip-listed by the C-API
+# statement-handle detector above (any script referencing `$::STMT*` — the
+# routing back through sqlite3_connection_pointer's dummy "0x12345678"
+# handle can never resolve to a real Tcl connection command, so simulating
+# it correctly is not possible; Part of #6170/#6154 A1). But some files
+# (fkey4.test) then reference the same variable again in a *bare*,
+# non-do_test-wrapped statement at file scope (`sqlite3_finalize $::STMT1`)
+# to release it — since the creating do_test never ran, that bare reference
+# hits Tcl's "no such variable" before sqlite3_finalize is ever invoked
+# (substitution happens before the call), aborting the rest of the file and
+# recording a synthetic filescope-err cascade marker instead of a clean
+# no-op. Pre-declaring these as empty-string sentinels makes the bare
+# reference resolve; sqlite3_finalize/_step/_reset all guard on
+# `[info exists ...]`/`unset -nocomplain`, so an empty-string handle is a
+# harmless no-op. (Every file using these names either gates on `ifcapable
+# shared_cache` — 0 in this shim, so tkt2854.test's uses are unreached — or
+# is already a whole-file Bucket-A skip (malloc3, shared), so this is a
+# strictly-additive, blast-radius-bounded fix. Part of #6170.)
+foreach ::tcltest_stmt_sentinel_name {::STMT ::STMT1 ::STMT2 ::STMT3 ::STMT4 ::STMT5 ::STMT32} {
+    if {![info exists $::tcltest_stmt_sentinel_name]} {
+        set $::tcltest_stmt_sentinel_name ""
+    }
+}
+unset ::tcltest_stmt_sentinel_name
+
 # Character allowed inside a SQLite parameter identifier: ASCII alnum, '_',
 # '$' (SQLite's IdChar() treats '$' as an identifier character too, matched
 # by e.g. e_expr-11.4.4's `$_$_` parameter name), or any codepoint > 127.
