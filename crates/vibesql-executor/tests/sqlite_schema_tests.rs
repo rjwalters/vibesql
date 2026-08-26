@@ -444,6 +444,71 @@ fn test_sqlite_schema_lists_objects_in_creation_order() {
     );
 }
 
+/// Issue #6597: `sqlite_master`/`sqlite_schema`'s `rowid`/`oid` pseudo-columns
+/// must resolve to a real, non-NULL, monotonically-assigned-per-object value —
+/// the same creation ordinal `Catalog::creation_seq` already tracks to order
+/// these rows — instead of always evaluating to NULL.
+#[test]
+fn test_sqlite_master_oid_rowid_backed_by_creation_seq() {
+    let mut db = Database::new();
+    execute_create_table(&mut db, "CREATE TABLE t1 (a INTEGER, b TEXT)");
+    execute_create_table(&mut db, "CREATE TABLE t2 (a INTEGER, b TEXT)");
+
+    let (columns, rows) = execute_select(&db, "SELECT rowid, oid, name FROM sqlite_master");
+    assert_eq!(columns, vec!["rowid", "oid", "name"]);
+    assert_eq!(rows.len(), 2);
+
+    let mut seen = std::collections::HashSet::new();
+    for row in &rows {
+        let name = match &row.values[2] {
+            vibesql_types::SqlValue::Varchar(s) | vibesql_types::SqlValue::Character(s) => {
+                s.to_string()
+            }
+            other => panic!("expected text name value, got {:?}", other),
+        };
+        let expected_seq = db
+            .catalog
+            .creation_seq(vibesql_catalog::DEFAULT_SCHEMA, &name)
+            .expect("table must have a recorded creation_seq");
+
+        for (col_idx, col_name) in [(0, "rowid"), (1, "oid")] {
+            let value = match &row.values[col_idx] {
+                vibesql_types::SqlValue::Bigint(n) => *n,
+                other => panic!("expected non-NULL {} value, got {:?}", col_name, other),
+            };
+            assert_eq!(
+                value as u64, expected_seq,
+                "{} for {} must match Catalog::creation_seq ordering (#6597)",
+                col_name, name
+            );
+        }
+        assert!(seen.insert(name.clone()), "duplicate name in sqlite_master: {}", name);
+    }
+
+    // max(oid) must be a real, non-NULL value once at least one object exists.
+    let (_columns, max_rows) = execute_select(&db, "SELECT max(oid) FROM sqlite_master");
+    assert_eq!(max_rows.len(), 1);
+    match &max_rows[0].values[0] {
+        vibesql_types::SqlValue::Bigint(_) | vibesql_types::SqlValue::Integer(_) => {}
+        other => panic!("max(oid) must be non-NULL once objects exist, got {:?}", other),
+    }
+}
+
+/// Edge case (#6597): an empty database's `sqlite_master` has zero rows, so
+/// `max(oid)` correctly stays NULL — this is the one case where NULL is the
+/// right answer, unlike the always-NULL bug being fixed.
+#[test]
+fn test_sqlite_master_max_oid_null_on_empty_database() {
+    let db = Database::new();
+    let (_columns, rows) = execute_select(&db, "SELECT max(oid) FROM sqlite_master");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].values[0],
+        vibesql_types::SqlValue::Null,
+        "max(oid) on an empty sqlite_master must remain NULL"
+    );
+}
+
 /// Without captured source text (e.g. AST built programmatically), the engine
 /// falls back to reconstructing a valid CREATE TABLE statement.
 #[test]
