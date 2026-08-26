@@ -94,6 +94,7 @@ impl ForeignKeyValidator {
                 .ok_or_else(|| ExecutorError::TableNotFound(fk.parent_table.clone()))?;
 
             let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+            let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
             let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
 
             // Self-referential FKs are evaluated against the post-update row
@@ -110,6 +111,10 @@ impl ForeignKeyValidator {
                             fk_val,
                             parent_val,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         ),
                         None => false,
                     },
@@ -136,6 +141,10 @@ impl ForeignKeyValidator {
                             fk_val,
                             parent_val,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         ),
                         None => false,
                     },
@@ -304,7 +313,7 @@ impl ForeignKeyValidator {
                 // child table so the FK comparison honors NOCASE/RTRIM
                 // on the parent key (#5147).
                 let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+                let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
                 // SQLite fires no referential action and raises no violation
                 // when an UPDATE does not actually change the parent key
                 // that THIS FK targets. Re-assigning a parent-key column to
@@ -390,6 +399,10 @@ impl ForeignKeyValidator {
                                 cv,
                                 pv,
                                 parent_collations.get(i).and_then(|c| c.as_deref()),
+                                parent_affinities
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(vibesql_types::TypeAffinity::None),
                             )
                         },
                     )
