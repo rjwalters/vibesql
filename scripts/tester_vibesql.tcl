@@ -6913,7 +6913,105 @@ array set vibesql_skip_tests {
     table-19.1 "Genuine VibeSQL engine gap surfaced by enabling ATTACH replay for table.test (#6404), confirmed via direct single-session CLI reproduction (not a shim artifact): once a second database is ATTACHed, an unqualified 'CREATE TABLE t19 AS SELECT * FROM sqlite_master' (CTAS) fails with 'no such table: sqlite_master', even though a plain 'SELECT * FROM sqlite_master' with the identical ATTACH state resolves fine — i.e. the gap is specific to CTAS's query-planning path losing the unqualified-name-to-MAIN-schema resolution once any ATTACHed database exists, not a general sqlite_master/ATTACH interaction. Was passing before ATTACH replay was enabled for this file only because aux was never genuinely attached in the per-batch CLI process reaching this test (table-14.3/14.4 above, the file's only ATTACH statement, previously hit the file-scope ATTACH skip). Re-skipped rather than allowed to regress; engine-level fix tracked separately (not a TCL-shim issue)."
 
     regexp2-2.1 "Harness limitation, not a regexp()/REGEXP engine gap (Part of #6172): registers a custom TCL error()-raising scalar function via 'db func error sql_error' (regexp2.test line ~60) so a downstream trigger's CASE WHEN ... THEN error() can abort a cascading UPDATE chain; TCL-registered custom functions are not reachable from the VibeSQL CLI subprocess (same 'db func' C-API class as e_expr-13.1.* / check-7.2 / date-15.2, harness limitation #5720), so VibeSQL raises 'no such function: error' instead of the TCL-side 'SQL error!' message. The regexp()/regexpi()-under-triggers behavior this test exists to exercise (aux-data cleanup across nested trigger exceptions) is otherwise unaffected — 2.2/2.3 downstream confirm the trigger chain completes correctly once the (harness-only) error() call is bypassed."
+
+    alter-3.1.1 "Fires an AFTER INSERT trigger whose body calls trigfunc(), a TCL scalar function registered via 'db func trigfunc trigfunc' at alter.test FILE scope (line 347, outside any do_test body, so the per-test uses_sqlite_internals scan cannot auto-skip on it -- same mechanism as check-7.2). TCL-registered custom functions are reachable only through the C-API sqlite3_create_function surface, not from the VibeSQL CLI subprocess, so the trigger body fails with 'no such function: trigfunc' -- harness limitation #5720, same 'db func' class as e_expr-13.1.*/check-7.2/window6-2.0. Bucket A: the ALTER-TABLE-renames-trigger-references behavior this section exists to exercise is asserted through a TCL-side global the shim cannot observe, not through an SQL result. Part of #6574 (Bucket 2), part of #6174."
+    alter-3.1.2 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720). Part of #6574 (Bucket 2)."
+    alter-3.1.4 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720). Part of #6574 (Bucket 2)."
+    alter-3.1.5 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720). Part of #6574 (Bucket 2)."
+    alter-3.1.6 "Harness cascade, not an engine gap: 'DROP TRIGGER trig2' passes today only because alter-3.1.4 -- skip-listed just above as a #5720 'db func trigfunc' limitation -- happens to CREATE trig2 before failing on its trailing trigfunc INSERT. Once 3.1.4 is skipped the trigger is never created and this cleanup step reports 'no such trigger: trig2'. Same shape as the select9-3.X/pragma-10.3/istrue-600.*.3 cascade entries above. No coverage is lost: alter-3.1.3 exercises the byte-identical 'DROP TRIGGER trig1' cleanup and continues to run and PASS unskipped. Part of #6574 (Bucket 2)."
+    alter-3.1.7 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720). Part of #6574 (Bucket 2)."
+    alter-3.1.8 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720). Part of #6574 (Bucket 2)."
+    alter-3.3.2 "Same file-scope 'db func trigfunc trigfunc' harness limitation as alter-3.1.1 above (#5720), applied to the TEMP-trigger variant. Skipping it is side-effect-safe: its only effect is one row in tbl1, which no later test asserts. Its sibling alter-3.3.3 is deliberately NOT skipped -- see the alter.test/alter2.test note immediately below this array. Part of #6574 (Bucket 2)."
+    alter-9.1 "Calls the SQLite-INTERNAL SQL function SQLITE_RENAME_COLUMN(0,0,0,0,0,0,0,0,0) directly, which alter.test first unlocks with 'sqlite3_test_control SQLITE_TESTCTRL_INTERNAL_FUNCTIONS db' (alter.test line 687) -- a C-API test-control the CLI-subprocess shim can only stub as a no-op. sqlite_rename_column/sqlite_rename_table are SQLite's own internal schema-text-rewriting helpers for ALTER TABLE, deliberately hidden from ordinary SQL; VibeSQL performs renames natively and has no such function, so the call reports 'no such function: SQLITE_RENAME_COLUMN'. Bucket A (SQLite-internal surface behind a C-API test-control, same harness-limitation class as #5720). Note the externally observable half of this section still PASSES unskipped: alter-9.2.1/9.2.2/9.2.3 (bad input must error) and alter-9.3 (the function must NOT be visible to ordinary SQL when the test-control is off). Named under Bucket 2 of #6574, though its mechanism is the test-control rather than 'db func'. Part of #6174."
+
+    alter2-1.2 "Calls alter2.test's alter_table proc, whose final step is set_file_format (alter2.test lines 44-51): it patches bytes 44-47 (file-format version) and 40-43 (schema cookie) of the raw test.db image using hexio_write/hexio_read/hexio_render_int32/hexio_get_int. Those are C-extension TCL commands compiled into SQLite's own test harness and they address SQLite's on-disk header layout byte-for-byte; VibeSQL's on-disk format is not byte-compatible with SQLite's, so there is no faithful shim implementation and the test fails with 'invalid command name hexio_render_int32'. Bucket A -- an internal file-format-version detail of SQLite's storage layer, not an externally observable SQL behavior. Same class as the whole-file filefmt skip and minmax3-1.0 (#5844). Part of #6574 (Bucket 3), part of #6174."
+    alter2-2.2 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-4.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-5.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-6.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-7.2 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-7.5 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-10.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
 }
+
+# NOTE ON COMMENTS: `array set` parses its braced body as a Tcl LIST, so a `#`
+# line inside the braces above is NOT a comment — it becomes list elements and
+# corrupts the name/reason pairing ("list must have an even number of
+# elements"). Every explanatory note therefore lives outside the closing brace,
+# like the ones below.
+
+# alter.test / alter2.test harness-limitation skips (Part of #6574, which is
+# part of #6174 — ALTER TABLE semantics conformance family). Only two Bucket-A
+# harness-limitation classes are skip-listed; the rest of the failures triaged
+# in #6574 are deliberately LEFT VISIBLY FAILING and tracked separately.
+#
+# Bucket 2 — 'db func'-registered TCL scalar functions (harness limitation
+# #5720). alter.test registers `db func trigfunc trigfunc` at FILE scope
+# (alter.test line 347, outside any do_test body), so the per-test
+# uses_sqlite_internals scan never sees the registration and cannot auto-skip
+# on it — exactly the check-7.2 mechanism. The in-do_test
+# `db func <name> failing_app_func` registrations (alter-1.7-prep, alter2-1.0)
+# ARE seen by that scan and are already auto-skipped, which is why alter2.test
+# contributes no named Bucket-2 entry.
+#
+# Bucket 3 — hexio_* raw-file-byte patching of SQLite's own on-disk header.
+# alter2.test's set_file_format/get_file_format helpers (alter2.test lines
+# 44-56) patch bytes 40-47 of the raw test.db image. VibeSQL's on-disk format
+# is not byte-compatible with SQLite's, so no faithful shim implementation is
+# possible — same class as the whole-file `filefmt` skip and minmax3-1.0
+# (#5844).
+#
+# A skip-listed do_test does not run AT ALL, so its SQL side effects are lost
+# too. That is the governing constraint on which of these harness failures may
+# be skipped: every entry above was verified against before/after single-file
+# runs (`make test-tcl-file FILE=alter.test` / `FILE=alter2.test`) to confirm
+# it does not strand a later, currently-PASSING test. Three consequences of
+# that check are load-bearing — do NOT "complete" Bucket 2/3 by reversing them:
+#
+#   * alter-3.1.6 IS skip-listed, as a cascade. `DROP TRIGGER trig2` passes
+#     today only because alter-3.1.4 (itself a #5720 trigfunc failure) creates
+#     trig2 before erroring on its trailing INSERT. Skipping 3.1.4 means trig2
+#     is never created. Same shape as the select9-3.X / pragma-10.3 /
+#     istrue-600.*.3 cascade entries. No coverage is lost: alter-3.1.3 runs the
+#     byte-identical `DROP TRIGGER trig1` cleanup and still PASSES unskipped.
+#
+#   * alter-3.3.3 is deliberately NOT skip-listed, even though it is a genuine
+#     Bucket-2 trigfunc failure. Its script is
+#     `ALTER TABLE tbl1 RENAME TO tbl2; INSERT INTO tbl2 ...`: the RENAME
+#     succeeds and only the trailing trigfunc INSERT errors, so the test fails
+#     while still carrying the tbl1 -> tbl2 rename forward. Skipping it would
+#     not run the RENAME at all, leaving tbl1 alive past alter-3.3.7's cleanup.
+#     Measured: doing so regresses the currently PASSING alter-5.1 ("table tbl1
+#     already exists") and alter-5.2 (ALTER TABLE RENAME observed over a second
+#     connection) — substantive ALTER TABLE coverage, not cleanup.
+#
+#   * alter2-3.3 and alter2-6.3 are deliberately NOT skip-listed, even though
+#     both are genuine Bucket-3 hexio failures. Each runs load-bearing SQL
+#     before reaching its hexio call: alter2-3.3 inserts the (3,4) and (5,6)
+#     rows into abc3 that the PASSING alter2-3.5 asserts through the blog
+#     trigger, and alter2-6.3 runs `CREATE TABLE t1(a, b)` — the t1 that
+#     alter2-7.1 drops and recreates. Measured: skipping them regresses
+#     alter2-3.5, 7.1, 8.1 and 9.1 from passing to failing.
+#
+# Deliberately left failing (NOT skipped here), for the record:
+#   * Bucket 1 (#6595) — alter2.test's alter_table proc simulates pre-3.1.3
+#     ADD COLUMN by rewriting sqlite_master.sql under `PRAGMA
+#     writable_schema=1`; VibeSQL does not reload the live table layout from
+#     that, so alter2-1.3/1.4../1.10, 3.4, 3.6, 7.3, 7.4, 8.2, 8.3, 9.2,
+#     10.2../10.4 fail with "no such column: ...". A real in-scope engine gap.
+#   * Bucket 4 (#6596) — alter-1.2/1.6/2.3 schema-state mismatches.
+#   * Bucket 5 (#6597) — alter-6.2../6.6 identifier-escaping failures.
+#   * alter2-4.3/4.5 ("invalid command name sqlite3_errcode") and alter2-4.4
+#     (expects "unsupported file format" from the format-5 image alter2-4.1
+#     would have written).
+#   * alter2-filescope-err.1/.2/.3 — the file-scope
+#     `set default_file_format [expr $SQLITE_DEFAULT_FILE_FORMAT==4 ? 4 : 1]`
+#     at alter2.test line 291 plus its two cascaded successors. These markers
+#     are synthetic and positionally numbered by the shared
+#     record_contained_error/eval_file_resilient mechanism, so pinning a skip
+#     to an exact marker number would silently swallow a future, unrelated
+#     file-scope regression — the same reasoning already recorded for e_expr's
+#     filescope-err cascade.
 
 # autoinc-4.2/4.3/4.5..4.10 (#6173): these test that TEMP-table AUTOINCREMENT
 # bookkeeping (temp.sqlite_sequence) stays separate from MAIN's
