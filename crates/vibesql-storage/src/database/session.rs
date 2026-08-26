@@ -278,18 +278,33 @@ impl Database {
 
     /// Get the DQS_DML runtime fallback flag (SQLite compatibility).
     ///
-    /// Mirrors `sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, ...)`: when ON,
-    /// an unqualified, originally-quoted identifier that fails ordinary
-    /// column resolution during expression evaluation (in an ordinary
-    /// SELECT/INSERT/UPDATE/DELETE evaluated under the live connection's
-    /// current flags) falls back to being treated as a string literal named
-    /// by the identifier, instead of raising "no such column"/"Column not
-    /// found". This is a genuine *runtime* fallback distinct from
-    /// `SQLITE_DBCONFIG_DQS_DDL` (which governs whether double-quoted
-    /// strings are accepted as string literals while *parsing*
+    /// Mirrors `sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, ...)`: when ON
+    /// *and actually consulted by the evaluator constructing this query's
+    /// expression context*, an unqualified, originally-quoted identifier that
+    /// fails ordinary column resolution falls back to being treated as a
+    /// string literal named by the identifier, instead of raising "no such
+    /// column"/"Column not found". This is a genuine *runtime* fallback
+    /// distinct from `SQLITE_DBCONFIG_DQS_DDL` (which governs whether
+    /// double-quoted strings are accepted as string literals while *parsing*
     /// CREATE TABLE/INDEX/VIEW/TRIGGER text). SQLite's own default for this
     /// connection flag is OFF; VibeSQL matches that default so the fallback
     /// is strictly opt-in for this context (#6561).
+    ///
+    /// **Current actual reach is narrower than the flag's name suggests
+    /// (#6584):** this flag is threaded (`ExpressionEvaluator::with_dqs_dml_fallback`)
+    /// only into the CHECK-constraint validator call sites (INSERT/UPDATE/
+    /// DELETE/ON CONFLICT/FK-cascade paths). Every one of those call sites
+    /// *also* unconditionally sets `SchemaExprContext::CheckConstraint`,
+    /// which by itself already satisfies the evaluator's fallback gate
+    /// regardless of this flag's value (see "Not consulted for
+    /// CHECK-constraint evaluation" below) — so today, flipping this flag
+    /// has **no observable effect on any live SQL statement**: no plain
+    /// SELECT / ordinary expression-evaluation construction site reads
+    /// `dqs_dml()` at all. Wiring it into those general-DML paths (matching
+    /// real SQLite's DQS_DML semantics for ordinary, freshly-typed
+    /// SELECT/INSERT/UPDATE/DELETE text) is tracked separately; until that
+    /// lands, treat this flag as inert outside the CHECK-constraint code path
+    /// it happens to share a gate with.
     ///
     /// **Not consulted for CHECK-constraint evaluation** — a CHECK
     /// constraint's source text is stored verbatim in the schema and
