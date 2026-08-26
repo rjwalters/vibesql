@@ -13,7 +13,9 @@ use super::compute_prefix_upper_bound;
 use crate::database::indexes::{
     index_metadata::IndexData,
     range_bounds::{try_increment_sqlvalue, try_increment_sqlvalue_prefix},
-    value_normalization::normalize_for_comparison,
+    value_normalization::{
+        normalize_bound_for_range_scan, normalize_for_comparison, normalize_range_bounds,
+    },
 };
 
 impl IndexData {
@@ -66,7 +68,12 @@ impl IndexData {
         // Normalize values for consistent comparison
         let normalized_prefix: Vec<SqlValue> =
             prefix.iter().map(normalize_for_comparison).collect();
-        let normalized_bound = normalize_for_comparison(upper_bound);
+        // Correct the inclusive/exclusive flag for out-of-f64-precision
+        // integer literals compared against REAL-affinity columns (issue
+        // #6575), matching `range_scan`'s use of
+        // `normalize_bound_for_range_scan` (#6587).
+        let (normalized_bound, inclusive_upper) =
+            normalize_bound_for_range_scan(upper_bound, inclusive_upper, false);
 
         match self {
             IndexData::InMemory { data } => {
@@ -150,10 +157,17 @@ impl IndexData {
             return self.prefix_scan_covering(prefix);
         }
 
+        // Normalize bounds for consistent numeric comparison, correcting
+        // inclusive/exclusive flags for out-of-f64-precision integer
+        // literals compared against REAL-affinity columns (issue #6575),
+        // exactly as `range_scan` does via `normalize_range_bounds` (#6587).
+        let (normalized_lower_bound, normalized_upper_bound, inclusive_lower, inclusive_upper) =
+            normalize_range_bounds(lower_bound, upper_bound, inclusive_lower, inclusive_upper);
+
         // Check for inverted range
-        if let (Some(lb), Some(ub)) = (lower_bound, upper_bound) {
-            let normalized_lb = normalize_for_comparison(lb);
-            let normalized_ub = normalize_for_comparison(ub);
+        if let (Some(normalized_lb), Some(normalized_ub)) =
+            (&normalized_lower_bound, &normalized_upper_bound)
+        {
             if normalized_lb > normalized_ub {
                 return Vec::new();
             }
@@ -165,43 +179,43 @@ impl IndexData {
         match self {
             IndexData::InMemory { data } => {
                 // Build start key: [prefix, lower_bound?]
-                let start_bound: Bound<Vec<SqlValue>> = if let Some(lb) = lower_bound {
-                    let normalized_lb = normalize_for_comparison(lb);
-                    let mut start_key = normalized_prefix.clone();
-                    start_key.push(normalized_lb);
-                    if inclusive_lower {
-                        Bound::Included(start_key)
-                    } else {
-                        Bound::Excluded(start_key)
-                    }
-                } else {
-                    Bound::Included(normalized_prefix.clone())
-                };
-
-                // Build end key: [prefix, upper_bound?]
-                let end_bound: Bound<Vec<SqlValue>> = if let Some(ub) = upper_bound {
-                    let normalized_ub = normalize_for_comparison(ub);
-                    let mut end_key = normalized_prefix.clone();
-                    end_key.push(normalized_ub);
-                    if inclusive_upper {
-                        let last_idx = end_key.len() - 1;
-                        match try_increment_sqlvalue(&end_key[last_idx]) {
-                            Some(next_val) => {
-                                end_key[last_idx] = next_val;
-                                Bound::Excluded(end_key)
-                            }
-                            None => Bound::Included(end_key),
+                let start_bound: Bound<Vec<SqlValue>> =
+                    if let Some(normalized_lb) = &normalized_lower_bound {
+                        let mut start_key = normalized_prefix.clone();
+                        start_key.push(normalized_lb.clone());
+                        if inclusive_lower {
+                            Bound::Included(start_key)
+                        } else {
+                            Bound::Excluded(start_key)
                         }
                     } else {
-                        Bound::Excluded(end_key)
-                    }
-                } else {
-                    let end_key = normalized_prefix.clone();
-                    match try_increment_sqlvalue_prefix(&end_key) {
-                        Some(next_prefix) => Bound::Excluded(next_prefix),
-                        None => Bound::Unbounded,
-                    }
-                };
+                        Bound::Included(normalized_prefix.clone())
+                    };
+
+                // Build end key: [prefix, upper_bound?]
+                let end_bound: Bound<Vec<SqlValue>> =
+                    if let Some(normalized_ub) = &normalized_upper_bound {
+                        let mut end_key = normalized_prefix.clone();
+                        end_key.push(normalized_ub.clone());
+                        if inclusive_upper {
+                            let last_idx = end_key.len() - 1;
+                            match try_increment_sqlvalue(&end_key[last_idx]) {
+                                Some(next_val) => {
+                                    end_key[last_idx] = next_val;
+                                    Bound::Excluded(end_key)
+                                }
+                                None => Bound::Included(end_key),
+                            }
+                        } else {
+                            Bound::Excluded(end_key)
+                        }
+                    } else {
+                        let end_key = normalized_prefix.clone();
+                        match try_increment_sqlvalue_prefix(&end_key) {
+                            Some(next_prefix) => Bound::Excluded(next_prefix),
+                            None => Bound::Unbounded,
+                        }
+                    };
 
                 let mut results = Vec::new();
 
