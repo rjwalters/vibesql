@@ -9,7 +9,7 @@ use vibesql_types::SqlValue;
 
 use crate::database::indexes::{
     index_metadata::{acquire_btree_lock, IndexData},
-    value_normalization::normalize_for_comparison,
+    value_normalization::{normalize_bound_for_range_scan, normalize_for_comparison},
 };
 
 impl IndexData {
@@ -115,8 +115,27 @@ impl IndexData {
             return self.range_scan(lower_bound, upper_bound, inclusive_lower, inclusive_upper);
         }
 
-        let normalized_lower = lower_bound.map(normalize_for_comparison);
-        let normalized_upper = upper_bound.map(normalize_for_comparison);
+        // Normalize bounds for consistent numeric comparison, correcting
+        // inclusive/exclusive flags for out-of-f64-precision integer
+        // literals compared against REAL-affinity columns (issue #6575),
+        // same as `range_scan`'s use of `normalize_range_bounds` (#6587).
+        // `skip_scan_range` evaluates each side's predicate manually rather
+        // than via `BTreeMap::range()`, so each bound is corrected
+        // independently with `normalize_bound_for_range_scan`.
+        let (normalized_lower, inclusive_lower) = match lower_bound {
+            Some(v) => {
+                let (nv, inc) = normalize_bound_for_range_scan(v, inclusive_lower, true);
+                (Some(nv), inc)
+            }
+            None => (None, inclusive_lower),
+        };
+        let (normalized_upper, inclusive_upper) = match upper_bound {
+            Some(v) => {
+                let (nv, inc) = normalize_bound_for_range_scan(v, inclusive_upper, false);
+                (Some(nv), inc)
+            }
+            None => (None, inclusive_upper),
+        };
 
         match self {
             IndexData::InMemory { data } => {
