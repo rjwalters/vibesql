@@ -159,6 +159,10 @@ pub(super) fn eval_scalar_function(
         // Control flow functions
         "IF" => control::if_func(args),
         "IIF" => sqlite_compat::iif(args),
+        // ERROR([msg]) is not a genuine SQLite builtin — see
+        // `sqlite_compat::error_func` doc comment for the narrow test-helper
+        // rationale (issue #6591).
+        "ERROR" => sqlite_compat::error_func(args),
 
         // SQLite compatibility functions
         "TYPEOF" => sqlite_compat::typeof_func(args),

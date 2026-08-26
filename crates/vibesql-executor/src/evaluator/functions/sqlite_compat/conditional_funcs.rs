@@ -3,6 +3,7 @@
 //! This module contains SQLite-compatible conditional functions:
 //! - IIF(condition, true_val, false_val) - Inline if (ternary)
 //! - IFNULL(x, y) - Return y if x is NULL
+//! - ERROR([msg]) - Always raises an error (test-helper function)
 
 use vibesql_types::SqlValue;
 
@@ -40,6 +41,32 @@ pub(crate) fn ifnull(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
         Ok(args[1].clone())
     } else {
         Ok(args[0].clone())
+    }
+}
+
+/// ERROR([msg]) - Always raises an error; a narrow test-helper builtin.
+///
+/// This is not a genuine SQLite C-level builtin (SQLite's own test harness
+/// only registers this name per-file via TCL's `db func` mechanism — the
+/// general `db func` gap is tracked separately in #5720). VibeSQL implements
+/// it directly to reproduce the exact combined semantics of the two SQLite
+/// TCL test files that register it themselves (`regexp2.test`, `analyzeF.test`):
+///
+/// - `ERROR()` (0 args) raises the literal text `SQL error!`
+/// - `ERROR(msg)` (1 arg) raises `msg` verbatim, with no added prefix
+///
+/// Uses `ExecutorError::SqliteCompatError`, whose `Display` impl writes the
+/// message with no prefix — required for an exact-string match against
+/// `do_catchsql_test`'s literal expected output. `UnsupportedFeature` would
+/// NOT work here: it wraps its message in a template.
+pub(crate) fn error_func(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    match args.len() {
+        0 => Err(ExecutorError::SqliteCompatError("SQL error!".to_string())),
+        1 => Err(ExecutorError::SqliteCompatError(args[0].to_string())),
+        n => Err(ExecutorError::UnsupportedFeature(format!(
+            "ERROR requires 0 or 1 arguments, got {}",
+            n
+        ))),
     }
 }
 
@@ -204,5 +231,28 @@ mod tests {
             ifnull(&[SqlValue::Integer(1), SqlValue::Integer(42)]).unwrap(),
             SqlValue::Integer(1)
         );
+    }
+
+    #[test]
+    fn test_error_zero_args_raises_exact_text() {
+        // ERROR() (0 args) raises the literal text "SQL error!" (regexp2.test 2.1).
+        let err = error_func(&[]).unwrap_err();
+        assert_eq!(err.to_string(), "SQL error!");
+        assert!(matches!(err, ExecutorError::SqliteCompatError(ref msg) if msg == "SQL error!"));
+    }
+
+    #[test]
+    fn test_error_one_arg_raises_verbatim_message() {
+        // ERROR(msg) (1 arg) raises msg verbatim, no added prefix (analyzeF.test 4.1).
+        let err = error_func(&[SqlValue::Varchar(arcstr::ArcStr::from("error one"))]).unwrap_err();
+        assert_eq!(err.to_string(), "error one");
+        assert!(matches!(err, ExecutorError::SqliteCompatError(ref msg) if msg == "error one"));
+    }
+
+    #[test]
+    fn test_error_invalid_arity_is_normal_error_not_panic() {
+        // 2+ args returns a normal argument-count error rather than panicking.
+        let err = error_func(&[SqlValue::Integer(1), SqlValue::Integer(2)]).unwrap_err();
+        assert!(matches!(err, ExecutorError::UnsupportedFeature(_)));
     }
 }
