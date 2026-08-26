@@ -151,7 +151,8 @@ fn check_deferred_fk_violations(
     snapshot: &vibesql_storage::TxnSnapshot,
 ) -> Option<String> {
     use crate::foreign_key_check::{
-        fk_values_equal, parent_collations_for_fk, resolved_parent_indices_for_fk,
+        fk_values_equal, parent_affinities_for_fk, parent_collations_for_fk,
+        resolved_parent_indices_for_fk,
     };
 
     for violation in pending {
@@ -219,6 +220,7 @@ fn check_deferred_fk_violations(
         };
 
         let parent_collations = parent_collations_for_fk(db, fk);
+        let parent_affinities = parent_affinities_for_fk(db, fk);
         let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
         // Phase 1d: scan visible parent rows (commit-time snapshot).
@@ -247,6 +249,10 @@ fn check_deferred_fk_violations(
                                 fk_val,
                                 parent_val,
                                 parent_collations.get(i).and_then(|c| c.as_deref()),
+                                parent_affinities
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(vibesql_types::TypeAffinity::None),
                             ),
                             None => false,
                         },
@@ -263,6 +269,10 @@ fn check_deferred_fk_violations(
                                 fk_val,
                                 parent_val,
                                 parent_collations.get(i).and_then(|c| c.as_deref()),
+                                parent_affinities
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(vibesql_types::TypeAffinity::None),
                             ),
                             None => false,
                         },
@@ -308,7 +318,8 @@ fn check_deferred_fk_violations(
 /// (issue #5187).
 pub fn live_deferred_fk_violation_count(db: &Database) -> usize {
     use crate::foreign_key_check::{
-        fk_values_equal, parent_collations_for_fk, resolved_parent_indices_for_fk,
+        fk_values_equal, parent_affinities_for_fk, parent_collations_for_fk,
+        resolved_parent_indices_for_fk,
     };
 
     let pending = db.deferred_fk_violations();
@@ -371,6 +382,7 @@ pub fn live_deferred_fk_violation_count(db: &Database) -> usize {
         };
 
         let parent_collations = parent_collations_for_fk(db, fk);
+        let parent_affinities = parent_affinities_for_fk(db, fk);
         let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
         // Parent-side check uses `scan_live` (bitmap-filtered) so that the
@@ -387,6 +399,10 @@ pub fn live_deferred_fk_violation_count(db: &Database) -> usize {
                         fk_val,
                         parent_val,
                         parent_collations.get(i).and_then(|c| c.as_deref()),
+                        parent_affinities
+                            .get(i)
+                            .copied()
+                            .unwrap_or(vibesql_types::TypeAffinity::None),
                     ),
                     None => false,
                 },

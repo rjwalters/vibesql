@@ -203,7 +203,7 @@ fn check_child_references_impl(
             }
 
             let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+            let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
             // Check if any row in the child table references this parent
             // row's FK-target columns. Phase 1d follow-up (#5205): use
             // `scan_visible(&snapshot)` so the MVCC visibility filter
@@ -236,6 +236,10 @@ fn check_child_references_impl(
                             cv,
                             pv,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         )
                     },
                 )
@@ -358,7 +362,7 @@ fn queue_orphaned_children(
     // Resolve parent-side collations up front so the immutable borrow
     // inside the scan loop only sees the child table (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+    let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
     // Phase 1d follow-up (#5205): respect MVCC visibility when
     // identifying orphaned children. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
@@ -384,6 +388,10 @@ fn queue_orphaned_children(
                             cv,
                             pv,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         )
                     },
                 );
@@ -420,7 +428,7 @@ pub(crate) fn cascade_delete(
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+    let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
     // Phase 1d follow-up (#5205): respect MVCC visibility when picking
     // CASCADE-delete targets. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
@@ -444,6 +452,7 @@ pub(crate) fn cascade_delete(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
+                    parent_affinities.get(i).copied().unwrap_or(vibesql_types::TypeAffinity::None),
                 )
             });
         if matches {
@@ -568,7 +577,7 @@ pub(crate) fn set_null(
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+    let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
     // Phase 1d follow-up (#5205): respect MVCC visibility when picking
     // SET NULL targets. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
@@ -596,6 +605,7 @@ pub(crate) fn set_null(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
+                    parent_affinities.get(i).copied().unwrap_or(vibesql_types::TypeAffinity::None),
                 )
             });
         if matches {
@@ -663,7 +673,7 @@ pub(crate) fn set_default(
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
     let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+    let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
     // Phase 1d follow-up (#5205): respect MVCC visibility when picking
     // SET DEFAULT targets. Off-state collapses to scan_live.
     let snapshot = crate::mvcc::read_snapshot(db);
@@ -691,6 +701,7 @@ pub(crate) fn set_default(
                     cv,
                     pv,
                     parent_collations.get(i).and_then(|c| c.as_deref()),
+                    parent_affinities.get(i).copied().unwrap_or(vibesql_types::TypeAffinity::None),
                 )
             });
         if matches {

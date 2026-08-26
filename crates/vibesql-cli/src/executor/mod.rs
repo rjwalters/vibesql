@@ -3516,6 +3516,8 @@ impl SqlExecutor {
                 // do not skew which parent columns we read from.
                 let parent_column_collations: Vec<Option<String>> =
                     vibesql_executor::foreign_key_check::parent_collations_for_fk(&self.db, fk);
+                let parent_column_affinities: Vec<vibesql_types::TypeAffinity> =
+                    vibesql_executor::foreign_key_check::parent_affinities_for_fk(&self.db, fk);
                 let resolved_parent_indices =
                     vibesql_executor::foreign_key_check::resolved_parent_indices_for_fk(
                         &self.db, fk,
@@ -3574,6 +3576,10 @@ impl SqlExecutor {
                                         child_val,
                                         &parent_row.values[parent_idx],
                                         parent_column_collations.get(i).and_then(|c| c.as_deref()),
+                                        parent_column_affinities
+                                            .get(i)
+                                            .copied()
+                                            .unwrap_or(vibesql_types::TypeAffinity::None),
                                     )
                                 } else {
                                     false

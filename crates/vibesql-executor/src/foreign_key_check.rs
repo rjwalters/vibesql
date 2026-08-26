@@ -356,19 +356,38 @@ fn column_set_eq(a: &[usize], b: &[usize]) -> bool {
 }
 
 /// SQLite-style equality for FK comparisons that respects the parent column's
-/// collation (NOCASE / RTRIM) on top of strict typed equality and numeric
-/// coercion.
+/// collation (NOCASE / RTRIM) and *affinity* on top of strict typed equality.
+///
+/// `parent_affinity` gates the numeric cross-storage-class leniency
+/// (`Integer(1)` vs `Text("1")`): real SQLite's `fkey.c` applies the
+/// **parent** key column's affinity to the child value before performing the
+/// parent-index lookup (`sqlite3VdbeApplyAffinity` in `fkLookupParent`), so a
+/// bare/untyped parent column (affinity `None`, e.g. `p PRIMARY KEY` with no
+/// declared type) performs no such coercion — `Text("1.0")` must NOT match
+/// `Integer(1)` there (e_fkey-15.2.1: `chi(c REFERENCES par)` with
+/// `par(p PRIMARY KEY)`, both untyped; inserting `chi.c = '1.0'` must be
+/// rejected, not silently accepted as matching `par.p = 1`). Only a parent
+/// column with `Integer` / `Real` / `Numeric` affinity opts into the numeric
+/// coercion branch.
 pub fn fk_values_equal(
     child: &vibesql_types::SqlValue,
     parent: &vibesql_types::SqlValue,
     parent_collation: Option<&str>,
+    parent_affinity: vibesql_types::TypeAffinity,
 ) -> bool {
     if child == parent {
         return true;
     }
-    if let (Some(c), Some(p)) = (sql_value_as_f64(child), sql_value_as_f64(parent)) {
-        if c == p {
-            return true;
+    if matches!(
+        parent_affinity,
+        vibesql_types::TypeAffinity::Integer
+            | vibesql_types::TypeAffinity::Real
+            | vibesql_types::TypeAffinity::Numeric
+    ) {
+        if let (Some(c), Some(p)) = (sql_value_as_f64(child), sql_value_as_f64(parent)) {
+            if c == p {
+                return true;
+            }
         }
     }
     if let (Some(c), Some(p)) = (sql_value_as_text(child), sql_value_as_text(parent)) {
@@ -461,6 +480,35 @@ pub fn parent_collations_for_fk(db: &Database, fk: &ForeignKeyConstraint) -> Vec
             .collect()
     } else {
         vec![None; fk.parent_column_indices.len()]
+    }
+}
+
+/// Resolve the parent column *affinities* for an FK (ordered to align with
+/// the FK's parent-side columns), mirroring [`parent_collations_for_fk`]'s
+/// index resolution. Used to gate [`fk_values_equal`]'s numeric
+/// cross-storage-class coercion: a parent column with no declared type
+/// (`TypeAffinity::None`) must not accept a numeric-looking `TEXT` child
+/// value as equal to a stored `INTEGER`/`REAL` parent value (e_fkey-15.2.1).
+/// Missing parent tables or out-of-range indices default to `None` affinity
+/// (the strictest / no-coercion behavior).
+pub fn parent_affinities_for_fk(
+    db: &Database,
+    fk: &ForeignKeyConstraint,
+) -> Vec<vibesql_types::TypeAffinity> {
+    if let Some(parent) = db.catalog.get_table(&fk.parent_table) {
+        let indices = resolve_parent_indices(parent, fk);
+        indices
+            .iter()
+            .map(|&idx| {
+                parent
+                    .columns
+                    .get(idx)
+                    .map(|c| c.data_type.sqlite_affinity())
+                    .unwrap_or(vibesql_types::TypeAffinity::None)
+            })
+            .collect()
+    } else {
+        vec![vibesql_types::TypeAffinity::None; fk.parent_column_indices.len()]
     }
 }
 
@@ -563,6 +611,7 @@ pub(crate) fn check_fk_row_existence(
     })?;
 
     let parent_collations = parent_collations_for_fk(db, fk);
+    let parent_affinities = parent_affinities_for_fk(db, fk);
     let parent_indices = resolved_parent_indices_for_fk(db, fk);
 
     // Step 4: parent-table existence scan.
@@ -586,6 +635,10 @@ pub(crate) fn check_fk_row_existence(
                             fk_val,
                             parent_val,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         ),
                         None => false,
                     },
@@ -602,6 +655,10 @@ pub(crate) fn check_fk_row_existence(
                             fk_val,
                             parent_val,
                             parent_collations.get(i).and_then(|c| c.as_deref()),
+                            parent_affinities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(vibesql_types::TypeAffinity::None),
                         ),
                         None => false,
                     },
@@ -632,6 +689,10 @@ pub(crate) fn check_fk_row_existence(
                         fk_val,
                         parent_val,
                         parent_collations.get(i).and_then(|c| c.as_deref()),
+                        parent_affinities
+                            .get(i)
+                            .copied()
+                            .unwrap_or(vibesql_types::TypeAffinity::None),
                     ),
                     None => false,
                 }
@@ -700,38 +761,62 @@ mod tests {
     #[test]
     fn fk_values_equal_strict() {
         let v = vibesql_types::SqlValue::Integer(42);
-        assert!(fk_values_equal(&v, &v, None));
+        assert!(fk_values_equal(&v, &v, None, vibesql_types::TypeAffinity::None));
     }
 
     #[test]
     fn fk_values_equal_numeric_coercion() {
+        // Numeric cross-storage-class coercion only applies when the PARENT
+        // key column has a numeric-class affinity (real SQLite applies the
+        // parent column's affinity to the child value before the parent-
+        // index lookup — see fk_values_equal's doc comment).
         let child = vibesql_types::SqlValue::Integer(88);
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("88"));
-        assert!(fk_values_equal(&child, &parent, None));
+        assert!(fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Numeric));
+    }
+
+    #[test]
+    fn fk_values_equal_no_coercion_without_parent_affinity() {
+        // e_fkey-15.2.1: a bare/untyped parent column (affinity None) must
+        // NOT coerce a numeric-looking TEXT child value to match a stored
+        // INTEGER/TEXT/BLOB parent value it isn't byte-identical to.
+        let child = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1.0"));
+        let parent = vibesql_types::SqlValue::Integer(1);
+        assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::None));
     }
 
     #[test]
     fn fk_values_equal_nocase() {
         let child = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("Alpha"));
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("ALPHA"));
-        assert!(fk_values_equal(&child, &parent, Some("NOCASE")));
-        assert!(!fk_values_equal(&child, &parent, None));
+        assert!(fk_values_equal(
+            &child,
+            &parent,
+            Some("NOCASE"),
+            vibesql_types::TypeAffinity::Text
+        ));
+        assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
     }
 
     #[test]
     fn fk_values_equal_rtrim() {
         let child = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("abc"));
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("abc   "));
-        assert!(fk_values_equal(&child, &parent, Some("rtrim")));
-        assert!(!fk_values_equal(&child, &parent, None));
+        assert!(fk_values_equal(&child, &parent, Some("rtrim"), vibesql_types::TypeAffinity::Text));
+        assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
     }
 
     #[test]
     fn fk_values_equal_distinct() {
         let child = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("foo"));
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("bar"));
-        assert!(!fk_values_equal(&child, &parent, None));
-        assert!(!fk_values_equal(&child, &parent, Some("nocase")));
+        assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
+        assert!(!fk_values_equal(
+            &child,
+            &parent,
+            Some("nocase"),
+            vibesql_types::TypeAffinity::Text
+        ));
     }
 
     // -----------------------------------------------------------------

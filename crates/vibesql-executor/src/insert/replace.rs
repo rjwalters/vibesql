@@ -507,7 +507,7 @@ fn enforce_replace_fk_actions(
             continue;
         }
         let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
-
+        let parent_affinities = crate::foreign_key_check::parent_affinities_for_fk(db, fk);
         // Parent-key values the re-inserted row will provide (only relevant
         // to the NO ACTION / RESTRICT repair check below).
         let new_key: Vec<SqlValue> =
@@ -586,6 +586,10 @@ fn enforce_replace_fk_actions(
                                     dk,
                                     nk,
                                     parent_collations.get(i).and_then(|c| c.as_deref()),
+                                    parent_affinities
+                                        .get(i)
+                                        .copied()
+                                        .unwrap_or(vibesql_types::TypeAffinity::None),
                                 )
                             });
                         if restored {
@@ -615,6 +619,10 @@ fn enforce_replace_fk_actions(
                                 cv,
                                 pv,
                                 parent_collations.get(i).and_then(|c| c.as_deref()),
+                                parent_affinities
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(vibesql_types::TypeAffinity::None),
                             )
                         })
                     });
