@@ -339,6 +339,37 @@ impl Database {
         );
     }
 
+    /// Get the enable_regexp_extension PRAGMA setting (VibeSQL-specific,
+    /// #6576).
+    ///
+    /// When OFF (default), `regexp()`/`regexpi()` are not registered and
+    /// `X REGEXP Y` raises "no such function: REGEXP" — matching real
+    /// SQLite, which ships no default `regexp()` implementation
+    /// (R-41650-20872 / R-33693-50180) unless a build statically links the
+    /// `ext/misc/regexp.c` test extension. When ON, `regexp()`/`regexpi()`
+    /// become available for the remainder of THIS session only (a narrow,
+    /// purpose-built escape hatch — not a general session-scoped UDF
+    /// registration mechanism). VibeSQL's TCL conformance shim sets this via
+    /// `load_static_extension db regexp` (mirroring SQLite's own test
+    /// harness idiom in regexp1.test/regexp2.test) so it is scoped to the
+    /// single CLI process running that one test file, never leaking into an
+    /// unrelated session such as e_expr.test's (which asserts the default
+    /// "no such function" behavior and must stay unaffected).
+    pub fn regexp_extension_enabled(&self) -> bool {
+        match self.get_session_variable("ENABLE_REGEXP_EXTENSION") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the enable_regexp_extension PRAGMA setting (#6576).
+    pub fn set_regexp_extension_enabled(&mut self, value: bool) {
+        self.set_session_variable(
+            "ENABLE_REGEXP_EXTENSION",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     // ============================================================================
     // SQLite stat1 Storage (SQLite Compatibility)
     // ============================================================================

@@ -395,6 +395,7 @@ array set ::pragma_user_version_cookie {}   ;# db-file-path -> last raw text set
 array set ::pragma_page_size_cookie {}      ;# db-file-path -> last accepted PRAGMA page_size=... . Real SQLite stores the page size in the file header, so it survives a `db close`/reopen against the SAME file (#6175)
 array set ::pragma_application_id_cookie {} ;# db-file-path -> last raw text set via PRAGMA application_id=... (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
 array set ::pragma_schema_version_cookie {} ;# db-file-path -> running schema_version cookie: last explicit set PLUS every DDL/VACUUM auto-increment seen since (persists across reconnect to the SAME file, like SQLite's header cookie; #6175)
+set ::vibesql_regexp_extension_enabled 0 ;# Default: OFF (SQLite ships no default regexp()/regexpi() — #6576). Set by load_static_extension when $ext eq "regexp" (mirroring SQLite's own `load_static_extension db regexp` test-harness idiom); replayed as `PRAGMA enable_regexp_extension=1;` in build_pragma_prefix so the connection-scoped opt-in survives every fresh per-batch CLI process for the REST OF THIS FILE ONLY — a separate tclsh process (e.g. e_expr.test) starts with this at its own fresh default of 0, so REGEXP stays "no such function" there.
 
 # DQS (Double-Quoted Strings) mode tracking
 # When enabled, double-quoted strings are treated as string literals instead of identifiers.
@@ -2012,6 +2013,14 @@ proc build_pragma_prefix {} {
     set prefix ""
     # Always set SQLite mode for TCL tests (integer division, etc.)
     append prefix "SET sql_mode='sqlite';\n"
+    # Replay the regexp/regexpi opt-in (#6576) if `load_static_extension db
+    # regexp` has been called earlier in this file, so it stays available in
+    # every later fresh per-batch CLI process on this connection. Placed
+    # early (ahead of ATTACH/temp replay below) purely for readability; it
+    # has no ordering dependency on the other replayed state.
+    if {$::vibesql_regexp_extension_enabled} {
+        append prefix "PRAGMA enable_regexp_extension=1;\n"
+    }
     # Replay ATTACH for every still-attached alias (#6363) so a later batch's
     # fresh CLI process can resolve aux.*-qualified references before this
     # batch's own SQL runs. Placed FIRST among the replayed state — ahead of
@@ -7758,8 +7767,25 @@ proc uses_sqlite_internals {script {name ""}} {
         return [list 1 "uses sqlite_interrupt_count (interrupt counter)"]
     }
 
-    # SQLite REGEXP operator - requires custom function registration, not standard SQL
-    if {[regexp -nocase {\sREGEXP\s} $script]} {
+    # SQLite REGEXP operator - requires custom function registration, not
+    # standard SQL. VibeSQL now HAS a real (opt-in) regexp()/regexpi()
+    # implementation (#6576), reachable once `load_static_extension db
+    # regexp` has set ::vibesql_regexp_extension_enabled for THIS session
+    # (see that proc's doc comment). Keep skipping unconditionally when the
+    # extension has NOT been loaded — e.g. e_expr.test never calls
+    # load_static_extension, so its REGEXP-using tests (e_expr-18.2.1/18.2.3)
+    # continue to be skipped exactly as before, preserving its baseline.
+    #
+    # regexp1.test's very first test (regexp1-1.1) is a single `do_test`
+    # script that calls `load_static_extension db regexp` AND runs a REGEXP
+    # query in the SAME script body — so ::vibesql_regexp_extension_enabled
+    # is still 0 at the moment this static pre-check runs (load_static_extension
+    # hasn't executed yet). Also allow the script through when IT ITSELF is
+    # about to load the regexp extension, so that one bootstrapping test runs
+    # instead of being skipped before load_static_extension ever fires.
+    set loads_regexp_ext [regexp -nocase {load_static_extension\s+\S+\s+regexp\M} $script]
+    if {!$::vibesql_regexp_extension_enabled && !$loads_regexp_ext
+            && [regexp -nocase {\sREGEXP\s} $script]} {
         return [list 1 "uses REGEXP operator (requires custom function)"]
     }
 
@@ -9353,12 +9379,30 @@ proc load_static_extension {db args} {
     #    function fail (or are skipped) on their own, visibly. Files whose
     #    *test data* depends on an extension vtable (index6/index7's
     #    `wholenumber`) are handled by explicit vibesql_skip_files entries.
+    #
+    # 3. `regexp` (#6576): unlike the other extensions above, VibeSQL DOES
+    #    have a real (opt-in) implementation of the regexp/regexpi functions
+    #    this loads, gated behind `PRAGMA enable_regexp_extension`. Flip the
+    #    connection-scoped tracking flag so build_pragma_prefix replays that
+    #    PRAGMA into every later per-batch CLI process FOR THE REST OF THIS
+    #    FILE — this is still a no-op *here* (no SQL is sent), matching every
+    #    other extension's immediate behavior; the actual enabling happens via
+    #    the next execsql's replayed prefix. Session-scoped by construction:
+    #    this is a per-tclsh-process global, and the runner spawns one fresh
+    #    tclsh process per test file (see "each execsql runs a fresh vibesql
+    #    process" elsewhere in this file for the analogous per-batch CLI
+    #    process model), so a different file (e.g. e_expr.test, which never
+    #    calls load_static_extension) starts with this flag at its own fresh
+    #    default of 0 and REGEXP correctly stays "no such function" there.
     set ext [lindex $args 0]
     set error_exts {decimal ieee754 basexx zipfile}
     if {$ext in $error_exts \
             && !([info exists ::current_test_file_basename] \
                  && $::current_test_file_basename eq "nan")} {
         error "extension $ext is not available (VibeSQL does not load C test extensions)"
+    }
+    if {$ext eq "regexp"} {
+        set ::vibesql_regexp_extension_enabled 1
     }
     return ""
 }
@@ -10608,6 +10652,12 @@ proc reset_db {} {
     set ::pragma_defer_foreign_keys 0
     # recursive_triggers is per-connection in SQLite (OFF by default; #5909).
     set ::pragma_recursive_triggers 0
+    # regexp/regexpi extension loading is connection-scoped in real SQLite
+    # too (#6576): reset_db closes and reopens the connection, so a
+    # previously-loaded extension does not survive — matching
+    # regexp1.test's own `reset_db; load_static_extension db regexp`
+    # re-load idiom at its section boundary (~line 247-248).
+    set ::vibesql_regexp_extension_enabled 0
     set ::pragma_encoding ""  ;# reset_db: encoding resets to default UTF-8 (#6172)
     set ::pragma_synchronous_raw ""  ;# reset_db: synchronous resets to default FULL (#6175)
     set ::pragma_cache_size_raw ""   ;# reset_db: cache_size resets to default -2000 (#6175)

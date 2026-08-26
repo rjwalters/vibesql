@@ -1931,6 +1931,26 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "ENABLE_REGEXP_EXTENSION" => {
+                    // VibeSQL-specific escape hatch (#6576): opts the current
+                    // session into `regexp()`/`regexpi()`, mirroring SQLite's
+                    // `load_static_extension db regexp` test-harness idiom
+                    // (real SQLite has no `PRAGMA` for this — extensions load
+                    // via a C API — but VibeSQL has no dynamic extension
+                    // loader, so a narrow session-scoped PRAGMA is the
+                    // closest equivalent). Session-scoped, default OFF, so
+                    // `X REGEXP Y` still raises "no such function: REGEXP"
+                    // everywhere this PRAGMA has not been set, matching
+                    // SQLite's real default (e_expr.test e_expr-18.1.1/.2).
+                    self.db.set_regexp_extension_enabled(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "COUNT_CHANGES" => {
                     // SQLite-compatible PRAGMA count_changes: when ON, each
                     // INSERT/UPDATE/DELETE returns a one-row result with the
@@ -2452,6 +2472,16 @@ impl SqlExecutor {
                     let value = if self.db.case_sensitive_like() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["case_sensitive_like".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "ENABLE_REGEXP_EXTENSION" => {
+                    let value = if self.db.regexp_extension_enabled() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["enable_regexp_extension".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

@@ -325,6 +325,28 @@ impl CombinedExpressionEvaluator<'_> {
                 }
                 return Ok(vibesql_types::SqlValue::Bigint(0));
             }
+            // `regexp()`/`regexpi()` (#6576): only reachable once the
+            // *current session* has opted in via
+            // `PRAGMA enable_regexp_extension = 1` (mirroring SQLite's
+            // `load_static_extension db regexp` test-harness idiom). When
+            // NOT enabled, deliberately do nothing here and fall through to
+            // the generic dispatch below, which raises "no such function:
+            // REGEXP"/"REGEXPI" exactly as real SQLite does with no
+            // extension registered (e_expr.test e_expr-18.1.1/.2) — this
+            // must never become an always-on builtin.
+            upper @ ("REGEXP" | "REGEXPI") => {
+                if self.database.map(|db| db.regexp_extension_enabled()).unwrap_or(false) {
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.eval(arg, row)?);
+                    }
+                    return if upper == "REGEXPI" {
+                        super::super::functions::sqlite_compat::regexp_funcs::regexpi(&arg_values)
+                    } else {
+                        super::super::functions::sqlite_compat::regexp_funcs::regexp(&arg_values)
+                    };
+                }
+            }
             _ => {}
         }
 

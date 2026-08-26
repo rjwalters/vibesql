@@ -15,6 +15,7 @@
 //! - [`math_funcs`]: Math and query hints (RANDOM, LIKELY, UNLIKELY, LIKELIHOOD)
 //! - [`pattern_funcs`]: Pattern matching (LIKE, GLOB)
 //! - [`json_funcs`]: JSON functions (json, json_array, json_object, etc.)
+//! - [`regexp_funcs`]: Opt-in REGEXP/REGEXPI emulation (session-gated, #6576)
 
 mod blob_funcs;
 mod conditional_funcs;
@@ -22,6 +23,7 @@ pub(crate) mod json_funcs;
 pub(crate) mod jsonb;
 mod math_funcs;
 mod pattern_funcs;
+pub(crate) mod regexp_funcs;
 mod string_funcs;
 mod type_funcs;
 

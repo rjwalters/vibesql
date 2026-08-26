@@ -744,6 +744,24 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     };
                 }
 
+                // `regexp()`/`regexpi()` (#6576): only reachable once the
+                // *current session* has opted in via
+                // `PRAGMA enable_regexp_extension = 1` (see
+                // evaluator::expressions::special / evaluator::combined::special
+                // for the rationale). When NOT enabled, fall through to the
+                // generic dispatch below, which raises "no such function:
+                // REGEXP"/"REGEXPI" exactly as real SQLite does with no
+                // extension registered — never an always-on builtin.
+                if (upper == "REGEXP" || upper == "REGEXPI")
+                    && self.database.map(|db| db.regexp_extension_enabled()).unwrap_or(false)
+                {
+                    return if upper == "REGEXPI" {
+                        super::functions::sqlite_compat::regexp_funcs::regexpi(&evaluated_args)
+                    } else {
+                        super::functions::sqlite_compat::regexp_funcs::regexp(&evaluated_args)
+                    };
+                }
+
                 let char_unit = character_unit.as_ref().map(|cu| match cu {
                     arena_ast::CharacterUnit::Characters => vibesql_ast::CharacterUnit::Characters,
                     arena_ast::CharacterUnit::Octets => vibesql_ast::CharacterUnit::Octets,
