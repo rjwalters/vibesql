@@ -58,6 +58,25 @@ pub(super) fn execute_rename_table(
         None => stmt.new_table_name.clone(),
     };
 
+    // Capture the old name's `sqlite_master` creation ordinal (if any) BEFORE
+    // the drop+create below, so it can be carried over to the new name
+    // afterward — otherwise the renamed table would sort to the end of
+    // `sqlite_master` like a fresh CREATE TABLE instead of keeping its
+    // original position, unlike real SQLite (fkey2-14.2.2.2, #6170). Resolves
+    // the same schema namespace `create_table_with_identifier` will target for
+    // the new name below: the explicit qualifier if `stmt.table_name` carried
+    // one, else the catalog's current schema.
+    let rename_seq_schema: String = match &schema_qualifier {
+        Some(schema) => schema.clone(),
+        None => database.catalog.get_current_schema().to_string(),
+    };
+    let rename_seq_old_bare_name: &str = match &schema_qualifier {
+        Some(_) => stmt.table_name.split_once('.').map(|(_, t)| t).unwrap_or(&stmt.table_name),
+        None => stmt.table_name.as_str(),
+    };
+    let old_creation_seq =
+        database.catalog.creation_seq(&rename_seq_schema, rename_seq_old_bare_name);
+
     // Check if the new name already names a table or an index. SQLite shares a
     // single object namespace for tables and indexes, so a RENAME TO collision
     // against either reports the same SQLite-compatible message
@@ -125,6 +144,14 @@ pub(super) fn execute_rename_table(
     database
         .create_table_with_identifier(new_table.schema.clone(), new_table_identifier)
         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
+
+    // Overwrite the fresh ordinal `create_table_with_identifier` just assigned
+    // the new name with the old name's original one, so the renamed table
+    // keeps its `sqlite_master` position instead of sorting last (see the
+    // capture above). No-op if the old name had no recorded ordinal.
+    if let Some(seq) = old_creation_seq {
+        database.catalog.set_creation_seq(&rename_seq_schema, &stmt.new_table_name, seq);
+    }
 
     // Restore the triggers cascade-dropped above so `rewrite_triggers_for_rename`
     // (below) can rewrite their `ON`-target/body to the new table name instead of

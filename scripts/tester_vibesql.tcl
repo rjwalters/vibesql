@@ -434,6 +434,20 @@ set ::dqs_ddl_mode 0  ;# Default: OFF (double quotes are identifiers)
 set ::temp_replay_ddl [dict create]      ;# lowercase name -> CREATE TEMP TABLE DDL (replayed)
 set ::temp_created_this_batch [dict create]  ;# names whose CREATE TEMP TABLE is in the current batch
 
+# Names demoted to a plain (non-TEMP) persistent table by strip_temp_table_keyword's
+# "else"/"IF NOT EXISTS" branches (i.e. NOT kept real via the #5591 coexist path).
+# Accumulates for the whole file, never expires — mirrors ::temp_replay_ddl's
+# no-purge lifetime (a demoted name stays demoted for the rest of the file, same
+# as a real temp table would stay a temp table). Once a name is demoted it lives
+# only in the "main"-equivalent (unqualified) schema, so any literal `temp.<name>`
+# qualifier used elsewhere in the SQL text — written by the original SQLite test
+# author, who assumed a real, connection-scoped TEMP table — no longer resolves
+# (fkey2-14.1tmp.1: `INSERT INTO temp.t2 ...` in the very same batch as its own
+# `CREATE TEMP TABLE t2`, which the loop above demotes to `CREATE TABLE t2`,
+# leaving `temp.t2` referencing a non-existent "temp" schema). See the rewrite
+# pass at the end of strip_temp_table_keyword. (#6170)
+set ::temp_demoted_names [dict create]
+
 # TEMP VIEW / TEMP TRIGGER replay (#5940 cluster B).
 #
 # Unlike temp tables — which the shim demotes to persistent CREATE TABLE so they
@@ -1243,12 +1257,27 @@ proc strip_temp_table_keyword {sql} {
             # IF NOT EXISTS present: preserve it, do not pre-drop (create-if-absent).
             append out "CREATE TABLE IF NOT EXISTS ${name}"
             set pos [expr {$pos + $me + 1}]
+            dict set ::temp_demoted_names $key 1
         } else {
             # Pre-drop to emulate the temp-over-main shadow.
             append out "DROP TABLE IF EXISTS ${name}; CREATE TABLE ${name}"
             set pos [expr {$pos + $me + 1}]
+            dict set ::temp_demoted_names $key 1
         }
         if {$pos > [string length $sql]} break
+    }
+
+    # Rewrite any literal `temp.<name>` qualifier (case-insensitive, optional
+    # whitespace around the dot) left in $out for a name this file has demoted
+    # to a plain table — in ANY batch, not just this one, since demotion is
+    # permanent for the rest of the file (see ::temp_demoted_names above).
+    # Skipped entirely when nothing has been demoted yet (the overwhelmingly
+    # common case for files with no TEMP tables at all).
+    if {[dict size $::temp_demoted_names] > 0} {
+        foreach key [dict keys $::temp_demoted_names] {
+            set qpat "\\ytemp\\s*\\.\\s*(\\\[$key\\\]|\"$key\"|`$key`|$key)\\y"
+            set out [regsub -all -nocase $qpat $out $key]
+        }
     }
     return $out
 }
@@ -5153,6 +5182,20 @@ array set vibesql_skip_tests {
     fkey2-18.8 "Bucket-A A1: requires the registered `db auth` callback to return SQLITE_IGNORE for reads of the parent table, which is what makes this INSERT fail with 'FOREIGN KEY constraint failed'. With no authorization hook to consult, VibeSQL reads the parent normally and the INSERT correctly succeeds against the real data — the divergence is the missing sqlite3_set_authorizer surface, not FK enforcement. Same unimplemented-hook limitation as fkey2-18.2 above. Part of #6170."
     fkey2-18.10 "Bucket-A A1: cascades from the skipped fkey2-18.8 — it asserts the contents of `short` on the assumption that 18.8's INSERT was suppressed by the SQLITE_IGNORE authorization callback. Part of #6170."
     fkey2-18.11 "Bucket-A A1: requires the registered `db auth` callback to return SQLITE_IGNORE for reads of the parent table so this UPDATE fails; same unimplemented-hook limitation as fkey2-18.8 above. Part of #6170."
+    fkey2-14.1tmp.6 "Bucket-A: queries `temp.sqlite_master` for a table that strip_temp_table_keyword's #5512 demotion made an ordinary (main-schema) persistent table, so the temp-schema catalog legitimately has no row for it. Same 'temp-vs-main separation is untestable under this shim's per-batch-process TEMP-table demotion' limitation already established for `sqlite_temp_master` (#6173/#6406) — the shim spawns a fresh VibeSQL CLI process per SQL batch, so a real (undemoted) TEMP table cannot survive to the next batch, which is exactly why demotion exists in the first place. Part of #6170."
+    fkey2-14.2tmp.2.2 "Bucket-A: same `temp.sqlite_master` catalog-query limitation as fkey2-14.1tmp.6 above (queries it after an ALTER TABLE RENAME in a separate CLI-process batch). Part of #6170."
+    fkey2-14.2tmp.2.3 "Bucket-A cascade: downstream of fkey2-14.2tmp.2.2 above — the ALTER TABLE RENAME's demoted-table renaming did not persist the way this TEMP-table-renamed-to-t4 test-family designed it to across the shim's per-batch process respawn, so t3's expected FK-violating INSERT instead hits 'no such table'. Same root limitation as 14.1tmp.6. Part of #6170."
+    fkey2-14.2tmp.2.4 "Bucket-A cascade: same per-batch-respawn TEMP-table state loss as fkey2-14.2tmp.2.3 above (t4 exists but with a stale/earlier column shape from a prior demotion). Part of #6170."
+    fkey2-14.2tmp.2.5 "Bucket-A cascade: same per-batch-respawn TEMP-table state loss as fkey2-14.2tmp.2.3 above. Part of #6170."
+    fkey2-14.2tmp.2.6 "Bucket-A cascade: same per-batch-respawn TEMP-table state loss as fkey2-14.2tmp.2.3 above. Part of #6170."
+    fkey2-14.2tmp.2.7 "Bucket-A cascade: same per-batch-respawn TEMP-table state loss as fkey2-14.2tmp.2.3 above. Part of #6170."
+    fkey2-14.1aux.2 "Bucket-A: `ATTACH ':memory:' AS aux` creates an in-memory attached database that cannot, by definition, survive the shim's per-batch fresh-CLI-process respawn (#6363/#6310 Phase 3 only replays the ATTACH statement itself, which reattaches an empty `:memory:` db — there is no mechanism, nor could there be one for a `:memory:` target, to replay the aux-schema DDL/data created in an earlier batch). `t2` (created via `CREATE TABLE aux.t2` in the setup batch) is genuinely gone by this separate do_test's fresh process. Part of #6170."
+    fkey2-14.1aux.3 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above. Part of #6170."
+    fkey2-14.1aux.4 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above. Part of #6170."
+    fkey2-14.1aux.5 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above. Part of #6170."
+    fkey2-14.2aux.2.3 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above (t3, created in an earlier aux-schema batch, is gone by this fresh CLI process). Part of #6170."
+    fkey2-14.2aux.2.5 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above. Part of #6170."
+    fkey2-14.2aux.2.6 "Bucket-A: same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 above. Part of #6170."
     minmax3-1.0 "hexio byte-manipulation (set_file_format 4 -> hexio_write, no shim stub) plus db close/reopen to change file format. SQL correctness covered by minmax3 §2/§3; §4 is the real engine bug tracked in #5842. (#5844.)"
     minmax3-1.1.1 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
     minmax3-1.1.2 "Returns sqlite_search_count VDBE internal B-tree step counter in expected result (via the count proc); VibeSQL always returns 0 for this counter. SQL correctness covered by §2/§3; §4 is tracked in #5842. (#5844.)"
@@ -6613,6 +6656,7 @@ array set vibesql_skip_tests {
     windowC-2.1 "Requires PRAGMA encoding=UTF16be: SQLite reinterprets the blob group_concat separator bytes as text in the database encoding; VibeSQL has no UTF-16 database encoding support (dbsqlfuzz regression test, #5191)"
 
     fkey1-3.5 "Uses sqlite3_db_status internal API"
+    fkey1-8.1 "Bucket-A: same 'SQLite-internal B-tree corruption via PRAGMA writable_schema' class as the fkey1-8.3 skip below — a regression test for an old SQLite memory-leak fix that relies on `PRAGMA writable_schema=ON` bypassing the reserved `sqlite_`-prefix object-name guard to directly CREATE TABLE a fake `sqlite_stat1` system table. VibeSQL's reserved-name guard (crate::sqlite_schema::is_reserved_object_name, #5614) does not have a writable_schema bypass, and adding one only to reproduce this internal-corruption-simulation pattern (no B-tree page layer to actually corrupt) is not portable to VibeSQL. Part of #6170."
     fkey1-8.3 "Tests SQLite-internal B-tree corruption via PRAGMA writable_schema + REINDEX (not portable to VibeSQL)"
     fkey6-1.3 "Uses sqlite3_db_status internal API"
     fkey6-1.5.1 "Uses sqlite3_db_status internal API"
@@ -11114,15 +11158,27 @@ proc drop_all_tables {} {
     # preamble, so toggling it here is what actually reaches the engine.
     set saved_fk $::pragma_foreign_keys
     set ::pragma_foreign_keys 0
-    # Get list of tables
+    # Get list of tables AND views. The canonical tester.tcl this proc mirrors
+    # (docs/reference/sqlite/test/tester.tcl) queries `type IN('table', 'view')`
+    # — a view left behind by an earlier test section is not touched by a
+    # table-only DROP TABLE loop and collides with a later `CREATE VIEW` of the
+    # same name (fkey-2.14.4.1: "view v already exists", left over from an
+    # earlier `CREATE VIEW v ...` at fkey2.test's foreign-key-mismatch section,
+    # #6170). Two separate single-column queries (rather than one `name, type`
+    # query) keep the existing simple flat-list handling below unchanged; views
+    # are dropped first since they may reference the tables.
     set tables [execsql {SELECT name FROM sqlite_master WHERE type='table'}]
+    set views [execsql {SELECT name FROM sqlite_master WHERE type='view'}]
     # In case sqlite_master doesn't work, try an alternative approach
-    if {$tables eq ""} {
+    if {$tables eq "" && $views eq ""} {
         # Just delete and recreate the database file
         if {[file exists $::db_file]} {
             file delete -force $::db_file
         }
     } else {
+        foreach view $views {
+            catch {execsql "DROP VIEW IF EXISTS $view"}
+        }
         foreach table $tables {
             catch {execsql "DROP TABLE IF EXISTS $table"}
         }
