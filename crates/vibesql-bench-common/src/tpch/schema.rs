@@ -878,6 +878,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -895,6 +896,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -912,6 +914,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -929,6 +932,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -946,6 +950,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -964,12 +969,14 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "L_LINENUMBER".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -988,6 +995,7 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -1006,12 +1014,14 @@ fn create_tpch_indexes_vibesql(db: &mut VibeDB) {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "PS_SUPPKEY".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )

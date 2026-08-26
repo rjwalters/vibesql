@@ -193,6 +193,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -207,6 +208,7 @@ fn create_sbtest_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

@@ -158,6 +158,7 @@ fn test_disk_backed_index_creation_with_bulk_load() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         None,
         None,
@@ -203,6 +204,7 @@ fn test_in_memory_index_for_small_tables() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         None,
         None,
@@ -351,6 +353,7 @@ fn test_budget_enforcement_with_spill_policy() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         None,
         None,
@@ -370,6 +373,7 @@ fn test_budget_enforcement_with_spill_policy() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         None,
         None,
@@ -429,6 +433,7 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             None,
             None,
@@ -451,6 +456,7 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             None,
             None,
@@ -478,6 +484,7 @@ fn test_lru_eviction_order() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             None,
             None,
@@ -529,6 +536,7 @@ fn test_access_tracking() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             None,
             None,
@@ -589,6 +597,7 @@ fn test_resource_cleanup_on_drop() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             None,
             None,
@@ -678,6 +687,7 @@ fn test_index_scan_after_database_reset() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -859,6 +869,7 @@ fn test_thread_local_pool_pattern() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -941,6 +952,7 @@ fn test_lookup_by_index_single_column() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -992,6 +1004,7 @@ fn test_lookup_one_by_index() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -1073,18 +1086,21 @@ fn test_lookup_by_index_composite_key() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1152,6 +1168,7 @@ fn test_lookup_by_index_batch() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -1214,6 +1231,7 @@ fn test_lookup_one_by_index_batch() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -1343,18 +1361,21 @@ fn test_lookup_by_index_prefix_basic() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1452,12 +1473,14 @@ fn test_lookup_by_index_prefix_single_column() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "district".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1507,12 +1530,14 @@ fn test_lookup_by_index_prefix_no_match() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1569,18 +1594,21 @@ fn test_lookup_by_index_prefix_batch_basic() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1649,18 +1677,21 @@ fn test_lookup_by_index_prefix_batch_tpcc_delivery() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "no_d_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "no_o_id".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -1741,12 +1772,14 @@ fn test_lookup_by_index_prefix_empty_prefix() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "b".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )

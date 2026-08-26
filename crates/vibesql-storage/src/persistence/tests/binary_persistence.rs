@@ -122,6 +122,7 @@ fn test_binary_roundtrip_preserves_creation_seq() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
         )
         .unwrap();
@@ -1171,5 +1172,70 @@ fn test_int_primary_key_is_not_rehydrated_as_rowid_alias() {
         loaded_db.get_table("int_pk").unwrap().schema.rowid_alias_column,
         None,
         "INT PRIMARY KEY must not become a rowid alias on reload"
+    );
+}
+
+/// Issue #6560 (binary format v18): an index column's original-source
+/// quoting bit (`IndexColumn::Column::is_quoted` / catalog
+/// `IndexedColumn::is_quoted`) must survive a binary save/load round-trip.
+/// Without persisting it, `ALTER TABLE ... DROP COLUMN`'s dependent-index
+/// error would lose SQLite's "should this be a string literal in
+/// single-quotes?" hint for an index that was created, saved, and reloaded
+/// in a separate process — even though the same index would still get the
+/// hint if checked immediately after `CREATE INDEX` in the same session.
+#[test]
+fn test_index_column_quoting_bit_roundtrip() {
+    use vibesql_ast::{IndexColumn, OrderDirection};
+
+    let mut db = Database::new();
+    db.create_table(TableSchema::new(
+        "t1".to_string(),
+        vec![
+            ColumnSchema::new("a".to_string(), DataType::Integer, true),
+            ColumnSchema::new("b".to_string(), DataType::Integer, true),
+        ],
+    ))
+    .unwrap();
+
+    // One quoted column (`CREATE INDEX x1 ON t1("a")`) and one unquoted
+    // (`CREATE INDEX x1 ON t1(b)` shape) in the same index, so the roundtrip
+    // is verified to preserve the bit per-column, not just globally.
+    db.create_index(
+        "x1".to_string(),
+        "t1".to_string(),
+        false,
+        vec![
+            IndexColumn::Column {
+                column_name: "a".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+                collation: None,
+                is_quoted: true,
+            },
+            IndexColumn::Column {
+                column_name: "b".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+                collation: None,
+                is_quoted: false,
+            },
+        ],
+    )
+    .unwrap();
+
+    let path = format!("/tmp/test_index_quoting_bit_roundtrip_{}.vbsql", std::process::id());
+    db.save_binary(&path).unwrap();
+    let loaded_db = Database::load_binary(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    let index = loaded_db.catalog.get_index("t1", "x1").expect("index x1 must survive reload");
+    assert_eq!(index.columns.len(), 2);
+    assert!(
+        index.columns[0].is_quoted(),
+        "column a's original-source quoting bit must survive the round-trip"
+    );
+    assert!(
+        !index.columns[1].is_quoted(),
+        "column b's unquoted original-source bit must survive the round-trip"
     );
 }

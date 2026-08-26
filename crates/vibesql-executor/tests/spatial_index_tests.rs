@@ -64,6 +64,7 @@ fn test_create_spatial_index_basic() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         where_clause: None,
     };
@@ -141,12 +142,14 @@ fn test_spatial_index_multiple_columns_error() {
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "location2".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             },
         ],
         where_clause: None,
@@ -212,6 +215,7 @@ fn test_drop_spatial_index() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         where_clause: None,
     };
@@ -287,6 +291,7 @@ fn test_spatial_index_if_not_exists() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         where_clause: None,
     };
@@ -305,6 +310,7 @@ fn test_spatial_index_if_not_exists() {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }],
         where_clause: None,
     };

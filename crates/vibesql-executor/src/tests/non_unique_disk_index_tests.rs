@@ -106,6 +106,7 @@ fn test_basic_non_unique_index_with_duplicates() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -201,12 +202,14 @@ fn test_multi_column_non_unique_index() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "salary".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -311,6 +314,7 @@ fn test_range_queries_with_duplicates() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -406,6 +410,7 @@ fn test_updates_affecting_non_unique_indexes() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -511,6 +516,7 @@ fn test_deletes_with_duplicates() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -584,6 +590,7 @@ fn test_heavy_duplicate_scenario_in_memory() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -649,6 +656,7 @@ fn test_heavy_duplicate_scenario_disk_backed() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

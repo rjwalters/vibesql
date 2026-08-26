@@ -95,6 +95,7 @@ fn test_secondary_index_single_column_lookup() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -139,18 +140,21 @@ fn test_secondary_index_composite_lookup() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -194,18 +198,21 @@ fn test_secondary_index_with_order_by() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "c_d_id".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "c_last".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -243,6 +250,7 @@ fn test_secondary_index_select_star() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -281,6 +289,7 @@ fn test_secondary_index_no_match() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -315,6 +324,7 @@ fn test_secondary_index_with_limit() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -373,6 +383,7 @@ fn test_secondary_index_residual_predicate_filter() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -429,6 +440,7 @@ fn test_secondary_index_residual_predicate_match() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

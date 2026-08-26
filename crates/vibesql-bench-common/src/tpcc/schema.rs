@@ -465,6 +465,7 @@ fn create_tpcc_indexes_vibesql(db: &mut VibeDB) {
             direction: OrderDirection::Asc,
             prefix_length: None,
             collation: None,
+            is_quoted: false,
         }
     }
 

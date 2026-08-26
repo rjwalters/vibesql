@@ -377,6 +377,7 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 }],
             )
             .unwrap();

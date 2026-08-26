@@ -293,6 +293,16 @@ pub enum IndexColumn {
         /// BINARY). Persisted for round-trip and used by upsert conflict-target
         /// matching (issue #5921).
         collation: Option<String>,
+        /// Whether the column name was written as a delimited identifier
+        /// (double-quoted, backtick-quoted, or bracket-quoted) in the original
+        /// `CREATE INDEX` statement, e.g. `CREATE INDEX i3 ON t1("w")`.
+        /// `false` for a plain unquoted name or a single-quoted string used as
+        /// an identifier (SQLite's "string as identifier" fallback quirk does
+        /// NOT get the "should this be a string literal in single-quotes?"
+        /// hint — only a genuinely delimited identifier does). Drives the
+        /// SQLite-compatible hint appended to "no such column" errors that
+        /// reference this index column (issue #6560).
+        is_quoted: bool,
     },
     /// Expression index (functional index)
     /// Example: CREATE INDEX idx ON t(lower(name)) or CREATE INDEX idx ON t(a + b)
@@ -302,7 +312,13 @@ pub enum IndexColumn {
 impl IndexColumn {
     /// Create a new simple column index
     pub fn new_column(column_name: String, direction: crate::select::OrderDirection) -> Self {
-        IndexColumn::Column { column_name, direction, prefix_length: None, collation: None }
+        IndexColumn::Column {
+            column_name,
+            direction,
+            prefix_length: None,
+            collation: None,
+            is_quoted: false,
+        }
     }
 
     /// Create a new simple column index with an explicit collation.
@@ -311,7 +327,13 @@ impl IndexColumn {
         direction: crate::select::OrderDirection,
         collation: Option<String>,
     ) -> Self {
-        IndexColumn::Column { column_name, direction, prefix_length: None, collation }
+        IndexColumn::Column {
+            column_name,
+            direction,
+            prefix_length: None,
+            collation,
+            is_quoted: false,
+        }
     }
 
     /// Create a new column index with prefix length
@@ -325,7 +347,19 @@ impl IndexColumn {
             direction,
             prefix_length: Some(prefix_length),
             collation: None,
+            is_quoted: false,
         }
+    }
+
+    /// Attach the original-source quoting bit (builder-style chaining), e.g.
+    /// `IndexColumn::new_column(..).with_quoted(true)` for a column parsed
+    /// from a delimited identifier. A no-op on an `Expression` column. See
+    /// issue #6560.
+    pub fn with_quoted(mut self, is_quoted: bool) -> Self {
+        if let IndexColumn::Column { is_quoted: q, .. } = &mut self {
+            *q = is_quoted;
+        }
+        self
     }
 
     /// Create a new expression index
@@ -374,6 +408,16 @@ impl IndexColumn {
         match self {
             IndexColumn::Column { collation, .. } => collation.as_deref(),
             IndexColumn::Expression { .. } => None,
+        }
+    }
+
+    /// Whether this column was written as a delimited identifier
+    /// (double-quoted/backtick/bracket) in the original `CREATE INDEX`
+    /// statement. Always `false` for an expression index. See issue #6560.
+    pub fn is_quoted(&self) -> bool {
+        match self {
+            IndexColumn::Column { is_quoted, .. } => *is_quoted,
+            IndexColumn::Expression { .. } => false,
         }
     }
 

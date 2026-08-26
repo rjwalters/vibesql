@@ -229,12 +229,14 @@ fn convert_to_catalog_columns(columns: &[IndexColumn]) -> Vec<vibesql_catalog::I
                     prefix_len,
                 )
                 .with_collation(col.collation().map(|c| c.to_string()))
+                .with_quoted(col.is_quoted())
             } else {
                 vibesql_catalog::IndexedColumn::new_column(
                     col.column_name().unwrap().to_string(),
                     order,
                 )
                 .with_collation(col.collation().map(|c| c.to_string()))
+                .with_quoted(col.is_quoted())
             }
         })
         .collect()

@@ -90,7 +90,16 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///   (pragma.test 23.1, read across a second connection). v16 and earlier files remain readable:
 ///   the read path is gated on `version >= 17`; absence leaves the ordinals unrecorded and the
 ///   generator falls back to the prior emission order. Issue #6175.
-pub const VERSION: u8 = 17;
+/// - v18: Added per-index-key-part quoting persistence (`IndexColumn::Column::is_quoted`, whether
+///   the column name was written as a delimited identifier in the original `CREATE INDEX`
+///   statement, e.g. `CREATE INDEX i3 ON t1("w")`). Encoded as one bool, appended after the
+///   column's per-key-part collation field, and only for column-type index parts (type byte 0).
+///   Without it, a reloaded index forgot whether its column reference was originally quoted, so the
+///   "should this be a string literal in single-quotes?" hint on a later `ALTER TABLE ... DROP
+///   COLUMN`'s dependent-index error disappeared after a checkpoint. v17 and earlier files remain
+///   readable: the read path is gated on `version >= 18` and treats absence as `is_quoted = false`
+///   (prior behavior). Issue #6560.
+pub const VERSION: u8 = 18;
 
 /// Type tags for binary serialization
 #[repr(u8)]

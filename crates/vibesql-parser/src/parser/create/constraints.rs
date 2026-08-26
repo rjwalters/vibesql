@@ -216,7 +216,17 @@ impl Parser {
         // CREATE INDEX column specs (see `parse_index_column_list`).
         self.reject_nulls_in_index_position()?;
 
-        Ok(vibesql_ast::IndexColumn::Column { column_name, direction, prefix_length, collation })
+        Ok(vibesql_ast::IndexColumn::Column {
+            column_name,
+            direction,
+            prefix_length,
+            collation,
+            // Table-constraint column lists (PRIMARY KEY/UNIQUE) are a
+            // separate grammar position from `CREATE INDEX`'s column list;
+            // SQLite's quoted-identifier hint (issue #6560) only applies to
+            // CREATE INDEX, so this is unconditionally unquoted.
+            is_quoted: false,
+        })
     }
     /// Parse the ON DELETE/UPDATE actions and MATCH clauses of a
     /// foreign-key-clause.

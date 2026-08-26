@@ -153,6 +153,7 @@ fn test_order_by_single_column_asc_with_index() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -192,6 +193,7 @@ fn test_order_by_single_column_desc_with_index() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -232,12 +234,14 @@ fn test_order_by_multi_column_with_composite_index() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -290,6 +294,7 @@ fn test_order_by_with_where_clause() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -328,12 +333,14 @@ fn test_order_by_partial_index_match_falls_back_to_sort() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -434,12 +441,14 @@ fn test_order_by_mixed_asc_desc_no_index() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -484,6 +493,7 @@ fn test_order_by_positional_reference() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -520,6 +530,7 @@ fn test_order_by_alias() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -556,6 +567,7 @@ fn test_order_by_with_nulls_asc() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -606,6 +618,7 @@ fn test_order_by_with_nulls_desc() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -656,12 +669,14 @@ fn test_order_by_multi_column_desc_with_index_reversal() {
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "price".to_string(),
                 prefix_length: None,
                 direction: OrderDirection::Asc,
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -713,6 +728,7 @@ fn test_order_by_limit_with_index() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

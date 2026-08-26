@@ -120,6 +120,7 @@ fn test_index_range_scan_between_numeric_types() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -133,6 +134,7 @@ fn test_index_range_scan_between_numeric_types() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -146,6 +148,7 @@ fn test_index_range_scan_between_numeric_types() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -233,6 +236,7 @@ fn test_index_multi_lookup_large_value_set() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -300,6 +304,7 @@ fn test_index_commuted_comparisons() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -380,6 +385,7 @@ fn test_index_numeric_type_normalization() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -393,6 +399,7 @@ fn test_index_numeric_type_normalization() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -406,6 +413,7 @@ fn test_index_numeric_type_normalization() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -419,6 +427,7 @@ fn test_index_numeric_type_normalization() {
             prefix_length: None,
             direction: OrderDirection::Asc,
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

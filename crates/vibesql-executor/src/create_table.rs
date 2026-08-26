@@ -849,6 +849,7 @@ impl CreateTableExecutor {
                         direction: OrderDirection::Asc,
                         prefix_length: None,
                         collation: None,
+                        is_quoted: false,
                     })
                     .collect();
 
@@ -893,6 +894,7 @@ impl CreateTableExecutor {
                     direction: OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 })
                 .collect();
 

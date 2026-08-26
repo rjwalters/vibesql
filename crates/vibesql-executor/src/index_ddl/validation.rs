@@ -267,17 +267,23 @@ fn validate_indexed_columns(
     qualified_table_name: &str,
 ) -> Result<(), ExecutorError> {
     for index_col in columns {
-        // Validate column-based index columns
+        // Validate column-based index columns. SQLite's error here is `no
+        // such column: <name>`, matching the sibling expression-column path
+        // below — with the same "should this be a string literal in
+        // single-quotes?" hint appended when the original `CREATE INDEX`
+        // column reference was a delimited identifier (double-quoted,
+        // backtick, or bracket), e.g. `CREATE INDEX i3 ON t1("w")`
+        // (quote.test 2.1.3). A single-quoted string used as an identifier
+        // (SQLite's "string as identifier" fallback quirk) does NOT earn the
+        // hint — see `IndexColumn::is_quoted`'s doc comment (issue #6560).
         if let Some(col_name) = index_col.column_name() {
             if table_schema.get_column(col_name).is_none() {
-                let available_columns =
-                    table_schema.columns.iter().map(|c| c.name.clone()).collect();
-                return Err(ExecutorError::ColumnNotFound {
-                    column_name: col_name.to_string(),
-                    table_name: qualified_table_name.to_string(),
-                    searched_tables: vec![qualified_table_name.to_string()],
-                    available_columns,
-                });
+                let column_ref = if index_col.is_quoted() {
+                    format!("\"{}\" - should this be a string literal in single-quotes?", col_name)
+                } else {
+                    col_name.to_string()
+                };
+                return Err(ExecutorError::NoSuchColumn { column_ref });
             }
         }
 

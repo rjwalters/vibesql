@@ -447,6 +447,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -520,6 +521,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };
@@ -721,6 +723,7 @@ impl IndexManager {
                 direction: vibesql_ast::OrderDirection::Asc,
                 prefix_length: None,
                 collation: None,
+                is_quoted: false,
             }],
             where_clause: None,
         };

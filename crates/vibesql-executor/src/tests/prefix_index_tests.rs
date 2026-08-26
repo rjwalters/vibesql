@@ -47,6 +47,7 @@ fn test_create_index_with_prefix_length() {
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -68,6 +69,7 @@ fn test_create_unique_index_with_prefix_length() {
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -89,6 +91,7 @@ fn test_unique_prefix_index_enforces_prefix_uniqueness() {
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -132,6 +135,7 @@ fn test_unique_prefix_index_allows_different_prefixes() {
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -174,6 +178,7 @@ fn test_prefix_index_with_short_strings() {
             direction: OrderDirection::Asc,
             prefix_length: Some(50),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -218,12 +223,14 @@ fn test_composite_prefix_index() {
                 direction: OrderDirection::Asc,
                 prefix_length: Some(10),
                 collation: None,
+                is_quoted: false,
             },
             IndexColumn::Column {
                 column_name: "name".to_string(),
                 direction: OrderDirection::Asc,
                 prefix_length: Some(5),
                 collation: None,
+                is_quoted: false,
             },
         ],
     )
@@ -283,6 +290,7 @@ fn test_prefix_index_with_utf8_strings() {
             direction: OrderDirection::Asc,
             prefix_length: Some(6),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();
@@ -338,6 +346,7 @@ fn test_non_unique_prefix_index_allows_duplicates() {
             direction: OrderDirection::Asc,
             prefix_length: Some(10),
             collation: None,
+            is_quoted: false,
         }],
     )
     .unwrap();

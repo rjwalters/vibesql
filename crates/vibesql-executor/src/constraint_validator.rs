@@ -754,12 +754,14 @@ mod tests {
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                         collation: None,
+                        is_quoted: false,
                     },
                     vibesql_ast::IndexColumn::Column {
                         column_name: "tenant_id".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                         collation: None,
+                        is_quoted: false,
                     },
                 ],
                 on_conflict: None,
@@ -786,6 +788,7 @@ mod tests {
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                         collation: coll.map(|c| c.to_string()),
+                        is_quoted: false,
                     })
                     .collect(),
                 on_conflict: None,
@@ -855,6 +858,7 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 }],
                 on_conflict: None,
             },
@@ -881,6 +885,7 @@ mod tests {
                     direction: vibesql_ast::OrderDirection::Asc,
                     prefix_length: None,
                     collation: None,
+                    is_quoted: false,
                 }],
                 on_conflict: None,
             },
@@ -1093,12 +1098,14 @@ mod tests {
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                         collation: None,
+                        is_quoted: false,
                     },
                     vibesql_ast::IndexColumn::Column {
                         column_name: "code".to_string(),
                         direction: vibesql_ast::OrderDirection::Asc,
                         prefix_length: None,
                         collation: None,
+                        is_quoted: false,
                     },
                 ],
                 on_conflict: None,
@@ -1152,6 +1159,7 @@ mod tests {
             direction: vibesql_ast::OrderDirection::Asc,
             prefix_length: None,
             collation: collation.map(|s| s.to_string()),
+            is_quoted: false,
         }
     }
 

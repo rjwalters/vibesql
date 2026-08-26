@@ -206,6 +206,7 @@ fn test_index_column_can_filter_column() {
         direction: OrderDirection::Asc,
         prefix_length: None,
         collation: None,
+        is_quoted: false,
     };
 
     assert!(
