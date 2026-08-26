@@ -76,7 +76,18 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
     for table_name in &table_names {
         let qualified_name = format!("{}.{}", current_schema, table_name);
         if let Some(table) = db.get_table(&qualified_name) {
-            write_string(writer, table_name)?;
+            // Persist the table's exact-case display name (`table.schema.name`),
+            // NOT `table_name` — the latter is `Catalog::list_tables()`'s
+            // *canonical* lookup key, which is lowercased for an unquoted
+            // (case-insensitive) identifier. Writing the canonical key here
+            // silently lowercased any mixed/upper-case unquoted table name on
+            // reload (issue #6599) — most visibly after `ALTER TABLE ...
+            // RENAME TO Foo`, whose new name is set directly on
+            // `table.schema.name` and displays correctly in the *same*
+            // session (`sqlite_master` reads `table.name`, not the catalog
+            // key — see `sqlite_schema.rs`), but was lost the moment the
+            // catalog got serialized to a snapshot/checkpoint.
+            write_string(writer, &table.schema.name)?;
 
             // Write column count
             write_u32(writer, table.schema.columns.len() as u32)?;

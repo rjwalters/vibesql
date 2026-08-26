@@ -1,7 +1,7 @@
 //! Table-level operation executors for ALTER TABLE
 
 use vibesql_ast::{RenameTableStmt, TriggerAction, TriggerEvent};
-use vibesql_catalog::{TableIdentifier, TriggerDefinition};
+use vibesql_catalog::{IndexMetadata, TableIdentifier, TriggerDefinition};
 use vibesql_storage::Database;
 
 use crate::{
@@ -135,8 +135,42 @@ pub(super) fn execute_rename_table(
         .cloned()
         .collect();
 
+    // `database.drop_table` below CASCADE-drops every index on the table
+    // being dropped — including `UNIQUE` indexes — via the generic
+    // table-drop path. That is correct for a genuine `DROP TABLE`, but for
+    // RENAME TABLE (drop-old + create-new) it permanently discards indexes
+    // that should survive: SQLite keeps every index on a renamed table,
+    // retargeted at the new name. Without this snapshot/restore, a `UNIQUE`
+    // index silently stopped enforcing its constraint and vanished from any
+    // later persisted snapshot the moment the table was renamed (issue
+    // #6599). Two parallel snapshots are needed, mirroring the trigger
+    // handling above:
+    //   - `indexes_on_renamed_table`: catalog-level index metadata (used by
+    //     `sqlite_master`/introspection and cross-process reload). `drop_table_indexes` both
+    //     captures and removes these entries so none are left as stale ghosts pointing at the old
+    //     (soon nonexistent) table name — the same-session symptom of #6599 where
+    //     `sqlite_master.tbl_name` kept naming the pre-rename table.
+    //   - `physical_indexes_on_renamed_table`: the live storage-side index bodies (B-tree/hash
+    //     data) that actually enforce `UNIQUE` and back query planning. Taking them out here
+    //     (rather than letting `database.drop_table` CASCADE-drop them) is what keeps them from
+    //     being lost outright.
+    // Each catalog index's `sqlite_master` creation ordinal is captured too,
+    // mirroring `old_creation_seq` above, so a renamed table's indexes keep
+    // their original listing position instead of sorting last.
+    let indexes_on_renamed_table: Vec<(IndexMetadata, Option<u64>)> = database
+        .catalog
+        .drop_table_indexes(&stmt.table_name)
+        .into_iter()
+        .map(|idx| {
+            let seq = database.catalog.creation_seq(&idx.schema, &idx.name);
+            (idx, seq)
+        })
+        .collect();
+    let physical_indexes_on_renamed_table = database.take_indexes_for_table(&stmt.table_name);
+
     // Drop old table and create new one with the renamed schema
-    // This handles indexes and spatial indexes via CASCADE
+    // This handles spatial indexes via CASCADE (regular/UNIQUE indexes were
+    // already detached above and are unaffected by this drop).
     database
         .drop_table(&stmt.table_name)
         .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
@@ -151,6 +185,27 @@ pub(super) fn execute_rename_table(
     // capture above). No-op if the old name had no recorded ordinal.
     if let Some(seq) = old_creation_seq {
         database.catalog.set_creation_seq(&rename_seq_schema, &stmt.new_table_name, seq);
+    }
+
+    // Reattach the renamed table's indexes (both physical bodies and catalog
+    // metadata) under the new table identity, retargeting each index's
+    // `table_name` and restoring its original `sqlite_master` ordinal.
+    database.restore_indexes_for_table(physical_indexes_on_renamed_table, &stmt.new_table_name);
+    for (mut index_meta, seq) in indexes_on_renamed_table {
+        index_meta.table_name = stmt.new_table_name.clone();
+        let index_schema = index_meta.schema.clone();
+        let index_name = index_meta.name.clone();
+        // The physical body was already restored above; a re-add failure
+        // here (e.g. a name collision that shouldn't be reachable since the
+        // index survived under the same name) would leave `sqlite_master`
+        // silently missing the index rather than aborting the whole rename —
+        // acceptable as a defensive fallback since the constraint-enforcing
+        // physical index is unaffected either way.
+        if database.catalog.add_index(index_meta).is_ok() {
+            if let Some(seq) = seq {
+                database.catalog.set_creation_seq(&index_schema, &index_name, seq);
+            }
+        }
     }
 
     // Restore the triggers cascade-dropped above so `rewrite_triggers_for_rename`

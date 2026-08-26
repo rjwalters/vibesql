@@ -13,8 +13,8 @@ use crate::{
         hnsw::HnswIndex,
         index_manager::IndexManager,
         index_metadata::{
-            make_index_key, normalize_index_name, IndexData, IndexMetadata, DEFAULT_INDEX_SCHEMA,
-            DISK_BACKED_THRESHOLD,
+            make_index_key, normalize_index_name, split_schema_qualifier, IndexData, IndexMetadata,
+            DEFAULT_INDEX_SCHEMA, DISK_BACKED_THRESHOLD,
         },
         ivfflat::IVFFlatIndex,
     },
@@ -912,5 +912,75 @@ impl IndexManager {
         }
 
         indexes_to_drop
+    }
+
+    /// Detach and return the indexes belonging to `table_name`, together with
+    /// their physical bodies, WITHOUT discarding the data or touching
+    /// resource-tracker stats (unlike [`Self::drop_indexes_for_table`]).
+    ///
+    /// `ALTER TABLE ... RENAME TO ...` is implemented as drop-old +
+    /// create-new (see `execute_rename_table` in `vibesql-executor`).
+    /// Calling [`Self::drop_indexes_for_table`] for that CASCADE would
+    /// permanently discard every index (including `UNIQUE` indexes) on the
+    /// renamed table — the physical body has no other owner and nothing
+    /// re-creates it afterward, so the index (and any constraint it
+    /// enforces) silently disappears from both the live session and any
+    /// later persisted snapshot (issue #6599). This is the counterpart to
+    /// [`Self::restore_indexes_for_table`], which reattaches the returned
+    /// entries under the table's new identity.
+    ///
+    /// Resource-tracker stats are keyed on the index name alone (not the
+    /// table name), so they stay valid across the rename and are
+    /// deliberately left untouched here — unregistering and re-registering
+    /// would just churn the same accounting for no behavioral difference.
+    pub fn take_indexes_for_table(&mut self, table_name: &str) -> Vec<(IndexMetadata, IndexData)> {
+        let search_name_lower = table_name.to_lowercase();
+        let search_table_only = search_name_lower.rsplit('.').next().unwrap_or(&search_name_lower);
+
+        let keys_to_take: Vec<String> = self
+            .indexes
+            .iter()
+            .filter(|(_, metadata)| {
+                let stored_lower = metadata.table_name.to_lowercase();
+                let stored_table_only = stored_lower.rsplit('.').next().unwrap_or(&stored_lower);
+                stored_lower == search_name_lower || stored_table_only == search_table_only
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        let mut taken = Vec::with_capacity(keys_to_take.len());
+        for key in &keys_to_take {
+            let Some(meta) = self.indexes.shift_remove(key) else { continue };
+            let Some(data) = self.index_data.remove(key) else { continue };
+            taken.push((meta, data));
+        }
+        taken
+    }
+
+    /// Reattach indexes previously detached by [`Self::take_indexes_for_table`]
+    /// under `new_table_name`.
+    ///
+    /// Each index's `table_name` is rewritten to `new_table_name` (preserving
+    /// any schema qualifier the original stored name carried, e.g. `aux.t` ->
+    /// `aux.<new_table_name>`), and the physical body is reinserted
+    /// unchanged: a table rename does not touch row data or column
+    /// positions, so no index rebuild is necessary. The storage key
+    /// (`schema.index_name`) is derived from the index's own schema and
+    /// name, neither of which change on a table rename, so this restores the
+    /// index under the exact same physical key it was taken from.
+    pub fn restore_indexes_for_table(
+        &mut self,
+        indexes: Vec<(IndexMetadata, IndexData)>,
+        new_table_name: &str,
+    ) {
+        for (mut meta, data) in indexes {
+            meta.table_name = match split_schema_qualifier(&meta.table_name) {
+                Some((schema, _)) => format!("{schema}.{new_table_name}"),
+                None => new_table_name.to_string(),
+            };
+            let key = make_index_key(&meta.schema, &meta.index_name);
+            self.indexes.insert(key.clone(), meta);
+            self.index_data.insert(key, data);
+        }
     }
 }
