@@ -936,6 +936,24 @@ fn table_self_reference_error(schema: &TableSchema, dropped: &str) -> Option<Str
                     ));
                 }
             }
+            // A table-level `UNIQUE(...)` constraint (as opposed to an inline
+            // column-level `col UNIQUE`, which is rejected earlier by the
+            // dedicated `cannot drop UNIQUE column` precheck and never
+            // reaches here) also survives the drop as schema text, so a
+            // reference to the dropped column dangles the same way a CHECK
+            // constraint would. This covers both multi-column
+            // (`UNIQUE(b, c)`, alterdropcol2 2.2.2) and single-column
+            // (`UNIQUE(b)`) table-level constraints — verified against
+            // sqlite3 3.51.0, both report the generic "no such column"
+            // re-parse error rather than "cannot drop UNIQUE column".
+            TableConstraintKind::Unique { columns, .. } => {
+                if let Some(display) = columns
+                    .iter()
+                    .find_map(|c| c.column_name().filter(|n| n.eq_ignore_ascii_case(dropped)))
+                {
+                    return Some(format!("no such column: {}", display));
+                }
+            }
             _ => {}
         }
     }

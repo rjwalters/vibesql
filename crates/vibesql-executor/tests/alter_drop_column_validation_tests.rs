@@ -88,6 +88,22 @@ fn drop_unique_column_is_rejected() {
 }
 
 #[test]
+fn drop_column_referenced_by_multi_column_table_unique_is_generic_error() {
+    // A multi-column table-level UNIQUE(b, c) is NOT the same rejection as an
+    // inline column-level UNIQUE: SQLite only raises `cannot drop UNIQUE
+    // column` for the latter. Dropping a column referenced by a multi-column
+    // UNIQUE(...) constraint instead falls through to the generic post-drop
+    // schema re-parse error, exactly like a table-level CHECK constraint
+    // would (verified against sqlite3 3.51.0; alterdropcol2.test 2.2.2).
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE x1(a INTEGER PRIMARY KEY, b, c, UNIQUE(b, c))");
+    assert_eq!(
+        drop_column_err(&mut db, "ALTER TABLE x1 DROP COLUMN c"),
+        "error in table x1 after drop column: no such column: c"
+    );
+}
+
+#[test]
 fn drop_primary_key_column_is_rejected() {
     let mut db = Database::new();
     create_table(&mut db, "CREATE TABLE t2(x INTEGER PRIMARY KEY, y, z UNIQUE)");

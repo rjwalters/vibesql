@@ -400,10 +400,20 @@ pub(super) fn execute_drop_column(
     // decided before the generic index-reference check below, otherwise the
     // auto-index would surface as `error in index sqlite_autoindex_...` instead
     // of SQLite's `cannot drop UNIQUE column`.
+    //
+    // Restricted to single-column auto-indexes: SQLite's `cannot drop UNIQUE
+    // column` rejection only fires for a column-level (inline) UNIQUE
+    // constraint, never for a multi-column table-level `UNIQUE(a, b)` —
+    // dropping a column referenced by the latter instead falls through to
+    // the generic post-drop schema re-parse (`error in table <t> after drop
+    // column: no such column: <c>`; verified against sqlite3 3.51.0, see
+    // `column_in_unique_constraint`'s doc comment). A multi-column
+    // auto-index can never legitimately trigger the single-column message.
     let in_unique = super::validation::column_in_unique_constraint(schema, col)
         || database.catalog.get_table_indexes(table_name).iter().any(|idx| {
             idx.is_unique
                 && is_auto_index(&idx.name)
+                && idx.columns.len() == 1
                 && super::validation::index_references_column(idx, col)
         });
     if in_unique {
