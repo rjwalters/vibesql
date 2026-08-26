@@ -522,6 +522,73 @@ mod tests {
         assert!(db.index_exists("idx_users_email_qualified"));
     }
 
+    /// Regression test for #6596: `CREATE INDEX <idx> ON <TableRef>(...)`
+    /// must store the table's own canonical catalog name (whatever case it
+    /// was CREATE TABLE'd with) as `sqlite_master.tbl_name`, not the literal
+    /// case the CREATE INDEX statement happened to reference the table with.
+    /// Real SQLite normalizes `tbl_name` this way (verified against sqlite3
+    /// 3.51.0): `CREATE TABLE t1(a,b); CREATE INDEX t1i1 ON T1(b);` records
+    /// `tbl_name='t1'`, not `'T1'`.
+    #[test]
+    fn test_create_index_tbl_name_uses_table_canonical_case() {
+        let mut db = Database::new();
+        create_test_table(&mut db); // creates table "users" (lowercase)
+
+        // Reference the table with different case in CREATE INDEX.
+        let stmt = CreateIndexStmt {
+            index_name: "idx_case_fold".to_string(),
+            schema: None,
+            if_not_exists: false,
+            table_name: "USERS".to_string(),
+            index_type: vibesql_ast::IndexType::BTree { unique: false },
+            columns: vec![IndexColumn::Column {
+                column_name: "email".to_string(),
+                direction: OrderDirection::Asc,
+                prefix_length: None,
+                collation: None,
+                is_quoted: false,
+            }],
+            where_clause: None,
+        };
+
+        let result = CreateIndexExecutor::execute(&stmt, &mut db);
+        assert!(result.is_ok(), "CREATE INDEX should succeed: {:?}", result.err());
+
+        let indexes = db.catalog.get_schema_indexes("main");
+        let index = indexes
+            .iter()
+            .find(|idx| idx.name.eq_ignore_ascii_case("idx_case_fold"))
+            .expect("index should be recorded in the catalog");
+        assert_eq!(
+            index.table_name, "users",
+            "tbl_name must match the table's canonical stored name, not the \
+             literal case used in the CREATE INDEX statement"
+        );
+    }
+
+    /// Companion to the above: a table that is genuinely created with mixed
+    /// case must keep reporting that exact case as its `tbl_name`, even when
+    /// referenced with the same case at CREATE INDEX time — the fix must not
+    /// regress case-preservation for legitimately mixed-case table names.
+    #[test]
+    fn test_create_index_preserves_genuinely_mixed_case_table_name() {
+        let mut db = Database::new();
+        CreateTableExecutor::execute(&simple_ab_table("MyTable", false), &mut db).unwrap();
+
+        let result = CreateIndexExecutor::execute(&index_on_b("idx_mixed", "MyTable"), &mut db);
+        assert!(result.is_ok(), "CREATE INDEX should succeed: {:?}", result.err());
+
+        let indexes = db.catalog.get_schema_indexes("main");
+        let index = indexes
+            .iter()
+            .find(|idx| idx.name.eq_ignore_ascii_case("idx_mixed"))
+            .expect("index should be recorded in the catalog");
+        assert_eq!(
+            index.table_name, "MyTable",
+            "a genuinely mixed-case table name must keep its own case in tbl_name"
+        );
+    }
+
     /// Build a `CreateTableStmt` with two unconstrained columns (a, b).
     /// `temporary` selects between a main table and a TEMP table.
     fn simple_ab_table(name: &str, temporary: bool) -> CreateTableStmt {
