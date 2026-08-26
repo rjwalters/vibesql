@@ -24,6 +24,7 @@ use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
 use super::predicate::{
+    coerce_prefix_result_for_affinity, coerce_prefix_with_range_result_for_affinity,
     extract_prefix_equality_predicates, extract_prefix_with_trailing_range, PrefixWithRangeResult,
 };
 use crate::{
@@ -132,9 +133,18 @@ pub(super) fn execute_covering_index_scan(
     let prefix_with_range: Option<PrefixWithRangeResult> =
         where_clause.and_then(|expr| extract_prefix_with_trailing_range(expr, &index_column_names));
 
+    // Issue #6555: coerce the extracted literal(s) to each covered column's
+    // declared affinity before they reach the index (see
+    // `predicate::affinity_coercion` for the full rationale).
+    let prefix_with_range = prefix_with_range.map(|r| {
+        coerce_prefix_with_range_result_for_affinity(r, &index_column_names, &table.schema)
+    });
+
     // Try prefix-only if no range found
     let prefix_only = if prefix_with_range.is_none() {
-        where_clause.and_then(|expr| extract_prefix_equality_predicates(expr, &index_column_names))
+        where_clause
+            .and_then(|expr| extract_prefix_equality_predicates(expr, &index_column_names))
+            .map(|r| coerce_prefix_result_for_affinity(r, &index_column_names, &table.schema))
     } else {
         None
     };

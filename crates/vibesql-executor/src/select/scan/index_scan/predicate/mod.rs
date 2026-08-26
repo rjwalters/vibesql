@@ -20,6 +20,7 @@
 
 use vibesql_types::SqlValue;
 
+mod affinity_coercion;
 mod composite;
 mod expression_index;
 mod in_list;
@@ -53,6 +54,12 @@ pub(crate) enum IndexPredicate {
 
 // Re-export composite index functions
 // Test-only re-export (function kept for backward compatibility with tests)
+// Re-export WHERE-clause literal affinity coercion (issue #6555)
+pub(crate) use affinity_coercion::{
+    coerce_composite_predicates_for_affinity, coerce_index_predicate_for_affinity,
+    coerce_lookup_keys_for_affinity, coerce_prefix_result_for_affinity,
+    coerce_prefix_with_range_result_for_affinity,
+};
 #[cfg(test)]
 pub(crate) use composite::extract_composite_equality_predicates;
 pub(crate) use composite::{

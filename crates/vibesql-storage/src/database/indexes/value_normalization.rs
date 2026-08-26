@@ -14,8 +14,33 @@ use vibesql_types::SqlValue;
 /// to a canonical form (Double) before storing in the BTreeMap. This ensures that queries
 /// comparing different numeric types (e.g., Real > Numeric) work correctly.
 ///
-/// SQLite Type Affinity: String values that look like numbers are also normalized to Double.
-/// This enables queries like `WHERE int_col = '123'` to find rows where int_col = 123.
+/// # Storage classes are NOT collapsed (issue #6555)
+///
+/// This canonicalization deliberately spans only the *numeric* storage class.
+/// A `Varchar`/`Character` value whose text happens to parse as a number
+/// (`'1'`) is **not** turned into `Double(1.0)`, because that would make the
+/// index unable to tell SQLite's INTEGER `1` apart from TEXT `'1'` — producing
+/// a false `UNIQUE constraint failed` on any column that does not have
+/// INTEGER/REAL/NUMERIC affinity (a `TEXT` column, or an untyped
+/// `PRIMARY KEY` column, which has BLOB affinity):
+///
+/// ```sql
+/// CREATE TABLE par(p PRIMARY KEY);   -- no declared type => BLOB affinity
+/// INSERT INTO par VALUES(1);
+/// INSERT INTO par VALUES('1');       -- SQLite: OK, 1 and '1' are distinct
+/// ```
+///
+/// Column *affinity* is applied once, earlier, at INSERT/UPDATE time
+/// (`vibesql_executor::insert::validation::coerce_value`), so a string that
+/// reaches this function for an INTEGER/REAL/NUMERIC-affinity column has
+/// already been converted to a numeric `SqlValue`; a string that is still a
+/// string here belongs to a TEXT/BLOB-affinity column and must stay TEXT.
+/// Coercing a *query literal* to the indexed column's declared affinity (so
+/// `WHERE int_col = '123'` still probes `Double(123.0)`) is the job of the
+/// affinity-aware probe coercion in the executor
+/// (`vibesql_executor::select::scan::index_scan::predicate::affinity_coercion`),
+/// which — unlike this type-agnostic index utility — knows the column's
+/// declared type.
 ///
 /// Uses f64 (Double) instead of f32 (Real) to preserve precision for:
 /// - Large integers (Bigint, Unsigned) beyond f32 precision range (> 2^24 ≈ 16 million)
@@ -30,16 +55,9 @@ pub fn normalize_for_comparison(value: &SqlValue) -> SqlValue {
         SqlValue::Real(r) => SqlValue::Double(*r as f64),
         SqlValue::Double(d) => SqlValue::Double(*d),
         SqlValue::Numeric(n) => SqlValue::Double(*n),
-        // SQLite type affinity: strings that look like numbers should be normalized
-        // This enables queries like: WHERE int_col = '123' to match int_col = 123
-        SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            if let Ok(n) = s.trim().parse::<f64>() {
-                SqlValue::Double(n)
-            } else {
-                value.clone()
-            }
-        }
-        // For other non-numeric types, return as-is
+        // For every other storage class (TEXT, BLOB, temporal, boolean, NULL),
+        // return as-is: cross-storage-class coercion is affinity-dependent and
+        // is therefore not this function's decision to make (see above).
         other => other.clone(),
     }
 }
@@ -47,8 +65,9 @@ pub fn normalize_for_comparison(value: &SqlValue) -> SqlValue {
 /// Zero-copy normalization using Cow - avoids allocation for non-numeric values.
 /// Returns Borrowed for non-numeric types (no clone), Owned for normalized numerics.
 ///
-/// SQLite Type Affinity: String values that look like numbers are also normalized to Double.
-/// This enables queries like `WHERE int_col = '123'` to find rows where int_col = 123.
+/// Same semantics as [`normalize_for_comparison`]: numeric storage classes are
+/// canonicalized to `Double`, and TEXT/BLOB values are left untouched
+/// (issue #6555).
 #[inline]
 pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
     match value {
@@ -60,15 +79,7 @@ pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
         SqlValue::Real(r) => Cow::Owned(SqlValue::Double(*r as f64)),
         SqlValue::Double(d) => Cow::Owned(SqlValue::Double(*d)),
         SqlValue::Numeric(n) => Cow::Owned(SqlValue::Double(*n)),
-        // SQLite type affinity: strings that look like numbers should be normalized
-        SqlValue::Varchar(s) | SqlValue::Character(s) => {
-            if let Ok(n) = s.trim().parse::<f64>() {
-                Cow::Owned(SqlValue::Double(n))
-            } else {
-                Cow::Borrowed(value)
-            }
-        }
-        // For other non-numeric types, borrow without clone
+        // For other storage classes, borrow without clone
         other => Cow::Borrowed(other),
     }
 }
@@ -104,5 +115,63 @@ mod tests {
 
         let bool_val = SqlValue::Boolean(true);
         assert_eq!(normalize_for_comparison(&bool_val), bool_val);
+    }
+
+    /// Issue #6555: a numeric-looking TEXT value must keep its storage class
+    /// so a UNIQUE/PRIMARY KEY index on a TEXT/BLOB-affinity column can tell
+    /// `1` (INTEGER) apart from `'1'` (TEXT).
+    #[test]
+    fn numeric_looking_text_keeps_text_storage_class() {
+        let text_one = SqlValue::Varchar(arcstr::ArcStr::from("1"));
+        assert_eq!(normalize_for_comparison(&text_one), text_one);
+        assert_ne!(
+            normalize_for_comparison(&text_one),
+            normalize_for_comparison(&SqlValue::Integer(1))
+        );
+
+        let char_one = SqlValue::Character(arcstr::ArcStr::from("1"));
+        assert_eq!(normalize_for_comparison(&char_one), char_one);
+
+        // Whitespace-padded and float-formatted strings likewise stay TEXT.
+        let padded = SqlValue::Varchar(arcstr::ArcStr::from(" 1 "));
+        assert_eq!(normalize_for_comparison(&padded), padded);
+        let float_text = SqlValue::Varchar(arcstr::ArcStr::from("1.0"));
+        assert_eq!(normalize_for_comparison(&float_text), float_text);
+    }
+
+    /// The `Cow` variant must agree with [`normalize_for_comparison`] exactly,
+    /// including on the numeric-looking-TEXT case (issue #6555).
+    #[test]
+    fn normalize_cow_agrees_with_owned_variant() {
+        let cases = [
+            SqlValue::Integer(1),
+            SqlValue::Bigint(-7),
+            SqlValue::Double(2.5),
+            SqlValue::Varchar(arcstr::ArcStr::from("1")),
+            SqlValue::Character(arcstr::ArcStr::from("42")),
+            SqlValue::Varchar(arcstr::ArcStr::from("abc")),
+            SqlValue::Blob(vec![0x31]),
+            SqlValue::Null,
+        ];
+        for case in cases {
+            assert_eq!(
+                normalize_cow(&case).into_owned(),
+                normalize_for_comparison(&case),
+                "mismatch for {:?}",
+                case
+            );
+        }
+    }
+
+    /// The three SQLite storage classes that all render as `1` must stay
+    /// mutually distinct index keys (issue #6555).
+    #[test]
+    fn integer_text_and_blob_one_are_distinct_keys() {
+        let int_one = normalize_for_comparison(&SqlValue::Integer(1));
+        let text_one = normalize_for_comparison(&SqlValue::Varchar(arcstr::ArcStr::from("1")));
+        let blob_one = normalize_for_comparison(&SqlValue::Blob(vec![0x31]));
+        assert_ne!(int_one, text_one);
+        assert_ne!(int_one, blob_one);
+        assert_ne!(text_one, blob_one);
     }
 }
