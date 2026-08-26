@@ -163,8 +163,14 @@ pub fn validate_fk_schema_for_dml(
                 continue;
             }
             visited.insert(key);
+            // Check *all* of this newly-discovered table's outgoing FKs whose parent is
+            // already known to be in the BFS closure (a key in `visited`) — not just the
+            // single edge that caused `other_name` to be discovered. A table can have
+            // multiple FKs pointing at different ancestors that are each already in the
+            // closure (a "diamond" shape); checking only the discovering edge silently
+            // skips validation of the others (#6570).
             for fk in &other_schema.foreign_keys {
-                if !fk.parent_table.eq_ignore_ascii_case(&current) {
+                if !visited.contains(&fk.parent_table.to_ascii_lowercase()) {
                     continue;
                 }
                 if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
@@ -957,5 +963,214 @@ mod tests {
             "session pragma must defer, got {:?}",
             outcome
         );
+    }
+
+    // -----------------------------------------------------------------
+    // validate_fk_schema_for_dml — diamond-topology BFS coverage (#6570)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn validate_fk_schema_for_dml_diamond_detects_non_discovering_broken_edge() {
+        // Diamond topology (issue #6570, follow-up to #6568):
+        //
+        //   t1 <- X  (X.t1_id REFERENCES t1(id), valid)
+        //   t1 <- Y  (Y.t1_id REFERENCES t1(id), valid)
+        //   X  <- W  (W.x_junk REFERENCES X(junk), BROKEN: `junk` is not backed
+        //             by any PK/UNIQUE/non-partial UNIQUE INDEX on X)
+        //   Y  <- W  (W.y_id REFERENCES Y(id), valid)
+        //
+        // W is discovered via its valid edge to Y. Before the #6570 fix, the
+        // BFS only checked the single edge that discovered a node, so W's
+        // broken edge to X was silently skipped whenever X had already been
+        // marked `visited` by the time W's FKs were (partially) checked.
+        // After the fix, all of W's outgoing FKs whose parent is already in
+        // the closure are checked at discovery time, so the broken edge must
+        // surface as a `ForeignKeyMismatch { child: "w", parent: "x" }`.
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        // 1. t1 — DML target, no FKs of its own.
+        let t1 = TableSchema::with_primary_key(
+            "t1".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+            vec!["id".to_string()],
+        );
+        db.create_table(t1).unwrap();
+
+        // 2. X — valid FK to t1, plus a plain (non-unique, non-PK) `junk` column.
+        let x_t1_fk = ForeignKeyConstraint {
+            name: Some("fk_x_t1".to_string()),
+            column_names: vec!["t1_id".to_string()],
+            column_indices: vec![1],
+            parent_table: "t1".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let x_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("t1_id".to_string(), DataType::Integer, true),
+            ColumnSchema::new("junk".to_string(), DataType::Integer, true),
+        ];
+        let mut x =
+            TableSchema::with_primary_key("x".to_string(), x_columns, vec!["id".to_string()]);
+        x.foreign_keys.push(x_t1_fk);
+        db.create_table(x).unwrap();
+
+        // 3. Y — valid FK to t1.
+        let y_t1_fk = ForeignKeyConstraint {
+            name: Some("fk_y_t1".to_string()),
+            column_names: vec!["t1_id".to_string()],
+            column_indices: vec![1],
+            parent_table: "t1".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let y_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("t1_id".to_string(), DataType::Integer, true),
+        ];
+        let mut y =
+            TableSchema::with_primary_key("y".to_string(), y_columns, vec!["id".to_string()]);
+        y.foreign_keys.push(y_t1_fk);
+        db.create_table(y).unwrap();
+
+        // 4. W — broken FK to X(junk) (no PK/UNIQUE/non-partial UNIQUE INDEX backs `junk`), plus a
+        //    valid FK to Y(id).
+        let w_x_fk = ForeignKeyConstraint {
+            name: Some("fk_w_x".to_string()),
+            column_names: vec!["x_junk".to_string()],
+            column_indices: vec![1],
+            parent_table: "x".to_string(),
+            parent_column_names: vec!["junk".to_string()],
+            parent_column_indices: vec![2],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_y_fk = ForeignKeyConstraint {
+            name: Some("fk_w_y".to_string()),
+            column_names: vec!["y_id".to_string()],
+            column_indices: vec![2],
+            parent_table: "y".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("x_junk".to_string(), DataType::Integer, true),
+            ColumnSchema::new("y_id".to_string(), DataType::Integer, true),
+        ];
+        let mut w =
+            TableSchema::with_primary_key("w".to_string(), w_columns, vec!["id".to_string()]);
+        w.foreign_keys.push(w_x_fk);
+        w.foreign_keys.push(w_y_fk);
+        db.create_table(w).unwrap();
+
+        let result = validate_fk_schema_for_dml(&db, "t1");
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "w");
+                assert_eq!(parent, "x");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"w\", parent: \"x\" }}), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_cycle_does_not_infinite_loop() {
+        // FK reference cycle: a REFERENCES b, b REFERENCES a. The node-level
+        // `visited` set must still bound frontier growth even though the
+        // per-edge check (post-#6570 fix) now looks at all of a node's FKs
+        // whose parent is in `visited`, not just the discovering edge.
+        //
+        // `Catalog::create_table` rejects a genuine multi-table FK cycle at
+        // creation time (`check_circular_foreign_keys`), so a cyclic pair
+        // cannot be built via two ordinary `db.create_table` calls — the
+        // second call always errors out before the cycle ever reaches the
+        // catalog. To exercise the BFS's own cycle guard, this test builds
+        // "a" and "b" acyclically first, then uses the catalog's existing
+        // `replace_table_schema` (the same mechanism ALTER TABLE column
+        // operations use to push a mutated schema back into the catalog
+        // without re-running the create-time cycle check) to retroactively
+        // complete the cycle on "a".
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let b_a_fk = ForeignKeyConstraint {
+            name: Some("fk_b_a".to_string()),
+            column_names: vec!["aid".to_string()],
+            column_indices: vec![1],
+            parent_table: "a".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+
+        // 1. "a" — no FKs yet, just the PK "b" will reference.
+        let a_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("bid".to_string(), DataType::Integer, true),
+        ];
+        let a = TableSchema::with_primary_key(
+            "a".to_string(),
+            a_columns.clone(),
+            vec!["id".to_string()],
+        );
+        db.create_table(a).unwrap();
+
+        // 2. "b" — valid FK to "a". Not cyclic yet (a has no FKs at all).
+        let b_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("aid".to_string(), DataType::Integer, true),
+        ];
+        let mut b =
+            TableSchema::with_primary_key("b".to_string(), b_columns, vec!["id".to_string()]);
+        b.foreign_keys.push(b_a_fk);
+        db.create_table(b).unwrap();
+
+        // 3. Retroactively complete the cycle: swap in a new version of "a" with a valid FK to "b",
+        //    bypassing the create-time cycle guard.
+        let a_b_fk = ForeignKeyConstraint {
+            name: Some("fk_a_b".to_string()),
+            column_names: vec!["bid".to_string()],
+            column_indices: vec![1],
+            parent_table: "b".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let mut a_with_cycle =
+            TableSchema::with_primary_key("a".to_string(), a_columns, vec!["id".to_string()]);
+        a_with_cycle.foreign_keys.push(a_b_fk);
+        db.catalog.replace_table_schema("a", a_with_cycle);
+
+        // Both FKs are well-formed (each parent has a PK covering the
+        // referenced column), so this must terminate and return Ok — the
+        // test's real assertion is simply that it returns at all (i.e. the
+        // BFS's `visited` set bounds frontier growth on a genuine cycle).
+        let result = validate_fk_schema_for_dml(&db, "a");
+        assert!(result.is_ok(), "cyclic FK graph must not error: {:?}", result);
     }
 }
