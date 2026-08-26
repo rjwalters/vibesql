@@ -2120,8 +2120,20 @@ fn check_would_violate_constraints(
     // Check CHECK constraints
     if !schema.check_constraints.is_empty() {
         let row = vibesql_storage::Row::new(row_values.to_vec());
-        let evaluator =
-            crate::evaluator::ExpressionEvaluator::new(schema).with_dqs_dml_fallback(db.dqs_dml());
+        // #6584: match every other CHECK-constraint call site by also setting
+        // `SchemaExprContext::CheckConstraint` (not just the session
+        // `dqs_dml` flag) so an unqualified, originally-quoted column
+        // reference that fails ordinary resolution gets SQLite's unconditional
+        // schema-loading fallback here too. Without this, a resolution
+        // failure was silently swallowed as "not violating" by the `if let
+        // Ok(result)` below, letting the row fall through to full validation
+        // (`RowValidator`, which already sets this context) -- which then
+        // raised a genuine CHECK-violation error that this `OR IGNORE` /
+        // untargeted `DO NOTHING` pre-check path is supposed to convert into
+        // a silent skip, not a hard statement failure.
+        let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
+            .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint)
+            .with_dqs_dml_fallback(db.dqs_dml());
 
         for (_constraint_name, check_expr) in &schema.check_constraints {
             if let Ok(result) = evaluator.eval(check_expr, &row) {
