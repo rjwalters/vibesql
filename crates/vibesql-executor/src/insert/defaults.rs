@@ -448,7 +448,21 @@ pub fn apply_default_values_with_batch_context(
                     }
                     _ => evaluate_default_expression(default_expr)?,
                 };
-                let coerced_value = super::validation::coerce_value(default_value, &col.data_type)?;
+                // STRICT tables (issue #6173) apply the same rigid
+                // strict-datatype rules to a materialized column DEFAULT as to
+                // any other stored value, erroring with `cannot store <T>
+                // value in <T> column ...` when the default's type doesn't
+                // match the column's strict type -- mirroring the generated-
+                // column enforcement in `apply_generated_columns` above
+                // (alter-20.3: a `TEXT DEFAULT x'...'` added via `ALTER TABLE
+                // ... ADD COLUMN` on an empty STRICT table is only rejected
+                // once an INSERT actually materializes the mismatched blob
+                // default into a TEXT column).
+                let coerced_value = if let Some(st) = schema.strict_type_of(col_idx) {
+                    crate::strict::enforce_strict_type(default_value, st, &schema.name, &col.name)?
+                } else {
+                    super::validation::coerce_value(default_value, &col.data_type)?
+                };
                 row_values[col_idx] = coerced_value;
             }
         }
