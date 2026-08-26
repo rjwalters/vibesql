@@ -42,12 +42,20 @@ mod vector;
 /// expression). The SQLite date/time functions consult it to reject
 /// non-deterministic uses ('now', zero-argument defaults, 'localtime'/'utc')
 /// at evaluation time.
+///
+/// `enable_regexp` mirrors the session's `enable_regexp_functions` PRAGMA
+/// (default `false`, matching stock SQLite's default absence of `regexp()`
+/// per R-41650-20872): gates whether `regexp()`/`regexpi()` (and thus the `X
+/// REGEXP Y` operator sugar) are available, versus raising the standard "no
+/// such function" error. See `sqlite_compat::pattern_funcs::regexp_impl` for
+/// the rationale.
 pub(super) fn eval_scalar_function(
     name: &str,
     args: &[vibesql_types::SqlValue],
     character_unit: &Option<vibesql_ast::CharacterUnit>,
     sql_mode: &vibesql_types::SqlMode,
     schema_context: super::SchemaExprContext,
+    enable_regexp: bool,
 ) -> Result<vibesql_types::SqlValue, ExecutorError> {
     match name.to_uppercase().as_str() {
         // NULL handling functions
@@ -178,11 +186,17 @@ pub(super) fn eval_scalar_function(
         // Default `match()` application-defined function backing the `X MATCH Y`
         // operator (parsed as `match(Y, X)`). SQLite ships a genuine default
         // implementation that always raises "unable to use function MATCH in
-        // the requested context" (R-42037-37826); there is deliberately no
-        // "REGEXP" case here — SQLite has no default `regexp()`, so `X REGEXP Y`
-        // (parsed as `regexp(Y, X)`) falls through to the generic "no such
-        // function: REGEXP" error below, matching SQLite exactly.
+        // the requested context" (R-42037-37826).
         "MATCH" => sqlite_compat::match_default(args),
+        // `regexp()`/`regexpi()` back the `X REGEXP Y` infix operator (parsed
+        // as `regexp(Y, X)`). Stock SQLite ships NO default `regexp()`
+        // (R-41650-20872) — it only exists once an extension registers it, so
+        // these arms are gated behind the `enable_regexp_functions` PRAGMA
+        // (default OFF). With the guard false (the common case), match falls
+        // through to the generic "no such function: REGEXP[I]" error below,
+        // matching stock SQLite exactly.
+        "REGEXP" if enable_regexp => sqlite_compat::regexp(args),
+        "REGEXPI" if enable_regexp => sqlite_compat::regexpi(args),
 
         // JSON functions (SQLite JSON1 extension)
         //
@@ -377,6 +391,10 @@ pub(crate) fn eval_scalar_function_for_default(
         &None,
         &vibesql_types::SqlMode::default(),
         super::SchemaExprContext::None,
+        // No session/database context in DEFAULT-expression materialization,
+        // so `enable_regexp_functions` can't have been set: same as SQLite's
+        // out-of-the-box default.
+        false,
     )
 }
 

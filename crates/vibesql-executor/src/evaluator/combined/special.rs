@@ -347,6 +347,7 @@ impl CombinedExpressionEvaluator<'_> {
 
         // Call shared scalar function evaluator
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
+        let enable_regexp = self.database.map(|db| db.enable_regexp_functions()).unwrap_or(false);
         // Schema-attached expressions (CHECK / generated column / index) are
         // always evaluated through the single-table ExpressionEvaluator, so
         // the combined evaluator runs in the unrestricted context.
@@ -356,6 +357,7 @@ impl CombinedExpressionEvaluator<'_> {
             character_unit,
             &sql_mode,
             crate::evaluator::SchemaExprContext::None,
+            enable_regexp,
         )
     }
 

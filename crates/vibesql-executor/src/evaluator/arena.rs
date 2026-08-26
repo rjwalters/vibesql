@@ -594,12 +594,15 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
             ArenaExpression::Wildcard => Ok(SqlValue::Null),
 
             // Current date/time functions - use scalar function path
+            // (`enable_regexp` is irrelevant for these fixed function names,
+            // so pass `false` unconditionally rather than looking it up.)
             ArenaExpression::CurrentDate => super::functions::eval_scalar_function(
                 "CURRENT_DATE",
                 &[],
                 &None,
                 &self.sql_mode,
                 super::SchemaExprContext::None,
+                false,
             ),
             ArenaExpression::CurrentTime { .. } => super::functions::eval_scalar_function(
                 "CURRENT_TIME",
@@ -607,6 +610,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 &None,
                 &self.sql_mode,
                 super::SchemaExprContext::None,
+                false,
             ),
             ArenaExpression::CurrentTimestamp { .. } => super::functions::eval_scalar_function(
                 "CURRENT_TIMESTAMP",
@@ -614,6 +618,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                 &None,
                 &self.sql_mode,
                 super::SchemaExprContext::None,
+                false,
             ),
 
             // DEFAULT keyword
@@ -754,6 +759,7 @@ impl<'a, 'arena> ArenaExpressionEvaluator<'a, 'arena> {
                     &char_unit,
                     &self.sql_mode,
                     super::SchemaExprContext::None,
+                    self.database.map(|db| db.enable_regexp_functions()).unwrap_or(false),
                 )
             }
 

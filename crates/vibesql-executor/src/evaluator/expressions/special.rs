@@ -397,7 +397,15 @@ impl ExpressionEvaluator<'_> {
         }
 
         let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
-        eval_scalar_function(name, &arg_values, character_unit, &sql_mode, self.schema_context)
+        let enable_regexp = self.database.map(|db| db.enable_regexp_functions()).unwrap_or(false);
+        eval_scalar_function(
+            name,
+            &arg_values,
+            character_unit,
+            &sql_mode,
+            self.schema_context,
+            enable_regexp,
+        )
     }
 }
 

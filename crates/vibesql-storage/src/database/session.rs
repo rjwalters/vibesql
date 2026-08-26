@@ -124,6 +124,34 @@ impl Database {
         );
     }
 
+    /// Get the enable_regexp_functions PRAGMA setting
+    ///
+    /// When OFF (default), `regexp()`/`regexpi()` and the `X REGEXP Y` operator
+    /// sugar (which desugars to `regexp(Y, X)`) raise "no such function" —
+    /// matching stock SQLite, which ships no default `regexp()` implementation
+    /// (R-41650-20872) until an extension registers one.
+    ///
+    /// When ON, VibeSQL's built-in `regexp()`/`regexpi()` (case-sensitive /
+    /// case-insensitive ERE matching) become available. This is a
+    /// VibeSQL-internal PRAGMA (not a real SQLite pragma): SQLite's own test
+    /// suite enables the equivalent behavior per-connection via
+    /// `load_static_extension db regexp` (a C-API extension load with no SQL
+    /// surface), which this PRAGMA lets the SQL-only CLI harness emulate.
+    pub fn enable_regexp_functions(&self) -> bool {
+        match self.get_session_variable("ENABLE_REGEXP_FUNCTIONS") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (matches SQLite's no-extension default)
+        }
+    }
+
+    /// Set the enable_regexp_functions PRAGMA setting
+    pub fn set_enable_regexp_functions(&mut self, value: bool) {
+        self.set_session_variable(
+            "ENABLE_REGEXP_FUNCTIONS",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Get the reverse_unordered_selects PRAGMA setting
     ///
     /// When ON, the order of output rows from SELECT statements that do not have
