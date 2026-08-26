@@ -100,8 +100,14 @@ fn format_string_literal(s: &str) -> String {
 
 /// Format an identifier, quoting if necessary
 fn format_identifier(name: &str) -> String {
-    // Check if the identifier needs quoting (contains special chars or is a reserved word)
-    let needs_quoting = name.contains(' ')
+    // Check if the identifier needs quoting (contains special chars or is a reserved word).
+    // An empty name (SQLite allows a zero-length double-quoted identifier,
+    // e.g. `t1("w"||"")`) MUST be quoted: rendering it bare would drop the
+    // identifier from the SQL text entirely, producing unparseable output
+    // (`w||` instead of `w||""`) when an expression index's stored
+    // definition is round-tripped through persistence/reload.
+    let needs_quoting = name.is_empty()
+        || name.contains(' ')
         || name.contains('-')
         || name.contains('.')
         || name.chars().next().is_some_and(|c| c.is_ascii_digit());
@@ -292,8 +298,22 @@ impl ToSql for Expression {
             Expression::NamedPlaceholder(name) => format!(":{}", name),
 
             Expression::ColumnRef(col_id) => {
-                // Use display form which preserves user's original input
-                col_id.display().to_string()
+                // Use display form which preserves user's original input. An
+                // empty column name (`""`, a lexically valid zero-length
+                // double-quoted identifier — quote.test 2.2/3.4: `t1("w"||"")`)
+                // must still be rendered quoted here: the bare (unquoted)
+                // display form drops the identifier from the output entirely
+                // (`w||` instead of `w||""`), which fails to reparse when a
+                // persisted expression-index/CHECK-constraint definition is
+                // round-tripped through storage/reload.
+                if col_id.column_display().is_empty() {
+                    match col_id.table_display() {
+                        Some(table) => format!("{}.\"\"", table),
+                        None => "\"\"".to_string(),
+                    }
+                } else {
+                    col_id.display().to_string()
+                }
             }
 
             Expression::BinaryOp { op, left, right } => {

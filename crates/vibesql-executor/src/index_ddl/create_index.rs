@@ -1241,7 +1241,12 @@ mod tests {
 
         let result = CreateIndexExecutor::execute(&stmt, &mut db);
         assert!(result.is_err(), "Expression index with non-existent column should fail");
-        assert!(matches!(result, Err(ExecutorError::ColumnNotFound { .. })));
+        // Expression-index column-not-found now raises the same `NoSuchColumn`
+        // (SQLite `no such column: X`) variant the CHECK-constraint resolver
+        // uses, so unresolved index-expression column references get the same
+        // "should this be a string literal in single-quotes?" hint for
+        // unqualified delimited identifiers (quote.test 2.1.2/2.1.4).
+        assert!(matches!(result, Err(ExecutorError::NoSuchColumn { .. })));
     }
 
     #[test]

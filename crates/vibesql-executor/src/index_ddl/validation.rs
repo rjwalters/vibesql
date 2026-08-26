@@ -176,8 +176,31 @@ pub fn validate_create_index(
     // Validate expression determinism
     validate_expression_determinism(&stmt.columns)?;
 
-    // Validate that all indexed columns exist in the table
-    validate_indexed_columns(&stmt.columns, &table_schema, &qualified_table_name)?;
+    // Column-existence validation (indexed columns/expressions and the
+    // partial-index WHERE clause) is SQLite's normal bind-time strictness.
+    // `PRAGMA writable_schema=ON` is a schema-repair escape hatch that lets
+    // an application write a schema object referencing columns that don't
+    // (yet) exist — SQLite loads such a schema from disk without complaint
+    // (quote.test 2.2: `CREATE INDEX i2 ON t1(x, y, z||"abc")` /
+    // `CREATE INDEX i4 ON t1(x) WHERE z="w"` succeed under writable_schema
+    // even though `"abc"`/`"w"` don't name columns of `t1`). Gated on the
+    // session pragma so default (writable_schema=OFF) strictness is
+    // unchanged, matching the analogous CHECK-constraint gate in
+    // `create_table.rs`.
+    if !database.writable_schema() {
+        // Validate that all indexed columns exist in the table
+        validate_indexed_columns(&stmt.columns, &table_schema, &qualified_table_name)?;
+
+        // Validate that the partial-index WHERE clause only references
+        // existing columns. SQLite resolves this at CREATE INDEX time, not
+        // deferred to per-row evaluation at build/DML time (quote.test
+        // 2.1.4: `CREATE INDEX i4 ON t1(x) WHERE z="w"` raises `no such
+        // column: "w" - should this be a string literal in single-quotes?`
+        // immediately, even against an empty table with no rows to scan).
+        if let Some(where_expr) = &stmt.where_clause {
+            validate_expression_columns(where_expr, &table_schema, &qualified_table_name)?;
+        }
+    }
 
     // Validate prefix length specifications
     validate_prefix_lengths(&stmt.columns, &table_schema)?;
@@ -388,13 +411,15 @@ pub fn validate_expression_columns(
         Expression::ColumnRef(col_id) => {
             let col_name = col_id.column_canonical();
             if table_schema.get_column(col_name).is_none() {
-                let available_columns =
-                    table_schema.columns.iter().map(|c| c.name.clone()).collect();
-                return Err(ExecutorError::ColumnNotFound {
-                    column_name: col_name.to_string(),
-                    table_name: qualified_table_name.to_string(),
-                    searched_tables: vec![qualified_table_name.to_string()],
-                    available_columns,
+                // SQLite appends "- should this be a string literal in
+                // single-quotes?" when the unresolved reference is an
+                // unqualified, delimited (double-quoted/backtick/bracket)
+                // identifier — the same ambiguity the CHECK-constraint
+                // resolver flags (quote.test 2.1.2/2.1.4: `CREATE INDEX ...
+                // ON t1(x, y, z||"abc")` / `... WHERE z="w"` under
+                // SQLITE_DBCONFIG_DQS_DDL=0).
+                return Err(ExecutorError::NoSuchColumn {
+                    column_ref: crate::constraint_validator::quoted_column_display(col_id),
                 });
             }
             Ok(())

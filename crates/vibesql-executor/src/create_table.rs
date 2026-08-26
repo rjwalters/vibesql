@@ -448,11 +448,21 @@ impl CreateTableExecutor {
         // before any table is created, so validate here — after the columns and
         // check constraints are known but before the table is inserted into the
         // catalog.
-        crate::constraint_validator::validate_check_constraint_columns(
-            &table_schema.name,
-            &table_schema.columns,
-            &table_schema.check_constraints,
-        )?;
+        //
+        // `PRAGMA writable_schema=ON` is a schema-repair escape hatch (same
+        // rationale as the reserved-name guard above): it lets an application
+        // write a schema object whose CHECK references a column that doesn't
+        // exist, exactly as SQLite loads such a schema from disk without
+        // complaint (quote.test 2.2: `CREATE TABLE xyz(a, b, c CHECK
+        // (c!="null"))` succeeds under writable_schema even though `"null"`
+        // doesn't name a column of `xyz`).
+        if !database.writable_schema() {
+            crate::constraint_validator::validate_check_constraint_columns(
+                &table_schema.name,
+                &table_schema.columns,
+                &table_schema.check_constraints,
+            )?;
+        }
 
         // Reject a circular dependency among generated columns (gencol1-8.20,
         // issue #6173): `c1 AS(c0+c2), c2 AS(c1)`. Checked here too, before the

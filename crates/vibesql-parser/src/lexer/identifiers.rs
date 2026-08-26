@@ -90,15 +90,16 @@ impl<'a> Lexer<'a> {
                     identifier.push('"');
                     self.advance();
                 } else {
-                    // End of delimited identifier
-                    // Reject empty delimited identifiers
-                    if identifier.is_empty() {
-                        return Err(LexerError {
-                            message: "Empty delimited identifier is not allowed".to_string(),
-                            position: self.position(),
-                            near_token: Some("\"\"".to_string()),
-                        });
-                    }
+                    // End of delimited identifier. Unlike backtick/bracket
+                    // identifiers below, SQLite's tokenizer does not reject a
+                    // zero-length double-quoted identifier (`""`) — it is a
+                    // valid TK_ID token naming the empty-string identifier,
+                    // which then fails ordinary column resolution ("no such
+                    // column: \"\" - should this be a string literal in
+                    // single-quotes?") but parses fine, e.g. inside a
+                    // `PRAGMA writable_schema=ON` schema definition that
+                    // bypasses that resolution (quote.test 2.2/3.4: `CREATE
+                    // INDEX i3 ON t1("w"||"")`).
                     return Ok(Token::DelimitedIdentifier(identifier));
                 }
             } else {
