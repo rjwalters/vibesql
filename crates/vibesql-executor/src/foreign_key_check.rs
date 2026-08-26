@@ -143,6 +143,19 @@ pub fn validate_fk_schema_for_dml(
     // 2. Transitive closure of tables that reference `table_name`, either directly or via a chain
     //    ("X references Y references table_name"). A `visited` set guards against infinite loops on
     //    FK reference cycles and avoids re-checking the same table twice in a diamond shape.
+    //
+    //    This is a two-pass discover-then-check walk rather than a single-pass "check edges as
+    //    each node is first discovered" walk. A single-pass walk is sensitive to traversal order:
+    //    `frontier` here is a plain `Vec` popped LIFO (not a true FIFO BFS), and when two ancestor
+    //    chains of *unequal depth* converge on a node, LIFO order can discover that node via the
+    //    shorter chain before the longer chain's ancestor has entered `visited` — so an edge to
+    //    that not-yet-visited ancestor is silently skipped and never re-checked, since each node's
+    //    outgoing FKs were previously examined only once, at first-discovery time (#6583, a
+    //    follow-up to the same-round-diamond case #6570/#6581 already fixed below). Splitting into
+    //    "discover the full closure" (pass 1, any traversal order is fine — only set membership
+    //    matters) then "check every edge whose endpoints are both in the closure" (pass 2, run only
+    //    after the closure is complete) sidesteps traversal-order sensitivity entirely, for both
+    //    same-round diamonds and asymmetric-depth convergence.
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     visited.insert(table_name.to_ascii_lowercase());
     let mut frontier = vec![table_name.to_string()];
@@ -163,21 +176,28 @@ pub fn validate_fk_schema_for_dml(
                 continue;
             }
             visited.insert(key);
-            // Check *all* of this newly-discovered table's outgoing FKs whose parent is
-            // already known to be in the BFS closure (a key in `visited`) — not just the
-            // single edge that caused `other_name` to be discovered. A table can have
-            // multiple FKs pointing at different ancestors that are each already in the
-            // closure (a "diamond" shape); checking only the discovering edge silently
-            // skips validation of the others (#6570).
-            for fk in &other_schema.foreign_keys {
-                if !visited.contains(&fk.parent_table.to_ascii_lowercase()) {
-                    continue;
-                }
-                if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
-                    return Err(err);
-                }
-            }
             frontier.push(other_name.clone());
+        }
+    }
+
+    // Pass 2: now that the full closure of tables reachable from `table_name` is known, check
+    // every outgoing FK edge from a table in the closure whose parent is *also* in the closure.
+    // This catches a broken edge at a convergence node regardless of which chain's discovery
+    // order happened to reach that node first in pass 1.
+    for other_name in db.catalog.list_tables() {
+        if !visited.contains(&other_name.to_ascii_lowercase()) {
+            continue;
+        }
+        let Some(other_schema) = db.catalog.get_table(&other_name) else {
+            continue;
+        };
+        for fk in &other_schema.foreign_keys {
+            if !visited.contains(&fk.parent_table.to_ascii_lowercase()) {
+                continue;
+            }
+            if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
+                return Err(err);
+            }
         }
     }
 
@@ -1212,5 +1232,315 @@ mod tests {
         // BFS's `visited` set bounds frontier growth on a genuine cycle).
         let result = validate_fk_schema_for_dml(&db, "a");
         assert!(result.is_ok(), "cyclic FK graph must not error: {:?}", result);
+    }
+
+    // -----------------------------------------------------------------
+    // validate_fk_schema_for_dml — asymmetric-depth convergence (#6583,
+    // follow-up to #6570/#6581)
+    // -----------------------------------------------------------------
+
+    /// Builds the shared four-table-per-branch topology from #6583's repro:
+    ///
+    /// ```text
+    /// t1 <- a1 <- a2 <- a
+    /// t1 <- c1 <- c2 <- c
+    /// a  <- w   (w.a_junk -> a(junk))
+    /// c  <- w   (w.c_id   -> c(id))
+    /// ```
+    ///
+    /// `a` and `c` each gain a plain (non-unique, non-PK) `junk` column so
+    /// either side can be made the "broken" FK target by the caller. Tables
+    /// are created in the issue's exact order (`t1, a1, c1, a2, c2, a, c,
+    /// w`) so the LIFO `frontier` in `validate_fk_schema_for_dml` explores
+    /// the `c`-branch to completion (discovering `w` via its edge to `c`)
+    /// while the `a`-branch is still unvisited at the bottom of the stack —
+    /// the exact interleaving that made the single-pass BFS order-sensitive
+    /// before the #6583 fix.
+    fn setup_asymmetric_convergence(a_broken: bool) -> Database {
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let t1 = TableSchema::with_primary_key(
+            "t1".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+            vec!["id".to_string()],
+        );
+        db.create_table(t1).unwrap();
+
+        fn chain_link_fk(parent_table: &str) -> ForeignKeyConstraint {
+            ForeignKeyConstraint {
+                name: Some(format!("fk_to_{parent_table}")),
+                column_names: vec!["pid".to_string()],
+                column_indices: vec![1],
+                parent_table: parent_table.to_string(),
+                parent_column_names: vec!["id".to_string()],
+                parent_column_indices: vec![0],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+                is_deferrable: false,
+                initially_deferred: false,
+            }
+        }
+
+        fn chain_link_columns() -> Vec<ColumnSchema> {
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("pid".to_string(), DataType::Integer, true),
+            ]
+        }
+
+        // a1 -> t1, c1 -> t1 (creation order interleaved per the repro).
+        let mut a1 = TableSchema::with_primary_key(
+            "a1".to_string(),
+            chain_link_columns(),
+            vec!["id".to_string()],
+        );
+        a1.foreign_keys.push(chain_link_fk("t1"));
+        db.create_table(a1).unwrap();
+
+        let mut c1 = TableSchema::with_primary_key(
+            "c1".to_string(),
+            chain_link_columns(),
+            vec!["id".to_string()],
+        );
+        c1.foreign_keys.push(chain_link_fk("t1"));
+        db.create_table(c1).unwrap();
+
+        // a2 -> a1, c2 -> c1.
+        let mut a2 = TableSchema::with_primary_key(
+            "a2".to_string(),
+            chain_link_columns(),
+            vec!["id".to_string()],
+        );
+        a2.foreign_keys.push(chain_link_fk("a1"));
+        db.create_table(a2).unwrap();
+
+        let mut c2 = TableSchema::with_primary_key(
+            "c2".to_string(),
+            chain_link_columns(),
+            vec!["id".to_string()],
+        );
+        c2.foreign_keys.push(chain_link_fk("c1"));
+        db.create_table(c2).unwrap();
+
+        // a -> a2 (leaf, has an extra plain `junk` column). c -> c2 (same shape).
+        let leaf_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("pid".to_string(), DataType::Integer, true),
+            ColumnSchema::new("junk".to_string(), DataType::Integer, true),
+        ];
+        let mut a = TableSchema::with_primary_key(
+            "a".to_string(),
+            leaf_columns.clone(),
+            vec!["id".to_string()],
+        );
+        a.foreign_keys.push(chain_link_fk("a2"));
+        db.create_table(a).unwrap();
+
+        let mut c =
+            TableSchema::with_primary_key("c".to_string(), leaf_columns, vec!["id".to_string()]);
+        c.foreign_keys.push(chain_link_fk("c2"));
+        db.create_table(c).unwrap();
+
+        // w -> a(junk) and w -> c(id) — exactly one of the two is "broken"
+        // (points at a column with no PK/UNIQUE/non-partial UNIQUE INDEX)
+        // depending on `a_broken`.
+        let w_to_a = ForeignKeyConstraint {
+            name: Some("fk_w_a".to_string()),
+            column_names: vec!["a_ref".to_string()],
+            column_indices: vec![1],
+            parent_table: "a".to_string(),
+            parent_column_names: vec![if a_broken { "junk" } else { "id" }.to_string()],
+            parent_column_indices: vec![if a_broken { 2 } else { 0 }],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_to_c = ForeignKeyConstraint {
+            name: Some("fk_w_c".to_string()),
+            column_names: vec!["c_ref".to_string()],
+            column_indices: vec![2],
+            parent_table: "c".to_string(),
+            parent_column_names: vec![if a_broken { "id" } else { "junk" }.to_string()],
+            parent_column_indices: vec![if a_broken { 0 } else { 2 }],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("a_ref".to_string(), DataType::Integer, true),
+            ColumnSchema::new("c_ref".to_string(), DataType::Integer, true),
+        ];
+        let mut w =
+            TableSchema::with_primary_key("w".to_string(), w_columns, vec!["id".to_string()]);
+        w.foreign_keys.push(w_to_a);
+        w.foreign_keys.push(w_to_c);
+        db.create_table(w).unwrap();
+
+        db
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_asymmetric_depth_detects_broken_edge_on_unvisited_branch() {
+        // Exact repro from #6583: the broken edge (`w -> a(junk)`) lives on
+        // the branch (`a1`/`a2`/`a`) that the LIFO frontier has NOT yet
+        // visited at the moment `w` is discovered via its valid edge to `c`.
+        // Before the #6583 fix this silently returned `Ok(())`.
+        let db = setup_asymmetric_convergence(/* a_broken = */ true);
+
+        let result = validate_fk_schema_for_dml(&db, "t1");
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "w");
+                assert_eq!(parent, "a");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"w\", parent: \"a\" }}), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_asymmetric_depth_detects_broken_edge_on_visited_branch() {
+        // Mirror image of the exact repro: the broken edge (`w -> c(junk)`)
+        // is swapped onto the branch (`c1`/`c2`/`c`) that the LIFO frontier
+        // *has* already fully visited by the time `w` is discovered (the
+        // branch the pre-#6583 single-pass code already happened to check
+        // correctly). Asserts the fix does not depend on which side is
+        // broken — both directions must be caught.
+        let db = setup_asymmetric_convergence(/* a_broken = */ false);
+
+        let result = validate_fk_schema_for_dml(&db, "t1");
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "w");
+                assert_eq!(parent, "c");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"w\", parent: \"c\" }}), got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_three_way_convergence_detects_broken_edge() {
+        // Three independent chains from `t1` (`a1<-a`, `b1<-b`, `c1<-c`)
+        // converge on `w`, which has FKs to all three leaves. Only the edge
+        // to `a` is broken (`a.junk` has no PK/UNIQUE). This generalizes
+        // #6570's two-way diamond and #6583's asymmetric two-way case to
+        // three simultaneous converging ancestors.
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let t1 = TableSchema::with_primary_key(
+            "t1".to_string(),
+            vec![ColumnSchema::new("id".to_string(), DataType::Integer, false)],
+            vec!["id".to_string()],
+        );
+        db.create_table(t1).unwrap();
+
+        fn link_fk(parent_table: &str) -> ForeignKeyConstraint {
+            ForeignKeyConstraint {
+                name: Some(format!("fk_to_{parent_table}")),
+                column_names: vec!["pid".to_string()],
+                column_indices: vec![1],
+                parent_table: parent_table.to_string(),
+                parent_column_names: vec!["id".to_string()],
+                parent_column_indices: vec![0],
+                on_delete: ReferentialAction::NoAction,
+                on_update: ReferentialAction::NoAction,
+                is_deferrable: false,
+                initially_deferred: false,
+            }
+        }
+
+        for mid in ["a1", "b1", "c1"] {
+            let columns = vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("pid".to_string(), DataType::Integer, true),
+            ];
+            let mut table =
+                TableSchema::with_primary_key(mid.to_string(), columns, vec!["id".to_string()]);
+            table.foreign_keys.push(link_fk("t1"));
+            db.create_table(table).unwrap();
+        }
+
+        for (leaf, mid) in [("a", "a1"), ("b", "b1"), ("c", "c1")] {
+            let columns = vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("pid".to_string(), DataType::Integer, true),
+                ColumnSchema::new("junk".to_string(), DataType::Integer, true),
+            ];
+            let mut table =
+                TableSchema::with_primary_key(leaf.to_string(), columns, vec!["id".to_string()]);
+            table.foreign_keys.push(link_fk(mid));
+            db.create_table(table).unwrap();
+        }
+
+        let w_to_a = ForeignKeyConstraint {
+            name: Some("fk_w_a".to_string()),
+            column_names: vec!["a_ref".to_string()],
+            column_indices: vec![1],
+            parent_table: "a".to_string(),
+            parent_column_names: vec!["junk".to_string()],
+            parent_column_indices: vec![2],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_to_b = ForeignKeyConstraint {
+            name: Some("fk_w_b".to_string()),
+            column_names: vec!["b_ref".to_string()],
+            column_indices: vec![2],
+            parent_table: "b".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_to_c = ForeignKeyConstraint {
+            name: Some("fk_w_c".to_string()),
+            column_names: vec!["c_ref".to_string()],
+            column_indices: vec![3],
+            parent_table: "c".to_string(),
+            parent_column_names: vec!["id".to_string()],
+            parent_column_indices: vec![0],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let w_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("a_ref".to_string(), DataType::Integer, true),
+            ColumnSchema::new("b_ref".to_string(), DataType::Integer, true),
+            ColumnSchema::new("c_ref".to_string(), DataType::Integer, true),
+        ];
+        let mut w =
+            TableSchema::with_primary_key("w".to_string(), w_columns, vec!["id".to_string()]);
+        w.foreign_keys.push(w_to_a);
+        w.foreign_keys.push(w_to_b);
+        w.foreign_keys.push(w_to_c);
+        db.create_table(w).unwrap();
+
+        let result = validate_fk_schema_for_dml(&db, "t1");
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "w");
+                assert_eq!(parent, "a");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"w\", parent: \"a\" }}), got {:?}",
+                other
+            ),
+        }
     }
 }
