@@ -4,7 +4,7 @@
 //! - LIKE(pattern, string) - SQL LIKE pattern matching
 //! - GLOB(pattern, string) - Unix-style pattern matching
 
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::LazyLock};
 
 use vibesql_types::SqlValue;
 
@@ -162,6 +162,110 @@ pub(crate) fn match_default(args: &[SqlValue]) -> Result<SqlValue, ExecutorError
     ))
 }
 
+/// SQLite's `regexp()`/`regexpi()` test-extension (ext/misc/regexp.c) caps
+/// repeat-quantifier counts (`{n}` / `{n,m}`) to guard against NFA-size
+/// blowup; exceeding the cap raises "REGEXP pattern too big"
+/// (regexp2.test 5.1/5.3: `a{1,999}bc`/`a{999}bc` succeed,
+/// `a{1,25000}bc`/`a{25000}bc` fail). 1000 sits between the known-passing
+/// and known-failing boundary cases in the SQLite test suite (the extension's
+/// own internal constant is not part of its documented public interface).
+const MAX_REGEXP_REPEAT: u32 = 1000;
+
+static REPEAT_QUANTIFIER_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\{(\d+)(,(\d*))?\}").expect("valid literal regex"));
+
+fn check_regexp_repeat_bounds(pattern: &str) -> Result<(), ExecutorError> {
+    for caps in REPEAT_QUANTIFIER_RE.captures_iter(pattern) {
+        for group in [caps.get(1), caps.get(3)] {
+            if let Some(n) = group.and_then(|m| m.as_str().parse::<u32>().ok()) {
+                if n > MAX_REGEXP_REPEAT {
+                    return Err(ExecutorError::SqliteCompatError(
+                        "REGEXP pattern too big".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Shared implementation backing `regexp()`/`regexpi()`.
+///
+/// `regexp(pattern, string)` / `regexpi(pattern, string)` implement the
+/// SQLite `regexp`-test-extension-compatible functions (ext/misc/regexp.c)
+/// that back the `X REGEXP Y` infix operator (parsed as `regexp(Y, X)` per
+/// R-33693-50180). Unlike `match()` (always present, see [`match_default`]),
+/// stock SQLite ships NO default `regexp()` at all (R-41650-20872) — it only
+/// exists once an extension registers it. VibeSQL therefore gates these
+/// functions behind the `enable_regexp_functions` PRAGMA (default OFF, so
+/// `X REGEXP Y` raises "no such function" exactly like stock SQLite unless a
+/// caller opts in — dispatch happens in `functions/mod.rs`, this module only
+/// implements the matching logic once dispatch has already gated on the
+/// PRAGMA).
+fn regexp_impl(
+    args: &[SqlValue],
+    function_name: &str,
+    case_insensitive: bool,
+) -> Result<SqlValue, ExecutorError> {
+    if args.len() != 2 {
+        return Err(ExecutorError::WrongNumberOfArguments {
+            function_name: function_name.to_string(),
+        });
+    }
+
+    // NULL propagation - SQL standard semantics
+    if matches!(args[0], SqlValue::Null) || matches!(args[1], SqlValue::Null) {
+        return Ok(SqlValue::Null);
+    }
+
+    let pattern = match &args[0] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => s.as_str(),
+        other => {
+            return Err(ExecutorError::UnsupportedFeature(format!(
+                "{function_name} pattern must be a string, got {other:?}"
+            )));
+        }
+    };
+
+    // SQLite coerces non-string types to strings for REGEXP comparison,
+    // mirroring GLOB's coercion above.
+    let text: Cow<str> = match &args[1] {
+        SqlValue::Varchar(s) | SqlValue::Character(s) => Cow::Borrowed(s.as_str()),
+        SqlValue::Integer(i) => Cow::Owned(i.to_string()),
+        SqlValue::Bigint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Smallint(i) => Cow::Owned(i.to_string()),
+        SqlValue::Unsigned(u) => Cow::Owned(u.to_string()),
+        SqlValue::Real(_) | SqlValue::Double(_) | SqlValue::Numeric(_) | SqlValue::Float(_) => {
+            Cow::Owned(args[1].to_string())
+        }
+        SqlValue::Boolean(b) => Cow::Owned(if *b { "1".to_string() } else { "0".to_string() }),
+        other => Cow::Owned(other.to_string()),
+    };
+
+    check_regexp_repeat_bounds(pattern)?;
+
+    let re = regex::RegexBuilder::new(pattern)
+        .case_insensitive(case_insensitive)
+        .build()
+        .map_err(|e| ExecutorError::SqliteCompatError(format!("REGEXP pattern error: {e}")))?;
+
+    Ok(SqlValue::Integer(if re.is_match(&text) { 1 } else { 0 }))
+}
+
+/// regexp(pattern, string) - case-sensitive extended-regex match.
+///
+/// See [`regexp_impl`] for the shared implementation and PRAGMA-gating notes.
+pub(crate) fn regexp(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    regexp_impl(args, "regexp", false)
+}
+
+/// regexpi(pattern, string) - case-insensitive extended-regex match.
+///
+/// See [`regexp_impl`] for the shared implementation and PRAGMA-gating notes.
+pub(crate) fn regexpi(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
+    regexp_impl(args, "regexpi", true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,5 +396,96 @@ mod tests {
         // Wrong number of arguments
         assert!(glob(&[]).is_err());
         assert!(glob(&[SqlValue::Varchar("a".into())]).is_err());
+    }
+
+    // regexp()/regexpi() — ported from SQLite's regexp1.test/regexp2.test
+    // (Part of #6172). These functions are dispatch-gated behind the
+    // `enable_regexp_functions` PRAGMA (see `functions/mod.rs`); the matching
+    // logic itself is unconditional here, matching the pre-gate call site.
+
+    fn s(text: &str) -> SqlValue {
+        SqlValue::Varchar(text.into())
+    }
+
+    #[test]
+    fn test_regexp_case_sensitive() {
+        // regexp1-1.3.2 / 1.5.2 / 1.5.3
+        assert_eq!(
+            regexp(&[s("by|christ"), s("For since by man came death,")]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            regexp(&[s("by|christ"), s("even so in Christ shall all be made alive.")]).unwrap(),
+            SqlValue::Integer(0)
+        );
+        assert_eq!(
+            regexp(&[s("shall x*y*z*all"), s("even so in Christ shall all be made alive.")])
+                .unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            regexp(&[s("SHALL x*y*z*all"), s("even so in Christ shall all be made alive.")])
+                .unwrap(),
+            SqlValue::Integer(0)
+        );
+    }
+
+    #[test]
+    fn test_regexpi_case_insensitive() {
+        // regexp1-1.1.2..1.1.5
+        assert_eq!(regexpi(&[s("abc"), s("ABC")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexpi(&[s("ABC"), s("ABC")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexpi(&[s("ABC"), s("abc")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexpi(&[s("ABC."), s("ABC")]).unwrap(), SqlValue::Integer(0));
+        // regexp1-1.3.3/1.3.4/1.5.4
+        assert_eq!(
+            regexpi(&[s("by|christ"), s("even so in Christ shall all be made alive.")]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            regexpi(&[s("BY|CHRIST"), s("even so in Christ shall all be made alive.")]).unwrap(),
+            SqlValue::Integer(1)
+        );
+        assert_eq!(
+            regexpi(&[s("SHALL x*y*z*all"), s("even so in Christ shall all be made alive.")])
+                .unwrap(),
+            SqlValue::Integer(1)
+        );
+    }
+
+    #[test]
+    fn test_regexp_char_classes() {
+        // regexp2.test 4.1-4.18
+        assert_eq!(regexp(&[s(r"\W"), s("abc")]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(regexp(&[s(r"\W"), s("a c")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexp(&[s(r"\w"), s("abc")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexp(&[s(r"\w"), s("   ")]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(regexp(&[s("[^a-z]"), s("abc")]).unwrap(), SqlValue::Integer(0));
+        assert_eq!(regexp(&[s("[^a-z]"), s("a c")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexp(&[s("[a-z]"), s("abc")]).unwrap(), SqlValue::Integer(1));
+        assert_eq!(regexp(&[s("[a-z]"), s("   ")]).unwrap(), SqlValue::Integer(0));
+    }
+
+    #[test]
+    fn test_regexp_repeat_bounds() {
+        // regexp2.test 5.0-5.3
+        assert_eq!(regexp(&[s("a{1,999}bc"), s("abc")]).unwrap(), SqlValue::Integer(1));
+        assert!(regexp(&[s("a{1,25000}bc"), s("abc")]).is_err());
+        assert_eq!(regexp(&[s("a{999}bc"), s("abc")]).unwrap(), SqlValue::Integer(0));
+        assert!(regexp(&[s("a{25000}bc"), s("abc")]).is_err());
+    }
+
+    #[test]
+    fn test_regexp_null_propagation() {
+        assert_eq!(regexp(&[SqlValue::Null, s("abc")]).unwrap(), SqlValue::Null);
+        assert_eq!(regexp(&[s("abc"), SqlValue::Null]).unwrap(), SqlValue::Null);
+        assert_eq!(regexpi(&[SqlValue::Null, s("abc")]).unwrap(), SqlValue::Null);
+    }
+
+    #[test]
+    fn test_regexp_wrong_arg_count() {
+        assert!(regexp(&[]).is_err());
+        assert!(regexp(&[s("a")]).is_err());
+        assert!(regexpi(&[]).is_err());
     }
 }

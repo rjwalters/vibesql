@@ -33,6 +33,12 @@ arcstr = "1.2"
 # (literal-run search between wildcards). Already resolved transitively at 2.8.x;
 # promoted to a direct dependency here (issue #6011).
 memchr = "2.8"
+# Backs the SQLite `regexp()`/`regexpi()` test-extension-compatible functions
+# (PRAGMA-gated, see `evaluator::functions::sqlite_compat::pattern_funcs`).
+# Already a dependency of vibesql-cli/vibesql-sqllogictest at the same 1.10
+# line; promoted here so the engine can implement the functions directly
+# rather than only the CLI harness (Part of #6172).
+regex = "1.10"
 # The SQLite JSON1 functions (json_object/json_set/json_patch/...) need three
 # serde_json behaviors to match sqlite3 byte-for-byte:
 #   * preserve_order    - keep object keys in insertion order

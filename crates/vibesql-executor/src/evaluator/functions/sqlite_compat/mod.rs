@@ -13,7 +13,7 @@
 //! - [`string_funcs`]: String manipulation (CHAR, UNICODE, CONCAT_WS, PRINTF)
 //! - [`conditional_funcs`]: Conditional logic (IIF, IFNULL)
 //! - [`math_funcs`]: Math and query hints (RANDOM, LIKELY, UNLIKELY, LIKELIHOOD)
-//! - [`pattern_funcs`]: Pattern matching (LIKE, GLOB)
+//! - [`pattern_funcs`]: Pattern matching (LIKE, GLOB, REGEXP/REGEXPI)
 //! - [`json_funcs`]: JSON functions (json, json_array, json_object, etc.)
 
 mod blob_funcs;
@@ -42,7 +42,7 @@ pub(super) use math_funcs::likelihood;
 pub(super) use math_funcs::{likely, random, unlikely};
 // Re-export pattern functions
 pub(super) use pattern_funcs::glob;
-pub(super) use pattern_funcs::{like, match_default};
+pub(super) use pattern_funcs::{like, match_default, regexp, regexpi};
 // Re-export string functions
 pub(super) use string_funcs::char_func;
 pub(super) use string_funcs::{concat_ws, printf, unicode, unistr};

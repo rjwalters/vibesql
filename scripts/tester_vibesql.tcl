@@ -379,6 +379,16 @@ set ::pragma_cookie_pretrack_snapshot [dict create]
 set ::pragma_full_column_names 0   ;# Default: OFF
 set ::pragma_short_column_names 1  ;# Default: ON
 set ::pragma_case_sensitive_like 0 ;# Default: OFF (case-insensitive LIKE)
+# VibeSQL-internal PRAGMA (no real SQLite equivalent): mirrors the C-API
+# `load_static_extension db regexp` extension load real sqlite3's test
+# harness uses to register `regexp()`/`regexpi()` for a connection
+# (regexp1.test/regexp2.test). Persists for the rest of the tclsh process
+# once set — matching a real extension load's per-connection lifetime for
+# the one-connection-per-file usage those tests make. Default OFF matches
+# stock SQLite's documented absence of a default regexp() (R-41650-20872;
+# see e_expr-18.1.1/18.1.2, which must keep failing without a prior
+# `load_static_extension db regexp` call). Part of #6172.
+set ::pragma_enable_regexp 0
 set ::pragma_count_changes 0       ;# Default: OFF (UPDATE/DELETE return nothing)
 set ::pragma_prefix_skip_count_changes 0 ;# Per-block: suppress count_changes prefix replay when the block sets it itself (#5738)
 set ::pragma_reverse_unordered_selects 0  ;# Default: OFF (normal row order)
@@ -2034,6 +2044,12 @@ proc build_pragma_prefix {} {
     # Include case_sensitive_like if it's been set to ON
     if {$::pragma_case_sensitive_like != 0} {
         append prefix "PRAGMA case_sensitive_like=$::pragma_case_sensitive_like;\n"
+    }
+    # Include enable_regexp if `load_static_extension db regexp` has been
+    # called earlier in this file (Part of #6172; see the ::pragma_enable_regexp
+    # declaration above for the rationale).
+    if {$::pragma_enable_regexp != 0} {
+        append prefix "PRAGMA enable_regexp_functions=$::pragma_enable_regexp;\n"
     }
     # Include count_changes if it's been set to ON (#5738). Replaying this into
     # every fresh per-batch CLI process lets the CLI emit the per-statement row
@@ -6895,6 +6911,8 @@ array set vibesql_skip_tests {
 
 
     table-19.1 "Genuine VibeSQL engine gap surfaced by enabling ATTACH replay for table.test (#6404), confirmed via direct single-session CLI reproduction (not a shim artifact): once a second database is ATTACHed, an unqualified 'CREATE TABLE t19 AS SELECT * FROM sqlite_master' (CTAS) fails with 'no such table: sqlite_master', even though a plain 'SELECT * FROM sqlite_master' with the identical ATTACH state resolves fine — i.e. the gap is specific to CTAS's query-planning path losing the unqualified-name-to-MAIN-schema resolution once any ATTACHed database exists, not a general sqlite_master/ATTACH interaction. Was passing before ATTACH replay was enabled for this file only because aux was never genuinely attached in the per-batch CLI process reaching this test (table-14.3/14.4 above, the file's only ATTACH statement, previously hit the file-scope ATTACH skip). Re-skipped rather than allowed to regress; engine-level fix tracked separately (not a TCL-shim issue)."
+
+    regexp2-2.1 "Harness limitation, not a regexp()/REGEXP engine gap (Part of #6172): registers a custom TCL error()-raising scalar function via 'db func error sql_error' (regexp2.test line ~60) so a downstream trigger's CASE WHEN ... THEN error() can abort a cascading UPDATE chain; TCL-registered custom functions are not reachable from the VibeSQL CLI subprocess (same 'db func' C-API class as e_expr-13.1.* / check-7.2 / date-15.2, harness limitation #5720), so VibeSQL raises 'no such function: error' instead of the TCL-side 'SQL error!' message. The regexp()/regexpi()-under-triggers behavior this test exists to exercise (aux-data cleanup across nested trigger exceptions) is otherwise unaffected — 2.2/2.3 downstream confirm the trigger chain completes correctly once the (harness-only) error() call is bypassed."
 }
 
 # autoinc-4.2/4.3/4.5..4.10 (#6173): these test that TEMP-table AUTOINCREMENT
@@ -7758,8 +7776,27 @@ proc uses_sqlite_internals {script {name ""}} {
         return [list 1 "uses sqlite_interrupt_count (interrupt counter)"]
     }
 
-    # SQLite REGEXP operator - requires custom function registration, not standard SQL
-    if {[regexp -nocase {\sREGEXP\s} $script]} {
+    # SQLite REGEXP operator - requires custom function registration, not
+    # standard SQL. BUT: once a test file has called `load_static_extension
+    # db regexp` (tracked in ::pragma_enable_regexp, see the declaration
+    # near the top of this file), VibeSQL's real regexp()/regexpi()
+    # implementation IS reachable — skipping here would mask genuine,
+    # newly-supported coverage as a capability gap (Bucket-B smell per
+    # docs/reference/tcl-skip-policy.md). Only skip while the extension has
+    # NOT been loaded for this connection.
+    #
+    # This is a STATIC pre-check run BEFORE $script is ever evaluated, so
+    # ::pragma_enable_regexp is not yet set for a script whose OWN body is
+    # what calls `load_static_extension db regexp` in the first place
+    # (regexp1.test's regexp1-1.1: the load and the first REGEXP use are in
+    # the same do_test block) — without this second check that self-loading
+    # script would skip itself before ever running, leaving t1 uncreated and
+    # cascading "no such table: t1" into every later regexp1-1.* test. Treat
+    # a script that itself loads the regexp extension as not-a-skip too.
+    # Part of #6172.
+    if {!$::pragma_enable_regexp \
+            && ![regexp -nocase {load_static_extension\s+\S+\s+regexp} $script] \
+            && [regexp -nocase {\sREGEXP\s} $script]} {
         return [list 1 "uses REGEXP operator (requires custom function)"]
     }
 
@@ -9360,6 +9397,15 @@ proc load_static_extension {db args} {
                  && $::current_test_file_basename eq "nan")} {
         error "extension $ext is not available (VibeSQL does not load C test extensions)"
     }
+    # The `regexp` extension (ext/misc/regexp.c) is the one static extension
+    # VibeSQL actually implements real matching logic for (regexp()/regexpi(),
+    # gated behind the internal enable_regexp_functions PRAGMA — see the
+    # ::pragma_enable_regexp declaration above). Loading it flips that PRAGMA
+    # on for the rest of this tclsh process, replayed into every subsequent
+    # fresh CLI subprocess by build_pragma_prefix. Part of #6172.
+    if {$ext eq "regexp"} {
+        set ::pragma_enable_regexp 1
+    }
     return ""
 }
 
@@ -10139,6 +10185,10 @@ proc sqlite3 {db args} {
         set ::pragma_full_column_names 0
         set ::pragma_short_column_names 1
         set ::pragma_case_sensitive_like 0
+        # Extension registration is per-connection in real SQLite too: a fresh
+        # `sqlite3 db ...` open must not inherit a previous connection's
+        # `load_static_extension db regexp` (Part of #6172).
+        set ::pragma_enable_regexp 0
         set ::pragma_reverse_unordered_selects 0
         set ::pragma_foreign_keys 0
         set ::pragma_defer_foreign_keys 0
@@ -10603,6 +10653,7 @@ proc reset_db {} {
     set ::pragma_full_column_names 0
     set ::pragma_short_column_names 1
     set ::pragma_case_sensitive_like 0
+    set ::pragma_enable_regexp 0     ;# reset_db: extension registration doesn't survive a reset (Part of #6172)
     set ::pragma_reverse_unordered_selects 0
     set ::pragma_foreign_keys 0
     set ::pragma_defer_foreign_keys 0

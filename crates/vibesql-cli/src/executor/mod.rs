@@ -1931,6 +1931,16 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "ENABLE_REGEXP_FUNCTIONS" => {
+                    self.db.set_enable_regexp_functions(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "COUNT_CHANGES" => {
                     // SQLite-compatible PRAGMA count_changes: when ON, each
                     // INSERT/UPDATE/DELETE returns a one-row result with the
@@ -2462,6 +2472,16 @@ impl SqlExecutor {
                     let value = if self.count_changes { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["count_changes".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "ENABLE_REGEXP_FUNCTIONS" => {
+                    let value = if self.db.enable_regexp_functions() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["enable_regexp_functions".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

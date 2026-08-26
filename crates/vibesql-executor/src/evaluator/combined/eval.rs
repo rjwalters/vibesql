@@ -1356,7 +1356,8 @@ impl CombinedExpressionEvaluator<'_> {
                 self.eval_function(name.display(), args, character_unit, row)
             }
 
-            // Current date/time functions
+            // Current date/time functions (`enable_regexp` is irrelevant for
+            // these fixed function names, so pass `false` unconditionally)
             vibesql_ast::Expression::CurrentDate => {
                 let sql_mode = self.database.map(|db| db.sql_mode()).unwrap_or_default();
                 super::super::functions::eval_scalar_function(
@@ -1365,6 +1366,7 @@ impl CombinedExpressionEvaluator<'_> {
                     &None,
                     &sql_mode,
                     crate::evaluator::SchemaExprContext::None,
+                    false,
                 )
             }
             vibesql_ast::Expression::CurrentTime { precision: _ } => {
@@ -1377,6 +1379,7 @@ impl CombinedExpressionEvaluator<'_> {
                     &None,
                     &sql_mode,
                     crate::evaluator::SchemaExprContext::None,
+                    false,
                 )
             }
             vibesql_ast::Expression::CurrentTimestamp { precision: _ } => {
@@ -1389,6 +1392,7 @@ impl CombinedExpressionEvaluator<'_> {
                     &None,
                     &sql_mode,
                     crate::evaluator::SchemaExprContext::None,
+                    false,
                 )
             }
 
