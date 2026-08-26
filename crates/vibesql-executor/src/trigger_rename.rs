@@ -284,7 +284,29 @@ pub fn rewrite_column_refs_in_trigger_sql(
     // Collect the spans of the *column identifier* tokens that should be renamed.
     let mut edits: Vec<Span> = Vec::new();
 
+    // Tracks the most recently seen `INSERT INTO <table>` target as the scan
+    // proceeds left-to-right. `excluded.<col>` (inside an `ON CONFLICT ... DO
+    // UPDATE` clause) always refers to a column of *that* INSERT's target
+    // table — unlike NEW/OLD, which always alias the trigger's own subject
+    // table, `excluded` can name a column of a *different* table than the one
+    // the trigger fires ON (e.g. a trigger on t1 whose body does `INSERT INTO
+    // t2 ... ON CONFLICT(d) DO UPDATE SET f = excluded.f`, altercol.test
+    // 16.1.5/16.1.6). A trigger body has no expression-level nesting of
+    // INSERT statements, so simple sequential tracking (last INTO wins) is
+    // sufficient: any `excluded.<col>` reference is always preceded by its
+    // own statement's `INTO <table>` by the time the scan reaches it.
+    let mut current_insert_target: Option<&str> = None;
+
     for (pos, &idx) in significant.iter().enumerate() {
+        if matches!(tokens[idx].0, Token::Keyword { keyword: Keyword::Into, .. }) {
+            if let Some(&next_idx) = significant.get(pos + 1) {
+                if let Token::Identifier(target) = &tokens[next_idx].0 {
+                    current_insert_target = Some(target.as_str());
+                }
+            }
+            continue;
+        }
+
         let Token::Identifier(name) = &tokens[idx].0 else { continue };
 
         // Qualified reference: `<qualifier> . <name>`.
@@ -296,8 +318,12 @@ pub fn rewrite_column_refs_in_trigger_sql(
                     let is_new_old_ref = new_old_refer_to_renamed_table
                         && (qualifier.eq_ignore_ascii_case("new")
                             || qualifier.eq_ignore_ascii_case("old"));
+                    let is_excluded_ref = qualifier.eq_ignore_ascii_case("excluded")
+                        && current_insert_target
+                            .is_some_and(|t| t.eq_ignore_ascii_case(renamed_table));
                     if name.eq_ignore_ascii_case(old_column)
                         && (is_new_old_ref
+                            || is_excluded_ref
                             || qualifier_is_renamed_table(
                                 qualifier,
                                 renamed_table,
@@ -759,6 +785,42 @@ mod tests {
         assert_eq!(
             rewrite_col_result(sql, "t3", "e", "abc").unwrap(),
             "CREATE TRIGGER r1 INSERT ON t3 BEGIN UPDATE t3 SET a=1 FROM t4 WHERE t3.abc=2; END"
+        );
+    }
+
+    /// altercol.test 16.1.5: a trigger ON t1 whose body INSERTs into a
+    /// *different* table (t3) with an `ON CONFLICT ... DO UPDATE SET
+    /// f=excluded.f` clause. Renaming t3.f must rewrite `excluded.f` (the
+    /// INSERT's own target-table pseudo-row), even though the trigger's own
+    /// subject table is t1, not t3 — `excluded` is not gated by
+    /// `new_old_refer_to_renamed_table`.
+    #[test]
+    fn col_excluded_ref_to_insert_target_table() {
+        let sql = "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN \
+                    INSERT INTO t3 VALUES(new.a, new.b, new.c) \
+                    ON CONFLICT(e) DO UPDATE SET f = excluded.f; END";
+        let got =
+            rewrite_column_refs_in_trigger_sql(sql, "t3", "f", "big_f", &altertrig_schema, false)
+                .expect("rewrite should not be ambiguous in this fixture");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN \
+             INSERT INTO t3 VALUES(new.a, new.b, new.c) \
+             ON CONFLICT(e) DO UPDATE SET big_f = excluded.big_f; END"
+        );
+    }
+
+    /// `excluded.<col>` only refers to the *current* INSERT's target table;
+    /// a rename of an unrelated table must leave it untouched.
+    #[test]
+    fn col_excluded_ref_unrelated_table_unchanged() {
+        let sql = "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN \
+                    INSERT INTO t3 VALUES(new.a, new.b, new.c) \
+                    ON CONFLICT(e) DO UPDATE SET f = excluded.f; END";
+        assert_eq!(
+            rewrite_column_refs_in_trigger_sql(sql, "t2", "f", "big_f", &altertrig_schema, false)
+                .unwrap(),
+            sql
         );
     }
 
