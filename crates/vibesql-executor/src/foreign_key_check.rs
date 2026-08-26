@@ -16,6 +16,8 @@
 use vibesql_catalog::{ForeignKeyConstraint, TableSchema};
 use vibesql_storage::{Database, DeferredFkViolation, DeferredFkViolationKind};
 
+use crate::evaluator::expressions::eval::format_float_for_text_comparison;
+
 /// Returns `Some` (the child / parent table names to embed in the error) when
 /// the parent table does **not** have a key that exactly covers the FK's
 /// referenced columns.
@@ -358,17 +360,22 @@ fn column_set_eq(a: &[usize], b: &[usize]) -> bool {
 /// SQLite-style equality for FK comparisons that respects the parent column's
 /// collation (NOCASE / RTRIM) and *affinity* on top of strict typed equality.
 ///
-/// `parent_affinity` gates the numeric cross-storage-class leniency
-/// (`Integer(1)` vs `Text("1")`): real SQLite's `fkey.c` applies the
-/// **parent** key column's affinity to the child value before performing the
-/// parent-index lookup (`sqlite3VdbeApplyAffinity` in `fkLookupParent`), so a
-/// bare/untyped parent column (affinity `None`, e.g. `p PRIMARY KEY` with no
-/// declared type) performs no such coercion — `Text("1.0")` must NOT match
-/// `Integer(1)` there (e_fkey-15.2.1: `chi(c REFERENCES par)` with
-/// `par(p PRIMARY KEY)`, both untyped; inserting `chi.c = '1.0'` must be
-/// rejected, not silently accepted as matching `par.p = 1`). Only a parent
-/// column with `Integer` / `Real` / `Numeric` affinity opts into the numeric
-/// coercion branch.
+/// `parent_affinity` gates the cross-storage-class leniency: real SQLite's
+/// `fkey.c` applies the **parent** key column's affinity to the child value
+/// before performing the parent-index lookup (`sqlite3VdbeApplyAffinity` in
+/// `fkLookupParent`), which conditions on the affinity *class*:
+///
+/// - `Integer` / `Real` / `Numeric` affinity: the child is converted to a number (`Integer(1)`
+///   matches `Text("1")` against such a parent).
+/// - `Text` affinity: the child is converted to text instead — a non-text child is stringified
+///   (numeric storage classes only; BLOB/NULL are left alone) and then compared as text, so
+///   `Integer(1)` matches a `Varchar("1")` parent under `TEXT`/`VARCHAR` affinity (the common
+///   `VARCHAR PRIMARY KEY` referenced by an `INTEGER` child shape; confirmed against real `sqlite3`
+///   3.51.0).
+/// - `None` (bare/untyped parent column, e.g. `p PRIMARY KEY` with no declared type): no coercion
+///   at all — `Text("1.0")` must NOT match `Integer(1)` there (e_fkey-15.2.1: `chi(c REFERENCES
+///   par)` with `par(p PRIMARY KEY)`, both untyped; inserting `chi.c = '1.0'` must be rejected, not
+///   silently accepted as matching `par.p = 1`).
 pub fn fk_values_equal(
     child: &vibesql_types::SqlValue,
     parent: &vibesql_types::SqlValue,
@@ -390,12 +397,26 @@ pub fn fk_values_equal(
             }
         }
     }
-    if let (Some(c), Some(p)) = (sql_value_as_text(child), sql_value_as_text(parent)) {
+
+    // TEXT-affinity parent: stringify a non-text child (numeric storage
+    // classes only) so it can be compared against the TEXT-stored parent key.
+    let stringified_child;
+    let child_text: Option<&str> = match sql_value_as_text(child) {
+        Some(c) => Some(c),
+        None if parent_affinity == vibesql_types::TypeAffinity::Text => {
+            stringified_child = sql_value_to_text_affinity_string(child);
+            stringified_child.as_deref()
+        }
+        None => None,
+    };
+
+    if let (Some(c), Some(p)) = (child_text, sql_value_as_text(parent)) {
         match parent_collation.map(|s| s.to_ascii_lowercase()) {
             Some(ref name) if name == "nocase" => return c.eq_ignore_ascii_case(p),
             Some(ref name) if name == "rtrim" => {
                 return c.trim_end_matches(' ') == p.trim_end_matches(' ');
             }
+            _ if parent_affinity == vibesql_types::TypeAffinity::Text => return c == p,
             _ => {}
         }
     }
@@ -462,6 +483,35 @@ fn sql_value_as_text(v: &vibesql_types::SqlValue) -> Option<&str> {
     use vibesql_types::SqlValue::*;
     match v {
         Character(s) | Varchar(s) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+/// Stringify a numeric-class value the way SQLite's TEXT-affinity conversion
+/// (`sqlite3VdbeApplyAffinity`) does before comparing it against a
+/// TEXT-affinity parent key column. Only numeric/boolean storage classes
+/// convert; BLOB and NULL are left as `None` — SQLite's affinity conversion
+/// never stringifies a BLOB, and NULL only ever matches NULL (already
+/// handled by the `child == parent` fast path in [`fk_values_equal`]).
+///
+/// Floating-point values go through the shared
+/// [`format_float_for_text_comparison`] helper rather than a plain
+/// `to_string()`: SQLite always renders a REAL with a decimal point
+/// (`1.0` → `"1.0"`, matching `CAST(1.0 AS TEXT)`), whereas Rust's `Display`
+/// renders `1.0f64` as `"1"`. Using `to_string()` here would both wrongly
+/// *accept* a `Real(1.0)` child against a `'1'` parent and wrongly *reject*
+/// it against a `'1.0'` parent — the inverse of real `sqlite3` 3.51.0 on
+/// both counts (verified directly against the `sqlite3` CLI).
+fn sql_value_to_text_affinity_string(v: &vibesql_types::SqlValue) -> Option<String> {
+    use vibesql_types::SqlValue::*;
+    match v {
+        Integer(i) | Bigint(i) => Some(i.to_string()),
+        Smallint(i) => Some(i.to_string()),
+        Unsigned(i) => Some(i.to_string()),
+        Float(f) => Some(format_float_for_text_comparison(f64::from(*f))),
+        Real(r) => Some(format_float_for_text_comparison(*r)),
+        Double(d) | Numeric(d) => Some(format_float_for_text_comparison(*d)),
+        Boolean(b) => Some(if *b { "1".to_string() } else { "0".to_string() }),
         _ => None,
     }
 }
@@ -769,7 +819,12 @@ mod tests {
         // Numeric cross-storage-class coercion only applies when the PARENT
         // key column has a numeric-class affinity (real SQLite applies the
         // parent column's affinity to the child value before the parent-
-        // index lookup — see fk_values_equal's doc comment).
+        // index lookup — see fk_values_equal's doc comment). Exercises the
+        // function's Numeric-affinity contract directly; a real schema would
+        // report TypeAffinity::Text for a declared VARCHAR column, and would
+        // have already stored numeric-looking text as INTEGER/REAL under a
+        // genuinely NUMERIC-affinity column — see
+        // fk_values_equal_text_affinity_coercion for that real-world shape.
         let child = vibesql_types::SqlValue::Integer(88);
         let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("88"));
         assert!(fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Numeric));
@@ -783,6 +838,61 @@ mod tests {
         let child = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1.0"));
         let parent = vibesql_types::SqlValue::Integer(1);
         assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::None));
+    }
+
+    #[test]
+    fn fk_values_equal_text_affinity_coercion() {
+        // Real-world shape: `par(p VARCHAR PRIMARY KEY)` (declared VARCHAR ->
+        // TypeAffinity::Text) referenced by `chi(c INTEGER REFERENCES par(p))`.
+        // SQLite's `fkLookupParent` applies the PARENT column's TEXT affinity
+        // to the child value before comparing, stringifying the INTEGER
+        // child so it matches the TEXT-stored parent key (confirmed against
+        // real sqlite3 3.51.0).
+        let child = vibesql_types::SqlValue::Integer(1);
+        let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1"));
+        assert!(fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
+    }
+
+    #[test]
+    fn fk_values_equal_text_affinity_renders_real_with_decimal_point() {
+        // SQLite renders a REAL as text *with* its decimal point when applying
+        // TEXT affinity (`CAST(1.0 AS TEXT)` is `'1.0'`, not `'1'`), so a
+        // `Real(1.0)` child matches a `'1.0'` parent and does NOT match a
+        // `'1'` parent. Both directions verified against real sqlite3 3.51.0:
+        //
+        //   CREATE TABLE p1(x TEXT PRIMARY KEY);
+        //   CREATE TABLE c1(y REAL REFERENCES p1(x));
+        //   INSERT INTO p1 VALUES('1.0'); INSERT INTO c1 VALUES(1.0);  -- accepted
+        //   INSERT INTO p1 VALUES('1');   INSERT INTO c1 VALUES(1.0);  -- rejected
+        //
+        // Regression guard for Rust's `f64::to_string()`, which renders
+        // `1.0` as `"1"` and would invert *both* of the above.
+        let child = vibesql_types::SqlValue::Real(1.0);
+        let matching_parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1.0"));
+        let non_matching_parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1"));
+        assert!(fk_values_equal(&child, &matching_parent, None, vibesql_types::TypeAffinity::Text));
+        assert!(!fk_values_equal(
+            &child,
+            &non_matching_parent,
+            None,
+            vibesql_types::TypeAffinity::Text
+        ));
+
+        // Non-integral REALs keep their natural rendering (no spurious ".0").
+        let child = vibesql_types::SqlValue::Double(1.5);
+        let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1.5"));
+        assert!(fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
+    }
+
+    #[test]
+    fn fk_values_equal_text_affinity_does_not_stringify_blob() {
+        // TEXT affinity conversion never stringifies a BLOB (SQLite leaves
+        // BLOB values untouched by affinity conversion) — a blob whose bytes
+        // happen to spell the same digits as the parent's text value must
+        // still not match.
+        let child = vibesql_types::SqlValue::Blob(vec![b'1']);
+        let parent = vibesql_types::SqlValue::Varchar(arcstr::ArcStr::from("1"));
+        assert!(!fk_values_equal(&child, &parent, None, vibesql_types::TypeAffinity::Text));
     }
 
     #[test]
