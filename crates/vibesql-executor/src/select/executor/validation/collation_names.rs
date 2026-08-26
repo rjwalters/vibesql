@@ -20,13 +20,23 @@
 //! of erroring; SQLite reports `no such collation sequence: nose` at prepare
 //! time in every one of these positions.
 //!
-//! It intentionally recurses only through the *directly evaluated* expression
-//! subtree; nested subqueries carry their own COLLATE nodes but are validated
-//! when that subquery is itself prepared, so recursing into them here would
-//! either duplicate work or, worse, evaluate a COLLATE against a schema it does
-//! not belong to.
+//! It recurses through the directly evaluated expression subtree and, for
+//! EXISTS / IN / scalar-subquery / quantified-comparison expressions, also
+//! walks the referenced subquery's own SELECT list, WHERE, GROUP BY, HAVING,
+//! ORDER BY, and JOIN ... ON clauses (`validate_collation_names_in_subquery`
+//! below) rather than deferring to that subquery's own `execute()`. A
+//! subquery is normally validated when it is itself prepared, but a
+//! correlated or uncorrelated EXISTS/IN/scalar subquery is only actually
+//! *executed* (and thus only actually prepared) while evaluating the outer
+//! per-row predicate -- which never happens if the outer FROM table has zero
+//! rows. SQLite still raises `no such collation sequence: <name>` at prepare
+//! time in that case (existsexpr-6.1: `SELECT a FROM t1 WHERE EXISTS (SELECT
+//! 1 FROM t2 WHERE c COLLATE f = a)` over an empty `t1`), so this validation
+//! must not depend on the subquery ever actually running. This walk is purely
+//! syntactic (no schema needed), so it is safe to run eagerly regardless of
+//! row counts.
 
-use vibesql_ast::Expression;
+use vibesql_ast::{Expression, FromClause, SelectItem, SelectStmt};
 
 use crate::errors::ExecutorError;
 
@@ -63,7 +73,6 @@ pub fn validate_collation_names(expr: &Expression) -> Result<(), ExecutorError> 
         | Expression::IsTruthValue { expr, .. }
         | Expression::Cast { expr, .. }
         | Expression::Extract { expr, .. }
-        | Expression::QuantifiedComparison { expr, .. }
         | Expression::Interval { value: expr, .. } => validate_collation_names(expr),
         Expression::Function { args, .. } | Expression::AggregateFunction { args, .. } => {
             for arg in args {
@@ -98,10 +107,20 @@ pub fn validate_collation_names(expr: &Expression) -> Result<(), ExecutorError> 
             }
             Ok(())
         }
-        // For IN / EXISTS / scalar subqueries, only the directly-evaluated
-        // left-hand expression is validated here; the subquery body is
-        // validated when that subquery is prepared.
-        Expression::In { expr, .. } => validate_collation_names(expr),
+        // IN / EXISTS / scalar / quantified-comparison subqueries: validate
+        // both the directly-evaluated left-hand expression (if any) and the
+        // subquery body itself -- see the module doc comment for why the
+        // subquery body cannot simply wait for its own `execute()`.
+        Expression::In { expr, subquery, .. } => {
+            validate_collation_names(expr)?;
+            validate_collation_names_in_subquery(subquery)
+        }
+        Expression::Exists { subquery, .. } => validate_collation_names_in_subquery(subquery),
+        Expression::ScalarSubquery(subquery) => validate_collation_names_in_subquery(subquery),
+        Expression::QuantifiedComparison { expr, subquery, .. } => {
+            validate_collation_names(expr)?;
+            validate_collation_names_in_subquery(subquery)
+        }
         Expression::Like { expr, pattern, .. } | Expression::Glob { expr, pattern, .. } => {
             validate_collation_names(expr)?;
             validate_collation_names(pattern)
@@ -155,14 +174,11 @@ pub fn validate_collation_names(expr: &Expression) -> Result<(), ExecutorError> 
             }
             Ok(())
         }
-        // Terminals and subquery-bearing nodes (validated on their own prepare):
-        // no directly-evaluated COLLATE to check here.
+        // Terminals: no directly-evaluated COLLATE to check here.
         Expression::ColumnRef(_)
         | Expression::Literal(_)
         | Expression::CollatedLiteral { .. }
         | Expression::Wildcard
-        | Expression::Exists { .. }
-        | Expression::ScalarSubquery(_)
         | Expression::CurrentDate
         | Expression::CurrentTime { .. }
         | Expression::CurrentTimestamp { .. }
@@ -175,6 +191,60 @@ pub fn validate_collation_names(expr: &Expression) -> Result<(), ExecutorError> 
         | Expression::NumberedPlaceholder(_)
         | Expression::NamedPlaceholder(_) => Ok(()),
     }
+}
+
+/// Recursively walk `from`'s JOIN ... ON conditions, validating COLLATE names
+/// in each. Mirrors `SelectExecutor::for_each_join_condition`'s traversal
+/// shape but is duplicated here (rather than shared) because this module is
+/// schema-free and must stay callable before any table/subquery is prepared.
+fn validate_collation_names_in_from(from: &FromClause) -> Result<(), ExecutorError> {
+    if let FromClause::Join { left, right, condition, .. } = from {
+        validate_collation_names_in_from(left)?;
+        validate_collation_names_in_from(right)?;
+        if let Some(cond) = condition {
+            validate_collation_names(cond)?;
+        }
+    }
+    Ok(())
+}
+
+/// Validate every COLLATE name in `stmt`'s own directly-evaluated clauses:
+/// SELECT list, WHERE, GROUP BY, HAVING, ORDER BY, and JOIN ... ON. Used to
+/// eagerly validate a subquery reached through EXISTS / IN / scalar-subquery
+/// / quantified-comparison, since (per the module doc comment) that subquery
+/// is not guaranteed to ever actually execute during outer-query evaluation.
+fn validate_collation_names_in_subquery(stmt: &SelectStmt) -> Result<(), ExecutorError> {
+    for item in &stmt.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            validate_collation_names(expr)?;
+        }
+    }
+    if let Some(where_expr) = &stmt.where_clause {
+        validate_collation_names(where_expr)?;
+    }
+    if let Some(group_by) = &stmt.group_by {
+        for expr in group_by.all_expressions() {
+            validate_collation_names(expr)?;
+        }
+    }
+    if let Some(having_expr) = &stmt.having {
+        validate_collation_names(having_expr)?;
+    }
+    if let Some(order_by) = &stmt.order_by {
+        for item in order_by {
+            validate_collation_names(&item.expr)?;
+        }
+    }
+    if let Some(from) = &stmt.from {
+        validate_collation_names_in_from(from)?;
+    }
+    // Compound queries (UNION/INTERSECT/EXCEPT) chain further SelectStmts off
+    // `set_operation.right`; walk the whole chain so a COLLATE name in a
+    // later branch is validated too.
+    if let Some(set_op) = &stmt.set_operation {
+        validate_collation_names_in_subquery(&set_op.right)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -223,5 +293,101 @@ mod tests {
     #[test]
     fn bare_column_without_collate_passes() {
         assert!(validate_collation_names(&col("a")).is_ok());
+    }
+
+    /// A bare `SelectStmt` with just a WHERE clause, otherwise minimal — for
+    /// building EXISTS/IN/scalar-subquery bodies in the tests below.
+    fn subquery_with_where(where_clause: Expression) -> SelectStmt {
+        SelectStmt {
+            hints: Vec::new(),
+            into_table: None,
+            into_variables: None,
+            with_clause: None,
+            distinct: false,
+            select_list: vec![SelectItem::Expression {
+                expr: Expression::Literal(vibesql_types::SqlValue::Integer(1)),
+                alias: None,
+                source_text: None,
+            }],
+            from: Some(FromClause::Table {
+                index_hint: None,
+                name: "t2".to_string(),
+                alias: None,
+                column_aliases: None,
+                quoted: false,
+            }),
+            where_clause: Some(where_clause),
+            group_by: None,
+            having: None,
+            window_definitions: None,
+            order_by: None,
+            limit: None,
+            offset: None,
+            set_operation: None,
+            values: None,
+        }
+    }
+
+    /// Regression test for existsexpr-6.1 (#6172): `EXISTS (SELECT ... WHERE
+    /// c COLLATE f = a)` must raise `no such collation sequence: f` at
+    /// prepare time even when the outer table driving the EXISTS predicate
+    /// has zero rows (so the subquery is never actually executed/prepared on
+    /// its own to trigger the check).
+    #[test]
+    fn unknown_collation_inside_exists_subquery_errors() {
+        let where_clause = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left: Box::new(collate(col("c"), "f")),
+            right: Box::new(col("a")),
+        };
+        let expr = Expression::Exists {
+            subquery: Box::new(subquery_with_where(where_clause)),
+            negated: false,
+        };
+        let err = validate_collation_names(&expr).unwrap_err();
+        assert_eq!(
+            err,
+            ExecutorError::SqliteCompatError("no such collation sequence: f".to_string())
+        );
+    }
+
+    #[test]
+    fn known_collation_inside_exists_subquery_passes() {
+        let where_clause = Expression::BinaryOp {
+            op: vibesql_ast::BinaryOperator::Equal,
+            left: Box::new(collate(col("c"), "nocase")),
+            right: Box::new(col("a")),
+        };
+        let expr = Expression::Exists {
+            subquery: Box::new(subquery_with_where(where_clause)),
+            negated: false,
+        };
+        assert!(validate_collation_names(&expr).is_ok());
+    }
+
+    #[test]
+    fn unknown_collation_inside_in_subquery_errors() {
+        let where_clause = collate(col("c"), "nose");
+        let expr = Expression::In {
+            expr: Box::new(col("a")),
+            subquery: Box::new(subquery_with_where(where_clause)),
+            negated: false,
+        };
+        let err = validate_collation_names(&expr).unwrap_err();
+        assert_eq!(
+            err,
+            ExecutorError::SqliteCompatError("no such collation sequence: nose".to_string())
+        );
+    }
+
+    #[test]
+    fn unknown_collation_inside_scalar_subquery_errors() {
+        let where_clause = collate(col("c"), "nose");
+        let expr = Expression::ScalarSubquery(Box::new(subquery_with_where(where_clause)));
+        let err = validate_collation_names(&expr).unwrap_err();
+        assert_eq!(
+            err,
+            ExecutorError::SqliteCompatError("no such collation sequence: nose".to_string())
+        );
     }
 }
