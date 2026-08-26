@@ -10,6 +10,7 @@ use vibesql_types::SqlValue;
 use super::analysis::extract_simple_aggregate;
 use crate::{
     errors::ExecutorError,
+    evaluator::coercion::coerce_value_to_column_type,
     select::{executor::builder::SelectExecutor, grouping::AggregateAccumulator},
 };
 
@@ -72,6 +73,21 @@ impl SelectExecutor<'_> {
                     "Streaming aggregate requires BETWEEN predicate on PK".to_string(),
                 ))
             }
+        };
+
+        // Issue #6555: coerce raw WHERE-clause literal bounds to the PK
+        // column's declared affinity before probing the index (see
+        // `fast_path::range_scan` / `predicate::affinity_coercion` for the
+        // full rationale).
+        let (low_value, high_value) = match table.schema.get_column_index(pk_col) {
+            Some(idx) => {
+                let data_type = &table.schema.columns[idx].data_type;
+                (
+                    coerce_value_to_column_type(low_value, data_type),
+                    coerce_value_to_column_type(high_value, data_type),
+                )
+            }
+            None => (low_value, high_value),
         };
 
         // Find an index on the PK column

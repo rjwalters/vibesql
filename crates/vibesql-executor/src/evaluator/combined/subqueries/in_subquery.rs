@@ -911,10 +911,20 @@ fn try_index_optimized_in_subquery(
 
     let values_set = if let Some(where_expr) = &subquery.where_clause {
         // Strategy 1: Use index scan with predicate pushdown
-        use crate::select::scan::index_scan::predicate::extract_index_predicate;
+        use crate::select::scan::index_scan::predicate::{
+            coerce_index_predicate_for_affinity, extract_index_predicate,
+        };
 
         // Try to extract index predicate (range or IN)
-        if let Some(index_pred) = extract_index_predicate(where_expr, column_name) {
+        // Issue #6555: `extract_index_predicate` returns raw WHERE-clause
+        // literals from the subquery's own filter, which never went through
+        // INSERT/UPDATE affinity coercion. Coerce to the indexed column's
+        // declared affinity before probing the index — see
+        // `predicate::affinity_coercion` for the full rationale.
+        let index_pred = extract_index_predicate(where_expr, column_name);
+        let index_pred =
+            coerce_index_predicate_for_affinity(index_pred, column_name, &table.schema);
+        if let Some(index_pred) = index_pred {
             // Get row indices using index predicate
             let row_indices: Vec<usize> = match index_pred {
                 crate::select::scan::index_scan::predicate::IndexPredicate::Range(range) => {

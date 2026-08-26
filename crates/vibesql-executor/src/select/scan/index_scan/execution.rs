@@ -8,7 +8,9 @@ use vibesql_ast::Expression;
 use vibesql_storage::{Database, Row};
 
 use super::predicate::{
-    build_residual_where_clause, coerce_index_predicate_for_temporal_keys,
+    build_residual_where_clause, coerce_composite_predicates_for_affinity,
+    coerce_index_predicate_for_affinity, coerce_index_predicate_for_temporal_keys,
+    coerce_prefix_result_for_affinity, coerce_prefix_with_range_result_for_affinity,
     extract_composite_predicates_with_in, extract_index_predicate_for_indexed_column,
     extract_prefix_equality_predicates, extract_prefix_with_trailing_range,
     generate_composite_keys, where_clause_fully_satisfied_by_composite_key,
@@ -122,6 +124,19 @@ pub(crate) fn execute_index_scan(
         !index_column_names.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
     });
 
+    // Issue #6555: the literal values above came straight from the parsed
+    // WHERE clause, unlike stored row values (which are coerced to their
+    // column's affinity at INSERT/UPDATE time before ever reaching the
+    // index). Coerce each composite-key literal to its own column's declared
+    // affinity now, before it reaches the storage-layer index (which no
+    // longer guesses string->number coercion on its own — see
+    // `value_normalization.rs`) — so `WHERE int_col = '123'` still probes
+    // `Integer(123)` for an INTEGER-affinity column, while a TEXT/BLOB-affinity
+    // column's literal passes through unchanged.
+    let composite_predicates = composite_predicates.map(|preds| {
+        coerce_composite_predicates_for_affinity(preds, &index_column_names, &table.schema)
+    });
+
     // Generate composite keys (handles both single key and multiple keys for IN predicates)
     let composite_keys: Option<Vec<Vec<vibesql_types::SqlValue>>> =
         composite_predicates.as_ref().map(|preds| generate_composite_keys(preds));
@@ -153,6 +168,13 @@ pub(crate) fn execute_index_scan(
         !r.covered_columns.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
     });
 
+    // Issue #6555: coerce the prefix key and trailing-range bound literals to
+    // their own columns' declared affinity (see composite-predicate comment
+    // above for rationale).
+    let prefix_with_range_result = prefix_with_range_result.map(|r| {
+        coerce_prefix_with_range_result_for_affinity(r, &index_column_names, &table.schema)
+    });
+
     let use_prefix_bounded_lookup = prefix_with_range_result.is_some();
 
     // Try prefix lookup if full composite key not available (for partial prefix matches)
@@ -172,6 +194,11 @@ pub(crate) fn execute_index_scan(
         !r.covered_columns.iter().any(|col| column_has_nonbinary_collation(&table.schema, col))
     });
 
+    // Issue #6555: coerce the prefix key literals to their own columns'
+    // declared affinity (see composite-predicate comment above for rationale).
+    let prefix_result = prefix_result
+        .map(|r| coerce_prefix_result_for_affinity(r, &index_column_names, &table.schema));
+
     // Check if we're using prefix lookup (partial composite key match)
     let use_prefix_lookup =
         prefix_result.is_some() && !use_composite_lookup && !use_prefix_bounded_lookup;
@@ -185,6 +212,17 @@ pub(crate) fn execute_index_scan(
         first_indexed_column.and_then(|idx_col| {
             where_clause.and_then(|expr| extract_index_predicate_for_indexed_column(expr, idx_col))
         })
+    };
+
+    // Issue #6555: coerce the single-column predicate's literal bound(s) to
+    // the indexed column's declared affinity (see composite-predicate comment
+    // above for rationale). Only applies to column-based indexes — an
+    // expression index has no single declared column type to coerce against.
+    let index_predicate = match first_indexed_column.and_then(|idx_col| idx_col.column_name()) {
+        Some(col_name) => {
+            coerce_index_predicate_for_affinity(index_predicate, col_name, &table.schema)
+        }
+        None => index_predicate,
     };
 
     // Issue #5806 / #5823: an equality/range/IN-list probe looks up the raw

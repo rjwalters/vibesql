@@ -7,7 +7,10 @@ use vibesql_ast::{Expression, OrderDirection, SelectStmt};
 use vibesql_storage::Row;
 use vibesql_types::SqlValue;
 
-use crate::{errors::ExecutorError, select::executor::builder::SelectExecutor};
+use crate::{
+    errors::ExecutorError, evaluator::coercion::coerce_value_to_column_type,
+    select::executor::builder::SelectExecutor,
+};
 
 impl SelectExecutor<'_> {
     /// Try PK range scan with early projection (issue #3799)
@@ -50,6 +53,24 @@ impl SelectExecutor<'_> {
         let (low_value, high_value) = match self.extract_between_bounds(where_clause, pk_col) {
             Some(bounds) => bounds,
             None => return Ok(None),
+        };
+
+        // Issue #6555: `extract_between_bounds` returns raw WHERE-clause
+        // literals (e.g. `'1'` in `WHERE pk BETWEEN '1' AND '10'`), which
+        // never went through INSERT/UPDATE affinity coercion. Coerce to the
+        // PK column's declared affinity before probing the index — see
+        // `select::scan::index_scan::predicate::affinity_coercion` for the
+        // full rationale (this fast path predates that module and builds its
+        // bounds independently).
+        let (low_value, high_value) = match table.schema.get_column_index(pk_col) {
+            Some(idx) => {
+                let data_type = &table.schema.columns[idx].data_type;
+                (
+                    coerce_value_to_column_type(low_value, data_type),
+                    coerce_value_to_column_type(high_value, data_type),
+                )
+            }
+            None => (low_value, high_value),
         };
 
         // Need simple column references in SELECT (not SELECT *)

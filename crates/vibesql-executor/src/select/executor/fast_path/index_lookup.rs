@@ -18,7 +18,10 @@ use crate::{
     schema::CombinedSchema,
     select::{
         executor::builder::SelectExecutor,
-        scan::index_scan::covering::{check_covering_index, try_covering_index_scan},
+        scan::index_scan::{
+            covering::{check_covering_index, try_covering_index_scan},
+            predicate::coerce_lookup_keys_for_affinity,
+        },
     },
 };
 
@@ -177,10 +180,17 @@ impl SelectExecutor<'_> {
                 None => continue,
             };
 
+            // Issue #6555: coerce WHERE-clause literals (which never went
+            // through INSERT/UPDATE affinity coercion, unlike stored row
+            // values) to each covered column's declared affinity before
+            // probing the index — see `predicate::affinity_coercion` for
+            // the full rationale.
+            let mut prefix_key = prefix_key;
+            coerce_lookup_keys_for_affinity(&mut prefix_key, &index_columns, &table.schema);
+
             // Issue #5333: coerce string equality keys to the stored temporal
             // key type; skip this index when no faithful coercion exists
             // (slower paths evaluate with executor semantics).
-            let mut prefix_key = prefix_key;
             if !coerce_temporal_lookup_keys(index_data, &mut prefix_key) {
                 continue;
             }
@@ -386,11 +396,16 @@ impl SelectExecutor<'_> {
                 None => continue,
             };
 
+            // Issue #6555: coerce WHERE-clause literals to each covered
+            // column's declared affinity before probing the index (see
+            // `predicate::affinity_coercion` for the full rationale).
+            let mut key_values = key_values;
+            coerce_lookup_keys_for_affinity(&mut key_values, &index_columns, &table.schema);
+
             // Issue #5333: coerce string equality keys to the stored temporal
             // key type (e.g. `ts_col = '2017-07-20 15:30:00'` against
             // Timestamp keys); skip this index when no faithful coercion
             // exists (slower paths evaluate with executor semantics).
-            let mut key_values = key_values;
             if !coerce_temporal_lookup_keys(index_data, &mut key_values) {
                 continue;
             }
