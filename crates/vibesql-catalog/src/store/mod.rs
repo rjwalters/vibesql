@@ -332,12 +332,30 @@ impl Catalog {
     /// Look up the creation ordinal for a schema object, if one was recorded.
     ///
     /// Returns `None` for objects created via a path that did not record an
-    /// ordinal (e.g. a rename, or an old-format reload that predates the
-    /// persisted creation-order section); the `sqlite_master` generator falls
-    /// back to its historical "tables first, then indexes" emission order for
-    /// those.
+    /// ordinal (e.g. an old-format reload that predates the persisted
+    /// creation-order section); the `sqlite_master` generator falls back to its
+    /// historical "tables first, then indexes" emission order for those.
     pub fn creation_seq(&self, schema: &str, name: &str) -> Option<u64> {
         self.creation_seq.get(&Self::creation_seq_key(schema, name)).copied()
+    }
+
+    /// Directly set the creation ordinal for a schema object to an explicit
+    /// value, bypassing the "always assign the next fresh ordinal" behavior of
+    /// [`Catalog::record_creation_seq`].
+    ///
+    /// `ALTER TABLE ... RENAME TO` is implemented as drop-old + create-new
+    /// (see `execute_rename_table` in `vibesql-executor`), so the create-new
+    /// step's own `record_creation_seq` call unavoidably assigns the *new* name
+    /// a fresh (later) ordinal — the correct behavior for a genuine drop and
+    /// re-create, but not for a rename: real SQLite preserves a renamed
+    /// table's original position in `sqlite_master` (fkey2-14.2.2.2, #6170).
+    /// The rename call site uses this method to overwrite that fresh ordinal
+    /// with the old name's original one (captured via [`Catalog::creation_seq`]
+    /// before the drop). Does not advance `next_creation_seq`: the value being
+    /// restored is always one already handed out in the past, so future
+    /// `record_creation_seq` calls continue to hand out later ordinals than it.
+    pub fn set_creation_seq(&mut self, schema: &str, name: &str, seq: u64) {
+        self.creation_seq.insert(Self::creation_seq_key(schema, name), seq);
     }
 
     /// Iterate the recorded creation ordinals as `(opaque_key, seq)` pairs.
