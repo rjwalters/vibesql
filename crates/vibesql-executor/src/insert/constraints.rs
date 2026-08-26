@@ -295,6 +295,7 @@ pub fn enforce_unique_constraints(
 /// Enforce CHECK constraints on a row
 /// Returns Ok if all CHECK constraints are satisfied
 pub fn enforce_check_constraints(
+    database: &vibesql_storage::Database,
     schema: &vibesql_catalog::TableSchema,
     row_values: &[vibesql_types::SqlValue],
 ) -> Result<(), ExecutorError> {
@@ -304,7 +305,8 @@ pub fn enforce_check_constraints(
         // CHECK context: non-deterministic date/time uses ('now', date(),
         // 'localtime'/'utc') are rejected at evaluation time (SQLite).
         let evaluator = crate::evaluator::ExpressionEvaluator::new(schema)
-            .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
+            .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint)
+            .with_dqs_dml_fallback(database.dqs_dml());
 
         for (constraint_name, check_expr) in &schema.check_constraints {
             // Evaluate the CHECK expression against the row

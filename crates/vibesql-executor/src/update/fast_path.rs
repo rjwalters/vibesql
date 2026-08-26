@@ -253,6 +253,7 @@ pub(super) fn try_fast_path_update(
     if !schema.check_constraints.is_empty() {
         super::constraints::ConstraintValidator::new(schema)
             .with_check_constraints_ignored(database.ignore_check_constraints())
+            .with_dqs_dml_fallback(database.dqs_dml())
             .validate_check_constraints(&new_row)?;
     }
 

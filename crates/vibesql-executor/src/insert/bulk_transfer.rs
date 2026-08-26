@@ -255,7 +255,7 @@ fn execute_bulk_transfer(
         // #6173, check.test check-4.8): `PRAGMA ignore_check_constraints=ON`
         // disables CHECK enforcement on INSERT/UPDATE entirely.
         if compat_result.validate_check && !db.ignore_check_constraints() {
-            super::constraints::enforce_check_constraints(dest_schema, &row_values)?;
+            super::constraints::enforce_check_constraints(db, dest_schema, &row_values)?;
         }
 
         // Non-deterministic date/time uses in index expressions /

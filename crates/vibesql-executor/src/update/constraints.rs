@@ -10,18 +10,30 @@ pub struct ConstraintValidator<'a> {
     /// not enforced. Defaults to `false`; set via
     /// [`Self::with_check_constraints_ignored`].
     ignore_check_constraints: bool,
+    /// SQLite's `SQLITE_DBCONFIG_DQS_DML` runtime fallback (#6561): mirrors
+    /// `Database::dqs_dml()`. Defaults to `false`; set via
+    /// [`Self::with_dqs_dml_fallback`].
+    dqs_dml_fallback: bool,
 }
 
 impl<'a> ConstraintValidator<'a> {
     /// Create a new constraint validator
     pub fn new(schema: &'a vibesql_catalog::TableSchema) -> Self {
-        Self { schema, ignore_check_constraints: false }
+        Self { schema, ignore_check_constraints: false, dqs_dml_fallback: false }
     }
 
     /// Set whether CHECK constraints should be bypassed, mirroring
     /// `PRAGMA ignore_check_constraints` (Part of #6173).
     pub fn with_check_constraints_ignored(mut self, ignore: bool) -> Self {
         self.ignore_check_constraints = ignore;
+        self
+    }
+
+    /// Set whether the SQLITE_DBCONFIG_DQS_DML runtime column-resolution
+    /// fallback is enabled for CHECK-constraint evaluation, mirroring
+    /// `Database::dqs_dml()` (#6561).
+    pub fn with_dqs_dml_fallback(mut self, enabled: bool) -> Self {
+        self.dqs_dml_fallback = enabled;
         self
     }
 
@@ -367,7 +379,8 @@ impl<'a> ConstraintValidator<'a> {
             // CHECK context: non-deterministic date/time uses are rejected
             // at evaluation time (SQLite semantics).
             let evaluator = ExpressionEvaluator::new(self.schema)
-                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
+                .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint)
+                .with_dqs_dml_fallback(self.dqs_dml_fallback);
 
             for (constraint_name, check_expr) in &self.schema.check_constraints {
                 // Evaluate the CHECK expression against the updated row

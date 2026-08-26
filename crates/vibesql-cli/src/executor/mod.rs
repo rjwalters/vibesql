@@ -1865,8 +1865,12 @@ impl SqlExecutor {
                             continue;
                         };
                         for row in &rows {
-                            if vibesql_executor::enforce_check_constraints(schema, &row.values)
-                                .is_err()
+                            if vibesql_executor::enforce_check_constraints(
+                                &self.db,
+                                schema,
+                                &row.values,
+                            )
+                            .is_err()
                             {
                                 diagnostics
                                     .push(format!("CHECK constraint failed in {}", tbl_name));
@@ -2009,6 +2013,24 @@ impl SqlExecutor {
                     // rewrite the stored CREATE TABLE source text (issue
                     // #5796; alterdropcol 8.x). Session-scoped, default OFF.
                     self.db.set_writable_schema(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "DQS_DML" => {
+                    // VibeSQL-internal PRAGMA mirroring
+                    // `sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, ...)`.
+                    // No public SQLite SQL PRAGMA exists for this (C-API-only
+                    // knob); exposed here so the TCL conformance shim's
+                    // per-batch CLI processes can carry the connection-level
+                    // setting forward (see `PRAGMA trigger_depth_limit`,
+                    // #5536, for the same pattern). Session-scoped, default
+                    // OFF (#6561).
+                    self.db.set_dqs_dml(bool_value);
                     Ok(QueryResult {
                         rows: Vec::new(),
                         columns: Vec::new(),
@@ -2497,6 +2519,18 @@ impl SqlExecutor {
                     let value = if self.db.writable_schema() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["writable_schema".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "DQS_DML" => {
+                    // VibeSQL-internal PRAGMA read counterpart of the SET
+                    // handler above. Defaults to 0 (OFF).
+                    let value = if self.db.dqs_dml() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["dqs_dml".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,

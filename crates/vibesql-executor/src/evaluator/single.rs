@@ -42,6 +42,13 @@ pub struct ExpressionEvaluator<'a> {
     /// column, index expression). Non-deterministic date/time function uses
     /// are rejected at evaluation time in these contexts (SQLite semantics).
     pub(super) schema_context: super::SchemaExprContext,
+    /// SQLite's `SQLITE_DBCONFIG_DQS_DML` runtime fallback (#6561): when
+    /// true, an unqualified, originally-quoted column reference that fails
+    /// ordinary resolution evaluates to a string literal named by the
+    /// identifier instead of raising "no such column". Defaults to `false`
+    /// (SQLite's own connection default is OFF); set via
+    /// [`Self::with_dqs_dml_fallback`].
+    pub(super) dqs_dml_fallback: bool,
 }
 
 impl<'a> ExpressionEvaluator<'a> {
@@ -62,6 +69,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -86,6 +94,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -109,6 +118,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -133,6 +143,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -159,6 +170,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -184,6 +196,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -209,6 +222,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: None,
             table_alias: None,
             schema_context: super::SchemaExprContext::None,
+            dqs_dml_fallback: false,
         }
     }
 
@@ -255,6 +269,17 @@ impl<'a> ExpressionEvaluator<'a> {
     /// `non-deterministic use of <fn>() in <context>`.
     pub fn with_schema_context(mut self, schema_context: super::SchemaExprContext) -> Self {
         self.schema_context = schema_context;
+        self
+    }
+
+    /// Enable/disable the `SQLITE_DBCONFIG_DQS_DML` runtime column-resolution
+    /// fallback (#6561): when enabled, an unqualified, originally-quoted
+    /// column reference that fails ordinary resolution evaluates to a string
+    /// literal named by the identifier instead of raising "no such column".
+    /// Callers pass the session's `Database::dqs_dml()` setting; defaults to
+    /// `false` (matching SQLite's own connection default) when not called.
+    pub fn with_dqs_dml_fallback(mut self, enabled: bool) -> Self {
+        self.dqs_dml_fallback = enabled;
         self
     }
 
@@ -335,6 +360,7 @@ impl<'a> ExpressionEvaluator<'a> {
             row_index: self.row_index,
             table_alias: self.table_alias.clone(),
             schema_context: self.schema_context,
+            dqs_dml_fallback: self.dqs_dml_fallback,
         };
         f(&evaluator)
     }

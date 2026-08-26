@@ -248,6 +248,50 @@ impl Database {
         );
     }
 
+    /// Get the DQS_DML runtime fallback flag (SQLite compatibility).
+    ///
+    /// Mirrors `sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, ...)`: when ON,
+    /// an unqualified, originally-quoted identifier that fails ordinary
+    /// column resolution during expression evaluation (in an ordinary
+    /// SELECT/INSERT/UPDATE/DELETE evaluated under the live connection's
+    /// current flags) falls back to being treated as a string literal named
+    /// by the identifier, instead of raising "no such column"/"Column not
+    /// found". This is a genuine *runtime* fallback distinct from
+    /// `SQLITE_DBCONFIG_DQS_DDL` (which governs whether double-quoted
+    /// strings are accepted as string literals while *parsing*
+    /// CREATE TABLE/INDEX/VIEW/TRIGGER text). SQLite's own default for this
+    /// connection flag is OFF; VibeSQL matches that default so the fallback
+    /// is strictly opt-in for this context (#6561).
+    ///
+    /// **Not consulted for CHECK-constraint evaluation** — a CHECK
+    /// constraint's source text is stored verbatim in the schema and
+    /// SQLite's schema-loading parser unconditionally tolerates this same
+    /// fallback independent of the current connection's DQS_DML setting
+    /// ("SQLite can load such a schema from disk", quote.test's own
+    /// comment); `ExpressionEvaluator`'s `SchemaExprContext::CheckConstraint`
+    /// gate applies the fallback there regardless of this flag's value (see
+    /// quote.test 2.3.1, 2.3.2).
+    ///
+    /// There is no public SQL PRAGMA for this in SQLite (it's a C-API-only
+    /// `sqlite3_db_config` knob) — VibeSQL exposes an internal `PRAGMA
+    /// dqs_dml` so the TCL conformance shim's per-batch CLI processes can
+    /// carry the setting forward on the same logical connection, mirroring
+    /// `trigger_depth_limit` (#5536).
+    pub fn dqs_dml(&self) -> bool {
+        match self.get_session_variable("DQS_DML") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the DQS_DML runtime fallback flag (SQLite compatibility).
+    pub fn set_dqs_dml(&mut self, value: bool) {
+        self.set_session_variable(
+            "DQS_DML",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Get the defer_foreign_keys PRAGMA setting (SQLite compatibility).
     ///
     /// When ON, enforcement of all foreign key constraints is delayed until

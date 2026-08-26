@@ -474,7 +474,8 @@ pub(super) fn execute_internal(
         // For IGNORE: catch constraint violations and skip the row
         // For REPLACE: we've already marked conflicts for deletion, so skip PK/UNIQUE validation
         let constraint_validator = ConstraintValidator::new(schema)
-            .with_check_constraints_ignored(database.ignore_check_constraints());
+            .with_check_constraints_ignored(database.ignore_check_constraints())
+            .with_dqs_dml_fallback(database.dqs_dml());
 
         if use_ignore {
             // Non-deterministic date/time uses in index expressions /
@@ -2062,7 +2063,8 @@ fn execute_update_from(
     // skip / evict semantics replace the deferred-UNIQUE post-statement pass. The
     // logic mirrors the default UPDATE path at executor.rs:239-468.
     let constraint_validator = ConstraintValidator::new(schema)
-        .with_check_constraints_ignored(database.ignore_check_constraints());
+        .with_check_constraints_ignored(database.ignore_check_constraints())
+        .with_dqs_dml_fallback(database.dqs_dml());
 
     // Track rows to delete for REPLACE conflict resolution (before applying updates)
     let mut rows_to_delete_for_replace: Vec<usize> = Vec::new();
