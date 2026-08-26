@@ -20,6 +20,9 @@ fn exec_sql(db: &mut Database, sql: &str) -> Result<String, String> {
         Statement::Insert(s) => crate::InsertExecutor::execute(db, &s)
             .map(|count| format!("{} row(s) inserted", count))
             .map_err(|e| e.to_string()),
+        Statement::Delete(s) => crate::DeleteExecutor::execute(&s, db)
+            .map(|count| format!("{} row(s) deleted", count))
+            .map_err(|e| e.to_string()),
         Statement::AlterTable(s) => {
             crate::alter::AlterTableExecutor::execute(&s, db).map_err(|e| e.to_string())
         }
@@ -165,4 +168,58 @@ fn add_generated_not_null_check_reports_check_first() {
     let err =
         exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d AS (b+1) NOT NULL CHECK(a!=1)").unwrap_err();
     assert_eq!(err, "CHECK constraint failed");
+}
+
+#[test]
+fn add_column_strict_default_type_mismatch_rejected_when_rows_exist() {
+    // alter-20.2 (do_catchsql_test): a STRICT table's ADD COLUMN DEFAULT whose
+    // value doesn't match the declared strict type must abort the whole ALTER
+    // once there is at least one existing row to backfill -- matching
+    // sqlite3AlterFinishAddColumn's post-ALTER `pragma_quick_check` pass
+    // (alter.c), which maps the resulting type violation to the fixed message
+    // `type mismatch on DEFAULT` rather than the ordinary
+    // `cannot store ... column ...` runtime message.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a INT) STRICT").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1(a) VALUES(45)").unwrap();
+    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT x'313233'").unwrap_err();
+    assert_eq!(err, "type mismatch on DEFAULT");
+    // The rejected ALTER left the table untouched -- no `b` column exists.
+    assert!(exec_sql(&mut db, "SELECT b FROM t1").is_err());
+}
+
+#[test]
+fn add_column_strict_default_type_mismatch_allowed_on_empty_table() {
+    // alter-20.2 (do_execsql_test, same ALTER re-run against an empty table):
+    // with zero existing rows there is nothing for the post-ALTER scan to
+    // find, so the identical ALTER that fails above succeeds here.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a INT) STRICT").unwrap();
+    assert!(exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT x'313233'").is_ok());
+}
+
+#[test]
+fn strict_default_mismatch_surfaces_on_later_insert() {
+    // alter-20.3: once the mismatched DEFAULT has been added to a STRICT
+    // table (permitted while the table was empty, previous test), a later
+    // INSERT that omits `b` and so materializes the BLOB default into the
+    // TEXT column must be rejected with the ordinary STRICT runtime message
+    // -- the DEFAULT clause itself is not re-validated at ALTER time once
+    // already accepted, only at the point a row actually needs the value.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a INT) STRICT").unwrap();
+    exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT x'313233'").unwrap();
+    let err = exec_sql(&mut db, "INSERT INTO t1(a) VALUES(45)").unwrap_err();
+    assert_eq!(err, "cannot store BLOB value in TEXT column t1.b");
+}
+
+#[test]
+fn add_column_strict_default_matching_type_is_allowed_with_existing_rows() {
+    // A STRICT-typed DEFAULT that DOES match the declared column type must
+    // still succeed with existing rows to backfill -- only a genuine mismatch
+    // triggers `type mismatch on DEFAULT`.
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a INT) STRICT").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1(a) VALUES(45)").unwrap();
+    assert!(exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT 'ok'").is_ok());
 }

@@ -208,6 +208,18 @@ pub(super) fn execute_add_column(
     // the indices of the pre-existing columns the expression references are
     // unchanged, and evaluation resolves exactly as it does at INSERT time.
     // Non-generated columns keep the previous behavior: a static default or NULL.
+    //
+    // For a STRICT table, track whether the backfilled DEFAULT value actually
+    // satisfies the new column's declared strict type. Real SQLite runs a
+    // post-ALTER `pragma_quick_check` pass over the whole table
+    // (`sqlite3AlterFinishAddColumn`, alter.c) and maps any resulting
+    // `non-<TYPE> value in <tbl>.<col>` integrity-check hit to the fixed
+    // message `type mismatch on DEFAULT`, aborting the whole ALTER. That scan
+    // only ever finds something if there is at least one existing row to
+    // backfill -- an empty table's identical ALTER succeeds (alter-20.2's
+    // second occurrence: `DELETE FROM t1` then the same `ADD COLUMN ...
+    // DEFAULT x'313233'` no longer errors).
+    let mut strict_default_violation: Option<ExecutorError> = None;
     if let Some(ref gen_expr) = stmt.column_def.generated_expr {
         let gen_expr = *gen_expr.clone();
         let col_type = stmt.column_def.data_type.clone();
@@ -227,6 +239,21 @@ pub(super) fn execute_add_column(
         } else {
             SqlValue::Null
         };
+
+        if let Some(st) = added_strict_type {
+            if table.row_count() > 0
+                && crate::strict::enforce_strict_type(
+                    default_value.clone(),
+                    st,
+                    &stmt.table_name,
+                    &stmt.column_def.name,
+                )
+                .is_err()
+            {
+                strict_default_violation =
+                    Some(ExecutorError::SqliteCompatError("type mismatch on DEFAULT".to_string()));
+            }
+        }
 
         for row in table.rows_mut() {
             row.add_value(default_value.clone());
@@ -265,13 +292,18 @@ pub(super) fn execute_add_column(
     let needs_not_null_check =
         !stmt.column_def.nullable && stmt.column_def.generated_expr.is_some();
 
-    if !added_checks.is_empty() || needs_not_null_check {
+    if !added_checks.is_empty() || needs_not_null_check || strict_default_violation.is_some() {
         let schema_snapshot = table.schema.clone();
         let new_col_index = schema_snapshot.columns.len() - 1;
         let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
             .with_schema_context(crate::evaluator::SchemaExprContext::CheckConstraint);
 
-        let mut violation: Option<ExecutorError> = None;
+        // Seed `violation` with any STRICT-type mismatch already detected on the
+        // backfilled DEFAULT (a single constant value, checked once above rather
+        // than per row). When there are no added CHECK/NOT NULL constraints to
+        // scan for, the loop below exits on its first iteration without
+        // overwriting it.
+        let mut violation: Option<ExecutorError> = strict_default_violation;
         for row in table.rows_mut() {
             for (_, expr) in &added_checks {
                 if evaluator.eval(expr, row)? == SqlValue::Boolean(false) {
