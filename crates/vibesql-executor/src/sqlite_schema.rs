@@ -380,6 +380,15 @@ pub fn execute_sqlite_schema_query_for_schema(
 /// then views, then triggers" emission order. The fallback keys sort *after*
 /// every recorded ordinal, so a reload reproduces the previous ordering exactly
 /// and never regresses.
+///
+/// The same ordinal also backs `sqlite_master`'s `rowid`/`oid`/`_rowid_`
+/// pseudo-columns (issue #6597): real SQLite's schema table is itself an
+/// ordinary rowid table, so `rowid`/`oid` there are genuine per-object
+/// identities, not `NULL`. Each emitted [`Row`] carries the ordinal as its
+/// `row_id` ([`Row::set_row_id`]) so the general rowid-pseudo-column
+/// resolution in the evaluator (which falls back to `Row::get_row_id_for_table`
+/// for tables without an INTEGER PRIMARY KEY alias) resolves it exactly like
+/// any other rowid table, with no evaluator-side special case needed.
 struct SchemaRowCollector<'a> {
     catalog: &'a vibesql_catalog::Catalog,
     rows: Vec<(u64, Row)>,
@@ -394,10 +403,14 @@ impl<'a> SchemaRowCollector<'a> {
         SchemaRowCollector { catalog, rows: Vec::new(), pushed: 0 }
     }
 
-    fn push(&mut self, schema: &str, name: &str, row: Row) {
+    fn push(&mut self, schema: &str, name: &str, mut row: Row) {
         let seq =
             self.catalog.creation_seq(schema, name).unwrap_or(Self::FALLBACK_BASE + self.pushed);
         self.pushed += 1;
+        // Back rowid/oid/_rowid_ with the same creation ordinal used to order
+        // the rows, so `sqlite_master.oid`/`rowid` resolve to a real,
+        // monotonically-assigned, distinct value instead of NULL (#6597).
+        row.set_row_id(seq);
         self.rows.push((seq, row));
     }
 
