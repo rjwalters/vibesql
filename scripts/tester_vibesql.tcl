@@ -7126,32 +7126,37 @@ array set vibesql_skip_tests {
 #     schema-state mismatches (index loss across RENAME + reload). #6599 and
 #     #6608 fixed tbl_name retargeting and exact-case survival, and #6607
 #     fixed implicit `sqlite_autoindex_<table>_<n>` name regeneration on
-#     RENAME — alter-1.2 and alter-2.3 now PASS unskipped. Only alter-1.6
-#     remains, and its residual diff is no longer a schema-state mismatch: it
-#     is `TempTab`/`objlist` (both TEMP tables) leaking into the persistent
-#     `sqlite_master` listing after this test's `db close; sqlite3 db
-#     test.db` simulated reconnect. Root-caused to this shim's own
-#     TEMP-TABLE-emulation strategy (`strip_temp_table_keyword`, above): it
-#     demotes `CREATE TEMP TABLE` to a genuinely persistent `CREATE TABLE`
-#     (permanently, for the rest of the file — see `::temp_demoted_names`),
-#     which has no way to distinguish a real `db close`/reconnect boundary
-#     from an ordinary same-connection batch, so a demoted name never goes
-#     away the way a real TEMP table would on reconnect. Confirmed
-#     non-regressive at the engine level: `Database` save/reload round-trips
-#     (this repo's closest analogue to a fresh connection) correctly drop
-#     every TEMP table, including a renamed one — see
-#     `temp_table_does_not_leak_into_sqlite_master_after_binary_reload` in
-#     `crates/vibesql-executor/tests/alter_rename_table_index_tests.rs`. NOT
-#     skip-listed here: alter-1.6 populates the `$DB` API-pointer variable
-#     (`stepsql`) and the TEMP `objlist` table that the very next test,
-#     alter-1.7, reuses — skipping alter-1.6 would strand alter-1.7 (an
-#     unrelated, currently-PASSING RENAME assertion) with no `$DB`/`objlist`,
-#     the same cascade-avoidance reasoning as the alter-3.3.3 note above.
-#     Fixing this at the shim level (making `db close` a real reset point for
-#     `::temp_demoted_names`) is a materially larger, cross-cutting change to
-#     the TCL-shim's TEMP-table emulation than this file's other harness
-#     skips — tracked separately as #6609 rather than folded into #6607.
-#     Part of #6574.
+#     RENAME — alter-1.2 and alter-2.3 now PASS unskipped. #6609 then fixed
+#     the reconnect-boundary leak this test's `db close; sqlite3 db test.db`
+#     simulated reconnect used to expose: `TempTab` (a demoted TEMP table
+#     renamed pre-close) no longer survives the reconnect, matching real
+#     SQLite's connection-scoped TEMP-table lifetime (see `::db_close_pending`
+#     / `::pending_temp_drop_names` above `strip_temp_table_keyword`).
+#
+#     alter-1.6 STILL fails, but its residual diff is now a narrower,
+#     STRUCTURALLY DIFFERENT root cause, unrelated to the reconnect boundary:
+#     `objlist` — a TEMP table created fresh in the post-reopen session —
+#     "self-lists" itself in its own `INSERT INTO objlist SELECT ... FROM
+#     sqlite_master` statement, because that demotes-to-persistent within the
+#     SAME BATCH as `objlist`'s own `CREATE TEMP TABLE`, so it is already a
+#     real VibeSQL table by the time that unqualified `sqlite_master` query
+#     runs moments later in the same batch — something real SQLite's
+#     genuinely separate temp/main schemas would never expose (unqualified
+#     `sqlite_master` never includes a TEMP table, in any batch). Tracked as
+#     #6612 (a materially riskier fix than #6609's: a naive same-batch
+#     `sqlite_master`-reference rewrite needs regression verification across
+#     the ~45 files that mix `CREATE TEMP TABLE` and `sqlite_master` in one
+#     script, not just this file). NOT skip-listed here: alter-1.6 still
+#     populates the `$DB` API-pointer variable (`stepsql`) that the very next
+#     test, alter-1.7, reuses (alter-1.7 itself is independently
+#     auto-skipped, unconditionally of this fix, for its own unrelated
+#     `sqlite_temp_master` usage — see the blanket #6173 check below — so no
+#     currently-passing test actually depends on alter-1.6's `objlist`
+#     content, only on its `$DB` side effect surviving). Skipping alter-1.6
+#     entirely would still risk stranding that `$DB` side effect for any
+#     future un-skip of alter-1.7, so it stays intentionally left failing
+#     rather than skip-listed, same cascade-avoidance reasoning as the
+#     alter-3.3.3 note above. Part of #6574.
 #   * Bucket 5 (#6597) — alter-6.2../6.6 identifier-escaping failures.
 #   * alter2-4.3/4.5 ("invalid command name sqlite3_errcode") and alter2-4.4
 #     (expects "unsupported file format" from the format-5 image alter2-4.1
