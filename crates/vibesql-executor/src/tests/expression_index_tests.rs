@@ -395,6 +395,94 @@ fn test_expression_index_functional_after_binary_reload() {
     );
 }
 
+/// Regression for issue #6578: a persisted expression index whose expression
+/// cannot be resolved against the table schema (e.g. left over from a
+/// `PRAGMA writable_schema=1` escape hatch, or a stale index after a dropped
+/// column) must NOT abort the entire `rebuild_pending_expression_indexes`
+/// call. SQLite's own documented behavior (matches `quote.test`'s header
+/// comment) is that such a schema object persists and loads fine; only
+/// actually evaluating the bad expression should error. Before the fix,
+/// `rebuild_pending_expression_indexes` propagated the per-index evaluation
+/// error with `?`, which — called unconditionally on every CLI database open
+/// — turned an otherwise-healthy database permanently unopenable once the
+/// table backing the bad index had rows.
+#[test]
+fn test_rebuild_tolerates_unresolvable_expression_index() {
+    use vibesql_catalog::{ColumnSchema, TableSchema};
+
+    use crate::index_ddl::expression_index::rebuild_pending_expression_indexes;
+
+    // Table t1(x, y, z) with one row, mirroring the issue's repro.
+    let mut db = Database::new();
+    db.catalog.set_case_sensitive_identifiers(false);
+    let schema = TableSchema::new(
+        "t1".to_string(),
+        vec![
+            ColumnSchema::new("x".to_string(), DataType::Integer, true),
+            ColumnSchema::new("y".to_string(), DataType::Integer, true),
+            ColumnSchema::new("z".to_string(), DataType::Integer, true),
+        ],
+    );
+    db.create_table(schema.clone()).unwrap();
+    db.insert_row(
+        "t1",
+        Row::new(vec![SqlValue::Integer(1), SqlValue::Integer(2), SqlValue::Integer(3)]),
+    )
+    .unwrap();
+
+    // Register a "bad" expression index (`w1 + 1`, where `w1` is not a column
+    // of t1) and a "good" one (`x + y`) exactly the way the binary/JSON
+    // snapshot loader would on reload: `Database::create_index` never
+    // evaluates the expression for an expression column, it just records the
+    // index metadata with an empty body and flags it pending-rebuild (see
+    // `IndexManager::create_index`). This reproduces the post-reload state
+    // without needing an actual save/load round-trip.
+    let bad_expr = parse_index_expression("w1 + 1");
+    let bad_columns =
+        vec![IndexColumn::Expression { expr: Box::new(bad_expr), direction: OrderDirection::Asc }];
+    db.create_index("bad_idx".to_string(), "t1".to_string(), false, bad_columns).unwrap();
+
+    let good_expr = parse_index_expression("x + y");
+    let good_columns =
+        vec![IndexColumn::Expression { expr: Box::new(good_expr), direction: OrderDirection::Asc }];
+    db.create_index("good_idx".to_string(), "t1".to_string(), false, good_columns).unwrap();
+
+    assert!(db.is_index_pending_rebuild("bad_idx"));
+    assert!(db.is_index_pending_rebuild("good_idx"));
+
+    // The core regression assertion: rebuilding must NOT propagate the bad
+    // index's evaluation error and abort the whole call.
+    let result = rebuild_pending_expression_indexes(&mut db);
+    assert!(
+        result.is_ok(),
+        "rebuild_pending_expression_indexes must tolerate an unresolvable \
+         expression index rather than hard-failing the whole database load, got: {:?}",
+        result.err()
+    );
+
+    // The bad index stays unusable/pending-rebuild forever (the planner
+    // already declines a pending-rebuild index, so this is safe) ...
+    assert!(
+        db.is_index_pending_rebuild("bad_idx"),
+        "the unresolvable index should remain flagged pending-rebuild, not silently populated"
+    );
+    // ... while the good index still gets its chance to rebuild normally.
+    assert!(
+        !db.is_index_pending_rebuild("good_idx"),
+        "a resolvable expression index should still rebuild even when a sibling index fails"
+    );
+
+    // And the rest of the database remains fully usable — this is the actual
+    // symptom from the issue (a hard open error aborting the whole DB).
+    let executor = SelectExecutor::new(&db);
+    let stmt = Parser::parse_sql("SELECT x, y, z FROM t1").unwrap();
+    let rows = match stmt {
+        vibesql_ast::Statement::Select(select_stmt) => executor.execute(&select_stmt).unwrap(),
+        _ => panic!("Expected SELECT statement"),
+    };
+    assert_eq!(rows.len(), 1, "table data must remain intact and queryable");
+}
+
 /// Run `SELECT r, s FROM t3 WHERE r + s = 3` and return the row count.
 #[cfg(test)]
 fn run_r_plus_s_eq_3(db: &Database) -> usize {
