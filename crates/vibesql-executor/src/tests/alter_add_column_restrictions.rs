@@ -182,8 +182,7 @@ fn add_column_strict_default_type_mismatch_rejected_when_rows_exist() {
     let mut db = Database::new();
     exec_sql(&mut db, "CREATE TABLE t1(a INT) STRICT").unwrap();
     exec_sql(&mut db, "INSERT INTO t1(a) VALUES(45)").unwrap();
-    let err =
-        exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT x'313233'").unwrap_err();
+    let err = exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN b TEXT DEFAULT x'313233'").unwrap_err();
     assert_eq!(err, "type mismatch on DEFAULT");
     // The rejected ALTER left the table untouched -- no `b` column exists.
     assert!(exec_sql(&mut db, "SELECT b FROM t1").is_err());
