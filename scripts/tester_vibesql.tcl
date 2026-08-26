@@ -4549,8 +4549,15 @@ proc parse_raw_result {output} {
     # is completely unaffected, so multi-row/multi-column results -- including
     # a NULL embedded among other columns or rows -- keep today's "{}"-in-
     # normalize_result behavior exactly as before.
+    #
+    # Respect a customized `db nullvalue`/`::null_string` (e.g. e_expr.test's
+    # "null", pragma.test's "<<NULL>>") the same way the general per-value
+    # loop below does: only fall back to the literal "NULL" substitution when
+    # the effective null representation is the empty string -- the one case
+    # that produces the ambiguous "{}" bug this special case exists to fix.
     if {$output eq "${null_sentinel}\x1e"} {
-        return [list "NULL"]
+        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
+        return [list [expr {$null_rep eq "" ? "NULL" : $null_rep}]]
     }
 
     # Strip exactly one trailing record separator if present.
