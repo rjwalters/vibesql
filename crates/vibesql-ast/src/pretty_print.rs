@@ -119,6 +119,28 @@ fn format_identifier(name: &str) -> String {
     }
 }
 
+/// Format an identifier part of a `ColumnIdentifier`, quoting it if either
+/// it structurally needs quoting (see [`format_identifier`]) OR it was
+/// quoted in the original SQL (`was_quoted`).
+///
+/// SQLite persists the *literal* `CREATE ...` statement text a user typed in
+/// `sqlite_master.sql`; VibeSQL instead re-derives that text from the parsed
+/// AST via `ToSql`. Reproducing the original quoting choice for an
+/// already-quoted identifier (e.g. `"abc"`) is required for byte-identical
+/// round-tripping, even though the quoted and unquoted forms are
+/// semantically equivalent SQL (#6562). This subsumes the old
+/// always-quote-if-empty special case, since an empty name already forces
+/// `needs_quoting` regardless of `was_quoted`.
+fn format_identifier_preserving_quotes(name: &str, was_quoted: bool) -> String {
+    if was_quoted {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    } else {
+        // Falls back to the same structural-necessity quoting rules as an
+        // unquoted identifier (empty name, special chars, leading digit).
+        format_identifier(name)
+    }
+}
+
 // ============================================================================
 // SqlValue
 // ============================================================================
@@ -298,21 +320,27 @@ impl ToSql for Expression {
             Expression::NamedPlaceholder(name) => format!(":{}", name),
 
             Expression::ColumnRef(col_id) => {
-                // Use display form which preserves user's original input. An
-                // empty column name (`""`, a lexically valid zero-length
-                // double-quoted identifier — quote.test 2.2/3.4: `t1("w"||"")`)
-                // must still be rendered quoted here: the bare (unquoted)
-                // display form drops the identifier from the output entirely
-                // (`w||` instead of `w||""`), which fails to reparse when a
-                // persisted expression-index/CHECK-constraint definition is
-                // round-tripped through storage/reload.
-                if col_id.column_display().is_empty() {
-                    match col_id.table_display() {
-                        Some(table) => format!("{}.\"\"", table),
-                        None => "\"\"".to_string(),
+                // Reproduce the original quoting choice for each part
+                // (table and column) rather than using `col_id.display()`,
+                // which never re-adds quote characters regardless of
+                // `is_column_quoted()`/`is_table_quoted()`. This also
+                // subsumes the empty-column-name special case (`""`, a
+                // lexically valid zero-length double-quoted identifier —
+                // quote.test 2.2/3.4: `t1("w"||"")`): an empty name always
+                // needs quoting structurally, so it round-trips correctly
+                // even when it was not (and cannot be) marked as originally
+                // quoted. See #6562.
+                let column_sql = format_identifier_preserving_quotes(
+                    col_id.column_display(),
+                    col_id.is_column_quoted(),
+                );
+                match col_id.table_display() {
+                    Some(table) => {
+                        let table_sql =
+                            format_identifier_preserving_quotes(table, col_id.is_table_quoted());
+                        format!("{}.{}", table_sql, column_sql)
                     }
-                } else {
-                    col_id.display().to_string()
+                    None => column_sql,
                 }
             }
 
@@ -1307,6 +1335,39 @@ mod tests {
         let expr =
             Expression::ColumnRef(ColumnIdentifier::qualified("users", false, "name", false));
         assert_eq!(expr.to_sql(), "users.name");
+    }
+
+    /// #6562: an originally double-quoted, non-empty identifier must
+    /// round-trip through `to_sql()` with its quotes intact — SQLite
+    /// persists the literal `CREATE ...` statement text a user typed in
+    /// `sqlite_master.sql`, and VibeSQL re-derives that text via `ToSql`,
+    /// so quoting fidelity for `"abc"`/`"w"`-style identifiers must be
+    /// preserved explicitly rather than silently dropped.
+    #[test]
+    fn test_column_ref_preserves_original_quoting() {
+        // Simple (unqualified) quoted column, e.g. z||"abc" in quote.test 2.5.
+        let expr = Expression::ColumnRef(ColumnIdentifier::simple("abc", true));
+        assert_eq!(expr.to_sql(), "\"abc\"");
+
+        // An unquoted identifier must NOT gain quotes.
+        let expr = Expression::ColumnRef(ColumnIdentifier::simple("abc", false));
+        assert_eq!(expr.to_sql(), "abc");
+
+        // Table-qualified quoted column, e.g. t1."w".
+        let expr = Expression::ColumnRef(ColumnIdentifier::qualified("t1", false, "w", true));
+        assert_eq!(expr.to_sql(), "t1.\"w\"");
+
+        // Quoted table, unquoted column.
+        let expr = Expression::ColumnRef(ColumnIdentifier::qualified("t1", true, "w", false));
+        assert_eq!(expr.to_sql(), "\"t1\".w");
+
+        // Empty column name must still be quoted, regardless of the
+        // is_column_quoted flag (structural necessity, not fidelity) — the
+        // pre-existing special case this fix subsumes (quote.test 2.2/3.4).
+        let expr = Expression::ColumnRef(ColumnIdentifier::simple("", false));
+        assert_eq!(expr.to_sql(), "\"\"");
+        let expr = Expression::ColumnRef(ColumnIdentifier::qualified("t1", false, "", true));
+        assert_eq!(expr.to_sql(), "t1.\"\"");
     }
 
     #[test]

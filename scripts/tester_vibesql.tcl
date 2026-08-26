@@ -3675,9 +3675,37 @@ proc find_close_then_reopen_split {sql} {
 # (e.g. manydb.test, ~116 concurrent connections) stay on the skip list.
 proc resolve_db_file {db} {
     if {$db ne "" && $db ne "db" && [info exists ::db_file_map($db)]} {
-        return $::db_file_map($db)
+        set f $::db_file_map($db)
+    } else {
+        set f $::db_file
     }
-    return $::db_file
+
+    # Mark this path as "live" for `proc sqlite3`'s first-open/forcedelete
+    # guard (#6562). That guard only ever populates ::opened_dbs from an
+    # EXPLICIT `sqlite3 db|dbN <file>` call; DDL/DML issued through the
+    # normal execsql/flush_batch path (i.e. every `do_execsql_test` that
+    # never explicitly reopens its connection) writes directly to
+    # resolve_db_file's resolved path without ever touching ::opened_dbs.
+    # `reset_db` deliberately clears ::opened_dbs so a *subsequent* explicit
+    # `sqlite3 db test.db` reopen is treated as fresh — but when real
+    # data is written via execsql BEFORE that later explicit reopen (e.g.
+    # quote.test 2.2's `CREATE TABLE`s followed by `db close; sqlite3 db
+    # test.db` at 2.3), ::opened_dbs was never repopulated in between, so
+    # that reopen was wrongly treated as a genuine first-open and
+    # force-deleted the live database out from under it — silently wiping
+    # all schema/data created since the last reset_db (observed as a
+    # subsequent `SELECT sql FROM sqlite_master` returning zero rows even
+    # though the resolved path was byte-identical before and after the
+    # reopen). Registering the path here, the first time it is actually
+    # used for execution, closes that gap without disturbing the
+    # `reset_db; sqlite3 db test.db; ...` pattern (that explicit reopen
+    # still sees an empty ::opened_dbs, since no execsql has run yet at
+    # that point, and gets its own forcedelete + cookie-clear as before).
+    if {$f ne "" && (![info exists ::opened_dbs] || [lsearch -exact $::opened_dbs $f] < 0)} {
+        lappend ::opened_dbs $f
+    }
+
+    return $f
 }
 
 proc execsql {sql {db ""}} {
