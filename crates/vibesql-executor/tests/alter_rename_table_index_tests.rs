@@ -178,6 +178,97 @@ fn renamed_table_index_tbl_name_updates_immediately_same_session() {
     );
 }
 
+/// Issue #6607 gap 1: an implicit `sqlite_autoindex_<table>_<n>` index name
+/// (minted by `create_implicit_indexes`, `vibesql-executor/src/create_table.rs`,
+/// for PRIMARY KEY/UNIQUE constraints with no explicit index name) must be
+/// regenerated to match the table's new identity when the table is renamed —
+/// not just have its `tbl_name` retargeted (which #6599 already covered).
+/// SQLite's `sqlite_rename_table` does the same: the index's own `name`
+/// embeds the table identity at mint time, so it is stale after a rename
+/// unless explicitly rewritten. Verified same-session (immediately after the
+/// ALTER) and after a binary save/reload round trip.
+#[test]
+fn renamed_table_implicit_autoindex_names_retarget_to_new_table_same_session() {
+    let mut db = Database::new();
+    // `b PRIMARY KEY` (no INTEGER type) is a real column-backed PK, not a
+    // rowid alias, so it mints a genuine `sqlite_autoindex_*` slot (matching
+    // the issue's own repro, drawn from SQLite's alter.test alter-1.1/1.2/1.5).
+    exec_ok(&mut db, "CREATE TABLE t1(c UNIQUE, b PRIMARY KEY)");
+    exec_ok(&mut db, "ALTER TABLE t1 RENAME TO T2");
+
+    let mut names: Vec<String> =
+        query(&db, "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name")
+            .into_iter()
+            .map(|row| match &row[0] {
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                other => panic!("expected text, got {other:?}"),
+            })
+            .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["sqlite_autoindex_T2_1".to_string(), "sqlite_autoindex_T2_2".to_string()],
+        "implicit autoindex names must be regenerated onto the new table identity \
+         immediately after RENAME (same session), not left naming the pre-rename table (#6607)"
+    );
+
+    // The physical index bodies must be reachable under their NEW names (the
+    // catalog name and the physical storage key must never diverge)...
+    assert!(db.get_index("sqlite_autoindex_T2_1").is_some());
+    assert!(db.get_index("sqlite_autoindex_T2_2").is_some());
+    // ...and the stale pre-rename names must be gone, not left as ghost
+    // duplicates alongside the renamed entries.
+    assert!(db.get_index("sqlite_autoindex_t1_1").is_none());
+    assert!(db.get_index("sqlite_autoindex_t1_2").is_none());
+
+    // Constraint enforcement must still work through the renamed indexes.
+    exec_ok(&mut db, "INSERT INTO T2 VALUES(1, 10)");
+    let dup_pk = exec(&mut db, "INSERT INTO T2 VALUES(2, 10)");
+    assert!(
+        dup_pk.is_err(),
+        "PRIMARY KEY(b) must still be enforced after the implicit index rename"
+    );
+    let dup_unique = exec(&mut db, "INSERT INTO T2 VALUES(1, 11)");
+    assert!(
+        dup_unique.is_err(),
+        "UNIQUE(c) must still be enforced after the implicit index rename"
+    );
+}
+
+/// Same as above, but verified after a binary save/reload round trip — the
+/// renamed autoindex names (and their enforcement) must survive persistence,
+/// mirroring #6599's own reload coverage for explicitly-named indexes.
+#[test]
+fn renamed_table_implicit_autoindex_names_retarget_survives_binary_reload() {
+    let mut db = Database::new();
+    exec_ok(&mut db, "CREATE TABLE t1(c UNIQUE, b PRIMARY KEY)");
+    exec_ok(&mut db, "ALTER TABLE t1 RENAME TO T2");
+
+    let mut reloaded = roundtrip_binary(&db, "autoindex_rename");
+
+    let mut names: Vec<String> =
+        query(&reloaded, "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name")
+            .into_iter()
+            .map(|row| match &row[0] {
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                other => panic!("expected text, got {other:?}"),
+            })
+            .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["sqlite_autoindex_T2_1".to_string(), "sqlite_autoindex_T2_2".to_string()],
+        "renamed implicit autoindex names must survive a binary save/reload cycle (#6607)"
+    );
+
+    assert!(reloaded.get_index("sqlite_autoindex_T2_1").is_some());
+    assert!(reloaded.get_index("sqlite_autoindex_T2_2").is_some());
+
+    exec_ok(&mut reloaded, "INSERT INTO T2 VALUES(1, 10)");
+    let dup_pk = exec(&mut reloaded, "INSERT INTO T2 VALUES(2, 10)");
+    assert!(dup_pk.is_err(), "PRIMARY KEY(b) must still be enforced after reload");
+}
+
 /// Symptom 2 from the issue: the renamed table's exact-case name must
 /// survive a save + reopen, independent of whether the table has any
 /// indexes at all.
@@ -201,4 +292,64 @@ fn renamed_table_exact_case_name_survives_binary_reload() {
     // The renamed table must still be reachable under its new (case-folded)
     // name — SQLite identifier lookup stays case-insensitive.
     exec_ok(&mut reloaded, "INSERT INTO t2 VALUES(1, 2)");
+}
+
+/// Issue #6607 gap 2: minimal non-TCL repro isolating whether a TEMP table —
+/// renamed or not — leaks into a *fresh* connection's persistent
+/// `sqlite_master` view. `Database::save_binary` + `Database::load_binary` is
+/// this crate's analogue of "close the connection; open a second, independent
+/// connection to the same file", the exact operation SQLite's alter.test
+/// alter-1.6 performs via `db close; sqlite3 db test.db`.
+///
+/// **Finding: this is a TCL-shim artifact, not an engine bug.** The engine
+/// already isolates TEMP tables from persistence correctly —
+/// `write_catalog`/`write_sql_dump_to_file`
+/// (`vibesql-storage/src/persistence/{binary/catalog.rs,save.rs}`) skip every
+/// temp schema (`Catalog::is_temp_schema`) when saving, and a freshly loaded
+/// `Database` starts with no temp schema at all, so a TEMP table (renamed or
+/// not) cannot survive a save/reload round trip by construction — this test
+/// pins that down. The residual `TempTab`/`objlist` rows in alter-1.6's actual
+/// TCL diff (#6607) come instead from `scripts/tester_vibesql.tcl`'s own
+/// documented "TEMP TABLE emulation" strategy: because the shim spawns a fresh
+/// VibeSQL CLI process per SQL batch, it *demotes* `CREATE TEMP TABLE` to a
+/// genuinely persistent `CREATE TABLE` for any name that doesn't need to
+/// coexist with a same-named main-schema table (the one case — issue #5591 —
+/// where the shim instead keeps a real, session-scoped TEMP table and replays
+/// its DDL across batches). `[temp table]`/`objlist` in alter.test hit the
+/// demotion path, so they persist across the harness's simulated
+/// `db close`/reopen as ordinary tables — a deliberate, documented tradeoff of
+/// the shim's per-batch-process architecture (already flagged as a suspected
+/// cause under #6574's "Bucket 4"), not a defect in
+/// `execute_rename_table`/persistence. No engine fix is applicable here;
+/// tracked as a shim-level follow-up under #6609.
+#[test]
+fn temp_table_does_not_leak_into_sqlite_master_after_binary_reload() {
+    let mut db = Database::new();
+    exec_ok(&mut db, "CREATE TABLE main_table(a)");
+    exec_ok(&mut db, "CREATE TEMP TABLE temp_table(a)");
+    exec_ok(&mut db, "ALTER TABLE temp_table RENAME TO renamed_temp");
+
+    // Same session: the renamed TEMP table is reachable and distinct from the
+    // persistent table.
+    exec_ok(&mut db, "INSERT INTO renamed_temp VALUES(1)");
+    assert_eq!(query(&db, "SELECT a FROM renamed_temp"), vec![vec![SqlValue::Integer(1)]]);
+
+    let reloaded = roundtrip_binary(&db, "temp_leak");
+
+    // A fresh connection to the same file must see only the persistent
+    // table — the (renamed) TEMP table must not have leaked in.
+    let names: Vec<String> =
+        query(&reloaded, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .into_iter()
+            .map(|row| match &row[0] {
+                SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+                other => panic!("expected text, got {other:?}"),
+            })
+            .collect();
+    assert_eq!(
+        names,
+        vec!["main_table".to_string()],
+        "a TEMP table (renamed or not) must not appear in a fresh connection's \
+         sqlite_master after reload — TEMP tables are session-scoped (#6607 gap 2)"
+    );
 }
