@@ -230,6 +230,26 @@ fn is_table_position(
     }
 }
 
+/// Extract the textual name from an identifier token, treating a
+/// double-quoted `DelimitedIdentifier` (e.g. `"big c"`) exactly like a bare
+/// `Identifier` for matching purposes — SQL identifier equality never depends
+/// on how the identifier was *spelled* (quoted vs. bare), only on its text
+/// (case-insensitive ASCII). Every column/table/qualifier/alias match in the
+/// column-rename rewriter below must go through this so a delimited
+/// identifier is exactly as visible as a bare one; without it, a column
+/// reference written in double quotes (most commonly a *previous* rename's
+/// output, since a name containing a space can only be spelled quoted) was
+/// invisible to this token-level rewriter — which pattern-matched only
+/// `Token::Identifier` — and silently left every quoted reference
+/// unrewritten on the next `RENAME COLUMN` (altercol.test 16.2.3: renaming
+/// `"big c"` again after an earlier rename produced it).
+fn ident_name(tok: &Token) -> Option<&str> {
+    match tok {
+        Token::Identifier(s) | Token::DelimitedIdentifier(s) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
 /// Rewrite references to a renamed *column* inside a `CREATE TRIGGER` SQL text.
 ///
 /// When `ALTER TABLE <renamed_table> RENAME <old_column> TO <new_column>` runs,
@@ -300,21 +320,21 @@ pub fn rewrite_column_refs_in_trigger_sql(
     for (pos, &idx) in significant.iter().enumerate() {
         if matches!(tokens[idx].0, Token::Keyword { keyword: Keyword::Into, .. }) {
             if let Some(&next_idx) = significant.get(pos + 1) {
-                if let Token::Identifier(target) = &tokens[next_idx].0 {
-                    current_insert_target = Some(target.as_str());
+                if let Some(target) = ident_name(&tokens[next_idx].0) {
+                    current_insert_target = Some(target);
                 }
             }
             continue;
         }
 
-        let Token::Identifier(name) = &tokens[idx].0 else { continue };
+        let Some(name) = ident_name(&tokens[idx].0) else { continue };
 
         // Qualified reference: `<qualifier> . <name>`.
         if pos >= 2 {
             let dot_idx = significant[pos - 1];
             let qual_idx = significant[pos - 2];
             if matches!(tokens[dot_idx].0, Token::Symbol('.')) {
-                if let Token::Identifier(qualifier) = &tokens[qual_idx].0 {
+                if let Some(qualifier) = ident_name(&tokens[qual_idx].0) {
                     let is_new_old_ref = new_old_refer_to_renamed_table
                         && (qualifier.eq_ignore_ascii_case("new")
                             || qualifier.eq_ignore_ascii_case("old"));
@@ -358,7 +378,7 @@ pub fn rewrite_column_refs_in_trigger_sql(
                 table_has_column,
             ) {
                 Resolution::Rewrite => edits.push(tokens[idx].1),
-                Resolution::Ambiguous => return Err(name.clone()),
+                Resolution::Ambiguous => return Err(name.to_string()),
                 Resolution::Skip => {}
             }
         }
@@ -489,7 +509,8 @@ fn collect_scope_tables(
                     _ => {}
                 }
             }
-            Token::Identifier(name) if *in_table_list.last().unwrap_or(&false) => {
+            tok if *in_table_list.last().unwrap_or(&false) && ident_name(tok).is_some() => {
+                let name = ident_name(tok).expect("checked by guard");
                 // This identifier is a table name in the current scope's table
                 // list (it is not a qualifier and not preceded by a `.`).
                 let preceded_by_dot =
@@ -498,7 +519,7 @@ fn collect_scope_tables(
                     .get(pos + 1)
                     .is_some_and(|&n| matches!(tokens[n].0, Token::Symbol('.')));
                 if !preceded_by_dot && !followed_by_dot {
-                    let table = name.clone();
+                    let table = name.to_string();
                     // Look ahead for an optional alias: `AS x` or bare `x`.
                     let alias = parse_alias(tokens, significant, pos);
                     let scope_key = paren_stack.last().copied();
@@ -524,9 +545,9 @@ fn parse_alias(tokens: &[(Token, Span)], significant: &[usize], pos: usize) -> O
         }
     }
     if let Some(&nidx) = significant.get(next) {
-        if let Token::Identifier(alias) = &tokens[nidx].0 {
+        if let Some(alias) = ident_name(&tokens[nidx].0) {
             if next == pos + 1 || next == pos + 2 {
-                return Some(alias.clone());
+                return Some(alias.to_string());
             }
         }
     }
@@ -822,6 +843,38 @@ mod tests {
                 .unwrap(),
             sql
         );
+    }
+
+    /// altercol.test 16.2.3: renaming a column whose *current* name is a
+    /// double-quoted delimited identifier containing a space (the only way to
+    /// spell such a name — e.g. the result of an earlier rename to `"big c"`)
+    /// must still be recognized as a reference to `old_column`. Before the
+    /// `ident_name` fix this token-level rewriter pattern-matched only
+    /// `Token::Identifier`, so a `Token::DelimitedIdentifier` reference was
+    /// invisible and silently left unrewritten.
+    #[test]
+    fn col_delimited_identifier_unqualified_is_rewritten() {
+        let has_big_c =
+            |t: &str, c: &str| t.eq_ignore_ascii_case("t1") && c.eq_ignore_ascii_case("big c");
+        let sql = "CREATE VIEW v5 AS SELECT \"big c\" FROM t1";
+        let got =
+            rewrite_column_refs_in_trigger_sql(sql, "t1", "big c", "reallybigc", &has_big_c, false)
+                .expect("rewrite should not be ambiguous in this fixture");
+        assert_eq!(got, "CREATE VIEW v5 AS SELECT reallybigc FROM t1");
+    }
+
+    /// Same as above but the delimited identifier is table-qualified
+    /// (`t1."big c"`) — the qualifier-before-dot lookup must also recognize a
+    /// `DelimitedIdentifier` qualifier.
+    #[test]
+    fn col_delimited_identifier_qualified_is_rewritten() {
+        let has_big_c =
+            |t: &str, c: &str| t.eq_ignore_ascii_case("t1") && c.eq_ignore_ascii_case("big c");
+        let sql = "CREATE VIEW v5 AS SELECT t1.\"big c\" FROM t1";
+        let got =
+            rewrite_column_refs_in_trigger_sql(sql, "t1", "big c", "reallybigc", &has_big_c, false)
+                .expect("rewrite should not be ambiguous in this fixture");
+        assert_eq!(got, "CREATE VIEW v5 AS SELECT t1.reallybigc FROM t1");
     }
 
     #[test]
