@@ -1835,6 +1835,32 @@ proc format_sql_value {value} {
     # Check if value is numeric (integer or floating point)
     # TCL's string is double/integer checks handle this
     if {[string is integer -strict $value] || [string is double -strict $value]} {
+        # A canonical decimal integer literal never carries a redundant
+        # leading zero. Real sqlite3's tclsqlite3.c only binds a Tcl_Obj as
+        # SQL INTEGER/REAL when the object already has a *cached* numeric
+        # internal representation (produced by e.g. [expr]/[incr]); a fresh
+        # value straight from a literal source token -- a
+        # `foreach {tn hex} {1 0000 ...}` list element, or a plain
+        # `set x 0000` -- carries no such cached representation, so real
+        # sqlite3 falls back to sqlite3_bind_text() and the value is bound
+        # as TEXT, preserving every character including leading zeros.
+        # `string is integer` can't see that internal-representation
+        # distinction (it only inspects the string's own syntax), but a
+        # redundant leading zero is a syntactic tell we CAN check losslessly:
+        # a real numeric pass-through never needs one. Without this, e.g.
+        # unhex.test's `foreach {tn hex} {1 0000 ...} { ... unhex($hex) ...}`
+        # loses "0000" to the bare integer literal 0 instead of staying a
+        # 4-character TEXT value (#6172).
+        if {[string is integer -strict $value]} {
+            set digits $value
+            if {[string index $digits 0] in {+ -}} {
+                set digits [string range $digits 1 end]
+            }
+            if {[string length $digits] > 1 && [string index $digits 0] eq "0"} {
+                set escaped [string map {' ''} $value]
+                return "'$escaped'"
+            }
+        }
         return $value
     }
 
