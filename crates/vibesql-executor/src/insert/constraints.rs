@@ -79,6 +79,114 @@ pub(crate) fn primary_key_violation(
     ))
 }
 
+/// Shared "does this key already exist" check for PRIMARY KEY and UNIQUE
+/// constraint enforcement (issue #6601).
+///
+/// Implements the algorithm previously duplicated between
+/// `enforce_primary_key_constraint` and `enforce_unique_constraints`:
+///
+/// 1. Check for a duplicate within the current batch of rows being inserted (collation-aware
+///    compare vs. exact compare, depending on `collations`).
+/// 2. Fetch the table and take an MVCC read snapshot.
+/// 3. Optionally bail out early via `skip_after_fetch` (used by the PRIMARY KEY path's append-mode
+///    fast exit; UNIQUE constraints have no such exit).
+/// 4. Branch three ways to look for an existing, MVCC-visible row already holding the key: a
+///    collation-aware `scan_visible` loop (required whenever any key part has a non-BINARY
+///    collation, since the hash indexes are keyed on exact `SqlValue` bytes — issue #5881), an O(1)
+///    hash-index fast path (with an `is_row_visible` check to skip tombstoned rows — issue #5204),
+///    or a fallback full-table scan when no hash index is available.
+///
+/// `new_key_values` must already be NULL-free — callers skip calling this
+/// helper entirely when the candidate key has a NULL part, since NULL never
+/// conflicts with NULL or anything else in SQL.
+///
+/// `hash_index` and `skip_after_fetch` receive the freshly-fetched `Table`
+/// so callers can select the right index (`table.primary_key_index()` vs.
+/// `&table.unique_indexes()[constraint_idx]`) and the right early-exit
+/// condition without this helper needing to know which constraint kind it is
+/// serving. `violation` builds the caller's constraint-specific error.
+#[allow(clippy::too_many_arguments)]
+fn check_key_not_already_present(
+    db: &vibesql_storage::Database,
+    table_name: &str,
+    key_indices: &[usize],
+    new_key_values: &[vibesql_types::SqlValue],
+    collations: &[Option<String>],
+    batch_values: &[Vec<vibesql_types::SqlValue>],
+    hash_index: impl FnOnce(
+        &vibesql_storage::Table,
+    )
+        -> Option<&std::collections::HashMap<Vec<vibesql_types::SqlValue>, usize>>,
+    skip_after_fetch: impl FnOnce(&vibesql_storage::Table) -> bool,
+    violation: impl Fn() -> ExecutorError,
+) -> Result<(), ExecutorError> {
+    let collated = has_non_binary_collation(collations);
+
+    // Check for duplicates within the batch of rows being inserted.
+    let dup_in_batch = if collated {
+        batch_values.iter().any(|b| key_eq_with_collations(new_key_values, b, collations))
+    } else {
+        batch_values.iter().any(|b| b.as_slice() == new_key_values)
+    };
+    if dup_in_batch {
+        return Err(violation());
+    }
+
+    let table = db
+        .get_table(table_name)
+        .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
+
+    if skip_after_fetch(table) {
+        return Ok(());
+    }
+
+    // Issue #5204: Under MVCC we must treat tombstoned rows (xmax stamped by
+    // a committed concurrent txn / visible-as-deleted to our snapshot) as
+    // "not present" for uniqueness purposes — otherwise an UPDATE that moves
+    // a row to a unique key currently held by a deleted row would erroneously
+    // fail. Off-state (`mvcc_enabled` OFF): `is_row_visible` reduces to the
+    // existing not-bitmap-deleted check.
+    let snapshot = crate::mvcc::read_snapshot(db);
+
+    if collated {
+        // Collation-aware existing-row scan. The hash index is keyed on
+        // exact `SqlValue` bytes, so it would never surface a case-variant
+        // duplicate under NOCASE (or a trailing-space variant under RTRIM);
+        // we must compare every visible row with the key-part collation
+        // instead (issue #5881).
+        for (_idx, existing_row) in table.scan_visible(&snapshot) {
+            let existing_values: Vec<vibesql_types::SqlValue> =
+                key_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
+            if existing_values.contains(&vibesql_types::SqlValue::Null) {
+                continue;
+            }
+            if key_eq_with_collations(new_key_values, &existing_values, collations) {
+                return Err(violation());
+            }
+        }
+    } else if let Some(index) = hash_index(table) {
+        // BINARY fast path: O(1) hash lookup on exact key bytes.
+        if let Some(&row_idx) = index.get(new_key_values) {
+            if table.is_row_visible(row_idx, &snapshot) {
+                return Err(violation());
+            }
+        }
+    } else {
+        // Fallback to table scan if index not available (should not happen
+        // in normal operation). Issue #5204: respect MVCC visibility —
+        // iterate visible rows only.
+        for (_idx, existing_row) in table.scan_visible(&snapshot) {
+            let existing_values: Vec<vibesql_types::SqlValue> =
+                key_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
+            if new_key_values == existing_values.as_slice() {
+                return Err(violation());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Enforce PRIMARY KEY constraint (uniqueness)
 /// Returns Ok if constraint is satisfied
 pub fn enforce_primary_key_constraint(
@@ -88,90 +196,39 @@ pub fn enforce_primary_key_constraint(
     row_values: &[vibesql_types::SqlValue],
     batch_pk_values: &[Vec<vibesql_types::SqlValue>],
 ) -> Result<(), ExecutorError> {
-    if let Some(pk_indices) = schema.get_primary_key_indices() {
-        // Extract primary key values from the new row
-        let new_pk_values: Vec<vibesql_types::SqlValue> =
-            pk_indices.iter().map(|&idx| row_values[idx].clone()).collect();
+    let Some(pk_indices) = schema.get_primary_key_indices() else {
+        return Ok(());
+    };
 
-        // Skip uniqueness check if any primary key value is NULL
-        // (NULL != NULL in SQL, so multiple NULLs are allowed in non-INTEGER PRIMARY KEY)
-        if new_pk_values.contains(&vibesql_types::SqlValue::Null) {
-            return Ok(());
-        }
+    // Extract primary key values from the new row
+    let new_pk_values: Vec<vibesql_types::SqlValue> =
+        pk_indices.iter().map(|&idx| row_values[idx].clone()).collect();
 
-        // Effective per-key-part collation (key-part COLLATE → column collation →
-        // BINARY). Under any non-BINARY collation we must compare with the
-        // collation, and the raw hash index cannot be used (issue #5881).
-        let collations = schema.primary_key_effective_collations().unwrap_or_default();
-        let collated = has_non_binary_collation(&collations);
-
-        // Check for duplicates within the batch of rows being inserted
-        let dup_in_batch = if collated {
-            batch_pk_values.iter().any(|b| key_eq_with_collations(&new_pk_values, b, &collations))
-        } else {
-            batch_pk_values.contains(&new_pk_values)
-        };
-        if dup_in_batch {
-            return Err(primary_key_violation(schema, table_name));
-        }
-
-        // Check if any existing row has the same primary key using the hash index
-        let table = db
-            .get_table(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
-
-        // Skip existing row check if table is in append mode (sequential inserts)
-        // Append mode guarantees no duplicates because PKs are strictly increasing
-        if table.is_in_append_mode() {
-            return Ok(());
-        }
-
-        // Issue #5204: Under MVCC we must treat tombstoned rows (xmax stamped
-        // by a committed concurrent txn / visible-as-deleted to our snapshot)
-        // as "not present" for uniqueness purposes — otherwise an UPDATE that
-        // moves a row to a unique key currently held by a deleted row would
-        // erroneously fail. Off-state (`mvcc_enabled` OFF): `is_row_visible`
-        // reduces to the existing not-bitmap-deleted check.
-        let snapshot = crate::mvcc::read_snapshot(db);
-
-        if collated {
-            // Collation-aware existing-row scan. The primary-key hash index is
-            // keyed on exact `SqlValue` bytes, so it would never surface a
-            // case-variant duplicate under NOCASE (or a trailing-space variant
-            // under RTRIM); we must compare every visible row with the key-part
-            // collation instead (issue #5881).
-            for (_idx, existing_row) in table.scan_visible(&snapshot) {
-                let existing_pk_values: Vec<vibesql_types::SqlValue> =
-                    pk_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
-                if existing_pk_values.contains(&vibesql_types::SqlValue::Null) {
-                    continue;
-                }
-                if key_eq_with_collations(&new_pk_values, &existing_pk_values, &collations) {
-                    return Err(primary_key_violation(schema, table_name));
-                }
-            }
-        } else if let Some(pk_index) = table.primary_key_index() {
-            // BINARY fast path: O(1) hash lookup on exact key bytes.
-            if let Some(&row_idx) = pk_index.get(&new_pk_values) {
-                if table.is_row_visible(row_idx, &snapshot) {
-                    return Err(primary_key_violation(schema, table_name));
-                }
-            }
-        } else {
-            // Fallback to table scan if index not available (should not happen in normal operation)
-            // Issue #5204: respect MVCC visibility — iterate visible rows only.
-            for (_idx, existing_row) in table.scan_visible(&snapshot) {
-                let existing_pk_values: Vec<vibesql_types::SqlValue> =
-                    pk_indices.iter().filter_map(|&idx| existing_row.get(idx).cloned()).collect();
-
-                if new_pk_values == existing_pk_values {
-                    return Err(primary_key_violation(schema, table_name));
-                }
-            }
-        }
+    // Skip uniqueness check if any primary key value is NULL
+    // (NULL != NULL in SQL, so multiple NULLs are allowed in non-INTEGER PRIMARY KEY)
+    if new_pk_values.contains(&vibesql_types::SqlValue::Null) {
+        return Ok(());
     }
 
-    Ok(())
+    // Effective per-key-part collation (key-part COLLATE → column collation →
+    // BINARY). Under any non-BINARY collation we must compare with the
+    // collation, and the raw hash index cannot be used (issue #5881).
+    let collations = schema.primary_key_effective_collations().unwrap_or_default();
+
+    check_key_not_already_present(
+        db,
+        table_name,
+        &pk_indices,
+        &new_pk_values,
+        &collations,
+        batch_pk_values,
+        |table| table.primary_key_index(),
+        // Skip existing-row check if table is in append mode (sequential
+        // inserts): append mode guarantees no duplicates because PKs are
+        // strictly increasing.
+        |table| table.is_in_append_mode(),
+        || primary_key_violation(schema, table_name),
+    )
 }
 
 /// Build the SQLite-compatible "UNIQUE constraint failed: t.a, t.b" error for
@@ -201,6 +258,11 @@ pub fn enforce_unique_constraints(
     batch_unique_values: &[Vec<Vec<vibesql_types::SqlValue>>],
 ) -> Result<(), ExecutorError> {
     let unique_constraint_indices = schema.get_unique_constraint_indices();
+    // Batch values keyed by constraint index that have no corresponding
+    // entry (constraint_idx >= batch_unique_values.len()) contribute no
+    // in-batch duplicates — an empty slice makes that fall out of the shared
+    // helper's batch-dup check naturally, matching the original bounds check.
+    let empty_batch: Vec<Vec<vibesql_types::SqlValue>> = Vec::new();
 
     for (constraint_idx, unique_indices) in unique_constraint_indices.iter().enumerate() {
         // Extract unique constraint values from the new row
@@ -217,76 +279,26 @@ pub fn enforce_unique_constraints(
         // BINARY). A non-BINARY collation forces a collation-aware scan because
         // the unique hash index is keyed on exact `SqlValue` bytes (issue #5881).
         let collations = schema.unique_constraint_effective_collations(constraint_idx);
-        let collated = has_non_binary_collation(&collations);
 
-        // Check for duplicates within the batch of rows being inserted
-        // (skip if batch_unique_values is empty or doesn't have this constraint)
-        if constraint_idx < batch_unique_values.len() {
-            let dup_in_batch = if collated {
-                batch_unique_values[constraint_idx]
-                    .iter()
-                    .any(|b| key_eq_with_collations(&new_unique_values, b, &collations))
-            } else {
-                batch_unique_values[constraint_idx].contains(&new_unique_values)
-            };
-            if dup_in_batch {
-                return Err(unique_constraint_violation(schema, table_name, constraint_idx));
-            }
-        }
+        let batch_values = batch_unique_values.get(constraint_idx).unwrap_or(&empty_batch);
 
-        // Check if any existing row has the same unique constraint values using hash index
-        let table = db
-            .get_table(table_name)
-            .ok_or_else(|| ExecutorError::TableNotFound(table_name.to_string()))?;
-
-        // Issue #5204: under MVCC a tombstoned existing row must not block a
-        // new row with the same unique key. Off-state (`mvcc_enabled` OFF):
-        // `is_row_visible` is the existing not-bitmap-deleted check.
-        let snapshot = crate::mvcc::read_snapshot(db);
-
-        if collated {
-            // Collation-aware existing-row scan (the unique hash index cannot
-            // surface collated duplicates — see the PK path above, #5881).
-            for (_idx, existing_row) in table.scan_visible(&snapshot) {
-                let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
-                    .iter()
-                    .filter_map(|&idx| existing_row.get(idx).cloned())
-                    .collect();
-                if existing_unique_values.contains(&vibesql_types::SqlValue::Null) {
-                    continue;
+        check_key_not_already_present(
+            db,
+            table_name,
+            unique_indices,
+            &new_unique_values,
+            &collations,
+            batch_values,
+            |table| {
+                if constraint_idx < table.unique_indexes().len() {
+                    Some(&table.unique_indexes()[constraint_idx])
+                } else {
+                    None
                 }
-                if key_eq_with_collations(&new_unique_values, &existing_unique_values, &collations)
-                {
-                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
-                }
-            }
-        } else if constraint_idx < table.unique_indexes().len() {
-            // BINARY fast path: O(1) hash lookup on exact key bytes.
-            let unique_index = &table.unique_indexes()[constraint_idx];
-            if let Some(&row_idx) = unique_index.get(&new_unique_values) {
-                if table.is_row_visible(row_idx, &snapshot) {
-                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
-                }
-            }
-        } else {
-            // Fallback to table scan if index not available (should not happen in normal operation)
-            // Issue #5204: iterate only rows visible to our MVCC snapshot.
-            for (_idx, existing_row) in table.scan_visible(&snapshot) {
-                let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
-                    .iter()
-                    .filter_map(|&idx| existing_row.get(idx).cloned())
-                    .collect();
-
-                // Skip if any existing value is NULL
-                if existing_unique_values.contains(&vibesql_types::SqlValue::Null) {
-                    continue;
-                }
-
-                if new_unique_values == existing_unique_values {
-                    return Err(unique_constraint_violation(schema, table_name, constraint_idx));
-                }
-            }
-        }
+            },
+            |_table| false,
+            || unique_constraint_violation(schema, table_name, constraint_idx),
+        )?;
     }
 
     Ok(())
