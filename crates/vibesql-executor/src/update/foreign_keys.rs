@@ -300,6 +300,11 @@ impl ForeignKeyValidator {
                     .map(|&idx| new_parent_row.values[idx].clone())
                     .collect();
 
+                // Resolve parent-side collations before borrowing the
+                // child table so the FK comparison honors NOCASE/RTRIM
+                // on the parent key (#5147).
+                let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
+
                 // SQLite fires no referential action and raises no violation
                 // when an UPDATE does not actually change the parent key
                 // that THIS FK targets. Re-assigning a parent-key column to
@@ -311,23 +316,38 @@ impl ForeignKeyValidator {
                 // below would see child rows still matching the (unchanged)
                 // old key and raise a spurious "cannot update a parent row"
                 // violation (fkey2-1.*.13: `UPDATE t1 SET a = 1` /
-                // `UPDATE t7 SET b = 1` expect success). Plain equality is a
-                // conservative test: when the stored representations differ
-                // (e.g. 1 vs 1.0) we fall through to the full affinity-aware
-                // check below, preserving prior behaviour. This check must
-                // be per-FK (not per-table) so an UPDATE that changes column
-                // `x` (part of one FK's parent key) but not column `y` (part
-                // of a different FK's parent key on the same table) still
-                // fires the `x`-keyed FK's action while correctly skipping
-                // the `y`-keyed FK's.
-                if old_parent_key_values == new_parent_key_values {
+                // `UPDATE t7 SET b = 1` expect success).
+                //
+                // EVIDENCE-OF: R-27383-10246 "An ON UPDATE action is only
+                // taken if the values of the parent key are modified so that
+                // the new parent key values are not equal to the old. The
+                // default collation sequence and affinity are used to
+                // determine if the new values are 'distinct' from the old or
+                // not." — so this comparison must honor the parent key's own
+                // collation (e.g. `a INTEGER COLLATE NOCASE`: `'abc'` ->
+                // `'aBc'` is NOT a change and must not cascade, e_fkey-52.1),
+                // not plain Rust equality — but it must NOT gain
+                // `fk_values_equal`'s cross-storage-class numeric leniency
+                // (that helper exists for matching a *child* FK value
+                // against a *parent* key value, a different comparison with
+                // its own rules): a parent column with no declared affinity
+                // performs no write-time coercion, so `Integer(1)` and
+                // `Text("1")` are genuinely distinct there and must still
+                // count as a change (e_fkey-52.5). `fk_key_value_changed`
+                // applies only the collation-aware text comparison.
+                let key_unchanged =
+                    old_parent_key_values.iter().zip(&new_parent_key_values).enumerate().all(
+                        |(i, (old_val, new_val))| {
+                            !crate::foreign_key_check::fk_key_value_changed(
+                                old_val,
+                                new_val,
+                                parent_collations.get(i).and_then(|c| c.as_deref()),
+                            )
+                        },
+                    );
+                if key_unchanged {
                     continue;
                 }
-
-                // Resolve parent-side collations before borrowing the
-                // child table so the FK comparison honors NOCASE/RTRIM
-                // on the parent key (#5147).
-                let parent_collations = crate::foreign_key_check::parent_collations_for_fk(db, fk);
 
                 // Get the child table and find matching rows.
                 //

@@ -185,16 +185,20 @@ pub fn handle_replace_conflicts(
     // without_rowid3). Previously the conflict-clearing delete removed the
     // parent row without any FK processing at all.
     //
-    // NO ACTION / RESTRICT: SQLite performs this check at statement end —
-    // AFTER the REPLACE re-inserts its new row. Because a foreign key's
-    // parent columns are always a key (PRIMARY KEY / UNIQUE), at most one
-    // parent row can carry a given key value, so a child orphaned by the
-    // conflict-delete is repaired precisely when the re-inserted row restores
-    // that same parent-key value (fkey2-13.1.3/4). We evaluate that repair
-    // here using `row_values` (the row about to be inserted) rather than
-    // erroring eagerly on the delete. REPLACE's conflict-delete is always
-    // immediate (never deferred), so RESTRICT collapses to the same check as
-    // NO ACTION here.
+    // NO ACTION: SQLite performs this check at statement end — AFTER the
+    // REPLACE re-inserts its new row. Because a foreign key's parent columns
+    // are always a key (PRIMARY KEY / UNIQUE), at most one parent row can
+    // carry a given key value, so a child orphaned by the conflict-delete is
+    // repaired precisely when the re-inserted row restores that same
+    // parent-key value (fkey2-13.1.3/4). We evaluate that repair here using
+    // `row_values` (the row about to be inserted) rather than erroring
+    // eagerly on the delete.
+    //
+    // RESTRICT: enforced *immediately* at delete time (before the new row is
+    // re-inserted), so it does NOT get NO ACTION's statement-end repair — a
+    // RESTRICT-constrained child still referencing the deleted key trips the
+    // violation even when the re-inserted row would restore that exact key
+    // (e_fkey-42.7/42.8).
     //
     // CASCADE / SET NULL / SET DEFAULT: the conflict-delete must run the
     // same referential action a plain DELETE of the conflicting row would
@@ -447,13 +451,15 @@ pub fn handle_replace_conflicts(
 /// referenced that parent's key is affected exactly as it would be by a
 /// plain `DELETE` of that row:
 ///
-/// - **NO ACTION / RESTRICT**: SQLite checks this at *statement end*, after the REPLACE re-inserts
-///   its new row: the orphan is repaired if the new row restores the same parent-key value
+/// - **NO ACTION**: SQLite checks this at *statement end*, after the REPLACE re-inserts its new
+///   row: the orphan is repaired if the new row restores the same parent-key value
 ///   (fkey2-13.1.3/4). Because a foreign key's parent columns are always a key (PRIMARY KEY /
 ///   UNIQUE), at most one parent row can carry a given key value, so "some surviving parent still
-///   provides the key" reduces to "the re-inserted row provides the key". REPLACE's conflict-delete
-///   is always immediate (never deferred), so RESTRICT collapses to the same check as NO ACTION
-///   here.
+///   provides the key" reduces to "the re-inserted row provides the key".
+/// - **RESTRICT**: enforced *immediately* at delete time (EVIDENCE-OF: R-37997-42187), before the
+///   new row is (re-)inserted, so it never benefits from NO ACTION's statement-end repair — a
+///   RESTRICT-constrained child still referencing the about-to-be-deleted key trips the violation
+///   even when the re-inserted row would have restored that exact key (e_fkey-42.7/42.8).
 /// - **CASCADE / SET NULL / SET DEFAULT**: the action actually runs against the child rows (reusing
 ///   `delete::integrity`'s DELETE-side handlers), exactly as a plain `DELETE FROM <parent_table>
 ///   WHERE ...` would (fkey1-5.2/5.4). If that action itself orphans the row the REPLACE is about
@@ -554,18 +560,37 @@ fn enforce_replace_fk_actions(
                     )?;
                 }
                 ReferentialAction::NoAction | ReferentialAction::Restrict => {
-                    // If the re-inserted row restores this exact key, no
-                    // child that referenced the deleted row can be orphaned.
-                    let restored =
-                        deleted_key.iter().zip(&new_key).enumerate().all(|(i, (dk, nk))| {
-                            crate::foreign_key_check::fk_values_equal(
-                                dk,
-                                nk,
-                                parent_collations.get(i).and_then(|c| c.as_deref()),
-                            )
-                        });
-                    if restored {
-                        continue;
+                    // RESTRICT is enforced *immediately* at delete time, not
+                    // deferred to statement end like NO ACTION (EVIDENCE-OF:
+                    // R-37997-42187 — "the RESTRICT action processing
+                    // happens as soon as the field is updated - not at the
+                    // end of the current statement"). Because REPLACE's
+                    // conflict-delete happens strictly before the new row is
+                    // (re-)inserted, a RESTRICT-constrained child that still
+                    // references the about-to-be-deleted key must trip the
+                    // violation immediately — it cannot be forgiven by a
+                    // same-statement re-insert that would restore the key,
+                    // unlike NO ACTION's statement-end repair check below
+                    // (e_fkey-42.7/42.8: `REPLACE INTO parent VALUES('key1')`
+                    // errors even though the re-inserted row restores 'key1'
+                    // exactly, because child1's FK is ON DELETE RESTRICT).
+                    //
+                    // NO ACTION only: if the re-inserted row restores this
+                    // exact key, no child that referenced the deleted row
+                    // can be orphaned by the time the statement-end check
+                    // runs.
+                    if matches!(fk.on_delete, ReferentialAction::NoAction) {
+                        let restored =
+                            deleted_key.iter().zip(&new_key).enumerate().all(|(i, (dk, nk))| {
+                                crate::foreign_key_check::fk_values_equal(
+                                    dk,
+                                    nk,
+                                    parent_collations.get(i).and_then(|c| c.as_deref()),
+                                )
+                            });
+                        if restored {
+                            continue;
+                        }
                     }
 
                     // The key is being dropped: any child row that

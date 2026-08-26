@@ -383,6 +383,46 @@ pub fn fk_values_equal(
     false
 }
 
+/// SQLite-style equality for deciding whether a parent-key **value has
+/// changed** across an UPDATE (EVIDENCE-OF: R-27383-10246 — "An ON UPDATE
+/// action is only taken if the values of the parent key are modified so that
+/// the new parent key values are not equal to the old. The default collation
+/// sequence and affinity are used to determine if the new values are
+/// 'distinct' from the old or not.").
+///
+/// Deliberately narrower than [`fk_values_equal`]: it applies the parent
+/// column's own collation (NOCASE / RTRIM) to text/text comparisons, but does
+/// **not** treat cross-storage-class values as numerically equal. Column
+/// *affinity* already normalizes a written value to a single storage class
+/// at write time (e.g. `a INTEGER` coerces `'1'` to `Integer(1)` before this
+/// check ever runs); a column with **no** affinity (e.g. plain `b`, no type
+/// name) performs no such coercion, so `Integer(1)` and `Text("1")` are
+/// genuinely different values there and must be treated as *changed* even
+/// though they are numerically equal (e_fkey-52.5: `b` has no affinity,
+/// `UPDATE zeus SET b = '1'` on a stored `Integer(1)` must cascade). Using
+/// [`fk_values_equal`]'s cross-type numeric branch here — which exists for
+/// matching a *child* FK value against a *parent* key value, a different
+/// comparison with its own leniency rules — would wrongly skip that cascade.
+pub fn fk_key_value_changed(
+    old: &vibesql_types::SqlValue,
+    new: &vibesql_types::SqlValue,
+    parent_collation: Option<&str>,
+) -> bool {
+    if old == new {
+        return false;
+    }
+    if let (Some(o), Some(n)) = (sql_value_as_text(old), sql_value_as_text(new)) {
+        match parent_collation.map(|s| s.to_ascii_lowercase()) {
+            Some(ref name) if name == "nocase" => return !o.eq_ignore_ascii_case(n),
+            Some(ref name) if name == "rtrim" => {
+                return o.trim_end_matches(' ') != n.trim_end_matches(' ');
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
 fn sql_value_as_f64(v: &vibesql_types::SqlValue) -> Option<f64> {
     use vibesql_types::SqlValue::*;
     match v {
