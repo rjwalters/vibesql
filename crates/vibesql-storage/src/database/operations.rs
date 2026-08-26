@@ -1074,6 +1074,26 @@ impl Operations {
         self.index_manager.rename_column_in_table_indexes(table_name, old_column, new_column)
     }
 
+    /// Detach and return the physical indexes belonging to `table_name`. See
+    /// `IndexManager::take_indexes_for_table` for details (issue #6599).
+    pub fn take_indexes_for_table(
+        &mut self,
+        table_name: &str,
+    ) -> Vec<(super::indexes::IndexMetadata, super::indexes::IndexData)> {
+        self.index_manager.take_indexes_for_table(table_name)
+    }
+
+    /// Reattach indexes previously detached by [`Self::take_indexes_for_table`]
+    /// under `new_table_name`. See `IndexManager::restore_indexes_for_table`
+    /// for details (issue #6599).
+    pub fn restore_indexes_for_table(
+        &mut self,
+        indexes: Vec<(super::indexes::IndexMetadata, super::indexes::IndexData)>,
+        new_table_name: &str,
+    ) {
+        self.index_manager.restore_indexes_for_table(indexes, new_table_name)
+    }
+
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.index_manager.list_indexes()

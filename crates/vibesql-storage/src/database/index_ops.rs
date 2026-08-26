@@ -457,6 +457,33 @@ impl Database {
         self.operations.rename_column_in_table_indexes(table_name, old_column, new_column)
     }
 
+    /// Detach and return the physical indexes belonging to `table_name`,
+    /// together with their live data bodies.
+    ///
+    /// `ALTER TABLE ... RENAME TO ...` uses this to carry indexes (including
+    /// `UNIQUE` indexes) across the drop-old/create-new table identity swap
+    /// instead of losing them to the generic `drop_table` CASCADE — see
+    /// [`super::indexes::IndexManager::take_indexes_for_table`] for the full
+    /// rationale (issue #6599). Pair with [`Self::restore_indexes_for_table`].
+    pub fn take_indexes_for_table(
+        &mut self,
+        table_name: &str,
+    ) -> Vec<(super::indexes::IndexMetadata, super::indexes::IndexData)> {
+        self.snapshot_operations_for_mutation();
+        self.operations.take_indexes_for_table(table_name)
+    }
+
+    /// Reattach indexes previously detached by [`Self::take_indexes_for_table`]
+    /// under `new_table_name`, without rebuilding their physical bodies.
+    pub fn restore_indexes_for_table(
+        &mut self,
+        indexes: Vec<(super::indexes::IndexMetadata, super::indexes::IndexData)>,
+        new_table_name: &str,
+    ) {
+        self.snapshot_operations_for_mutation();
+        self.operations.restore_indexes_for_table(indexes, new_table_name)
+    }
+
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.operations.list_indexes()
