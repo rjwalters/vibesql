@@ -8,7 +8,7 @@ use super::{
     index_metadata::{acquire_btree_lock, IndexData},
     range_bounds::{calculate_next_value, smart_increment_value, try_increment_sqlvalue},
     streaming::OwnedStreamingRangeScan,
-    value_normalization::normalize_for_comparison,
+    value_normalization::normalize_range_bounds,
 };
 
 impl IndexData {
@@ -40,10 +40,11 @@ impl IndexData {
 
                 let mut matching_row_indices = Vec::new();
 
-                // Normalize bounds for consistent numeric comparison
-                // This allows Real, Numeric, Integer, etc. to be compared correctly
-                let normalized_start = start.map(normalize_for_comparison);
-                let normalized_end = end.map(normalize_for_comparison);
+                // Normalize bounds for consistent numeric comparison, correcting
+                // inclusive/exclusive flags for out-of-f64-precision integer
+                // literals compared against REAL-affinity columns (issue #6575).
+                let (normalized_start, normalized_end, inclusive_start, inclusive_end) =
+                    normalize_range_bounds(start, end, inclusive_start, inclusive_end);
 
                 // Special handling for prefix matching on multi-column indexes
                 // This handles both equality queries (start == end) and range queries (start !=
@@ -294,10 +295,10 @@ impl IndexData {
                 Vec::new()
             }
             IndexData::DiskBacked { btree, .. } => {
-                // Normalize bounds for consistent numeric comparison (same as InMemory)
-                // This ensures Real, Numeric, Integer, etc. can be compared correctly
-                let normalized_start = start.map(normalize_for_comparison);
-                let normalized_end = end.map(normalize_for_comparison);
+                // Normalize bounds for consistent numeric comparison (same as InMemory),
+                // correcting inclusive/exclusive flags for precision loss (issue #6575).
+                let (normalized_start, normalized_end, inclusive_start, inclusive_end) =
+                    normalize_range_bounds(start, end, inclusive_start, inclusive_end);
 
                 // Special handling for prefix matching (multi-column IN clauses) - same as InMemory
                 // When start == end with inclusive bounds, we're doing an equality check on the
@@ -432,9 +433,10 @@ impl IndexData {
 
                 let mut matching_row_indices = Vec::with_capacity(limit);
 
-                // Normalize bounds for consistent numeric comparison
-                let normalized_start = start.map(normalize_for_comparison);
-                let normalized_end = end.map(normalize_for_comparison);
+                // Normalize bounds for consistent numeric comparison, correcting
+                // inclusive/exclusive flags for precision loss (issue #6575).
+                let (normalized_start, normalized_end, inclusive_start, inclusive_end) =
+                    normalize_range_bounds(start, end, inclusive_start, inclusive_end);
 
                 // Edge case: Check for invalid/empty ranges
                 if let (Some(start_val), Some(end_val)) = (&normalized_start, &normalized_end) {
@@ -488,9 +490,10 @@ impl IndexData {
             IndexData::IVFFlat { .. } => Vec::new(),
             IndexData::Hnsw { .. } => Vec::new(),
             IndexData::DiskBacked { btree, .. } => {
-                // Normalize bounds
-                let normalized_start = start.map(normalize_for_comparison);
-                let normalized_end = end.map(normalize_for_comparison);
+                // Normalize bounds, correcting inclusive/exclusive flags for
+                // precision loss (issue #6575).
+                let (normalized_start, normalized_end, inclusive_start, inclusive_end) =
+                    normalize_range_bounds(start, end, inclusive_start, inclusive_end);
 
                 let start_key = normalized_start.as_ref().map(|v| vec![v.clone()]);
                 let end_key = normalized_end.as_ref().map(|v| vec![v.clone()]);
@@ -561,9 +564,10 @@ impl IndexData {
                     return None;
                 }
 
-                // Normalize bounds for consistent numeric comparison
-                let normalized_start = start.map(normalize_for_comparison);
-                let normalized_end = end.map(normalize_for_comparison);
+                // Normalize bounds for consistent numeric comparison, correcting
+                // inclusive/exclusive flags for precision loss (issue #6575).
+                let (normalized_start, normalized_end, inclusive_start, inclusive_end) =
+                    normalize_range_bounds(start, end, inclusive_start, inclusive_end);
 
                 // Use OwnedStreamingRangeScan which handles bounds and uses BTreeMap::range()
                 OwnedStreamingRangeScan::new(
@@ -577,5 +581,35 @@ impl IndexData {
             // DiskBacked, IVFFlat, HNSW don't support streaming yet
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod issue_6575_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::database::indexes::{
+        index_metadata::IndexData, value_normalization::normalize_for_comparison,
+    };
+
+    /// Regression test for issue #6575: an exclusive lower-bound range scan
+    /// (`col > literal`) must not falsely exclude a row whose REAL-affinity
+    /// stored value rounds, via the lossy `as f64` cast, to the same
+    /// `Double` as an out-of-f64-safe-integer-precision literal bound.
+    #[test]
+    fn exclusive_lower_bound_includes_row_that_rounds_up_to_literal() {
+        let mut data: BTreeMap<Vec<SqlValue>, Vec<usize>> = BTreeMap::new();
+        let stored = normalize_for_comparison(&SqlValue::Bigint(3175546974276630385));
+        data.insert(vec![stored], vec![0]);
+        let index = IndexData::InMemory { data };
+
+        let literal = SqlValue::Bigint(3175546974276630385);
+        let result = index.range_scan(Some(&literal), None, false, false);
+        assert_eq!(
+            result,
+            vec![0],
+            "row must be included: its true value rounds up past the exact literal"
+        );
     }
 }
