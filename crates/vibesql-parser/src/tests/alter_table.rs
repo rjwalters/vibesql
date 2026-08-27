@@ -574,6 +574,51 @@ fn test_parse_rename_column_rejects_reserved_keyword() {
     assert!(result.is_err(), "reserved keyword `select` must be rejected as a column name");
 }
 
+// ========================================================================
+// RENAME COLUMN with a single-quoted string literal as the new column name
+// (alterqf-2.1, issue #6174)
+//
+// SQLite's grammar defines the `nm` (name) nonterminal used for column and
+// table names as `nm ::= id | STRING` (see `parse.y`) -- a single-quoted
+// STRING token is accepted anywhere an identifier is expected, purely for
+// legacy compatibility (documented at https://www.sqlite.org/lang_keywords.html
+// under "string literals used as identifiers"). `ALTER TABLE t RENAME <old>
+// TO 'new'` is real, exercised SQLite syntax (SQLite's own alterqf.test group
+// 2), not a VibeSQL-only extension.
+// ========================================================================
+
+#[test]
+fn test_parse_rename_column_bare_form_string_literal_new_name() {
+    let result = Parser::parse_sql("ALTER TABLE x1 RENAME two TO 'four'");
+    assert!(result.is_ok(), "RENAME two TO 'four' should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(alter) => match alter {
+            vibesql_ast::AlterTableStmt::RenameColumn(rename) => {
+                assert_eq!(rename.old_column_name, "two");
+                assert_eq!(rename.new_column_name, "four");
+            }
+            _ => panic!("Expected RENAME COLUMN statement"),
+        },
+        _ => panic!("Expected ALTER TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_rename_column_keyword_form_string_literal_old_and_new_name() {
+    let result = Parser::parse_sql("ALTER TABLE x1 RENAME COLUMN 'two' TO 'four'");
+    assert!(result.is_ok(), "RENAME COLUMN 'two' TO 'four' should parse: {:?}", result.err());
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(alter) => match alter {
+            vibesql_ast::AlterTableStmt::RenameColumn(rename) => {
+                assert_eq!(rename.old_column_name, "two");
+                assert_eq!(rename.new_column_name, "four");
+            }
+            _ => panic!("Expected RENAME COLUMN statement"),
+        },
+        _ => panic!("Expected ALTER TABLE statement"),
+    }
+}
+
 #[test]
 fn test_parse_add_column_with_check_constraint() {
     // A column-level CHECK on an added column must be captured in the parsed

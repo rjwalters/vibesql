@@ -165,6 +165,19 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
+            // SQLite's grammar defines the `nm` (name) nonterminal used for
+            // column names as `nm ::= id | STRING` (`parse.y`): a
+            // single-quoted string literal is accepted anywhere an
+            // identifier is expected, purely for legacy compatibility
+            // (https://www.sqlite.org/lang_keywords.html, "string literals
+            // used as identifiers"). `ALTER TABLE t RENAME <old> TO 'new'`
+            // is real, exercised SQLite syntax (SQLite's own alterqf.test
+            // group 2, issue #6174) -- not a VibeSQL-only extension.
+            Token::String(value) => {
+                let identifier = value.clone();
+                self.advance();
+                Ok(identifier)
+            }
             _ => Err(ParseError { message: self.peek().syntax_error() }),
         }
     }
