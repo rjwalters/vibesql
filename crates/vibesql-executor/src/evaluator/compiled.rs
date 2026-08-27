@@ -302,7 +302,7 @@ impl CompiledPredicate {
     ) -> bool {
         use std::str::FromStr;
 
-        use vibesql_types::DataType;
+        use vibesql_types::{DataType, TypeAffinity};
 
         let col_type = schema.get_column_type_by_index(col_idx);
         let is_string_col = |t: &DataType| {
@@ -314,6 +314,38 @@ impl CompiledPredicate {
                     | DataType::Name
             )
         };
+
+        // Issue #6635: a column with NONE affinity (no declared type, or an
+        // explicit BLOB column — both resolve to `TypeAffinity::None` per
+        // `DataType::sqlite_affinity`) compares strictly against a
+        // TEXT/numeric literal: SQLite performs NO coercion in either
+        // direction for NONE affinity (datatype3.html §3, §4.2). The
+        // cross-type numeric<->string arms in `values_equal` /
+        // `compare_range` below are only correct when the column has
+        // NUMERIC/INTEGER/REAL affinity (mirroring
+        // `apply_affinity_for_comparison` cases 3-6 in the full expression
+        // evaluator). The compiled fast path evaluates against the row's
+        // *actual stored value* without re-checking affinity, and a
+        // NONE-affinity column can hold any storage class per row, so
+        // decline compilation for any literal that could trigger that
+        // coercion and fall back to the full (affinity-aware) evaluator.
+        if col_type.map(|t| t.sqlite_affinity()) == Some(TypeAffinity::None)
+            && matches!(
+                value,
+                SqlValue::Varchar(_)
+                    | SqlValue::Character(_)
+                    | SqlValue::Integer(_)
+                    | SqlValue::Smallint(_)
+                    | SqlValue::Bigint(_)
+                    | SqlValue::Unsigned(_)
+                    | SqlValue::Float(_)
+                    | SqlValue::Real(_)
+                    | SqlValue::Double(_)
+                    | SqlValue::Numeric(_)
+            )
+        {
+            return false;
+        }
 
         match value {
             // Strings against a DATE column compare parse-first; an

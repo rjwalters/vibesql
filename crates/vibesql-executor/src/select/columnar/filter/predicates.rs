@@ -632,6 +632,29 @@ fn value_supported_for_column(col_type: Option<&DataType>, value: &SqlValue) -> 
         Some(other) if other.sqlite_affinity() == TypeAffinity::Text && is_numeric_value(value) => {
             false
         }
+        // Issue #6635: a column with NONE affinity (no declared type, or an
+        // explicit BLOB column — both resolve to `TypeAffinity::None` per
+        // `DataType::sqlite_affinity`) compared against a numeric or string
+        // literal. SQLite performs NO coercion in either direction for NONE
+        // affinity (datatype3.html §3, §4.2): `apply_affinity_for_comparison`
+        // leaves both operands unchanged for this pairing, so a strict
+        // storage-class comparison decides the result. The columnar
+        // `compare_values` comparator's numeric<->string arm instead coerces
+        // unconditionally whenever one side looks numeric and the other
+        // parses as a number, regardless of affinity — and since a
+        // NONE-affinity column doesn't coerce at INSERT time either, the
+        // row's actual stored value may be any storage class (e.g. an
+        // INTEGER-valued row in an untyped column compared against a TEXT
+        // literal like `WHERE a = '14'`). There is no faithful columnar arm
+        // for this combination, so decline pushdown and let the evaluator's
+        // affinity-aware comparison handle it.
+        Some(other)
+            if other.sqlite_affinity() == TypeAffinity::None
+                && (is_numeric_value(value)
+                    || matches!(value, SqlValue::Varchar(_) | SqlValue::Character(_))) =>
+        {
+            false
+        }
         Some(other) => match value {
             // Temporal literal against a non-temporal column: only string
             // columns have comparator support (parse-first for Date, TEXT
@@ -1673,23 +1696,46 @@ mod tests {
         CombinedSchema::from_table("t".to_string(), schema)
     }
 
-    /// Issue #5340: Blob columns vs string/numeric literals stay on the
-    /// columnar path (compare_values now implements the storage-class
-    /// ordering numeric < TEXT < BLOB), and Blob vs Blob is bytewise.
+    /// Issue #5340: Blob vs Blob keeps the columnar path (bytewise
+    /// comparison, no coercion possible either way).
+    ///
+    /// Issue #6635: Blob-affinity ("b BLOB", which — like a bare untyped
+    /// column — resolves to `TypeAffinity::None`) vs a *numeric or string*
+    /// literal no longer stays on the columnar path. A NONE-affinity column
+    /// applies no affinity coercion at INSERT time either, so its physical
+    /// per-row storage class can be anything (e.g. `INSERT INTO t(b)
+    /// VALUES(5)` stores an actual `Integer`, not a `Blob`). The columnar
+    /// `compare_values` numeric<->string arm coerces unconditionally
+    /// whenever one side looks numeric and the other parses as a number,
+    /// which is only correct for NUMERIC/INTEGER/REAL-affinity columns —
+    /// declining pushdown here routes these comparisons through the
+    /// expression evaluator's affinity-aware (no-coercion) semantics
+    /// instead.
     #[test]
     fn test_blob_column_supported_literals_extracted() {
         let schema = create_blob_bool_schema();
-        for value in [
-            SqlValue::Varchar(arcstr::ArcStr::from("abc")),
-            SqlValue::Integer(5),
-            SqlValue::Blob(vec![0x61, 0x62]),
-        ] {
+
+        // Blob literal: still supported (bytewise storage-class ordering is
+        // unaffected by the actual value's storage class ambiguity).
+        let value = SqlValue::Blob(vec![0x61, 0x62]);
+        let expr = comparison_expr("b", BinaryOperator::GreaterThanOrEqual, value.clone());
+        assert!(
+            extract_column_predicates(&expr, &schema, false).is_some(),
+            "expected pushdown for b >= {value:?}"
+        );
+        assert!(extract_predicate_tree(&expr, &schema, false).is_some());
+
+        // Numeric/string literals: no longer pushed down (issue #6635) —
+        // the declared BLOB/NONE affinity says nothing about the actual
+        // per-row storage class, so only the evaluator's affinity-aware,
+        // no-coercion comparison is faithful here.
+        for value in [SqlValue::Varchar(arcstr::ArcStr::from("abc")), SqlValue::Integer(5)] {
             let expr = comparison_expr("b", BinaryOperator::GreaterThanOrEqual, value.clone());
             assert!(
-                extract_column_predicates(&expr, &schema, false).is_some(),
-                "expected pushdown for b >= {value:?}"
+                extract_column_predicates(&expr, &schema, false).is_none(),
+                "expected no pushdown for b >= {value:?} (issue #6635)"
             );
-            assert!(extract_predicate_tree(&expr, &schema, false).is_some());
+            assert!(extract_predicate_tree(&expr, &schema, false).is_none());
         }
     }
 
