@@ -76,6 +76,27 @@ fn check_schema_objects(
     database: &Database,
     dropped: Option<(&str, &str)>,
 ) -> Result<(), ExecutorError> {
+    // SQLite: "Do not complain about syntax errors in the schema if in PRAGMA
+    // writable_schema=ON mode" (altercol.test group 23, verified against
+    // sqlite3 3.51.0). `writable_schema` lets a connection hand-edit
+    // `sqlite_master.sql` directly, and its documented trade-off is that the
+    // *next* schema-mutating statement — while the pragma is still ON —
+    // tolerates whatever pre-existing brokenness that editing introduced
+    // (a view/trigger referencing a column that was never valid, etc.)
+    // instead of aborting the ALTER. This is gated on the CURRENT
+    // `writable_schema` value at the time THIS statement runs, not on
+    // whether the schema was ever corrupted under it: a later ALTER that
+    // runs after the pragma has been turned back OFF still complains
+    // normally (altercol.test 13.1.4-13.1.7 turn writable_schema OFF again
+    // before the ALTER that is expected to raise `error in index ...`; see
+    // issue #6174). Applies uniformly to both the pre-check (already-broken
+    // objects) and post-check (objects broken specifically by this
+    // ALTER) — SQLite's schema re-parse is skipped wholesale, not
+    // selectively, while writable_schema is ON.
+    if database.writable_schema() {
+        return Ok(());
+    }
+
     let suffix = if dropped.is_some() { " after drop column" } else { "" };
 
     // Resolve the altered table to its canonical catalog name once so FROM

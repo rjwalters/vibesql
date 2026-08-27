@@ -75,6 +75,7 @@ mod alter_rename_column_triggers;
 mod alter_rename_table_triggers;
 mod alter_system_table_restrictions;
 mod alter_table_constraints;
+mod alter_writable_schema_precheck_suppression;
 mod auto_increment_tests;
 mod between_predicates;
 mod changes_function_tests;
