@@ -4784,52 +4784,32 @@ proc parse_raw_result {output} {
         return [list ""]
     }
 
-    # Special case (#6600): a lone NULL sentinel followed by a single record
-    # separator is the exact raw-wire shape of "one row, one column, and that
-    # column is SQL NULL" -- the scalar-aggregate-returns-NULL shape (e.g.
-    # `SELECT max(oid) FROM sqlite_master` on an object-free schema). Below,
-    # the general per-value loop maps this same NULL_SENTINEL to the empty
-    # string, matching every NULL embedded in a larger multi-row/multi-column
-    # result -- that representation is correct and required there (see
-    # normalize_result's own doc comment re: #6175/pragma-23.4) and MUST NOT
-    # change. But when the NULL is the ONLY value in the ONLY row, `execsql`
-    # returns a one-element Tcl list whose sole element is the empty string;
-    # Tcl must brace-protect that element to keep the list re-parseable, so
-    # the list's STRING representation becomes the literal two characters
-    # "{}" whenever it has to be regenerated -- e.g. when a caller captures
-    # it via `set ::x [execsql {...}]` and later reuses `$::x` inside a NEW
-    # double-quoted SQL string. Tcl performs that $var substitution natively,
-    # inline, at the call site, before `execsql` is ever invoked again -- so
-    # there is no later hook point available to intercept or repair the
-    # already-substituted SQL text. The only fix is to never hand back a
-    # value whose string form is "{}" for this one specific isolated-scalar
-    # shape.
-    #
-    # Returning the literal text "NULL" here instead keeps both documented
-    # reuse shapes valid SQL: an unquoted context (`WHERE oid = $::x` ->
-    # `WHERE oid = NULL`, a syntactically valid comparison) and a quoted
-    # string-literal context (`WHERE name = '$::x'` -> `WHERE name =
-    # 'NULL'`, also syntactically valid, just comparing against the literal
-    # string "NULL" rather than SQL NULL). An empty string does NOT satisfy
-    # the unquoted case ("WHERE oid = ;" is still a syntax error), so "NULL"
-    # is the only substitution that is safe in both shapes.
-    #
-    # Scoped to the EXACT raw-wire byte sequence "\x01\x1e" (nothing before
-    # or after): any additional row (another \x1e) or additional column
-    # (another \x1f-separated value) takes a different code path below and
-    # is completely unaffected, so multi-row/multi-column results -- including
-    # a NULL embedded among other columns or rows -- keep today's "{}"-in-
-    # normalize_result behavior exactly as before.
-    #
-    # Respect a customized `db nullvalue`/`::null_string` (e.g. e_expr.test's
-    # "null", pragma.test's "<<NULL>>") the same way the general per-value
-    # loop below does: only fall back to the literal "NULL" substitution when
-    # the effective null representation is the empty string -- the one case
-    # that produces the ambiguous "{}" bug this special case exists to fix.
-    if {$output eq "${null_sentinel}\x1e"} {
-        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
-        return [list [expr {$null_rep eq "" ? "NULL" : $null_rep}]]
-    }
+    # NOTE: an earlier revision of this function (#6600/#6611) special-cased
+    # a lone NULL sentinel followed by a single record separator -- "one row,
+    # one column, and that column is SQL NULL" -- and returned the literal
+    # text "NULL" instead of letting it fall through to the general per-value
+    # loop below (which maps NULL_SENTINEL to the empty string, or to a
+    # customized `db nullvalue`/`::null_string`). The intent was to keep a
+    # captured-then-reinterpolated scalar (`set ::x [execsql {...}]` followed
+    # by `$::x` inside a later SQL string) from corrupting that SQL with a
+    # literal "{}" (a Tcl list-stringification artifact for a one-element
+    # empty-string list). That special case was removed (#6172) because it
+    # regressed the far more common `do_execsql_test`/plain-comparison path:
+    # any assertion expecting a bare NULL result (`{{}}`, e.g. `SELECT NULL`,
+    # `SELECT NULL == NULL`, a CASE with no matching WHEN and no ELSE) now got
+    # "NULL" text instead of an empty string and failed the comparison --
+    # observed as 11 fresh e_expr.test failures (e_expr-8.1.5/6/7/13/14/15,
+    # e_expr-10.5.1, e_expr-12.2.5, e_expr-22.4.1, e_expr-24.1.1). The
+    # captured-then-reinterpolated scenario #6600 was written for
+    # (`sqlite_master.oid` legitimately NULL) was independently fixed at the
+    # engine level by #6606 before #6611 even merged -- #6611's own PR
+    # description confirms removing this special case makes zero difference
+    # to alter.test/trans.test's pass/fail (A/B tested with and without it),
+    # so no currently-passing test in the corpus depends on it. If a future
+    # test genuinely needs a captured NULL scalar to reinterpolate safely,
+    # that idiom-specific call site is the right place to fix it (e.g. `IS
+    # $::x` instead of `= $::x`), not this shared, file-agnostic formatter
+    # used by every do_execsql_test in the corpus.
 
     # Strip exactly one trailing record separator if present.
     # VibeSQL terminates every row with \x1e, including the last row.
