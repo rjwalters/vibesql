@@ -215,50 +215,6 @@ impl BloomFilter {
     }
 }
 
-/// Statistics about Bloom filter effectiveness during a join operation.
-#[derive(Debug, Default, Clone)]
-#[allow(dead_code)]
-pub struct BloomFilterStats {
-    /// Number of rows checked against the Bloom filter
-    pub rows_checked: u64,
-    /// Number of rows rejected by the Bloom filter (true negatives)
-    pub rows_rejected: u64,
-    /// Number of rows that passed the Bloom filter check
-    pub rows_passed: u64,
-}
-
-#[allow(dead_code)]
-impl BloomFilterStats {
-    /// Create new empty statistics.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Record that a row was rejected by the Bloom filter.
-    #[inline]
-    pub fn record_rejected(&mut self) {
-        self.rows_checked += 1;
-        self.rows_rejected += 1;
-    }
-
-    /// Record that a row passed the Bloom filter check.
-    #[inline]
-    pub fn record_passed(&mut self) {
-        self.rows_checked += 1;
-        self.rows_passed += 1;
-    }
-
-    /// Get the rejection rate (fraction of rows rejected by Bloom filter).
-    #[allow(dead_code)]
-    pub fn rejection_rate(&self) -> f64 {
-        if self.rows_checked == 0 {
-            0.0
-        } else {
-            self.rows_rejected as f64 / self.rows_checked as f64
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,20 +309,6 @@ mod tests {
         let hash = 0x123456789ABCDEF0u64;
         filter.insert_hash(hash);
         assert!(filter.might_contain_hash(hash));
-    }
-
-    #[test]
-    fn test_bloom_filter_stats() {
-        let mut stats = BloomFilterStats::new();
-
-        stats.record_rejected();
-        stats.record_rejected();
-        stats.record_passed();
-
-        assert_eq!(stats.rows_checked, 3);
-        assert_eq!(stats.rows_rejected, 2);
-        assert_eq!(stats.rows_passed, 1);
-        assert!((stats.rejection_rate() - 0.666).abs() < 0.01);
     }
 
     #[test]
