@@ -530,9 +530,15 @@ impl Parser {
                 }
                 Token::Keyword { keyword: Keyword::References, .. } => {
                     self.advance(); // consume REFERENCES
-                                    // Accept both regular and quoted identifiers (e.g., REFERENCES t1, REFERENCES
-                                    // "t1")
-                    let table = self.parse_identifier().map_err(|_| ParseError {
+                                    // Accept regular, quoted, and (SQLite's `nm ::= id | STRING`
+                                    // legacy-compatibility fallback) single-quoted-string
+                                    // identifiers, optionally schema-qualified (e.g. REFERENCES
+                                    // t1, REFERENCES "t1", REFERENCES 'p 1 "parent one"'). Using
+                                    // `parse_qualified_identifier` (backed by `parse_table_ref`)
+                                    // instead of `parse_identifier` picks up both the string-
+                                    // literal fallback and schema.table qualification (e_fkey-56.1,
+                                    // Part of #6170).
+                    let table = self.parse_qualified_identifier().map_err(|_| ParseError {
                         message: "Expected table name after REFERENCES".to_string(),
                     })?;
 
@@ -812,9 +818,12 @@ impl Parser {
                 self.expect_token(Token::RParen)?;
                 self.expect_keyword(Keyword::References)?;
 
-                // Accept both regular and quoted identifiers for table names
-                let references_table = self.parse_identifier().map_err(|_| ParseError {
-                    message: "Expected table name after REFERENCES".to_string(),
+                // Accept regular, quoted, and single-quoted-string identifiers,
+                // optionally schema-qualified — see the matching inline
+                // column-constraint REFERENCES arm above for the full
+                // rationale (e_fkey-56.1, Part of #6170).
+                let references_table = self.parse_qualified_identifier().map_err(|_| {
+                    ParseError { message: "Expected table name after REFERENCES".to_string() }
                 })?;
 
                 // Column specification is optional - if omitted, defaults to PK

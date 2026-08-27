@@ -106,6 +106,62 @@ fn test_parse_create_table_with_references() {
     }
 }
 
+// SQLite's grammar defines the `nm` (name) nonterminal used for table names
+// as `nm ::= id | STRING` (`parse.y`): a single-quoted string literal is
+// accepted anywhere an identifier is expected, purely for legacy
+// compatibility (https://www.sqlite.org/lang_keywords.html, "string literals
+// used as identifiers"). `REFERENCES 'p 1 "parent one"'` is real, exercised
+// SQLite syntax (e_fkey.test's e_fkey-56.1, Part of #6170) -- not a VibeSQL-
+// only extension. Covers both the inline column-constraint REFERENCES arm
+// and the table-level FOREIGN KEY ... REFERENCES arm in constraints.rs.
+#[test]
+fn test_parse_create_table_with_string_literal_references_table_name() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE c1(c, d REFERENCES 'p 1 \"parent one\"' ON UPDATE CASCADE);",
+    );
+    assert!(
+        result.is_ok(),
+        "Should parse string-literal REFERENCES table name: {:?}",
+        result.err()
+    );
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => match &create.columns[1].constraints[0] {
+            vibesql_ast::ColumnConstraint {
+                kind: vibesql_ast::ColumnConstraintKind::References { table, .. },
+                ..
+            } => {
+                assert_eq!(table, "p 1 \"parent one\"");
+            }
+            _ => panic!("Expected REFERENCES constraint"),
+        },
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
+#[test]
+fn test_parse_create_table_with_string_literal_references_table_level_foreign_key() {
+    let result = Parser::parse_sql(
+        "CREATE TABLE c2(e, f, FOREIGN KEY(f) REFERENCES 'p 1 \"parent one\"' ON UPDATE CASCADE);",
+    );
+    assert!(
+        result.is_ok(),
+        "Should parse string-literal REFERENCES table name in a table-level FOREIGN KEY: {:?}",
+        result.err()
+    );
+    match result.unwrap() {
+        vibesql_ast::Statement::CreateTable(create) => {
+            assert_eq!(create.table_constraints.len(), 1);
+            match &create.table_constraints[0].kind {
+                vibesql_ast::TableConstraintKind::ForeignKey { references_table, .. } => {
+                    assert_eq!(references_table, "p 1 \"parent one\"");
+                }
+                _ => panic!("Expected FOREIGN KEY constraint"),
+            }
+        }
+        _ => panic!("Expected CREATE TABLE statement"),
+    }
+}
+
 #[test]
 fn test_parse_create_table_with_multiple_constraints() {
     let result = Parser::parse_sql(
