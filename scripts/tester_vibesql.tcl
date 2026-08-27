@@ -4611,6 +4611,53 @@ proc parse_raw_result {output} {
         return [list ""]
     }
 
+    # Special case (#6600): a lone NULL sentinel followed by a single record
+    # separator is the exact raw-wire shape of "one row, one column, and that
+    # column is SQL NULL" -- the scalar-aggregate-returns-NULL shape (e.g.
+    # `SELECT max(oid) FROM sqlite_master` on an object-free schema). Below,
+    # the general per-value loop maps this same NULL_SENTINEL to the empty
+    # string, matching every NULL embedded in a larger multi-row/multi-column
+    # result -- that representation is correct and required there (see
+    # normalize_result's own doc comment re: #6175/pragma-23.4) and MUST NOT
+    # change. But when the NULL is the ONLY value in the ONLY row, `execsql`
+    # returns a one-element Tcl list whose sole element is the empty string;
+    # Tcl must brace-protect that element to keep the list re-parseable, so
+    # the list's STRING representation becomes the literal two characters
+    # "{}" whenever it has to be regenerated -- e.g. when a caller captures
+    # it via `set ::x [execsql {...}]` and later reuses `$::x` inside a NEW
+    # double-quoted SQL string. Tcl performs that $var substitution natively,
+    # inline, at the call site, before `execsql` is ever invoked again -- so
+    # there is no later hook point available to intercept or repair the
+    # already-substituted SQL text. The only fix is to never hand back a
+    # value whose string form is "{}" for this one specific isolated-scalar
+    # shape.
+    #
+    # Returning the literal text "NULL" here instead keeps both documented
+    # reuse shapes valid SQL: an unquoted context (`WHERE oid = $::x` ->
+    # `WHERE oid = NULL`, a syntactically valid comparison) and a quoted
+    # string-literal context (`WHERE name = '$::x'` -> `WHERE name =
+    # 'NULL'`, also syntactically valid, just comparing against the literal
+    # string "NULL" rather than SQL NULL). An empty string does NOT satisfy
+    # the unquoted case ("WHERE oid = ;" is still a syntax error), so "NULL"
+    # is the only substitution that is safe in both shapes.
+    #
+    # Scoped to the EXACT raw-wire byte sequence "\x01\x1e" (nothing before
+    # or after): any additional row (another \x1e) or additional column
+    # (another \x1f-separated value) takes a different code path below and
+    # is completely unaffected, so multi-row/multi-column results -- including
+    # a NULL embedded among other columns or rows -- keep today's "{}"-in-
+    # normalize_result behavior exactly as before.
+    #
+    # Respect a customized `db nullvalue`/`::null_string` (e.g. e_expr.test's
+    # "null", pragma.test's "<<NULL>>") the same way the general per-value
+    # loop below does: only fall back to the literal "NULL" substitution when
+    # the effective null representation is the empty string -- the one case
+    # that produces the ambiguous "{}" bug this special case exists to fix.
+    if {$output eq "${null_sentinel}\x1e"} {
+        set null_rep [expr {[info exists ::null_string] && $::null_string ne "" ? $::null_string : ""}]
+        return [list [expr {$null_rep eq "" ? "NULL" : $null_rep}]]
+    }
+
     # Strip exactly one trailing record separator if present.
     # VibeSQL terminates every row with \x1e, including the last row.
     # Without this, split would create an extra empty element at the end.
