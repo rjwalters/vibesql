@@ -2,8 +2,37 @@
 // Point Lookup - Single-value equality operations
 // ============================================================================
 
+//! # Point lookups answer with a *candidate* set, not an exact one (issue #6586)
+//!
+//! Every probe below normalizes its key with
+//! [`normalize_for_comparison`]/[`normalize_cow`], whose `as f64` cast is
+//! lossy above 2^53. Because the same cast is applied to stored values at
+//! insert time, a probe never *under*-returns — a genuinely equal value
+//! always lands on the same normalized key. But it can *over*-return: an
+//! out-of-f64-precision literal (`3175546974276630385`) rounds onto a
+//! REAL-affinity column's independently-rounded stored value
+//! (`3175546974276630528.0`) and the BTreeMap reports a hit for two values
+//! that are not equal.
+//!
+//! The index layer cannot resolve this on its own. Its BTreeMap retains only
+//! the *normalized* key, so the original stored value is gone by lookup time
+//! and there is nothing exact left to compare the literal against. (That is
+//! also why the range-scan fix for the same defect — issue #6575's
+//! `normalize_bound_for_range_scan` — has no analogue here: a bound has an
+//! inclusive/exclusive flag to correct, an equality probe has nothing.)
+//!
+//! Callers are therefore responsible for exact re-verification whenever
+//! [`point_probe_needs_exact_reverification`] returns true for a probe key:
+//! re-check each candidate row against its *original* stored column value
+//! using exact comparison semantics. The executor's index-scan planner does
+//! this by widening back to the full WHERE clause
+//! (`select::scan::index_scan::execution`), and the IN-subquery optimizer
+//! declines the index path entirely because it has no post-filter.
+
 use vibesql_types::SqlValue;
 
+#[cfg(doc)]
+use super::value_normalization::point_probe_needs_exact_reverification;
 use super::{
     index_metadata::{acquire_btree_lock, IndexData},
     value_normalization::{normalize_cow, normalize_for_comparison},

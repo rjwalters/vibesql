@@ -559,6 +559,18 @@ impl CompiledPredicate {
             return false;
         }
 
+        // Issue #6586: the mixed integer/float arms below promote the integer
+        // with `as f64`, which stops round-tripping above 2^53 and reports
+        // two *distinct* values as equal (`3175546974276630385` vs the REAL
+        // `3175546974276630528.0` it rounds onto). Route just that pairing
+        // through the exact comparator so this fast path stays
+        // observationally identical to the general expression evaluator —
+        // which matters because the index-scan planner relies on this filter
+        // to re-verify candidates from a lossy index probe.
+        if let Some(ordering) = vibesql_types::exact_mixed_numeric_cmp(a, b) {
+            return ordering == std::cmp::Ordering::Equal;
+        }
+
         // Fast path for common types
         match (a, b) {
             (SqlValue::Integer(x), SqlValue::Integer(y)) => x == y,
@@ -711,6 +723,20 @@ impl CompiledPredicate {
         // NULL comparisons return NULL (unknown)
         if matches!(row_value, SqlValue::Null) || matches!(literal, SqlValue::Null) {
             return None;
+        }
+
+        // Issue #6586: same precision hazard as `values_equal` — the mixed
+        // integer/float arms below cast through f64, which collapses distinct
+        // values above 2^53 and turns a strict `<`/`>` into a false equality.
+        // Apply the operator to the exact ordering instead.
+        if let Some(ordering) = vibesql_types::exact_mixed_numeric_cmp(row_value, literal) {
+            use std::cmp::Ordering;
+            return Some(match op {
+                RangeOp::LessThan => ordering == Ordering::Less,
+                RangeOp::LessThanOrEqual => ordering != Ordering::Greater,
+                RangeOp::GreaterThan => ordering == Ordering::Greater,
+                RangeOp::GreaterThanOrEqual => ordering != Ordering::Less,
+            });
         }
 
         // Fast path for common types

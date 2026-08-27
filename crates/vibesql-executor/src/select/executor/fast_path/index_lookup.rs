@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use vibesql_ast::{Expression, SelectItem, SelectStmt};
-use vibesql_storage::Row;
+use vibesql_storage::{database::indexes::point_probe_needs_exact_reverification, Row};
 use vibesql_types::SqlValue;
 
 use super::helpers::EqualityResult;
@@ -251,9 +251,14 @@ impl SelectExecutor<'_> {
                 .map(|c| c.to_ascii_lowercase())
                 .collect();
 
-            // Check if WHERE clause is fully satisfied by the index lookup
-            let needs_where_filter =
-                !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+            // Check if WHERE clause is fully satisfied by the index lookup.
+            // Issue #6586: a probe key outside f64's exact-integer range makes
+            // the index answer a *candidate* set (index keys are lossily
+            // normalized to `Double`), so re-verify with the exact WHERE
+            // evaluator even when the index nominally covers every predicate.
+            let needs_where_filter = !self
+                .where_fully_satisfied_by_equality_columns(where_clause, &covered_columns)
+                || prefix_key.iter().any(point_probe_needs_exact_reverification);
 
             // Apply residual WHERE filter if needed
             let filtered_rows = if needs_where_filter && !rows.is_empty() {
@@ -447,9 +452,16 @@ impl SelectExecutor<'_> {
                 .map(|c| c.to_ascii_lowercase())
                 .collect();
 
-            // Check if WHERE clause is fully satisfied by the index lookup
-            let needs_where_filter =
-                !self.where_fully_satisfied_by_equality_columns(where_clause, &covered_columns);
+            // Check if WHERE clause is fully satisfied by the index lookup.
+            // Issue #6586: a probe key outside f64's exact-integer range makes
+            // the index answer a *candidate* set (index keys are lossily
+            // normalized to `Double`, so a rounded literal collides with a
+            // differently-valued stored key), so re-verify with the exact
+            // WHERE evaluator even when the index nominally covers every
+            // predicate.
+            let needs_where_filter = !self
+                .where_fully_satisfied_by_equality_columns(where_clause, &covered_columns)
+                || key_values.iter().any(point_probe_needs_exact_reverification);
 
             // Apply residual WHERE filter if needed
             let filtered_rows = if needs_where_filter && !rows.is_empty() {

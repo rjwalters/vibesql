@@ -84,6 +84,53 @@ pub fn normalize_cow(value: &SqlValue) -> Cow<'_, SqlValue> {
     }
 }
 
+/// Returns true when `value`, used as an **equality / IN-list point-lookup
+/// probe key**, can produce a *false positive* match against a
+/// differently-valued stored key because of [`normalize_for_comparison`]'s
+/// lossy `as f64` cast (issue #6586).
+///
+/// # Why a point lookup needs this and a range scan does not
+///
+/// [`normalize_bound_for_range_scan`] (issue #6575) repairs a range bound by
+/// flipping its inclusive/exclusive flag, because a bound has a *direction*
+/// and the exact literal-vs-rounded relationship tells you which side of the
+/// rounded key the true bound falls on. An equality probe has no such flag:
+/// once the rounded literal collides with a rounded stored key, the BTreeMap
+/// reports a hit and there is nothing left at the index layer to correct —
+/// the map only retains the *normalized* key, so the original stored value is
+/// no longer available to compare exactly against.
+///
+/// The index therefore cannot decide equality on its own for such a probe.
+/// It can, however, tell callers that its answer is only a **candidate set**:
+/// the normalized probe is a superset filter (the same lossy cast is applied
+/// to both sides at insert and probe time, so a genuinely equal value always
+/// normalizes to the same key — the probe can over-return, never
+/// under-return). When this function returns true, the caller must re-verify
+/// each candidate row against the *original* stored column value using exact
+/// comparison semantics — which is what the executor's general WHERE
+/// evaluator already does.
+///
+/// # Threshold
+///
+/// Both directions of the collision need covering, so the test is on
+/// magnitude rather than on the storage class alone:
+/// - an integer literal above 2^53 (`3175546974276630385`) rounds onto a REAL column's stored
+///   value;
+/// - a float literal above 2^53 is stored exactly, but a *stored* integer above 2^53 rounds onto
+///   it.
+///
+/// Values at or below 2^53 in magnitude (and every non-numeric storage class,
+/// which [`normalize_for_comparison`] leaves untouched — issue #6555) are
+/// exact under normalization, so this returns false and the hot path pays
+/// nothing but one comparison.
+#[inline]
+pub fn point_probe_needs_exact_reverification(value: &SqlValue) -> bool {
+    // Non-numeric storage classes are never normalized (issue #6555), so
+    // their index keys are exact and a key match is a genuine equality —
+    // `exceeds_f64_exact_integer_range` returns false for all of them.
+    vibesql_types::exceeds_f64_exact_integer_range(value)
+}
+
 /// Normalize a single range-scan bound value together with its
 /// inclusive/exclusive flag, correcting for precision loss when an
 /// out-of-f64-safe-integer-precision literal (`|i| > 2^53`) is lossily cast
@@ -365,6 +412,65 @@ mod tests {
                     assert_eq!(corrected, inclusive);
                 }
             }
+        }
+    }
+
+    /// Issue #6586: an integer literal beyond f64's exact-integer range is a
+    /// lossy equality-probe key and must be flagged for exact
+    /// re-verification.
+    #[test]
+    fn out_of_precision_integer_probe_needs_reverification() {
+        for value in [
+            SqlValue::Bigint(3175546974276630385),
+            SqlValue::Integer(3175546974276630385),
+            SqlValue::Integer(-3175546974276630385),
+            SqlValue::Integer(9_007_199_254_740_993), // 2^53 + 1
+            SqlValue::Integer(i64::MAX),
+            SqlValue::Unsigned(u64::MAX),
+        ] {
+            assert!(
+                point_probe_needs_exact_reverification(&value),
+                "{value:?} is out of f64 exact-integer range"
+            );
+        }
+    }
+
+    /// A float literal beyond 2^53 is stored exactly but can still collide
+    /// with a *stored* integer that rounds onto it, so it is flagged too.
+    #[test]
+    fn out_of_precision_float_probe_needs_reverification() {
+        assert!(point_probe_needs_exact_reverification(&SqlValue::Double(
+            3175546974276630385_i64 as f64
+        )));
+        assert!(point_probe_needs_exact_reverification(&SqlValue::Real(1e30)));
+        assert!(point_probe_needs_exact_reverification(&SqlValue::Numeric(-1e30)));
+        assert!(point_probe_needs_exact_reverification(&SqlValue::Float(1e30f32)));
+    }
+
+    /// Values inside f64's exact-integer range (and every non-numeric storage
+    /// class) round-trip exactly, so they keep the zero-overhead fast path.
+    #[test]
+    fn in_precision_and_non_numeric_probes_need_no_reverification() {
+        for value in [
+            SqlValue::Integer(0),
+            SqlValue::Integer(42),
+            SqlValue::Integer(-42),
+            SqlValue::Integer(9_007_199_254_740_992), // 2^53 exactly
+            SqlValue::Integer(-9_007_199_254_740_992),
+            SqlValue::Smallint(i16::MIN),
+            SqlValue::Unsigned(9_007_199_254_740_992),
+            SqlValue::Real(2.5),
+            SqlValue::Double(f64::NAN),
+            SqlValue::Float(3.14),
+            SqlValue::Varchar(arcstr::ArcStr::from("3175546974276630385")),
+            SqlValue::Blob(vec![0x31]),
+            SqlValue::Boolean(true),
+            SqlValue::Null,
+        ] {
+            assert!(
+                !point_probe_needs_exact_reverification(&value),
+                "{value:?} is exact under index normalization"
+            );
         }
     }
 

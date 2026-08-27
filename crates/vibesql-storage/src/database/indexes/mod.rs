@@ -42,4 +42,10 @@ pub use streaming::OwnedStreamingRangeScan;
 // executor's in-batch unique-index duplicate tracking (issue #6346) can build
 // keys with the exact same canonical form the stored index bodies use
 // (Integer 1 and Real 1.0 must collide, matching `IndexData::get`).
-pub use value_normalization::{normalize_cow, normalize_for_comparison};
+// `point_probe_needs_exact_reverification` (issue #6586) is exported for the
+// executor's index-scan planner: an equality/IN-list probe whose literal is
+// outside f64's exact-integer range is only a *candidate* filter, and the
+// caller must re-verify candidates against the original row values.
+pub use value_normalization::{
+    normalize_cow, normalize_for_comparison, point_probe_needs_exact_reverification,
+};
