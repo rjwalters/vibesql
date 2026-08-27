@@ -7,8 +7,6 @@ pub(crate) mod grouping;
 mod helpers;
 mod iterator;
 pub mod join;
-#[allow(dead_code)] // Experimental feature with tests, not yet enabled in production
-pub mod late_materialization;
 #[cfg(feature = "parallel")]
 pub mod morsel;
 pub(crate) mod order;
@@ -29,9 +27,6 @@ pub use executor::validation::{
 };
 pub(crate) use helpers::coerce_limit_offset_to_i64;
 pub use iterator::{RowIterator, TableScanIterator};
-pub use late_materialization::{
-    gather_columns, gather_single_column, LazyMaterializedBatch, RowReference, SelectionVector,
-};
 pub use window::WindowFunctionKey;
 
 /// Result of a SELECT query including column metadata
