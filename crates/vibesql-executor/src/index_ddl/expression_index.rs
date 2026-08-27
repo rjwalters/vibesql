@@ -184,17 +184,38 @@ fn compute_expression_index_keys(
 /// Call this after loading a database from a snapshot (and after any WAL replay
 /// that mutated table rows). It is a no-op when there are no pending rebuilds.
 ///
+/// Returns `Ok(warnings)` where `warnings` is one human-readable message per
+/// index that could not be rebuilt (empty when every pending index rebuilt
+/// cleanly, or when there was nothing pending). This function itself never
+/// fails on a per-index evaluation error — see below.
+///
 /// A single unresolvable persisted expression (e.g. an index created under
 /// `PRAGMA writable_schema=1` referencing an identifier that isn't a real
 /// column, per SQLite's own `quote.test`) must never abort the whole database
 /// load — SQLite's documented behavior is that such a schema object persists
 /// and the database loads fine; only actually evaluating the bad expression
 /// should error (issue #6578). So a per-index evaluation failure here is
-/// logged to stderr and that index is simply left pending-rebuild (the
-/// planner already declines to use a pending-rebuild index, per the doc
-/// comment above) rather than propagated with `?`, which would hard-fail the
-/// entire open. All other pending indexes still get their chance to rebuild.
-pub fn rebuild_pending_expression_indexes(database: &mut Database) -> Result<(), ExecutorError> {
+/// collected as a returned diagnostic and that index is simply left
+/// pending-rebuild (the planner already declines to use a pending-rebuild
+/// index, per the doc comment above) rather than propagated with `?`, which
+/// would hard-fail the entire open. All other pending indexes still get their
+/// chance to rebuild.
+///
+/// This function performs no I/O of its own (issue #6621): earlier revisions
+/// wrote each failure directly to stderr via `eprintln!`, which is
+/// unconditional library-code output with no quiet/library-mode gating.
+/// `vibesql-executor` is consumed by more than just the CLI (server,
+/// embedded use), and none of those other consumers necessarily want stderr
+/// writes from deep inside a library call — nor does real SQLite emit any
+/// diagnostic in this situation at all. Instead, one human-readable message
+/// per failed index is returned to the caller, which decides whether/how to
+/// surface it (the CLI only prints these to an actual interactive terminal;
+/// see `vibesql-cli/src/executor/mod.rs`'s
+/// `print_expression_index_rebuild_warnings`).
+pub fn rebuild_pending_expression_indexes(
+    database: &mut Database,
+) -> Result<Vec<String>, ExecutorError> {
+    let mut warnings = Vec::new();
     let pending = database.pending_expression_rebuilds();
     for (index_name, table_name) in pending {
         // Resolve the metadata we need to re-evaluate the expression.
@@ -219,22 +240,22 @@ pub fn rebuild_pending_expression_indexes(database: &mut Database) -> Result<(),
         ) {
             Ok(keys) => keys,
             Err(e) => {
-                eprintln!(
+                warnings.push(format!(
                     "Warning: could not rebuild expression index '{}' on table '{}' \
                      (leaving it unusable/pending-rebuild): {}",
                     index_name, table_name, e
-                );
+                ));
                 continue;
             }
         };
 
         if let Err(e) = database.populate_expression_index(&index_name, keys) {
-            eprintln!(
+            warnings.push(format!(
                 "Warning: could not populate expression index '{}' on table '{}' \
                  (leaving it unusable/pending-rebuild): {}",
                 index_name, table_name, e
-            );
+            ));
         }
     }
-    Ok(())
+    Ok(warnings)
 }
