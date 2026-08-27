@@ -21,7 +21,7 @@ path = "src/bin/check-translations.rs"
 fluent = "0.17"
 fluent-syntax = "0.12"
 unic-langid = "0.9"
-rust-embed = "8"
+rust-embed = { version = "8", features = ["debug-embed"] }
 once_cell = "1.19"
 thiserror = "2.0"
 
