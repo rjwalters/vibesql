@@ -22,26 +22,53 @@ use crate::{
 /// Whether the SQLite-affinity cross-type fallback (`is_potential_cross_type_match`
 /// + `values_are_equal`) may fire for a join column pair.
 ///
-/// SQLite only coerces a TEXT/numeric mismatch when at least one side has a
-/// real declared affinity (INTEGER/REAL/NUMERIC/TEXT) to drive the
-/// coercion. A column whose affinity is definitively `TypeAffinity::None`
-/// (BLOB/no affinity — e.g. a column of a view whose body is a compound
-/// SELECT, which SQLite intentionally leaves un-affinitied since each
-/// UNION/INTERSECT/EXCEPT branch may contribute a different storage class)
-/// must compare as-is with **no** coercion on either side, exactly like a
-/// plain `WHERE a = b` predicate already does via the evaluator's affinity
-/// resolution (issue #6172, affinity3.test 210/220/250/260: joining a
-/// TEXT-affinity column against a compound-select-derived view/CTAS column
-/// must not treat TEXT '1' as equal to INTEGER 1). When a column's affinity
-/// cannot be determined at all (`None` from `get_column_affinity`, e.g. an
-/// expression result not tracked in the schema) this conservatively keeps
-/// the existing permissive behavior rather than risk a new false negative.
+/// This mirrors the **asymmetric** rule the scalar comparison path already
+/// implements in `ExpressionEvaluator::apply_affinity_for_comparison_values`
+/// (`evaluator/expressions/eval.rs`), so a join predicate and the equivalent
+/// `WHERE a = b` predicate agree:
+///
+/// - A **numeric** affinity (INTEGER/REAL/NUMERIC) on *either* side drives the coercion of the
+///   other side's TEXT-shaped value to a number — even when that other side is definitively
+///   `TypeAffinity::None`. (`INTEGER 7` joined against a no-affinity compound-select column holding
+///   TEXT `'7'` matches in real SQLite; blocking it was the regression caught reviewing #6172.)
+/// - Otherwise, a column whose affinity is definitively `TypeAffinity::None` (BLOB/no affinity —
+///   e.g. a column of a view whose body is a compound SELECT, which SQLite intentionally leaves
+///   un-affinitied since each UNION/INTERSECT/EXCEPT branch may contribute a different storage
+///   class) compares as-is with **no** coercion on either side. This is the TEXT-vs-NONE /
+///   NONE-vs-NONE case that affinity3.test 210/220/250/260 needs: joining a TEXT-affinity column
+///   against a compound-select-derived view/CTAS column must not treat TEXT `'1'` as equal to
+///   INTEGER `1`.
+/// - TEXT vs TEXT keeps the pre-existing permissive behavior (both sides carry a real declared
+///   affinity, so nothing here is definitively un-affinitied).
+///
+/// When a column's affinity cannot be determined at all (`None` from
+/// `get_column_affinity`, e.g. an expression result not tracked in the schema)
+/// this conservatively keeps the existing permissive behavior rather than risk
+/// a new false negative — unless the *other* side is definitively
+/// `TypeAffinity::None`, which still governs.
 fn cross_type_fallback_allowed(
     build_affinity: Option<vibesql_types::TypeAffinity>,
     probe_affinity: Option<vibesql_types::TypeAffinity>,
 ) -> bool {
-    !matches!(build_affinity, Some(vibesql_types::TypeAffinity::None))
-        && !matches!(probe_affinity, Some(vibesql_types::TypeAffinity::None))
+    use vibesql_types::TypeAffinity;
+
+    let is_numeric_affinity = |a: Option<TypeAffinity>| {
+        matches!(
+            a,
+            Some(TypeAffinity::Numeric) | Some(TypeAffinity::Integer) | Some(TypeAffinity::Real)
+        )
+    };
+
+    // A numeric-affinity side coerces the other side's TEXT value to a number,
+    // regardless of whether that other side has NONE affinity.
+    if is_numeric_affinity(build_affinity) || is_numeric_affinity(probe_affinity) {
+        return true;
+    }
+
+    // Remaining pairings are drawn from {TEXT, NONE, unknown}: a definitively
+    // no-affinity side means storage-class comparison with no coercion.
+    !matches!(build_affinity, Some(TypeAffinity::None))
+        && !matches!(probe_affinity, Some(TypeAffinity::None))
 }
 
 /// Check if a key could potentially match a different type via SQLite affinity
@@ -604,4 +631,80 @@ pub(in crate::select::join) fn hash_join_inner_arithmetic(
     );
 
     Ok(FromResult::from_rows(combined_schema, result_rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use vibesql_types::TypeAffinity;
+
+    use super::cross_type_fallback_allowed;
+
+    /// affinity3.test 210/220/250/260: a TEXT-affinity column joined against a
+    /// compound-select-derived (no-affinity) view/CTAS column must compare by
+    /// storage class — TEXT '1' is not INTEGER 1.
+    #[test]
+    fn text_vs_none_blocks_cross_type_fallback() {
+        assert!(!cross_type_fallback_allowed(Some(TypeAffinity::Text), Some(TypeAffinity::None)));
+        assert!(!cross_type_fallback_allowed(Some(TypeAffinity::None), Some(TypeAffinity::Text)));
+    }
+
+    /// Two definitively no-affinity columns also compare as-is.
+    #[test]
+    fn none_vs_none_blocks_cross_type_fallback() {
+        assert!(!cross_type_fallback_allowed(Some(TypeAffinity::None), Some(TypeAffinity::None)));
+    }
+
+    /// The asymmetric half of SQLite's rule: a numeric-affinity side coerces
+    /// the no-affinity side's TEXT-shaped value to a number, so the fallback
+    /// must stay enabled. Mirrors
+    /// `ExpressionEvaluator::apply_affinity_for_comparison_values`'s
+    /// `numeric_column_vs_none_text_coerces_text_to_numeric`.
+    ///
+    /// Regression guard for the review of #6172:
+    /// `SELECT * FROM numeric_side JOIN compound_view USING(id)` must still
+    /// match INTEGER 7 against TEXT '7'.
+    #[test]
+    fn numeric_vs_none_allows_cross_type_fallback() {
+        for numeric in [TypeAffinity::Integer, TypeAffinity::Real, TypeAffinity::Numeric] {
+            assert!(
+                cross_type_fallback_allowed(Some(numeric), Some(TypeAffinity::None)),
+                "{numeric:?} vs NONE must still coerce"
+            );
+            assert!(
+                cross_type_fallback_allowed(Some(TypeAffinity::None), Some(numeric)),
+                "NONE vs {numeric:?} must still coerce"
+            );
+        }
+    }
+
+    /// A numeric side paired with a TEXT side keeps the pre-existing
+    /// permissive behavior, as does TEXT vs TEXT (both sides carry a real
+    /// declared affinity).
+    #[test]
+    fn declared_affinity_pairs_allow_cross_type_fallback() {
+        assert!(cross_type_fallback_allowed(Some(TypeAffinity::Integer), Some(TypeAffinity::Text)));
+        assert!(cross_type_fallback_allowed(Some(TypeAffinity::Text), Some(TypeAffinity::Integer)));
+        assert!(cross_type_fallback_allowed(Some(TypeAffinity::Text), Some(TypeAffinity::Text)));
+        assert!(cross_type_fallback_allowed(
+            Some(TypeAffinity::Integer),
+            Some(TypeAffinity::Integer)
+        ));
+    }
+
+    /// An undeterminable affinity (`None` from `get_column_affinity`, e.g. an
+    /// expression result not tracked in the schema) conservatively keeps the
+    /// legacy permissive behavior rather than risk a new false negative — but
+    /// only when it is *not* paired with a definitively no-affinity side,
+    /// which still governs (unchanged from the gate's original behavior).
+    #[test]
+    fn unknown_affinity_stays_permissive() {
+        assert!(cross_type_fallback_allowed(None, None));
+        assert!(cross_type_fallback_allowed(None, Some(TypeAffinity::Text)));
+        assert!(cross_type_fallback_allowed(Some(TypeAffinity::Text), None));
+        assert!(cross_type_fallback_allowed(None, Some(TypeAffinity::Integer)));
+
+        // A definitively-NONE side still blocks, even opposite an unknown.
+        assert!(!cross_type_fallback_allowed(None, Some(TypeAffinity::None)));
+        assert!(!cross_type_fallback_allowed(Some(TypeAffinity::None), None));
+    }
 }

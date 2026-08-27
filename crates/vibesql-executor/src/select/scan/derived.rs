@@ -237,3 +237,71 @@ where
 
     Ok(super::FromResult::from_rows(schema, rows))
 }
+
+#[cfg(test)]
+mod tests {
+    use vibesql_storage::Row;
+    use vibesql_types::{DataType, SqlValue};
+
+    use super::compound_column_data_type;
+
+    fn rows(values: Vec<SqlValue>) -> Vec<Row> {
+        values.into_iter().map(|v| Row::new(vec![v])).collect()
+    }
+
+    /// Every branch agrees on affinity → keep it (window_pushdown.rs's
+    /// `union_all_text_literal_vs_numeric_branch_affinity`, issue #5749).
+    #[test]
+    fn all_rows_same_affinity_keeps_that_affinity() {
+        let dt =
+            compound_column_data_type(&rows(vec![SqlValue::Integer(1), SqlValue::Integer(2)]), 0);
+        assert_eq!(dt, DataType::Integer);
+
+        let dt = compound_column_data_type(
+            &rows(vec![SqlValue::Varchar("a".into()), SqlValue::Varchar("b".into())]),
+            0,
+        );
+        assert_eq!(dt.sqlite_affinity(), vibesql_types::TypeAffinity::Text);
+    }
+
+    /// Branches disagree on affinity → no affinity at all (issue #6172,
+    /// affinity3.test 210/250).
+    #[test]
+    fn mixed_affinity_rows_yield_no_affinity() {
+        let dt = compound_column_data_type(
+            &rows(vec![SqlValue::Integer(9), SqlValue::Varchar("7".into())]),
+            0,
+        );
+        assert_eq!(dt, DataType::BinaryLargeObject);
+        assert_eq!(dt.sqlite_affinity(), vibesql_types::TypeAffinity::None);
+    }
+
+    /// NULLs carry no affinity information and must not decide the outcome —
+    /// they are skipped, not treated as a disagreeing branch.
+    #[test]
+    fn nulls_are_skipped() {
+        let dt = compound_column_data_type(
+            &rows(vec![SqlValue::Null, SqlValue::Integer(1), SqlValue::Null]),
+            0,
+        );
+        assert_eq!(dt, DataType::Integer);
+    }
+
+    /// An all-NULL (or empty) column has nothing to infer from → no affinity.
+    #[test]
+    fn all_null_or_empty_yields_no_affinity() {
+        assert_eq!(
+            compound_column_data_type(&rows(vec![SqlValue::Null, SqlValue::Null]), 0),
+            DataType::BinaryLargeObject
+        );
+        assert_eq!(compound_column_data_type(&[], 0), DataType::BinaryLargeObject);
+    }
+
+    /// A row too short for the requested column position is skipped rather
+    /// than panicking.
+    #[test]
+    fn short_rows_are_skipped() {
+        let rows = vec![Row::new(vec![SqlValue::Integer(1)]), Row::new(vec![])];
+        assert_eq!(compound_column_data_type(&rows, 0), DataType::Integer);
+    }
+}
