@@ -14,7 +14,35 @@ use super::{
 };
 #[cfg(feature = "parallel")]
 use crate::select::parallel::ParallelConfig;
-use crate::{errors::ExecutorError, schema::CombinedSchema};
+use crate::{
+    errors::ExecutorError, schema::CombinedSchema,
+    select::join::hash_semi_join::get_column_affinity,
+};
+
+/// Whether the SQLite-affinity cross-type fallback (`is_potential_cross_type_match`
+/// + `values_are_equal`) may fire for a join column pair.
+///
+/// SQLite only coerces a TEXT/numeric mismatch when at least one side has a
+/// real declared affinity (INTEGER/REAL/NUMERIC/TEXT) to drive the
+/// coercion. A column whose affinity is definitively `TypeAffinity::None`
+/// (BLOB/no affinity — e.g. a column of a view whose body is a compound
+/// SELECT, which SQLite intentionally leaves un-affinitied since each
+/// UNION/INTERSECT/EXCEPT branch may contribute a different storage class)
+/// must compare as-is with **no** coercion on either side, exactly like a
+/// plain `WHERE a = b` predicate already does via the evaluator's affinity
+/// resolution (issue #6172, affinity3.test 210/220/250/260: joining a
+/// TEXT-affinity column against a compound-select-derived view/CTAS column
+/// must not treat TEXT '1' as equal to INTEGER 1). When a column's affinity
+/// cannot be determined at all (`None` from `get_column_affinity`, e.g. an
+/// expression result not tracked in the schema) this conservatively keeps
+/// the existing permissive behavior rather than risk a new false negative.
+fn cross_type_fallback_allowed(
+    build_affinity: Option<vibesql_types::TypeAffinity>,
+    probe_affinity: Option<vibesql_types::TypeAffinity>,
+) -> bool {
+    !matches!(build_affinity, Some(vibesql_types::TypeAffinity::None))
+        && !matches!(probe_affinity, Some(vibesql_types::TypeAffinity::None))
+}
 
 /// Check if a key could potentially match a different type via SQLite affinity
 /// SQLite allows TEXT '1.0' to equal INTEGER 1 when comparing columns with different types.
@@ -72,6 +100,11 @@ pub(in crate::select::join) fn hash_join_inner(
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
 
+    // Declared affinity of each join column, used to gate the cross-type
+    // fallback below (see `cross_type_fallback_allowed`).
+    let left_col_affinity = get_column_affinity(&left.schema, left_col_idx);
+    let right_col_affinity = get_column_affinity(&right.schema, right_col_idx);
+
     // Use as_slice() for zero-cost access without triggering row materialization
     // This avoids the 57% performance bottleneck from premature row collection
     let left_slice = left.as_slice();
@@ -83,6 +116,8 @@ pub(in crate::select::join) fn hash_join_inner(
         probe_rows,
         build_col_idx,
         probe_col_idx,
+        build_col_affinity,
+        probe_col_affinity,
         left_is_build,
         build_table_names,
         probe_table_names,
@@ -92,6 +127,8 @@ pub(in crate::select::join) fn hash_join_inner(
             right_slice,
             left_col_idx,
             right_col_idx,
+            left_col_affinity,
+            right_col_affinity,
             true,
             &left_table_names,
             &right_table_names,
@@ -102,6 +139,8 @@ pub(in crate::select::join) fn hash_join_inner(
             left_slice,
             right_col_idx,
             left_col_idx,
+            right_col_affinity,
+            left_col_affinity,
             false,
             &right_table_names,
             &left_table_names,
@@ -180,7 +219,9 @@ pub(in crate::select::join) fn hash_join_inner(
                 for &build_idx in build_indices {
                     pairs.push((build_idx, probe_idx));
                 }
-            } else if is_potential_cross_type_match(key) {
+            } else if cross_type_fallback_allowed(build_col_affinity, probe_col_affinity)
+                && is_potential_cross_type_match(key)
+            {
                 // SQLite type affinity fallback: TEXT values may equal numeric values
                 // When exact lookup fails, scan the hash table using values_are_equal
                 // This handles cases like TEXT '1.0' = INTEGER 1
@@ -237,6 +278,26 @@ pub(in crate::select::join) fn hash_join_inner_multi(
 
     // Combine schemas using merge to preserve all tables from nested joins
     let combined_schema = CombinedSchema::merge(left.schema.clone(), right.schema.clone());
+
+    // Per-column-position gate for the cross-type fallback below (see
+    // `cross_type_fallback_allowed`): a column pair with a definitively
+    // no-affinity side (e.g. a compound SELECT-derived view/CTAS column,
+    // issue #6172) must compare strictly, with no coercion — but that must
+    // not disable coercion for the *other* columns of the same composite
+    // key, which may legitimately need it (join.test join-11.9/11.10: a
+    // NATURAL JOIN's composite key can pair one untyped/no-affinity column
+    // with one genuinely cross-typed TEXT/INTEGER column, and only the
+    // former should be compared strictly).
+    let composite_col_allows_cross_type: Vec<bool> = left_col_indices
+        .iter()
+        .zip(right_col_indices.iter())
+        .map(|(&l, &r)| {
+            cross_type_fallback_allowed(
+                get_column_affinity(&left.schema, l),
+                get_column_affinity(&right.schema, r),
+            )
+        })
+        .collect();
 
     // Choose build and probe sides (build hash table on smaller table)
     let (
@@ -346,15 +407,23 @@ pub(in crate::select::join) fn hash_join_inner_multi(
                 for &build_idx in build_indices {
                     pairs.push((build_idx, probe_idx));
                 }
-            } else if probe_key.0.iter().any(|v| is_potential_cross_type_match(v)) {
-                // SQLite type affinity fallback for multi-column joins
-                // Check if any column could have cross-type matches
+            } else if probe_key.0.iter().enumerate().any(|(i, v)| {
+                composite_col_allows_cross_type[i] && is_potential_cross_type_match(v)
+            }) {
+                // SQLite type affinity fallback for multi-column joins.
+                // Each column compares with cross-type coercion only if its
+                // own affinity pair allows it (`composite_col_allows_cross_type`);
+                // a no-affinity column position always compares strictly.
                 for (build_key, build_indices) in hash_table.iter() {
-                    let all_match = probe_key
-                        .0
-                        .iter()
-                        .zip(build_key.0.iter())
-                        .all(|(p, b)| crate::evaluator::values_are_equal(p, b));
+                    let all_match = probe_key.0.iter().zip(build_key.0.iter()).enumerate().all(
+                        |(i, (p, b))| {
+                            if composite_col_allows_cross_type[i] {
+                                crate::evaluator::values_are_equal(p, b)
+                            } else {
+                                p == b
+                            }
+                        },
+                    );
                     if all_match {
                         for &build_idx in build_indices {
                             pairs.push((build_idx, probe_idx));

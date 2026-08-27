@@ -5,6 +5,50 @@
 
 use crate::{errors::ExecutorError, schema::CombinedSchema, select::SelectResult};
 
+/// Determine the `DataType` a compound SELECT (UNION/INTERSECT/EXCEPT) should
+/// stamp on its derived-table column at `idx`, for affinity purposes.
+///
+/// SQLite gives a compound-select column the *shared* affinity of its
+/// branches when every branch agrees, and no affinity (BLOB/None) when they
+/// disagree — never simply "whichever type the first row happens to have".
+/// For example `SELECT a FROM int_tbl UNION ALL SELECT d FROM
+/// other_int_tbl` (both branches INTEGER) keeps INTEGER affinity end to end
+/// (window_pushdown.rs's `union_all_text_literal_vs_numeric_branch_affinity`,
+/// issue #5749), while `SELECT id FROM int_tbl UNION SELECT id FROM
+/// text_tbl` (branches disagree) gets no affinity at all (issue #6172,
+/// affinity3.test 210/250). Since the AST doesn't expose each branch's
+/// statically-resolved affinity at this call site, approximate the same
+/// distinction from the already-executed result: scan every row's actual
+/// runtime value at this column position (skipping NULLs, which carry no
+/// affinity information and are not part of SQLite's static per-branch
+/// affinity determination either) and require them to agree on affinity.
+pub(super) fn compound_column_data_type(
+    rows: &[vibesql_storage::Row],
+    idx: usize,
+) -> vibesql_types::DataType {
+    use vibesql_types::{SqlValue, TypeAffinity};
+
+    let mut representative: Option<vibesql_types::DataType> = None;
+    let mut representative_affinity: Option<TypeAffinity> = None;
+    for row in rows {
+        let Some(value) = row.values.get(idx) else { continue };
+        if matches!(value, SqlValue::Null) {
+            continue;
+        }
+        let data_type = value.get_type();
+        let affinity = data_type.sqlite_affinity();
+        match representative_affinity {
+            None => {
+                representative_affinity = Some(affinity);
+                representative = Some(data_type);
+            }
+            Some(existing) if existing == affinity => {}
+            Some(_) => return vibesql_types::DataType::BinaryLargeObject,
+        }
+    }
+    representative.unwrap_or(vibesql_types::DataType::BinaryLargeObject)
+}
+
 /// Derive a column name from an expression (simplified version from columns.rs)
 fn derive_column_name_from_expr(expr: &vibesql_ast::Expression) -> String {
     match expr {
@@ -105,6 +149,14 @@ where
     let rows = subquery_result.rows;
     let subquery_columns = subquery_result.columns;
 
+    // A compound SELECT (UNION/INTERSECT/EXCEPT)'s result columns need
+    // `compound_column_data_type`'s shared-or-none affinity treatment rather
+    // than blindly trusting row 1's runtime type (which only reflects
+    // whichever branch happened to produce the first row — see that
+    // function's doc comment for the two issue #6172/#5749 cases this
+    // distinguishes).
+    let is_compound = query.set_operation.is_some();
+
     // Derive schema from SELECT list
     let mut column_names = Vec::new();
     let mut column_types = Vec::new();
@@ -124,7 +176,11 @@ where
                             .cloned()
                             .unwrap_or_else(|| format!("column{}", col_index + j + 1));
                         column_names.push(col_name);
-                        column_types.push(value.get_type());
+                        column_types.push(if is_compound {
+                            compound_column_data_type(&rows, col_index + j)
+                        } else {
+                            value.get_type()
+                        });
                     }
                     col_index += first_row.values.len();
                 } else {
@@ -144,8 +200,11 @@ where
                 };
                 column_names.push(col_name);
 
-                // Infer type from first row if available
-                let col_type = if let Some(first_row) = rows.first() {
+                // Infer type from first row if available (except for a
+                // compound select — see `compound_column_data_type`).
+                let col_type = if is_compound {
+                    compound_column_data_type(&rows, col_index)
+                } else if let Some(first_row) = rows.first() {
                     if col_index < first_row.values.len() {
                         first_row.values[col_index].get_type()
                     } else {

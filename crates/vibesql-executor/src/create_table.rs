@@ -983,9 +983,27 @@ impl CreateTableExecutor {
         let columns: Vec<ColumnSchema> = column_info
             .iter()
             .enumerate()
-            .map(|(idx, (col_name, _affinity))| {
-                // Try to infer data type from the first row if available
-                let data_type = if !rows.is_empty() && idx < rows[0].values.len() {
+            .map(|(idx, (col_name, affinity))| {
+                // A column already known to have no declared affinity (a
+                // computed expression, or a column expanded from a view's
+                // wildcard — see `derive_ctas_columns`/`resolve_ctas_affinity`
+                // above) must never be given a concrete DataType inferred from
+                // the first row's *runtime* value. SQLite's CTAS assigns such
+                // columns no declared type at all, independent of what the
+                // query happens to return; picking a DataType from row 1
+                // here would wrongly give the new table's column a real
+                // affinity (e.g. Integer, if row 1 happens to hold an
+                // integer), which then incorrectly participates in SQLite's
+                // affinity-based comparison-coercion rules downstream (issue
+                // #6172, affinity3.test 220/260: `CREATE TABLE mzed AS
+                // SELECT * FROM idmap` — a view over a UNION — must keep
+                // `mzed.id` un-affinitied so `data.id = mzed.id` compares
+                // TEXT '1' against INTEGER 1 with no coercion, exactly like
+                // SQLite).
+                let data_type = if *affinity == TypeAffinity::None {
+                    DataType::BinaryLargeObject
+                } else if !rows.is_empty() && idx < rows[0].values.len() {
+                    // Try to infer data type from the first row if available
                     Self::infer_data_type(&rows[0].values[idx])
                 } else {
                     // No rows or column - default to BLOB affinity
