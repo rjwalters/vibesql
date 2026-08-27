@@ -83,6 +83,23 @@
   description: Critical/blocking issue requiring immediate attention
   color: "DC2626"  # red-600
 
+# Operator Labels (see .loom/docs/label-state-machine.md)
+- name: loom:operator-only
+  description: "Automation has stopped; only a human can move this forward (queue-exclusion)"
+  color: "B91C1C"  # red-700
+
+- name: loom:operator
+  description: "Soft-block hold; stays in normal queue, but a human should look (pairs with loom:pr)"
+  color: "F97316"  # orange-500
+
+- name: loom:operator-decision
+  description: "loom:operator-only sub-kind: needs a human judgment call, not self-clearing"
+  color: "F87171"  # red-400 - lighter variant of loom:operator-only
+
+- name: loom:operator-blocked
+  description: "loom:operator-only sub-kind: waiting on a named blocker; self-clearing once it lands"
+  color: "FBCA04"  # yellow (matches blocked-upstream) - transient wait
+
 # Epic Labels
 - name: loom:epic
   description: Multi-phase epic proposal (decomposes into implementation issues)
