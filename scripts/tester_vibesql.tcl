@@ -1238,6 +1238,157 @@ proc track_demoted_name_rename {sql} {
     }
 }
 
+# Return the SQL quoting state in effect at the END of $text, given the state
+# in effect at its start. State is "" (not quoted) or the character that will
+# CLOSE the currently-open literal: ' (string), " (identifier), ` (MySQL-style
+# identifier), or ] (a [bracketed] identifier). A doubled closing quote inside
+# a string/identifier is an escaped quote, not a terminator (SQLite's rule);
+# bracket quoting has no doubling rule.
+#
+# Used by rewrite_sqlite_master_self_exclusion to keep its rewrite out of
+# string literals and quoted identifiers.
+proc sql_quote_state_after {text state} {
+    set n [string length $text]
+    for {set i 0} {$i < $n} {incr i} {
+        set c [string index $text $i]
+        if {$state ne ""} {
+            if {$c eq $state} {
+                if {$state ne "\]" && [string index $text [expr {$i + 1}]] eq $state} {
+                    incr i
+                    continue
+                }
+                set state ""
+            }
+            continue
+        }
+        switch -- $c {
+            "'"  { set state "'" }
+            "\"" { set state "\"" }
+            "`"  { set state "`" }
+            "\[" { set state "\]" }
+        }
+    }
+    return $state
+}
+
+# Rewrite each unqualified `FROM sqlite_master` / `JOIN sqlite_master` (and the
+# `sqlite_schema` spelling) in $sql so it excludes $exclude_names from its
+# result set (#6612).
+#
+# WHY: a TEMP table demoted to a genuinely persistent table BY THIS SAME
+# BATCH's strip_temp_table_keyword pass (see ::temp_demoted_names) is, from the
+# instant its CREATE TABLE runs, a real row in VibeSQL's own unqualified schema
+# catalog. Real SQLite's TEMP objects live in a separate `temp` schema that
+# unqualified `sqlite_master`/`sqlite_schema` NEVER includes. Without this
+# rewrite, any later statement in the SAME batch that reads unqualified
+# sqlite_master "self-lists" the table whose own creation precedes it — e.g.
+# alter-1.6's `objlist` leaking a trailing `table objlist objlist` row into its
+# own listing.
+#
+# Callers pass ONLY the names newly demoted by the current batch. Names demoted
+# in an EARLIER batch are deliberately NOT excluded: the shim's demotion
+# emulates a real TEMP table's whole-file visibility, and alter-1.2/alter-1.5
+# depend on that cross-batch permanence (they read the demoted `[temp table]` /
+# `TempTab` rows back out of unqualified sqlite_master).
+#
+# Scope is deliberately surgical — the rewrite fires ONLY on a bare
+# schema-table name immediately preceded by FROM/JOIN, and every one of these
+# is left byte-for-byte alone:
+#   - a `.`-qualified reference (`temp.sqlite_master`, `main.sqlite_master`) —
+#     the regex allows only whitespace, never a `.`, between the keyword and
+#     the name;
+#   - a different identifier that merely starts the same way
+#     (`sqlite_temp_master`) — `\y` anchors both ends of the name;
+#   - any occurrence not preceded by FROM/JOIN (`PRAGMA
+#     table_info(sqlite_master)`, a CTE name, a column named sqlite_master);
+#   - `DELETE FROM sqlite_master` — wrapping the delete target in a subquery
+#     would be a syntax error, and a DELETE cannot self-list anyway;
+#   - anything inside a string literal or quoted identifier (tracked with
+#     sql_quote_state_after), e.g. `WHERE sql LIKE '%FROM sqlite_master%'`.
+#
+# An explicit or implicit table alias following the reference (`FROM
+# sqlite_master AS m` / `FROM sqlite_master m`) is detected and preserved, so a
+# later qualified column reference (`m.name`) still resolves; with no alias the
+# wrapping subquery is aliased `sqlite_master` so `sqlite_master.name` keeps
+# working. A word that cannot be an alias (WHERE, ORDER, JOIN, ...) is never
+# mistaken for one.
+#
+# Rows OWNED by an excluded table (its indexes and triggers, whose sqlite_master
+# row carries tbl_name = the table name) are excluded as well — real SQLite
+# keeps those in the temp schema too. tbl_name IS NULL is preserved defensively
+# so a row with no owning table is never silently dropped by NOT IN's NULL
+# semantics.
+proc rewrite_sqlite_master_self_exclusion {sql exclude_names} {
+    if {[llength $exclude_names] == 0} { return $sql }
+
+    set inlist {}
+    foreach n $exclude_names {
+        lappend inlist "'[string map {' ''} $n]'"
+    }
+    set inlist_str [join $inlist ", "]
+    set cond "name NOT IN ($inlist_str) AND (tbl_name IS NULL OR tbl_name NOT IN ($inlist_str))"
+
+    # Words that may legally follow a bare `FROM sqlite_master` / `JOIN
+    # sqlite_master` without being a table alias.
+    set reserved {WHERE ORDER GROUP LIMIT OFFSET JOIN INNER LEFT RIGHT OUTER
+            CROSS NATURAL ON USING UNION INTERSECT EXCEPT HAVING WINDOW
+            RETURNING VALUES INDEXED NOT AND OR AS IS IN LIKE GLOB REGEXP
+            MATCH BETWEEN ESCAPE COLLATE WHEN THEN ELSE END SET FULL}
+
+    set pat {\y(FROM|JOIN)\s+(sqlite_master|sqlite_schema)\y}
+    set out ""
+    set pos 0
+    set qstate ""
+    while {1} {
+        set rest [string range $sql $pos end]
+        if {![regexp -indices -nocase $pat $rest m c1 c2]} {
+            append out $rest
+            break
+        }
+        lassign $m ms me
+        set prefix [string range $rest 0 [expr {$ms - 1}]]
+        append out $prefix
+        set qstate [sql_quote_state_after $prefix $qstate]
+        set matched [string range $rest $ms $me]
+
+        # Inside a string literal / quoted identifier, or the delete target of
+        # a DELETE statement: copy the match through untouched.
+        if {$qstate ne "" || [regexp -nocase {\yDELETE\s+$} [string range $out end-32 end]]} {
+            append out $matched
+            set qstate [sql_quote_state_after $matched $qstate]
+            set pos [expr {$pos + $me + 1}]
+            if {$pos > [string length $sql]} break
+            continue
+        }
+
+        set kw [string range $rest [lindex $c1 0] [lindex $c1 1]]
+        set schema_name [string range $rest [lindex $c2 0] [lindex $c2 1]]
+        set after [string range $rest [expr {$me + 1}] end]
+
+        set alias $schema_name
+        set alias_consumed 0
+        if {[regexp -indices -nocase {^\s+AS\s+(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $after wm anm]} {
+            lassign $wm - wme
+            lassign $anm ams ame
+            set alias [string range $after $ams $ame]
+            set alias_consumed [expr {$wme + 1}]
+        } elseif {[regexp -indices {^\s+([A-Za-z_][A-Za-z0-9_]*)} $after wm anm]} {
+            lassign $wm - wme
+            lassign $anm ams ame
+            set cand [string range $after $ams $ame]
+            if {[lsearch -exact $reserved [string toupper $cand]] < 0} {
+                set alias $cand
+                set alias_consumed [expr {$wme + 1}]
+            }
+        }
+
+        append out "$kw (SELECT * FROM $schema_name WHERE $cond) AS $alias"
+        set pos [expr {$pos + $me + 1 + $alias_consumed}]
+        if {$pos > [string length $sql]} break
+    }
+    return $out
+}
+
 proc strip_temp_table_keyword {sql} {
     # Demote every `CREATE TEMP[ORARY] TABLE <name>` to a plain `CREATE TABLE`,
     # keeping <name> unchanged, and prepend `DROP TABLE IF EXISTS <name>;` to
@@ -1272,6 +1423,16 @@ proc strip_temp_table_keyword {sql} {
             {\yCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $sql] {
         dict set main_creates [string tolower [string trim $mname {[]"`}]] 1
     }
+
+    # Names this batch's scan below newly adds to ::temp_demoted_names, in
+    # original-case, quote-trimmed form (i.e. exactly as they will appear in
+    # sqlite_master.name). Used to keep a table demoted BY THIS BATCH out of
+    # that same batch's unqualified sqlite_master/sqlite_schema reads (#6612).
+    # Any key that already existed before this batch started is deliberately
+    # left out, so an earlier batch's demotion keeps its established
+    # cross-batch permanence (alter-1.2/alter-1.5) — see
+    # rewrite_sqlite_master_self_exclusion.
+    set newly_demoted_this_batch {}
 
     set pat {\yCREATE\s+TEMP(?:ORARY)?\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)(\.(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*))?}
     set out ""
@@ -1347,15 +1508,27 @@ proc strip_temp_table_keyword {sql} {
             # IF NOT EXISTS present: preserve it, do not pre-drop (create-if-absent).
             append out "CREATE TABLE IF NOT EXISTS ${name}"
             set pos [expr {$pos + $me + 1}]
+            if {![dict exists $::temp_demoted_names $key]} {
+                lappend newly_demoted_this_batch [string trim $name {[]"`}]
+            }
             dict set ::temp_demoted_names $key 1
         } else {
             # Pre-drop to emulate the temp-over-main shadow.
             append out "DROP TABLE IF EXISTS ${name}; CREATE TABLE ${name}"
             set pos [expr {$pos + $me + 1}]
+            if {![dict exists $::temp_demoted_names $key]} {
+                lappend newly_demoted_this_batch [string trim $name {[]"`}]
+            }
             dict set ::temp_demoted_names $key 1
         }
         if {$pos > [string length $sql]} break
     }
+
+    # Keep a name demoted BY THIS BATCH out of that same batch's unqualified
+    # sqlite_master/sqlite_schema reads (#6612). No-op — and skipped outright —
+    # when this batch demoted nothing new, which is the overwhelmingly common
+    # case.
+    set out [rewrite_sqlite_master_self_exclusion $out $newly_demoted_this_batch]
 
     # Rewrite any literal `temp.<name>` qualifier (case-insensitive, optional
     # whitespace around the dot) left in $out for a name this file has demoted
