@@ -276,6 +276,47 @@ impl Database {
         );
     }
 
+    /// Get the legacy_alter_table PRAGMA setting (SQLite compatibility).
+    ///
+    /// When OFF (the default, matching SQLite), `ALTER TABLE ... RENAME TO`
+    /// performs SQLite's "smart" rename: it rewrites references to the
+    /// renamed table inside dependent triggers, views, and child foreign key
+    /// `REFERENCES` clauses so they keep resolving under the new name (see
+    /// `vibesql-executor::alter::table_options::execute_rename_table`).
+    ///
+    /// When ON, that dependent-object rewrite is suppressed — a dependent
+    /// object's stored `sqlite_master.sql` text (and any bound FK target)
+    /// keeps naming the table by its *old* name verbatim, exactly as
+    /// SQLite's legacy (pre-3.25.0) `ALTER TABLE RENAME` behaved (EVIDENCE-OF
+    /// R-47080-02069, e_fkey-61.2.2, issue #6634). This does not affect the
+    /// renamed table's own `CREATE TABLE` header (its name always updates —
+    /// that is the unconditional "rename this object's own schema entry"
+    /// step, distinct from the gated propagation step). A *self*-referential
+    /// FK on the renamed table, however, IS one of the "other objects" the
+    /// propagation step rewrites (SQLite iterates every table, including the
+    /// one just renamed), so it is suppressed under `legacy_alter_table=ON`
+    /// exactly like a FK on any other child table. FK-reference propagation
+    /// specifically has one further wrinkle matching SQLite's `alter.c`
+    /// (`sqlite3AlterRenameTable`): it still fires under
+    /// `legacy_alter_table=ON` when `foreign_keys=ON`, since SQLite guards it
+    /// with `legacy_alter_table==OFF || foreign_keys==ON`. Trigger/view
+    /// rewriting has no such exception — those are gated purely on
+    /// `legacy_alter_table`.
+    pub fn legacy_alter_table(&self) -> bool {
+        match self.get_session_variable("LEGACY_ALTER_TABLE") {
+            Some(vibesql_types::SqlValue::Integer(n)) => *n != 0,
+            _ => false, // Default: OFF (SQLite compatibility)
+        }
+    }
+
+    /// Set the legacy_alter_table PRAGMA setting (SQLite compatibility).
+    pub fn set_legacy_alter_table(&mut self, value: bool) {
+        self.set_session_variable(
+            "LEGACY_ALTER_TABLE",
+            vibesql_types::SqlValue::Integer(if value { 1 } else { 0 }),
+        );
+    }
+
     /// Get the DQS_DML runtime fallback flag (SQLite compatibility).
     ///
     /// Mirrors `sqlite3_db_config(db, SQLITE_DBCONFIG_DQS_DML, ...)`: when ON
