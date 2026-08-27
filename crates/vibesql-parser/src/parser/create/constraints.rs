@@ -539,10 +539,15 @@ impl Parser {
                     // Column specification is optional in SQLite - defaults to PK
                     let column = if self.peek() == &Token::LParen {
                         self.advance(); // consume LParen
-                                        // Accept both regular and quoted identifiers for column names
-                        let col_name = self.parse_column_name().map_err(|_| ParseError {
-                            message: "Expected column name in REFERENCES".to_string(),
-                        })?;
+                                        // Accept both regular and quoted identifiers for column names.
+                                        // Do NOT override the error on failure: an empty list
+                                        // (`REFERENCES p()`) must surface SQLite's own generic
+                                        // "near \")\": syntax error" (e_fkey-28.2, Part of #6170)
+                                        // rather than a VibeSQL-specific message -- SQLite's grammar
+                                        // has no production for an empty column-name-list, so it
+                                        // reports a plain LALR syntax error naming the unexpected
+                                        // token, not a custom REFERENCES-aware message.
+                        let col_name = self.parse_column_name()?;
                         // An inline column-constraint REFERENCES clause defines a
                         // single-column foreign key, so the parent column list must
                         // name exactly one column. SQLite still parses a longer list
@@ -818,10 +823,13 @@ impl Parser {
                     self.advance(); // consume LParen
 
                     loop {
-                        // Accept both regular and quoted identifiers for column names
-                        let col = self.parse_column_name().map_err(|_| ParseError {
-                            message: "Expected column name in REFERENCES".to_string(),
-                        })?;
+                        // Accept both regular and quoted identifiers for column names.
+                        // Do NOT override the error on failure: an empty list
+                        // (`FOREIGN KEY(...) REFERENCES p()`) must surface SQLite's own
+                        // generic "near \")\": syntax error" (e_fkey-28.4/28.5, Part of
+                        // #6170) rather than a VibeSQL-specific message -- see the
+                        // matching column-constraint REFERENCES parse above.
+                        let col = self.parse_column_name()?;
                         references_columns.push(col);
 
                         if matches!(self.peek(), Token::Comma) {

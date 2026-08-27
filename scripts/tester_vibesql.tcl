@@ -6869,6 +6869,9 @@ array set vibesql_skip_tests {
 
     e_fkey-2.2 "Foreign key behavior differs"
 
+    e_fkey-62.1 "Bucket-A A9 (documented intentional engine divergence, docs/reference/tcl-skip-policy.md): asserts `SET CONSTRAINTS ALL IMMEDIATE` fails with SQLite's generic near-\"SET\"-syntax-error because real SQLite has no top-level SET statement grammar at all. VibeSQL deliberately supports a top-level `SET <variable> = <value>` statement (session/global variable assignment, a SQL-dialect extension beyond SQLite) -- parsing then fails later, at the unexpected `ALL` token, once `CONSTRAINTS` is consumed as the variable name. Not a conformance gap: SQLite lacking a feature VibeSQL supports on purpose is the inverse of a missing-feature bug. Part of #6170."
+    e_fkey-62.2 "Bucket-A A9: same intentional top-level SET-statement divergence as e_fkey-62.1 above, for `SET CONSTRAINTS ALL DEFERRED`. Part of #6170."
+
     enc4-1.1 "Encoding behavior differs"
     enc4-2.1 "Encoding behavior differs"
     enc4-3.1 "Encoding behavior differs"
