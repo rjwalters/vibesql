@@ -11202,6 +11202,30 @@ proc reset_db {} {
     # so a stale replayed `ATTACH 'test.db2' AS aux` would attach whatever
     # happens to exist at that path now rather than nothing (#6363).
     clear_attach_replay
+    # Re-arm the ATTACH-setup rescue's single-shot ::attach_skipped gate
+    # (do_test's "ATTACH-setup rescue" comment, #6193) on every reset_db
+    # (#6174). That gate exists to stop a SECOND, unrelated ATTACH-touching
+    # do_test block from being rescued once an EARLIER block in the same file
+    # has already been skipped — the documented risk is a later rescue's
+    # main-schema DDL leaking into and corrupting tests that already ran
+    # against the pre-existing (un-reset) connection. reset_db closes that
+    # connection and opens a logically fresh one (it wipes the on-disk file +
+    # WAL and clears the temp-view/trigger and ATTACH replay state right
+    # above), so there is no earlier-connection state left for a rescue here
+    # to corrupt — the single-shot gate should be scoped to a connection, not
+    # to a whole file. Verified against alter3.test: alter3-5.* (`ifcapable
+    # attach` section, `ATTACH 'test2.db' AS aux`) sets ::attach_skipped
+    # before line 399's reset_db; without this reset, alter3-9.10's later,
+    # independent `ifcapable attach`-free `CREATE TEMP TABLE t0(...); ...;
+    # ATTACH ':memory:' AS aux1; ...` setup block (empty expected result) no
+    # longer qualified for the rescue, so its `CREATE TEMP TABLE t0` (which
+    # the rescue would otherwise strip down to and run for real) silently
+    # never ran — cascading "no such table: t0" into alter3-9.11/9.12. This
+    # does not touch trigger1.test's documented single-shot corruption case
+    # (trigger1-10.*): that file's two ATTACH sections (lines ~548 and ~777)
+    # both run BEFORE its first reset_db call (line 807), so this reset never
+    # re-arms the gate within the window that scenario depends on.
+    set ::attach_skipped 0
 }
 
 # Forget all replayed temp view/trigger state (connection-lifetime reset). Called
