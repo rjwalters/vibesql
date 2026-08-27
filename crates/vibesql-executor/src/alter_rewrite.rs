@@ -180,9 +180,22 @@ fn first_trailing_constraint_start(
 /// Whether `tok` is an identifier-like token whose text matches `name`
 /// (case-insensitively for bare identifiers; delimited identifiers are also
 /// matched case-insensitively, since SQLite folds the ALTER target name).
+///
+/// A single-quoted string literal (`Token::String`) is also accepted: SQLite's
+/// grammar defines the `nm` (name) nonterminal used for table/column names as
+/// `nm ::= id | STRING` (`parse.y`) — a table created as `CREATE TABLE
+/// 'my table'(...)` or referenced as `REFERENCES 'my table'` stores that
+/// quoted-string spelling as its name, and a rewrite target token in that
+/// position is a `Token::String`, not an `Identifier`/`DelimitedIdentifier`.
+/// Without this arm, every in-place rewrite helper in this module silently
+/// failed to locate a string-literal-spelled name and fell back to
+/// invalidating `sql_source` (losing the verbatim text) instead of rewriting
+/// it in place (issue #6634).
 fn ident_matches(tok: &Token, name: &str) -> bool {
     match tok {
-        Token::Identifier(s) | Token::DelimitedIdentifier(s) => s.eq_ignore_ascii_case(name),
+        Token::Identifier(s) | Token::DelimitedIdentifier(s) | Token::String(s) => {
+            s.eq_ignore_ascii_case(name)
+        }
         _ => false,
     }
 }
@@ -232,15 +245,21 @@ fn table_name_index(tokens: &[(Token, Span)]) -> Option<usize> {
     {
         i += 3;
     }
-    // table name (may be schema-qualified: skip `schema .`)
+    // table name (may be schema-qualified: skip `schema .`). A single-quoted
+    // string literal is also accepted here (`Token::String`): SQLite's `nm ::=
+    // id | STRING` grammar rule lets `CREATE TABLE 'my table'(...)` name a
+    // table via a string literal, and this token position is where that
+    // literal lands (issue #6634).
     match tokens.get(i) {
-        Some((Token::Identifier(_) | Token::DelimitedIdentifier(_), _)) => {}
+        Some((Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_), _)) => {}
         _ => return None,
     }
     if matches!(tokens.get(i + 1), Some((Token::Symbol('.'), _))) {
         i += 2; // skip `schema .`, the real name follows
-        if !matches!(tokens.get(i), Some((Token::Identifier(_) | Token::DelimitedIdentifier(_), _)))
-        {
+        if !matches!(
+            tokens.get(i),
+            Some((Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_), _))
+        ) {
             return None;
         }
     }

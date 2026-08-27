@@ -320,32 +320,65 @@ pub(super) fn execute_rename_table(
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
     }
 
-    // Propagate the rename into any trigger definitions that reference the old
-    // table name. SQLite (legacy_alter_table=OFF) rewrites table references
-    // inside trigger bodies and the trigger's ON-target, and keeps the stored
-    // `sqlite_master.sql` text consistent. See `crate::trigger_rename`.
-    rewrite_triggers_for_rename(database, &stmt.table_name, &stmt.new_table_name);
+    // Propagate the rename into dependent triggers, child-table foreign keys,
+    // and views that reference the old table name — but only in SQLite's
+    // default "smart rename" mode (`legacy_alter_table=OFF`). When
+    // `legacy_alter_table=ON`, this propagation is suppressed: a dependent
+    // object's stored `sqlite_master.sql` text (and any bound FK target) keeps
+    // naming the table by its *old* name verbatim, matching SQLite's legacy
+    // (pre-3.25.0) `ALTER TABLE RENAME` behavior (EVIDENCE-OF R-47080-02069,
+    // e_fkey-61.2.2, issue #6634). This does not affect the renamed table's
+    // own `CREATE TABLE` header (already rewritten above via
+    // `alter_rewrite::rename_table`, which is SQLite's unconditional "rename
+    // this object's own schema entry" step, not the gated propagation step) —
+    // but a *self*-referential FK is itself one of the "other objects"
+    // `rebind_child_foreign_keys`'s loop rewrites (it iterates every table,
+    // including the just-renamed one), so it is gated identically to a FK on
+    // any other child table.
+    //
+    // The FK-rewrite step has one extra wrinkle SQLite's own `alter.c`
+    // (`sqlite3AlterRenameTable`) codes explicitly: it fires when
+    // `legacy_alter_table=OFF` **or** `foreign_keys=ON` — i.e.
+    // `legacy_alter_table=ON` alone does not suppress FK rewriting if foreign
+    // key enforcement is active. (Trigger/view rewriting has no such
+    // exception: those are gated purely on `legacy_alter_table`.) This is not
+    // exercised by e_fkey-61.2.2 itself (which sets `foreign_keys=OFF`), but
+    // matches the reference implementation exactly.
+    let legacy = database.legacy_alter_table();
+    if !legacy {
+        // Propagate the rename into any trigger definitions that reference the
+        // old table name. Rewrites table references inside trigger bodies and
+        // the trigger's ON-target, and keeps the stored `sqlite_master.sql`
+        // text consistent. See `crate::trigger_rename`.
+        rewrite_triggers_for_rename(database, &stmt.table_name, &stmt.new_table_name);
+    }
 
-    // Re-bind every child table's foreign key that referenced the old parent
-    // name, and rewrite its verbatim REFERENCES text. SQLite
-    // (legacy_alter_table=OFF) rewrites both the child's in-memory FK target and
-    // the stored `sqlite_master.sql` REFERENCES clause so cascade enforcement
-    // survives the rename. Without this, `fk.parent_table` keeps pointing at the
-    // now-nonexistent old name (silently severing enforcement) and a reload would
-    // resurrect the stale binding from the un-rewritten sql_source. Runs after
-    // the drop+create above, so the renamed table already exists under its new
-    // name — self-referential FKs on it are picked up by the same loop.
-    rebind_child_foreign_keys(database, &stmt.table_name, &stmt.new_table_name);
+    if !legacy || database.foreign_keys_enabled() {
+        // Re-bind every child table's foreign key that referenced the old parent
+        // name, and rewrite its verbatim REFERENCES text. Rewrites both the
+        // child's in-memory FK target and the stored `sqlite_master.sql`
+        // REFERENCES clause so cascade enforcement survives the rename.
+        // Without this, `fk.parent_table` keeps pointing at the now-nonexistent
+        // old name (silently severing enforcement) and a reload would
+        // resurrect the stale binding from the un-rewritten sql_source. Runs
+        // after the drop+create above, so the renamed table already exists
+        // under its new name — self-referential FKs on it are picked up by
+        // the same loop.
+        rebind_child_foreign_keys(database, &stmt.table_name, &stmt.new_table_name);
+    }
 
-    // Propagate the rename into any dependent VIEW definitions that reference the
-    // old table name. SQLite (legacy_alter_table=OFF) rewrites view bodies the
-    // same way it rewrites trigger bodies and FK REFERENCES clauses on
-    // `ALTER TABLE ... RENAME TO`; without this, a view resolving the old name
-    // fails with a stale "table not found" lookup on the next read (issue
-    // #6303). Mirrors `rewrite_views_for_column_rename`'s two-phase compute/
-    // commit shape, but table-reference rewriting is purely lexical (see
-    // `rewrite_table_refs_in_view_sql`) so there is no ambiguity to abort on.
-    rewrite_views_for_table_rename(database, &stmt.table_name, &stmt.new_table_name);
+    if !legacy {
+        // Propagate the rename into any dependent VIEW definitions that
+        // reference the old table name. Rewrites view bodies the same way it
+        // rewrites trigger bodies and FK REFERENCES clauses on
+        // `ALTER TABLE ... RENAME TO`; without this, a view resolving the old
+        // name fails with a stale "table not found" lookup on the next read
+        // (issue #6303). Mirrors `rewrite_views_for_column_rename`'s two-phase
+        // compute/commit shape, but table-reference rewriting is purely
+        // lexical (see `rewrite_table_refs_in_view_sql`) so there is no
+        // ambiguity to abort on.
+        rewrite_views_for_table_rename(database, &stmt.table_name, &stmt.new_table_name);
+    }
 
     // Invalidate the database-level columnar cache for both old and new table names.
     // The old table name's cache is invalidated since the table no longer exists,

@@ -2048,6 +2048,21 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "LEGACY_ALTER_TABLE" => {
+                    // SQLite-compatible PRAGMA legacy_alter_table: when ON,
+                    // ALTER TABLE ... RENAME TO no longer rewrites dependent
+                    // triggers/views/child-FK REFERENCES clauses to the new
+                    // name (issue #6634, e_fkey-61.2.2). Session-scoped,
+                    // default OFF (SQLite's modern "smart rename" behavior).
+                    self.db.set_legacy_alter_table(bool_value);
+                    Ok(QueryResult {
+                        rows: Vec::new(),
+                        columns: Vec::new(),
+                        row_count: 0,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "WRITABLE_SCHEMA" => {
                     // SQLite-compatible PRAGMA writable_schema: when ON,
                     // UPDATE sqlite_master/sqlite_schema SET sql = ... may
@@ -2570,6 +2585,18 @@ impl SqlExecutor {
                     let value = if self.db.writable_schema() { "1" } else { "0" };
                     Ok(QueryResult {
                         columns: vec!["writable_schema".to_string()],
+                        rows: vec![vec![Some(value.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
+                "LEGACY_ALTER_TABLE" => {
+                    // SQLite-compatible PRAGMA legacy_alter_table read.
+                    // Defaults to 0 (OFF).
+                    let value = if self.db.legacy_alter_table() { "1" } else { "0" };
+                    Ok(QueryResult {
+                        columns: vec!["legacy_alter_table".to_string()],
                         rows: vec![vec![Some(value.to_string())]],
                         row_count: 1,
                         execution_time_ms: None,
