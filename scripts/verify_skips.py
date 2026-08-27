@@ -56,7 +56,7 @@ ACK_BUCKET_B = {
     # curator-flagged
     "collate1-", "collate2-", "collate3-", "collate4-", "collate5-",
     "collate7-", "collate8-", "collate9-", "collateA-",
-    "types-", "types2-", "subquery-",
+    "types2-", "subquery-",
     "without_rowid1-", "without_rowid2-", "without_rowid5-", "without_rowid6-",
     "autoindex3-", "autoindex4-", "autoindex5-",
     "unique2-", "rowid-", "resolver01-", "misc3-", "misc4-", "aggnested-",

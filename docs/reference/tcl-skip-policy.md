@@ -398,7 +398,7 @@ each names an **in-scope SQL surface**:
 | Pattern(s) | Rationale as written | Why it is Bucket B |
 |-----------|----------------------|--------------------|
 | `collate1-` … `collateA-` (8) | "Collation behavior differs" | Built-in `BINARY`/`NOCASE`/`RTRIM` collation is core SQL. Custom-collation *sub*-cases are already separately Bucket A (the `db collate` detector), so the blanket file glob over-skips real coverage. |
-| `types-`, `types2-` | "Type handling differs" | Type affinity is core SQL. |
+| `types2-` | "Type handling differs" | Type affinity is core SQL. (`types-` was resolved: Part of #6172 removed the blanket pattern and re-verified the file at 51/55 (92.7%) passing for real, with 4 named per-test Bucket-A skips for the record_sizes/btree_open SQLite-internal-B-tree-API dependency — see the `types` entry in `vibesql_partial_skip_files`. `types2-` remains an open Bucket-B item: a fresh measurement (Part of #6172) found it also un-skips to mostly-passing, 367/398 (92.2%), but its 31 failures span several apparently-distinct root causes not yet triaged.) |
 | `subquery-` | "Subquery handling differs" | Subqueries are core SQL. |
 | `without_rowid1/2/5/6-` | "WITHOUT ROWID tables not fully supported" | WITHOUT ROWID is a real SQLite feature; "not fully" + the fact that `without_rowid3/4` are *not* skipped is direct evidence of a partial engine gap. |
 | `autoindex3/4/5-` | "Automatic indexing not implemented" | Automatic (transient) indexing. Result-only cases must still pass; plan-assertion cases are Bucket A **only if** verified to assert `EXPLAIN`/`sqlite_search_count`. Blanket skip is not defensible; `autoindex1/2` are not skipped. |
