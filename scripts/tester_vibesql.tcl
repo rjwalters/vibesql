@@ -11152,6 +11152,20 @@ proc reset_db {} {
     set ::pragma_encoding ""  ;# reset_db: encoding resets to default UTF-8 (#6172)
     set ::pragma_synchronous_raw ""  ;# reset_db: synchronous resets to default FULL (#6175)
     set ::pragma_cache_size_raw ""   ;# reset_db: cache_size resets to default -2000 (#6175)
+    # DQS (Double-Quoted Strings) mode is set via sqlite3_db_config, a
+    # connection-level (not file-level) setting. Real SQLite's reset_db
+    # proc closes and reopens the connection, which implicitly drops it back
+    # to the OFF default; our shim tracks it as a plain TCL global that is
+    # otherwise only cleared by the "first time opening this file" branch of
+    # `proc sqlite3` (triggered by an explicit `sqlite3 db <file>` call) —
+    # which reset_db callers do not always make before their next statement.
+    # Without this, a DQS toggle left on by an earlier do_execsql_test in the
+    # same file (e.g. `sqlite3_db_config db SQLITE_DBCONFIG_DQS_DDL 1`) leaks
+    # into every later test in the file even across reset_db, silently
+    # mangling unrelated double-quoted identifiers via
+    # apply_dqs_mode_conversion (see altercol.test group 22/23, issue #6174).
+    set ::dqs_ddl_mode 0
+    set ::dqs_dml_mode 0
     # reset_db wipes the database file (via delete_db_with_wal above), so any
     # tracked default_cache_size/user_version/application_id/schema_version
     # cookie for this path is stale — a fresh file has no header cookie,
