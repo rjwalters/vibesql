@@ -376,8 +376,14 @@ fn test_expression_index_functional_after_binary_reload() {
     );
 
     // Now perform the REINDEX-on-load and confirm the index becomes functional
-    // AND is actually selected for the query.
-    rebuild_pending_expression_indexes(&mut reloaded).unwrap();
+    // AND is actually selected for the query. A clean rebuild (issue #6621)
+    // reports no warnings — the returned `Vec<String>` is the sole channel
+    // for rebuild diagnostics now (no direct stderr write from this function).
+    let warnings = rebuild_pending_expression_indexes(&mut reloaded).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "a fully-resolvable rebuild must report no warnings, got: {warnings:?}"
+    );
     assert!(
         !reloaded.is_index_pending_rebuild("t3rs"),
         "pending-rebuild flag should clear after rebuild"
@@ -458,6 +464,27 @@ fn test_rebuild_tolerates_unresolvable_expression_index() {
         "rebuild_pending_expression_indexes must tolerate an unresolvable \
          expression index rather than hard-failing the whole database load, got: {:?}",
         result.err()
+    );
+
+    // Regression for issue #6621: the per-index failure must be surfaced as
+    // returned diagnostic data (not written directly to stderr, which would
+    // leak into any consumer capturing this call's output, e.g. the CLI under
+    // the TCL harness's merged-stream capture). Exactly one warning should be
+    // reported, naming the unresolvable index and NOT the sibling that
+    // rebuilt fine.
+    let warnings = result.unwrap();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one warning for the single unresolvable index, got: {warnings:?}"
+    );
+    assert!(
+        warnings[0].contains("bad_idx"),
+        "warning should name the unresolvable index 'bad_idx', got: {warnings:?}"
+    );
+    assert!(
+        !warnings[0].contains("good_idx"),
+        "warning should not mention the sibling index that rebuilt successfully, got: {warnings:?}"
     );
 
     // The bad index stays unusable/pending-rebuild forever (the planner

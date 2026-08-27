@@ -203,6 +203,33 @@ pub struct QueryResult {
 
 use crate::util::is_memory_database;
 
+/// Surface expression-index-rebuild diagnostics from
+/// `vibesql_executor::rebuild_pending_expression_indexes` on stderr, but only
+/// when stderr is an actual terminal a human is watching interactively.
+///
+/// Real SQLite never emits a diagnostic when it cannot resolve a persisted
+/// (e.g. `PRAGMA writable_schema`-created) expression index — the object
+/// simply stays unusable until an evaluation is actually attempted. VibeSQL's
+/// warning is a best-effort, human-facing extra on top of that, so it must
+/// never appear in output any other consumer might capture: piped stdin,
+/// `-c`/`-f` script execution, or (most concretely) the SQLite TCL test
+/// harness, which merges the CLI's stderr into its captured stdout at every
+/// `exec` call site — an unconditional `eprintln!` here would corrupt the
+/// captured query-result text for any test that happens to trigger a rebuild
+/// (issue #6621). Gating on `stderr().is_terminal()` keeps the diagnostic
+/// available for an ordinary interactive `vibesql` REPL session (where stderr
+/// really is a separate terminal stream a human can see) while suppressing it
+/// everywhere output is redirected or captured.
+fn print_expression_index_rebuild_warnings(warnings: &[String]) {
+    use std::io::IsTerminal;
+    if warnings.is_empty() || !std::io::stderr().is_terminal() {
+        return;
+    }
+    for warning in warnings {
+        eprintln!("{}", warning);
+    }
+}
+
 /// Render a VibeSQL DataType as a SQLite-flavor declared type string suitable
 /// for `PRAGMA table_info`. SQLite preserves the original CREATE TABLE text,
 /// but VibeSQL doesn't track the literal declaration, so we map back to the
@@ -481,9 +508,10 @@ fn load_attached_database_file(path: &str) -> anyhow::Result<(Database, u64)> {
     // loader cannot evaluate index expressions, so expression-index bodies
     // come back empty and must be rebuilt or they silently return no rows
     // (#5784).
-    vibesql_executor::rebuild_pending_expression_indexes(&mut db).map_err(|e| {
+    let warnings = vibesql_executor::rebuild_pending_expression_indexes(&mut db).map_err(|e| {
         anyhow::anyhow!("Failed to rebuild expression indexes after recovering {}: {}", path, e)
     })?;
+    print_expression_index_rebuild_warnings(&warnings);
 
     Ok((db, stats.last_lsn))
 }
@@ -692,13 +720,15 @@ impl SqlExecutor {
                 // empty (it cannot evaluate index expressions). Without this an
                 // expression index would silently return zero rows after reopen.
                 // See issue #5784.
-                vibesql_executor::rebuild_pending_expression_indexes(&mut db).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to rebuild expression indexes after loading {}: {}",
-                        db_path,
-                        e
-                    )
-                })?;
+                let warnings = vibesql_executor::rebuild_pending_expression_indexes(&mut db)
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to rebuild expression indexes after loading {}: {}",
+                            db_path,
+                            e
+                        )
+                    })?;
+                print_expression_index_rebuild_warnings(&warnings);
                 // Apply the configured columnar cache budget (issue #6200).
                 // Safe post-load: the cache populates lazily on the first
                 // analytical query, so no cached data is discarded here. `0`
@@ -757,8 +787,9 @@ impl SqlExecutor {
 
         // Rebuild expression-index bodies left empty by the snapshot loader
         // (binary/JSON reload path). Harmless no-op when there are none. #5784.
-        vibesql_executor::rebuild_pending_expression_indexes(&mut db)
+        let warnings = vibesql_executor::rebuild_pending_expression_indexes(&mut db)
             .map_err(|e| anyhow::anyhow!("Failed to rebuild expression indexes: {}", e))?;
+        print_expression_index_rebuild_warnings(&warnings);
 
         // Apply the configured columnar cache budget (issue #6200). Applied
         // before any query runs; the cache populates lazily so this discards
