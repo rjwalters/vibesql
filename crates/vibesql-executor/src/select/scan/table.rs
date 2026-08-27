@@ -652,7 +652,19 @@ pub(crate) fn execute_table_scan(
         };
 
         // Since views can have arbitrary SELECT expressions, we derive column types from the first
-        // row
+        // row.
+        //
+        // A compound view body (UNION/INTERSECT/EXCEPT) is the exception:
+        // its result columns need `super::derived::compound_column_data_type`'s
+        // shared-or-none affinity treatment rather than blindly trusting row
+        // 1's runtime type, which only reflects whichever branch happened to
+        // produce the first row — see that function's doc comment for the
+        // two issue #6172/#5749 cases this distinguishes (a view over
+        // `map_integer UNION SELECT ... FROM map_text`, joined against a
+        // TEXT-affinity column, must not coerce the INTEGER branch's values
+        // into matching the TEXT side; a view over two same-affinity
+        // branches must keep that shared affinity).
+        let is_compound_view = view.query.set_operation.is_some();
         let columns = if !select_result.rows.is_empty() {
             let first_row = &select_result.rows[0];
             column_names
@@ -662,7 +674,11 @@ pub(crate) fn execute_table_scan(
                 .map(|(idx, (name, value))| {
                     vibesql_catalog::ColumnSchema {
                         name: name.clone(),
-                        data_type: value.get_type(),
+                        data_type: if is_compound_view {
+                            super::derived::compound_column_data_type(&select_result.rows, idx)
+                        } else {
+                            value.get_type()
+                        },
                         nullable: true, // Views return nullable columns by default
                         default_value: None,
                         generated_expr: None, // Views don't have generated columns
