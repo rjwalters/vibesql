@@ -224,7 +224,7 @@ impl DeleteExecutor {
         // affecting zero rows — before the TRUNCATE fast path below and
         // before any row scan. Covers both this table's own outgoing FKs and
         // any other table's FK that references this table as parent.
-        crate::foreign_key_check::validate_fk_schema_for_dml(database, &stmt.table_name)?;
+        crate::foreign_key_check::validate_fk_schema_for_dml(database, &stmt.table_name, true)?;
 
         // Fast path: DELETE FROM table (no WHERE clause)
         // Use TRUNCATE-style optimization for 100-1000x performance improvement

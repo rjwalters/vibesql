@@ -103,21 +103,51 @@ pub(crate) fn check_fk_definition_error(
 ///   1. UPDATE/DELETE statements that end up touching zero rows (their per-row FK loops never run
 ///      at all).
 ///   2. DML against the *parent* side of a broken FK — SQLite reports the same error when preparing
-///      a statement against the referenced table, not just the referencing one.
+///      a statement against the referenced table, not just the referencing one — but (per
+///      `check_descendants` below) **only** for statement forms that make SQLite build the FK
+///      "change mask" infrastructure for that table.
 ///   3. DML against a table several cascade-action hops away from the broken FK
 ///      (fkey2-20150416-100, Part of #6170): preparing DML against `t1` must also detect that `t0`
 ///      (which references `t1` via an `ON DELETE`/`ON UPDATE` action) has its own child, `t`, whose
 ///      FK definition is broken — SQLite recursively re-validates a cascade child's schema while
 ///      compiling the cascade action, so the error surfaces transitively, not just one hop away.
+///
+/// `check_descendants` gates step 2/3 (the closure walk over tables that reference `table_name`,
+/// directly or transitively). UPDATE and DELETE always pass `true` — either can invoke a
+/// referencing child's ON UPDATE/ON DELETE action, so SQLite always resolves the child's FK
+/// definition when compiling them. For **INSERT**, real SQLite only does this when the row source
+/// is a `SELECT` (empirically verified against `sqlite3` 3.51.0, e_fkey-19.2 vs e_fkey-20.$tn.6):
+/// `INSERT INTO parent SELECT ...` reports "foreign key mismatch" for a broken child exactly like
+/// `DELETE`/`UPDATE` do, but `INSERT INTO parent VALUES(...)` and `INSERT INTO parent DEFAULT
+/// VALUES` do **not** — SQLite's fast single-row VALUES insert path never builds the FK
+/// change-mask machinery that a broken descendant's definition would be resolved through, since a
+/// new parent row can never invalidate an existing child row. Callers pass `false` for
+/// `InsertSource::Values`/`DefaultValues`, `true` for `InsertSource::Select`.
 pub fn validate_fk_schema_for_dml(
     db: &Database,
     table_name: &str,
+    check_descendants: bool,
 ) -> Result<(), crate::errors::ExecutorError> {
     if !db.foreign_keys_enabled() {
         return Ok(());
     }
 
     if db.catalog.get_table(table_name).is_none() {
+        return Ok(());
+    }
+
+    // 1. This table's own outgoing FKs. Always checked, regardless of statement form — an INSERT
+    //    INTO the child side of a broken FK must fail whether it's INSERT...VALUES or
+    //    INSERT...SELECT.
+    if let Some(schema) = db.catalog.get_table(table_name) {
+        for fk in &schema.foreign_keys {
+            if let Some(err) = check_fk_definition_error(db, table_name, fk) {
+                return Err(err);
+            }
+        }
+    }
+
+    if !check_descendants {
         return Ok(());
     }
 
@@ -128,15 +158,6 @@ pub fn validate_fk_schema_for_dml(
         .list_tables()
         .iter()
         .any(|t| db.catalog.get_table(t).map(|s| !s.foreign_keys.is_empty()).unwrap_or(false));
-
-    // 1. This table's own outgoing FKs.
-    if let Some(schema) = db.catalog.get_table(table_name) {
-        for fk in &schema.foreign_keys {
-            if let Some(err) = check_fk_definition_error(db, table_name, fk) {
-                return Err(err);
-            }
-        }
-    }
 
     if !has_any_fks {
         return Ok(());
@@ -1334,7 +1355,7 @@ mod tests {
         w.foreign_keys.push(w_y_fk);
         db.create_table(w).unwrap();
 
-        let result = validate_fk_schema_for_dml(&db, "t1");
+        let result = validate_fk_schema_for_dml(&db, "t1", true);
         match result {
             Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
                 assert_eq!(child, "w");
@@ -1343,6 +1364,102 @@ mod tests {
             other => panic!(
                 "expected Err(ForeignKeyMismatch {{ child: \"w\", parent: \"x\" }}), got {:?}",
                 other
+            ),
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // validate_fk_schema_for_dml — `check_descendants` gating (Part of
+    // #6170): INSERT...VALUES/DEFAULT VALUES must NOT walk the descendant
+    // closure (a broken *child*'s definition is invisible to a plain INSERT
+    // into the parent), but UPDATE/DELETE and INSERT...SELECT must.
+    // -----------------------------------------------------------------
+
+    /// `t1` (PK-only, no outgoing FKs) with one broken child `c` whose FK
+    /// references `t1(junk)` — `junk` is a plain column with no PK/UNIQUE/
+    /// non-partial UNIQUE INDEX backing it, so `c`'s FK definition is broken.
+    fn setup_broken_child_of_t1() -> Database {
+        let mut db = Database::new();
+        db.set_foreign_keys_enabled(true);
+
+        let t1 = TableSchema::with_primary_key(
+            "t1".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("junk".to_string(), DataType::Integer, true),
+            ],
+            vec!["id".to_string()],
+        );
+        db.create_table(t1).unwrap();
+
+        let c_junk_fk = ForeignKeyConstraint {
+            name: Some("fk_c_junk".to_string()),
+            column_names: vec!["t1_junk".to_string()],
+            column_indices: vec![1],
+            parent_table: "t1".to_string(),
+            parent_column_names: vec!["junk".to_string()],
+            parent_column_indices: vec![1],
+            on_delete: ReferentialAction::NoAction,
+            on_update: ReferentialAction::NoAction,
+            is_deferrable: false,
+            initially_deferred: false,
+        };
+        let c_columns = vec![
+            ColumnSchema::new("id".to_string(), DataType::Integer, false),
+            ColumnSchema::new("t1_junk".to_string(), DataType::Integer, true),
+        ];
+        let mut c =
+            TableSchema::with_primary_key("c".to_string(), c_columns, vec!["id".to_string()]);
+        c.foreign_keys.push(c_junk_fk);
+        db.create_table(c).unwrap();
+
+        db
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_check_descendants_false_ignores_broken_child() {
+        // Simulates INSERT INTO t1 VALUES(...) / DEFAULT VALUES: the broken
+        // child `c` must not be surfaced (e_fkey-19.2's contract).
+        let db = setup_broken_child_of_t1();
+        let result = validate_fk_schema_for_dml(&db, "t1", false);
+        assert!(
+            result.is_ok(),
+            "check_descendants=false must not walk to the broken child: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_check_descendants_true_detects_broken_child() {
+        // Simulates INSERT INTO t1 SELECT ... / UPDATE t1 / DELETE FROM t1:
+        // the broken child `c` must be surfaced (e_fkey-20.$tn.6's contract).
+        let db = setup_broken_child_of_t1();
+        let result = validate_fk_schema_for_dml(&db, "t1", true);
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "c");
+                assert_eq!(parent, "t1");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"c\", parent: \"t1\" }}), got {other:?}"
+            ),
+        }
+    }
+
+    #[test]
+    fn validate_fk_schema_for_dml_check_descendants_false_still_checks_own_fks() {
+        // check_descendants only gates the *descendant* closure walk (step
+        // 2/3) — a table's own outgoing FKs (step 1) are always checked,
+        // regardless of statement form. Simulates INSERT INTO c VALUES(...)
+        // directly against the broken child itself.
+        let db = setup_broken_child_of_t1();
+        let result = validate_fk_schema_for_dml(&db, "c", false);
+        match result {
+            Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
+                assert_eq!(child, "c");
+                assert_eq!(parent, "t1");
+            }
+            other => panic!(
+                "expected Err(ForeignKeyMismatch {{ child: \"c\", parent: \"t1\" }}) even with check_descendants=false, got {other:?}"
             ),
         }
     }
@@ -1425,7 +1542,7 @@ mod tests {
         // referenced column), so this must terminate and return Ok — the
         // test's real assertion is simply that it returns at all (i.e. the
         // BFS's `visited` set bounds frontier growth on a genuine cycle).
-        let result = validate_fk_schema_for_dml(&db, "a");
+        let result = validate_fk_schema_for_dml(&db, "a", true);
         assert!(result.is_ok(), "cyclic FK graph must not error: {:?}", result);
     }
 
@@ -1586,7 +1703,7 @@ mod tests {
         // Before the #6583 fix this silently returned `Ok(())`.
         let db = setup_asymmetric_convergence(/* a_broken = */ true);
 
-        let result = validate_fk_schema_for_dml(&db, "t1");
+        let result = validate_fk_schema_for_dml(&db, "t1", true);
         match result {
             Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
                 assert_eq!(child, "w");
@@ -1609,7 +1726,7 @@ mod tests {
         // broken — both directions must be caught.
         let db = setup_asymmetric_convergence(/* a_broken = */ false);
 
-        let result = validate_fk_schema_for_dml(&db, "t1");
+        let result = validate_fk_schema_for_dml(&db, "t1", true);
         match result {
             Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
                 assert_eq!(child, "w");
@@ -1726,7 +1843,7 @@ mod tests {
         w.foreign_keys.push(w_to_c);
         db.create_table(w).unwrap();
 
-        let result = validate_fk_schema_for_dml(&db, "t1");
+        let result = validate_fk_schema_for_dml(&db, "t1", true);
         match result {
             Err(crate::errors::ExecutorError::ForeignKeyMismatch { child, parent }) => {
                 assert_eq!(child, "w");

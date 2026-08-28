@@ -327,8 +327,14 @@ fn execute_insert_internal(
     // must be reported even when this INSERT's source produces zero rows
     // (`INSERT INTO t SELECT ... FROM empty`) — the per-row FK validation
     // below never runs in that case. Also covers INSERT into the *parent*
-    // side of a broken FK declared by some other (child) table.
-    crate::foreign_key_check::validate_fk_schema_for_dml(db, table_name)?;
+    // side of a broken FK declared by some other (child) table — but (per
+    // `validate_fk_schema_for_dml`'s doc comment, e_fkey-19.2 vs
+    // e_fkey-20.$tn.6, Part of #6170) only when the row source is a SELECT:
+    // real SQLite's fast INSERT...VALUES/DEFAULT VALUES path never resolves a
+    // broken descendant's FK definition, since a newly inserted parent row
+    // can never invalidate an existing child row.
+    let check_descendants = matches!(stmt.source, vibesql_ast::InsertSource::Select(_));
+    crate::foreign_key_check::validate_fk_schema_for_dml(db, table_name, check_descendants)?;
 
     // Schema-aware trigger firing (triggerD-3.1/3.2): resolve which schema this
     // INSERT's target table actually lives in (temp shadows main for unqualified

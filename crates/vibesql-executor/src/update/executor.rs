@@ -125,7 +125,7 @@ pub(super) fn execute_internal(
     // the per-row FK validation below never runs in that case. Covers both
     // this table's own outgoing FKs and any other table's FK that
     // references this table as parent.
-    crate::foreign_key_check::validate_fk_schema_for_dml(database, table_name)?;
+    crate::foreign_key_check::validate_fk_schema_for_dml(database, table_name, true)?;
 
     // Check if table has UPDATE triggers (check once, use multiple times).
     //
