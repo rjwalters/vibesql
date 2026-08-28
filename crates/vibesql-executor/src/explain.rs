@@ -127,6 +127,16 @@ pub struct PlanNode {
     /// (where9-3.2). Applies to ordinary SEARCH/COVERING lines and to each
     /// inner `SEARCH` line of a correlated-join MULTI-INDEX OR subtree.
     pub left_join: bool,
+    /// When set, this node is an `EXISTS`/`IN`/scalar-subquery expression
+    /// SQLite cannot flatten into the outer FROM-clause join/semi-join plan
+    /// (a correlated WHERE-clause `EXISTS`/`IN` whose own subquery has a
+    /// multi-table FROM clause or aggregates without `GROUP BY`, or any
+    /// SELECT-list `EXISTS`/`IN`/scalar-subquery expression, which is never
+    /// rewritten into a join at all). Rendered as its own labelled entry
+    /// (e.g. `CORRELATED SCALAR SUBQUERY 1`) with the subquery's own plan
+    /// nested underneath, matching sqlite3's EQP shape (existsexpr.test
+    /// 3.7/3.9/4.4, #6647).
+    pub subquery_label: Option<String>,
 }
 
 impl PlanNode {
@@ -150,6 +160,7 @@ impl PlanNode {
             coroutine: None,
             multi_index_or_branches: Vec::new(),
             left_join: false,
+            subquery_label: None,
         }
     }
 
@@ -575,6 +586,19 @@ fn write_eqp_entries(entries: &[EqpEntry], indent: &str, output: &mut String) {
 /// co-routine output — matching SQLite's EQP shape for window views
 /// (windowpushd.test, #5347).
 fn append_scan_entries(node: &PlanNode, entries: &mut Vec<EqpEntry>) {
+    // Un-flattenable EXISTS/IN/scalar-subquery expression (#6647): render as
+    // its own labelled entry (`CORRELATED SCALAR SUBQUERY N`) with the
+    // subquery's own plan nested underneath, mirroring the CO-ROUTINE/
+    // COMPOUND QUERY nesting pattern below.
+    if let Some(ref label) = node.subquery_label {
+        let mut children = Vec::new();
+        for child in &node.children {
+            children.extend(collect_eqp_entries(child));
+        }
+        entries.push(EqpEntry { text: label.clone(), children });
+        return;
+    }
+
     if let Some(ref name) = node.coroutine {
         let mut children = Vec::new();
         for child in &node.children {
@@ -1290,6 +1314,35 @@ impl ExplainExecutor {
             root.details.push(format!("Limit: {}", limit.to_sql()));
         }
 
+        // Un-flattenable EXISTS/IN/scalar-subquery expressions (#6647):
+        // SQLite's exists-to-join optimizer can rewrite a simple,
+        // single-table correlated WHERE-clause `EXISTS`/`IN` into a
+        // semi-join with no separate plan entry (the common case, already
+        // rendered above via the bare outer scan) — but a subquery whose own
+        // FROM clause has more than one table, or whose own SELECT list
+        // aggregates without a `GROUP BY` (always exactly one row, so it
+        // cannot become a per-outer-row join predicate), keeps its own
+        // `CORRELATED SCALAR SUBQUERY N` entry (existsexpr.test 3.7/3.9). A
+        // SELECT-list `EXISTS`/`IN`/scalar-subquery expression is never
+        // rewritten into a join at all, so it always keeps its own entry
+        // (existsexpr.test 4.4).
+        let mut where_subqueries = Vec::new();
+        if let Some(ref where_expr) = stmt.where_clause {
+            Self::collect_unflattenable_where_subqueries(where_expr, &mut where_subqueries);
+        }
+        for (subquery_index, subquery) in where_subqueries
+            .into_iter()
+            .chain(Self::collect_select_list_subqueries(&stmt.select_list))
+            .enumerate()
+        {
+            let mut subquery_node = PlanNode::new("Subquery");
+            subquery_node.subquery_label =
+                Some(format!("CORRELATED SCALAR SUBQUERY {}", subquery_index + 1));
+            let child = Self::explain_select(subquery, database, &ctes)?;
+            subquery_node.add_child(child);
+            root.add_child(subquery_node);
+        }
+
         Ok(root)
     }
 
@@ -1938,6 +1991,76 @@ impl ExplainExecutor {
             SelectItem::Expression { expr, .. } => contains_aggregate_function(expr),
             SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
         })
+    }
+
+    /// True when a WHERE-clause `EXISTS`/`IN` subquery cannot be folded into
+    /// the outer FROM-clause join/semi-join plan by SQLite's exists-to-join
+    /// optimizer, and therefore keeps its own `SUBQUERY` EQP entry instead of
+    /// disappearing into a bare `SCAN <outer-table>` (#6647): a subquery
+    /// whose own FROM clause is not a single table (SQLite only rewrites a
+    /// single-table correlated body into a semi-join — existsexpr.test 3.9),
+    /// or a subquery whose own SELECT list aggregates without a `GROUP BY`
+    /// (such a subquery always returns exactly one row, so it can never
+    /// become a per-outer-row join predicate — existsexpr.test 3.7).
+    fn subquery_blocks_where_flattening(subquery: &SelectStmt) -> bool {
+        let multi_table_from = matches!(
+            subquery.from.as_ref(),
+            Some(f) if !matches!(f, FromClause::Table { .. })
+        );
+        let aggregate_without_group_by =
+            subquery.group_by.is_none() && Self::select_list_has_aggregate(subquery);
+        multi_table_from || aggregate_without_group_by
+    }
+
+    /// Recursively collect the subquery bodies of WHERE-clause `EXISTS`/`IN`
+    /// expressions that [`subquery_blocks_where_flattening`] identifies as
+    /// un-flattenable, reachable through AND/OR/NOT boolean combinators
+    /// (#6647). Other predicate shapes (a subquery nested inside a
+    /// comparison, CASE, etc.) are out of scope for this issue.
+    fn collect_unflattenable_where_subqueries<'a>(
+        expr: &'a Expression,
+        out: &mut Vec<&'a SelectStmt>,
+    ) {
+        match expr {
+            Expression::Exists { subquery, .. } | Expression::In { subquery, .. } => {
+                if Self::subquery_blocks_where_flattening(subquery) {
+                    out.push(subquery);
+                }
+            }
+            Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
+                for e in exprs {
+                    Self::collect_unflattenable_where_subqueries(e, out);
+                }
+            }
+            Expression::BinaryOp { left, right, .. } => {
+                Self::collect_unflattenable_where_subqueries(left, out);
+                Self::collect_unflattenable_where_subqueries(right, out);
+            }
+            Expression::UnaryOp { expr, .. } => {
+                Self::collect_unflattenable_where_subqueries(expr, out);
+            }
+            _ => {}
+        }
+    }
+
+    /// Collect the subqueries of `EXISTS`/`IN`/scalar-subquery expressions
+    /// appearing directly in a SELECT list. Unlike a WHERE-clause predicate,
+    /// SQLite never rewrites a SELECT-list subquery into a join — every one
+    /// keeps its own `SUBQUERY` EQP entry (existsexpr.test 4.4, #6647).
+    fn collect_select_list_subqueries(select_list: &[SelectItem]) -> Vec<&SelectStmt> {
+        select_list
+            .iter()
+            .filter_map(|item| match item {
+                SelectItem::Expression { expr, .. } => match expr {
+                    Expression::Exists { subquery, .. } | Expression::In { subquery, .. } => {
+                        Some(subquery.as_ref())
+                    }
+                    Expression::ScalarSubquery(subquery) => Some(subquery.as_ref()),
+                    _ => None,
+                },
+                SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => None,
+            })
+            .collect()
     }
 
     /// True when a compound body contains any deduplicating set operation
