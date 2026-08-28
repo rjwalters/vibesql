@@ -474,6 +474,31 @@ pub fn rename_column(
                 }
             }
             Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_) => {
+                // A single-quoted token is identifier-like ONLY in `nm ::= id |
+                // STRING` *name* grammar positions: the parent-table name after
+                // `REFERENCES`, a collation name after `COLLATE`, a column's type
+                // name, and the column-definition name itself (the positions the
+                // dedicated branches below handle). Everywhere else in a column
+                // definition a single-quoted token is an `expr` *literal* —
+                // `DEFAULT 'foo'`, `CHECK (x <> 'foo')`, `GENERATED ALWAYS AS
+                // (... || 'foo')` — never a column reference. Letting such a
+                // literal fall through to the generic `ident_matches` rewrite at
+                // the bottom of this arm would silently rewrite the literal's
+                // *value* whenever its text happened to equal `old_col`: renaming
+                // `foo` -> `bar` would turn `DEFAULT 'foo'` into `DEFAULT "bar"`,
+                // which re-parses as a column reference rather than the original
+                // string constant (schema corruption, not just re-spelling).
+                let string_in_name_position = expect_parent_table
+                    || skip_below.is_some()
+                    || expect_collation
+                    || (depth == 1 && (at_def_start || saw_col_name));
+                if matches!(tok, Token::String(_)) && !string_in_name_position {
+                    // Nothing to reset: the guard above already establishes that
+                    // every flag the catch-all arm below would clear is false
+                    // here, so a non-name string literal is simply skipped.
+                    idx += 1;
+                    continue;
+                }
                 if expect_parent_table {
                     expect_parent_table = false;
                     if depth == 1 {
@@ -1092,6 +1117,47 @@ mod tests {
         let sql = "CREATE TABLE t1('a'\"b\",c)";
         let out = rename_column(sql, "t1", "a", "x").unwrap();
         assert_eq!(out, "CREATE TABLE t1(\"x\" \"b\",c)");
+    }
+
+    #[test]
+    fn rename_column_leaves_default_string_literal_untouched() {
+        // A single-quoted token is identifier-like ONLY in `nm` (name) grammar
+        // positions. In a `DEFAULT` expression it is a string *constant*, so a
+        // literal whose text happens to equal the renamed column must survive
+        // byte-for-byte — rewriting it to `"bar"` would change the default's
+        // meaning (a double-quoted token re-parses as a column reference first).
+        let sql = "CREATE TABLE t (foo TEXT DEFAULT 'foo')";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT DEFAULT 'foo')");
+    }
+
+    #[test]
+    fn rename_column_leaves_check_string_literal_untouched() {
+        // Same hazard inside a CHECK constraint's expression: the column
+        // *reference* `foo` is rewritten, the string constant `'foo'` is not.
+        let sql = "CREATE TABLE t (foo TEXT, b TEXT CHECK (foo <> 'foo'))";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT, b TEXT CHECK (bar <> 'foo'))");
+    }
+
+    #[test]
+    fn rename_column_string_literal_name_with_matching_default_literal() {
+        // Both halves at once: the column *name* is spelled as a single-quoted
+        // string (a legal `nm`, rewritten and re-quoted double), while the
+        // identically spelled `DEFAULT` literal in expression position is left
+        // alone.
+        let sql = "CREATE TABLE t ('foo' TEXT DEFAULT 'foo')";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (\"bar\" TEXT DEFAULT 'foo')");
+    }
+
+    #[test]
+    fn rename_column_generated_expr_string_literal_untouched() {
+        // GENERATED ALWAYS AS (...) is another `expr` position: only the real
+        // column reference is rewritten.
+        let sql = "CREATE TABLE t (foo TEXT, g TEXT GENERATED ALWAYS AS (foo || 'foo'))";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT, g TEXT GENERATED ALWAYS AS (bar || 'foo'))");
     }
 
     #[test]
