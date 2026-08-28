@@ -232,3 +232,107 @@ fn plain_main_trigger_still_fires_unqualified() {
 
     assert_eq!(log_values(&db), vec![42], "unqualified insert must still fire the main trigger");
 }
+
+/// alter3-6.1/6.2: a MAIN trigger registered *before* a TEMP trigger on the
+/// same table+event must still fire *after* it. SQLite iterates the temp
+/// schema before main when dispatching triggers for an event, independent of
+/// `CREATE TRIGGER` registration order.
+///
+/// Matches sqlite3 3.51.0:
+/// ```text
+/// CREATE TABLE t1(a, b);
+/// CREATE TABLE log(x, a, b);
+/// CREATE TRIGGER t1_a AFTER INSERT ON t1 BEGIN
+///   INSERT INTO log VALUES('a', new.a, new.b); END;
+/// CREATE TEMP TRIGGER t1_b AFTER INSERT ON t1 BEGIN
+///   INSERT INTO log VALUES('b', new.a, new.b); END;
+/// INSERT INTO t1 VALUES(1, 2);
+/// SELECT * FROM log;   -- {b 1 2 a 1 2}
+/// ```
+#[test]
+fn temp_trigger_fires_before_main_trigger_registered_first_alter3_6() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a, b);");
+    exec(&mut db, "CREATE TABLE log(x, a, b);");
+    // MAIN trigger registered FIRST.
+    exec(
+        &mut db,
+        "CREATE TRIGGER t1_a AFTER INSERT ON t1 \
+         BEGIN INSERT INTO log VALUES('a', new.a, new.b); END;",
+    );
+    // TEMP trigger registered SECOND, on the same table+event.
+    exec(
+        &mut db,
+        "CREATE TEMP TRIGGER t1_b AFTER INSERT ON t1 \
+         BEGIN INSERT INTO log VALUES('b', new.a, new.b); END;",
+    );
+
+    exec(&mut db, "INSERT INTO t1 VALUES(1, 2);");
+
+    let rows = {
+        use vibesql_ast::Statement;
+        let stmt = Parser::parse_sql("SELECT x FROM log;").expect("parse failed");
+        let Statement::Select(select) = stmt else { panic!("expected SELECT") };
+        SelectExecutor::new(&db).execute(&select).expect("SELECT failed")
+    };
+    let fire_order: Vec<String> = rows
+        .iter()
+        .map(|r| match &r.values[0] {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+            other => panic!("expected text, got {other:?}"),
+        })
+        .collect();
+
+    assert_eq!(
+        fire_order,
+        vec!["b".to_string(), "a".to_string()],
+        "the TEMP trigger (t1_b) must fire before the MAIN trigger (t1_a) \
+         even though t1_a was CREATE TRIGGER'd first"
+    );
+}
+
+/// Tie-breaker: multiple triggers within the *same* schema fire in creation
+/// order (not incidental HashMap order).
+#[test]
+fn same_schema_triggers_fire_in_creation_order() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a);");
+    exec(&mut db, "CREATE TABLE log(x, a);");
+    exec(
+        &mut db,
+        "CREATE TRIGGER t1_first AFTER INSERT ON t1 \
+         BEGIN INSERT INTO log VALUES('first', new.a); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t1_second AFTER INSERT ON t1 \
+         BEGIN INSERT INTO log VALUES('second', new.a); END;",
+    );
+    exec(
+        &mut db,
+        "CREATE TRIGGER t1_third AFTER INSERT ON t1 \
+         BEGIN INSERT INTO log VALUES('third', new.a); END;",
+    );
+
+    exec(&mut db, "INSERT INTO t1 VALUES(9);");
+
+    let rows = {
+        use vibesql_ast::Statement;
+        let stmt = Parser::parse_sql("SELECT x FROM log;").expect("parse failed");
+        let Statement::Select(select) = stmt else { panic!("expected SELECT") };
+        SelectExecutor::new(&db).execute(&select).expect("SELECT failed")
+    };
+    let fire_order: Vec<String> = rows
+        .iter()
+        .map(|r| match &r.values[0] {
+            SqlValue::Varchar(s) | SqlValue::Character(s) => s.to_string(),
+            other => panic!("expected text, got {other:?}"),
+        })
+        .collect();
+
+    assert_eq!(
+        fire_order,
+        vec!["first".to_string(), "second".to_string(), "third".to_string()],
+        "same-schema triggers must fire in creation order"
+    );
+}

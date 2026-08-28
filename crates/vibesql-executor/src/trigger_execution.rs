@@ -6,7 +6,7 @@ use std::{
 };
 
 use vibesql_ast::{PseudoTable, TriggerEvent, TriggerGranularity, TriggerTiming};
-use vibesql_catalog::{TableSchema, TriggerDefinition};
+use vibesql_catalog::{TableSchema, TriggerDefinition, DEFAULT_SCHEMA};
 use vibesql_storage::{Database, Row};
 use vibesql_types::SqlValue;
 
@@ -366,7 +366,9 @@ impl TriggerFirer {
     /// * `event` - Trigger event (INSERT, UPDATE, DELETE)
     ///
     /// # Returns
-    /// Vector of trigger definitions matching the criteria, sorted by creation order
+    /// Vector of trigger definitions matching the criteria, ordered temp-schema
+    /// first then main-schema (SQLite iterates the temp schema before main),
+    /// with each schema group internally ordered by creation order.
     pub fn find_triggers(
         db: &Database,
         table_name: &str,
@@ -392,11 +394,26 @@ impl TriggerFirer {
         event: TriggerEvent,
         dml_schema: Option<&str>,
     ) -> Vec<TriggerDefinition> {
-        db.catalog
+        let mut triggers: Vec<TriggerDefinition> = db
+            .catalog
             .get_triggers_for_table_in_schema(table_name, Some(event.clone()), dml_schema)
             .filter(|trigger| trigger.timing == timing && trigger.enabled) // Skip disabled triggers
             .cloned()
-            .collect()
+            .collect();
+
+        // SQLite iterates the temp schema before the main schema when firing
+        // triggers, so a TEMP trigger fires before a MAIN trigger bound to the
+        // same table+event regardless of which was `CREATE TRIGGER`'d first
+        // (alter3-6.1/6.2). Within the same schema, fall back to creation
+        // order (the schema's own registration order) so firing order stays
+        // deterministic rather than depending on HashMap iteration order.
+        triggers.sort_by_key(|trigger| {
+            let schema_name = if trigger.is_temp() { "temp" } else { DEFAULT_SCHEMA };
+            let seq = db.catalog.creation_seq(schema_name, &trigger.name).unwrap_or(u64::MAX);
+            (!trigger.is_temp(), seq)
+        });
+
+        triggers
     }
 
     /// Validate that every applicable trigger's WHEN clause resolves its column
