@@ -7,23 +7,51 @@
 //! PK/UNIQUE/non-partial UNIQUE INDEX) even when the DML statement itself
 //! never touches that descendant.
 //!
-//! Empirically verified against real `sqlite3` 3.51.0: this closure walk only
-//! fires for INSERT when the row source is a `SELECT` — `INSERT INTO parent
-//! SELECT ...` reports "foreign key mismatch" for a broken child exactly like
-//! `UPDATE`/`DELETE` do, but `INSERT INTO parent VALUES(...)` and `INSERT INTO
-//! parent DEFAULT VALUES` do not, because SQLite's fast single-row VALUES
-//! insert path never builds the FK change-mask machinery a broken
-//! descendant's definition would be resolved through (a new parent row can
-//! never invalidate an existing child row). This exact contrast is asserted
-//! side-by-side by the SQLite conformance suite itself: e_fkey-19.2 (`INSERT
-//! INTO parent VALUES(...)` succeeds despite a broken descendant) vs.
+//! Empirically verified against real `sqlite3` 3.51.0, this mirrors the skip
+//! condition at the head of SQLite's parent-side loop in `sqlite3FkCheck()`:
+//!
+//! ```c
+//! if( !pFKey->isDeferred && !(db->flags & SQLITE_DeferFKs)
+//!  && !pParse->pToplevel && !pParse->isMultiWrite
+//! ){
+//!   /* Inserting a single row into a parent table cannot cause (or fix)
+//!   ** an immediate foreign key violation. So do nothing in this case.  */
+//!   continue;
+//! }
+//! ```
+//!
+//! The `continue` skips the whole loop body — including the
+//! `sqlite3FkLocateIndex()` call that raises `foreign key mismatch` — so the
+//! descendant walk is skipped **only** for a single-row, top-level,
+//! non-multi-write INSERT whose relevant child FKs are all immediate. Measured
+//! matrix against `CREATE TABLE p(a PRIMARY KEY, b); CREATE TABLE c(x
+//! REFERENCES p(b));` (broken: `p.b` has no PK/UNIQUE backing it):
+//!
+//! | statement against the parent `p`                             | real SQLite |
+//! |--------------------------------------------------------------|-------------|
+//! | `INSERT INTO p VALUES(1,2)`                                  | ok          |
+//! | `INSERT INTO p DEFAULT VALUES`                               | ok          |
+//! | `INSERT OR IGNORE`/`OR ABORT`/`OR FAIL`/`OR ROLLBACK`        | ok          |
+//! | `INSERT INTO p VALUES(1,2) ON CONFLICT DO NOTHING`           | ok          |
+//! | `INSERT INTO p VALUES(1,2),(3,4)`                            | mismatch    |
+//! | `INSERT INTO p SELECT 1,2`                                   | mismatch    |
+//! | `INSERT OR REPLACE INTO p VALUES(1,2)`                       | mismatch    |
+//! | `INSERT INTO p VALUES(1,2) ON CONFLICT(a) DO UPDATE SET b=3` | mismatch    |
+//! | `INSERT INTO p VALUES(1,2) RETURNING a`                      | mismatch    |
+//! | `INSERT INTO p VALUES(1,2)` from inside a trigger body       | mismatch    |
+//! | single-row VALUES, child FK `DEFERRABLE INITIALLY DEFERRED`  | mismatch    |
+//! | single-row VALUES with `PRAGMA defer_foreign_keys=ON`        | mismatch    |
+//!
+//! The VALUES-vs-SELECT half of this contrast is asserted side-by-side by the
+//! SQLite conformance suite itself: e_fkey-19.2 / e_fkey-21.2 (`INSERT INTO
+//! parent VALUES(...)` succeeds despite a broken descendant) vs.
 //! e_fkey-20.$tn.6 (`INSERT INTO $ptbl SELECT ?, ?` fails) in
 //! `docs/reference/sqlite/test/e_fkey.test`.
 //!
 //! A child's own outgoing FK is still checked unconditionally on INSERT,
 //! regardless of statement form — INSERT into a broken child must always fail.
 
-use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, InsertExecutor};
+use vibesql_executor::{CreateIndexExecutor, CreateTableExecutor, InsertExecutor, TriggerExecutor};
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
 
@@ -44,7 +72,11 @@ fn exec_ddl(db: &mut Database, sql: &str) {
             CreateIndexExecutor::execute(&create_index_stmt, db)
                 .unwrap_or_else(|e| panic!("exec {sql:?}: {e}"));
         }
-        other => panic!("expected CREATE TABLE/INDEX, got {other:?}"),
+        vibesql_ast::Statement::CreateTrigger(create_trigger_stmt) => {
+            TriggerExecutor::create_trigger(db, &create_trigger_stmt)
+                .unwrap_or_else(|e| panic!("exec {sql:?}: {e}"));
+        }
+        other => panic!("expected CREATE TABLE/INDEX/TRIGGER, got {other:?}"),
     }
 }
 
@@ -145,4 +177,108 @@ fn insert_values_into_parent_with_only_well_formed_children_succeeds() {
 
     exec_insert(&mut db, "INSERT INTO parent VALUES(1)").unwrap();
     exec_insert(&mut db, "INSERT INTO parent SELECT 2").unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// The rest of SQLite's `pParse->isMultiWrite` / `pParse->pToplevel` /
+// `pFKey->isDeferred` / `SQLITE_DeferFKs` conditions. `InsertSource::Select`
+// is not the only form that leaves the skip path — each case below was
+// measured against real `sqlite3` 3.51.0 (see the module doc matrix).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_multi_row_values_into_parent_of_broken_descendant_fails() {
+    // A multi-row VALUES list is parsed by SQLite as a compound SELECT of
+    // VALUES, which makes the statement multi-write — so unlike the single-row
+    // form it *does* report the broken descendant.
+    let mut db = new_db();
+    setup_parent_with_broken_descendant(&mut db);
+
+    let err = exec_insert(&mut db, "INSERT INTO parent VALUES(1, 2, 3), (4, 5, 6)")
+        .expect_err("multi-row INSERT ... VALUES into the parent must fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("foreign key mismatch") && msg.contains("child_bad"),
+        "expected a foreign key mismatch naming child_bad, got: {msg}"
+    );
+}
+
+#[test]
+fn insert_or_replace_values_into_parent_of_broken_descendant_fails() {
+    // REPLACE conflict handling deletes conflicting rows before inserting, so
+    // SQLite marks the statement multi-write. (The other conflict clauses —
+    // IGNORE/ABORT/FAIL/ROLLBACK — do not, and stay on the skip path.)
+    let mut db = new_db();
+    setup_parent_with_broken_descendant(&mut db);
+
+    let err = exec_insert(&mut db, "INSERT OR REPLACE INTO parent VALUES(1, 2, 3)")
+        .expect_err("INSERT OR REPLACE into the parent must fail");
+    assert!(err.to_string().contains("foreign key mismatch"), "got: {err}");
+}
+
+#[test]
+fn insert_or_ignore_values_into_parent_of_broken_descendant_succeeds() {
+    // Counterpart to the REPLACE case above: OR IGNORE is not multi-write in
+    // SQLite, so it stays on the single-row skip path and succeeds.
+    let mut db = new_db();
+    setup_parent_with_broken_descendant(&mut db);
+
+    exec_insert(&mut db, "INSERT OR IGNORE INTO parent VALUES(1, 2, 3)")
+        .expect("INSERT OR IGNORE into the parent side of a broken descendant must succeed");
+}
+
+#[test]
+fn insert_values_with_returning_into_parent_of_broken_descendant_fails() {
+    // RETURNING compiles to a coroutine, which SQLite flags as multi-write.
+    let mut db = new_db();
+    setup_parent_with_broken_descendant(&mut db);
+
+    let err = exec_insert(&mut db, "INSERT INTO parent VALUES(1, 2, 3) RETURNING a")
+        .expect_err("INSERT ... VALUES ... RETURNING into the parent must fail");
+    assert!(err.to_string().contains("foreign key mismatch"), "got: {err}");
+}
+
+#[test]
+fn insert_values_from_inside_a_trigger_body_into_parent_of_broken_descendant_fails() {
+    // `pParse->pToplevel != 0`: an INSERT compiled as part of a trigger
+    // sub-program is never on the skip path, even in single-row VALUES form.
+    let mut db = new_db();
+    setup_parent_with_broken_descendant(&mut db);
+    exec_ddl(&mut db, "CREATE TABLE t(v INTEGER)");
+    exec_ddl(
+        &mut db,
+        "CREATE TRIGGER tr AFTER INSERT ON t BEGIN INSERT INTO parent VALUES(1, 2, 3); END",
+    );
+
+    let err = exec_insert(&mut db, "INSERT INTO t VALUES(9)")
+        .expect_err("a trigger body's INSERT ... VALUES into the parent must fail");
+    assert!(err.to_string().contains("foreign key mismatch"), "got: {err}");
+}
+
+#[test]
+fn insert_values_into_parent_of_deferred_broken_child_fails() {
+    // `pFKey->isDeferred`: even the single-row VALUES skip path still resolves
+    // a child FK declared DEFERRABLE INITIALLY DEFERRED, so the mismatch in its
+    // definition is reported.
+    let mut db = new_db();
+    exec_ddl(&mut db, "CREATE TABLE p4(a INTEGER PRIMARY KEY, b INTEGER)");
+    exec_ddl(&mut db, "CREATE TABLE c4(c INTEGER REFERENCES p4(b) DEFERRABLE INITIALLY DEFERRED)");
+
+    let err = exec_insert(&mut db, "INSERT INTO p4 VALUES(1, 2)")
+        .expect_err("a deferred broken child FK must still be reported on single-row VALUES");
+    assert!(err.to_string().contains("foreign key mismatch"), "got: {err}");
+}
+
+#[test]
+fn insert_values_into_parent_of_broken_child_fails_under_defer_foreign_keys_pragma() {
+    // `SQLITE_DeferFKs`: with PRAGMA defer_foreign_keys on, *every* child FK is
+    // treated as deferred, so the skip path is abandoned entirely.
+    let mut db = new_db();
+    exec_ddl(&mut db, "CREATE TABLE p5(a INTEGER PRIMARY KEY, b INTEGER)");
+    exec_ddl(&mut db, "CREATE TABLE c5(c INTEGER REFERENCES p5(b))");
+    db.set_defer_foreign_keys(true);
+
+    let err = exec_insert(&mut db, "INSERT INTO p5 VALUES(1, 2)")
+        .expect_err("PRAGMA defer_foreign_keys must re-arm the parent-side mismatch check");
+    assert!(err.to_string().contains("foreign key mismatch"), "got: {err}");
 }

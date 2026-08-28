@@ -84,6 +84,13 @@ pub(crate) fn check_fk_definition_error(
         .map(|(child, parent)| crate::errors::ExecutorError::ForeignKeyMismatch { child, parent })
 }
 
+/// SQLite's `pFKey->isDeferred`: a constraint declared `DEFERRABLE INITIALLY DEFERRED`. Uses the
+/// same predicate as `check_fk_row_existence`'s defer-or-error decision, so the two cannot drift
+/// apart.
+fn fk_is_deferred(fk: &ForeignKeyConstraint) -> bool {
+    fk.is_deferrable && fk.initially_deferred
+}
+
 /// Statement-prepare-time FK schema validation.
 ///
 /// EVIDENCE-OF R-45488-08504 / R-48391-38472: when the database schema
@@ -113,16 +120,34 @@ pub(crate) fn check_fk_definition_error(
 ///      compiling the cascade action, so the error surfaces transitively, not just one hop away.
 ///
 /// `check_descendants` gates step 2/3 (the closure walk over tables that reference `table_name`,
-/// directly or transitively). UPDATE and DELETE always pass `true` — either can invoke a
-/// referencing child's ON UPDATE/ON DELETE action, so SQLite always resolves the child's FK
-/// definition when compiling them. For **INSERT**, real SQLite only does this when the row source
-/// is a `SELECT` (empirically verified against `sqlite3` 3.51.0, e_fkey-19.2 vs e_fkey-20.$tn.6):
-/// `INSERT INTO parent SELECT ...` reports "foreign key mismatch" for a broken child exactly like
-/// `DELETE`/`UPDATE` do, but `INSERT INTO parent VALUES(...)` and `INSERT INTO parent DEFAULT
-/// VALUES` do **not** — SQLite's fast single-row VALUES insert path never builds the FK
-/// change-mask machinery that a broken descendant's definition would be resolved through, since a
-/// new parent row can never invalidate an existing child row. Callers pass `false` for
-/// `InsertSource::Values`/`DefaultValues`, `true` for `InsertSource::Select`.
+/// directly or transitively). It encodes the **statement-form** half of the skip condition at the
+/// head of SQLite's parent-side loop in `sqlite3FkCheck()`:
+///
+/// ```c
+/// if( !pFKey->isDeferred && !(db->flags & SQLITE_DeferFKs)
+///  && !pParse->pToplevel && !pParse->isMultiWrite
+/// ){
+///   /* Inserting a single row into a parent table cannot cause (or fix)
+///   ** an immediate foreign key violation. So do nothing in this case.  */
+///   continue;
+/// }
+/// ```
+///
+/// UPDATE and DELETE always pass `true` — either can invoke a referencing child's ON UPDATE/ON
+/// DELETE action, so SQLite always resolves the child's FK definition when compiling them. For
+/// **INSERT**, `insert_checks_fk_descendants` (in `insert/execution.rs`) decides: a single-row,
+/// top-level, non-multi-write INSERT passes `false`, everything else passes `true`. Empirically
+/// verified against `sqlite3` 3.51.0 — `INSERT INTO parent SELECT ...` reports "foreign key
+/// mismatch" for a broken child exactly like `DELETE`/`UPDATE`, but plain
+/// `INSERT INTO parent VALUES(1,2)` / `DEFAULT VALUES` does **not**, because a new parent row can
+/// never invalidate an existing child row. SQLite's own suite asserts both sides of this contrast
+/// (e_fkey-19.2 vs e_fkey-20.$tn.6).
+///
+/// The remaining **per-FK / session** half of that same condition is evaluated here, because it
+/// depends on schema and session state the caller does not have: even on the single-row-VALUES
+/// skip path, SQLite still resolves a child FK that is `INITIALLY DEFERRED`, or *any* child FK
+/// when `PRAGMA defer_foreign_keys` is on. So `check_descendants == false` means "walk the
+/// closure for deferred FKs only", not "skip the walk entirely" (Part of #6170).
 pub fn validate_fk_schema_for_dml(
     db: &Database,
     table_name: &str,
@@ -147,19 +172,24 @@ pub fn validate_fk_schema_for_dml(
         }
     }
 
-    if !check_descendants {
-        return Ok(());
-    }
+    // Per-FK / session half of SQLite's skip condition (see the doc comment above). When the
+    // caller reports a statement form that SQLite skips the parent-side loop for, the loop is
+    // still entered for any FK that is `INITIALLY DEFERRED` (`pFKey->isDeferred`), and for every
+    // FK when `PRAGMA defer_foreign_keys` is on (`SQLITE_DeferFKs`).
+    let deferred_only = !check_descendants && !db.defer_foreign_keys();
 
-    // Skip the O(tables) walk entirely when nothing in the schema declares
-    // any FK at all (the overwhelmingly common case).
-    let has_any_fks = db
-        .catalog
-        .list_tables()
-        .iter()
-        .any(|t| db.catalog.get_table(t).map(|s| !s.foreign_keys.is_empty()).unwrap_or(false));
+    // Skip the O(tables) walk entirely when nothing in the schema declares an FK this statement
+    // form could surface (the overwhelmingly common case) — no FK at all in the ordinary mode, no
+    // *deferred* FK in `deferred_only` mode. This keeps the hot single-row-INSERT path down to one
+    // cheap catalog scan.
+    let has_relevant_fk = db.catalog.list_tables().iter().any(|t| {
+        db.catalog
+            .get_table(t)
+            .map(|s| s.foreign_keys.iter().any(|fk| !deferred_only || fk_is_deferred(fk)))
+            .unwrap_or(false)
+    });
 
-    if !has_any_fks {
+    if !has_relevant_fk {
         return Ok(());
     }
 
@@ -216,6 +246,11 @@ pub fn validate_fk_schema_for_dml(
         };
         for fk in &other_schema.foreign_keys {
             if !visited.contains(&fk.parent_table.to_ascii_lowercase()) {
+                continue;
+            }
+            // On the single-row-INSERT skip path, only a deferred child FK is still resolved by
+            // SQLite (see `deferred_only` above).
+            if deferred_only && !fk_is_deferred(fk) {
                 continue;
             }
             if let Some(err) = check_fk_definition_error(db, &other_name, fk) {
