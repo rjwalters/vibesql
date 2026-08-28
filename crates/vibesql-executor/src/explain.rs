@@ -2003,13 +2003,36 @@ impl ExplainExecutor {
     /// (such a subquery always returns exactly one row, so it can never
     /// become a per-outer-row join predicate — existsexpr.test 3.7).
     fn subquery_blocks_where_flattening(subquery: &SelectStmt) -> bool {
-        let multi_table_from = matches!(
+        // Deliberately "anything that is not a single base table", not
+        // strictly "more than one table": a join, a derived table
+        // (`FromClause::Subquery`), and a table-valued function all fall
+        // outside the single-base-table shape SQLite's exists-to-join
+        // rewrite handles, so each one keeps its own EQP entry. The name
+        // describes the common case (a multi-table FROM), not the full set.
+        let non_single_table_from = matches!(
             subquery.from.as_ref(),
             Some(f) if !matches!(f, FromClause::Table { .. })
         );
+        // Narrow aggregate check on purpose (#6647): `select_list_has_aggregate`
+        // is the view-flattening gate's *conservative* helper, which reports
+        // "aggregate" for any nested subquery expression. Reusing it here would
+        // render a spurious `CORRELATED SCALAR SUBQUERY` node for a subquery
+        // whose SELECT list merely mentions another subquery, e.g.
+        // `WHERE EXISTS (SELECT (SELECT 1) FROM t2 WHERE t2.b = t1.a)`.
         let aggregate_without_group_by =
-            subquery.group_by.is_none() && Self::select_list_has_aggregate(subquery);
-        multi_table_from || aggregate_without_group_by
+            subquery.group_by.is_none() && Self::select_list_has_real_aggregate(subquery);
+        non_single_table_from || aggregate_without_group_by
+    }
+
+    /// True when any SELECT-list expression contains an *actual* aggregate
+    /// function call, treating nested subquery expressions as opaque (#6647).
+    /// See [`contains_real_aggregate_function`] for why this is not
+    /// [`Self::select_list_has_aggregate`].
+    fn select_list_has_real_aggregate(stmt: &SelectStmt) -> bool {
+        stmt.select_list.iter().any(|item| match item {
+            SelectItem::Expression { expr, .. } => contains_real_aggregate_function(expr),
+            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. } => false,
+        })
     }
 
     /// Recursively collect the subquery bodies of WHERE-clause `EXISTS`/`IN`
@@ -3215,37 +3238,64 @@ impl ExplainExecutor {
 /// list aggregates cannot be flattened. Subqueries are conservatively treated
 /// as containing aggregates (blocking flattening keeps the safe opaque
 /// rendering).
+///
+/// **Do not reuse this for "does this SELECT list really aggregate?"** — the
+/// subquery conservatism makes it answer "yes" for a SELECT list whose only
+/// subquery-shaped expression contains no aggregate at all. Use
+/// [`contains_real_aggregate_function`] for that question (#6647).
 fn contains_aggregate_function(expr: &Expression) -> bool {
+    contains_aggregate_function_inner(expr, true)
+}
+
+/// Recursively check if an expression contains an *actual* aggregate function
+/// call, without [`contains_aggregate_function`]'s "any nested subquery counts
+/// as an aggregate" conservatism (#6647).
+///
+/// A nested `ScalarSubquery`/`IN (SELECT …)`/`EXISTS (SELECT …)` is opaque
+/// here: whatever it aggregates belongs to *its* result set, not to the
+/// enclosing SELECT list, so it does not make the enclosing query an aggregate
+/// query. This is the narrow check
+/// [`ExplainExecutor::subquery_blocks_where_flattening`] needs — reusing the
+/// conservative helper there would render a spurious
+/// `CORRELATED SCALAR SUBQUERY` node for every WHERE-clause `EXISTS`/`IN`
+/// whose own SELECT list merely mentions another subquery.
+fn contains_real_aggregate_function(expr: &Expression) -> bool {
+    contains_aggregate_function_inner(expr, false)
+}
+
+/// Shared walker for [`contains_aggregate_function`] (conservative) and
+/// [`contains_real_aggregate_function`] (narrow). The two differ only in how
+/// they answer for a nested subquery expression, so they share one traversal
+/// and cannot drift apart as new `Expression` variants are handled.
+fn contains_aggregate_function_inner(expr: &Expression, subquery_is_aggregate: bool) -> bool {
+    let recurse = |e: &Expression| contains_aggregate_function_inner(e, subquery_is_aggregate);
     match expr {
         Expression::AggregateFunction { .. } => true,
-        Expression::Function { args, .. } => args.iter().any(contains_aggregate_function),
-        Expression::BinaryOp { left, right, .. } => {
-            contains_aggregate_function(left) || contains_aggregate_function(right)
-        }
-        Expression::UnaryOp { expr, .. } => contains_aggregate_function(expr),
-        Expression::IsNull { expr, .. } => contains_aggregate_function(expr),
-        Expression::Cast { expr, .. } => contains_aggregate_function(expr),
+        Expression::Function { args, .. } => args.iter().any(recurse),
+        Expression::BinaryOp { left, right, .. } => recurse(left) || recurse(right),
+        Expression::UnaryOp { expr, .. } => recurse(expr),
+        Expression::IsNull { expr, .. } => recurse(expr),
+        Expression::Cast { expr, .. } => recurse(expr),
         Expression::Conjunction(exprs) | Expression::Disjunction(exprs) => {
-            exprs.iter().any(contains_aggregate_function)
+            exprs.iter().any(recurse)
         }
         Expression::Case { operand, when_clauses, else_result, .. } => {
-            operand.as_ref().is_some_and(|e| contains_aggregate_function(e))
-                || when_clauses.iter().any(|clause| {
-                    clause.conditions.iter().any(contains_aggregate_function)
-                        || contains_aggregate_function(&clause.result)
-                })
-                || else_result.as_ref().is_some_and(|e| contains_aggregate_function(e))
+            operand.as_ref().is_some_and(|e| recurse(e))
+                || when_clauses
+                    .iter()
+                    .any(|clause| clause.conditions.iter().any(recurse) || recurse(&clause.result))
+                || else_result.as_ref().is_some_and(|e| recurse(e))
         }
-        Expression::InList { expr, values, .. } => {
-            contains_aggregate_function(expr) || values.iter().any(contains_aggregate_function)
-        }
+        Expression::InList { expr, values, .. } => recurse(expr) || values.iter().any(recurse),
         Expression::Between { expr, low, high, .. } => {
-            contains_aggregate_function(expr)
-                || contains_aggregate_function(low)
-                || contains_aggregate_function(high)
+            recurse(expr) || recurse(low) || recurse(high)
         }
-        // Conservative: subqueries may contain anything; block flattening.
-        Expression::ScalarSubquery(_) | Expression::In { .. } | Expression::Exists { .. } => true,
+        // Conservative caller: subqueries may contain anything; block
+        // flattening. Narrow caller: a nested subquery's aggregates belong to
+        // that subquery, not to this SELECT list (#6647).
+        Expression::ScalarSubquery(_) | Expression::In { .. } | Expression::Exists { .. } => {
+            subquery_is_aggregate
+        }
         _ => false,
     }
 }
