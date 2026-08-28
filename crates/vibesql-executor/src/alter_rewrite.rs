@@ -200,6 +200,19 @@ fn ident_matches(tok: &Token, name: &str) -> bool {
     }
 }
 
+/// Whether `tok` is a *quoted* identifier-like token — `Token::DelimitedIdentifier`
+/// (double-quoted / backtick / bracket) or `Token::String` (single-quoted, per the
+/// `nm ::= id | STRING` grammar rule documented on [`ident_matches`]) — as opposed
+/// to a bare `Token::Identifier`.
+///
+/// Used to decide `emit_renamed_ident`'s `replaced_was_quoted` flag: SQLite always
+/// re-emits a renamed identifier in double-quotes when the token it replaced was
+/// quoted in *any* form, single-quote-as-identifier included (altercol.test 23.0:
+/// `CREATE TABLE t1('a'"b",c)` renaming column `'a'` emits `"x"`, not bare `x`).
+fn is_quoted_ident(tok: &Token) -> bool {
+    matches!(tok, Token::DelimitedIdentifier(_) | Token::String(_))
+}
+
 /// Rewrite the table name in the verbatim `CREATE TABLE` text to the
 /// double-quoted `new_name`, matching SQLite's `ALTER TABLE ... RENAME TO`
 /// (which quotes the new name and preserves all other formatting).
@@ -460,7 +473,32 @@ pub fn rename_column(
                     at_def_start = false;
                 }
             }
-            Token::Identifier(_) | Token::DelimitedIdentifier(_) => {
+            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_) => {
+                // A single-quoted token is identifier-like ONLY in `nm ::= id |
+                // STRING` *name* grammar positions: the parent-table name after
+                // `REFERENCES`, a collation name after `COLLATE`, a column's type
+                // name, and the column-definition name itself (the positions the
+                // dedicated branches below handle). Everywhere else in a column
+                // definition a single-quoted token is an `expr` *literal* —
+                // `DEFAULT 'foo'`, `CHECK (x <> 'foo')`, `GENERATED ALWAYS AS
+                // (... || 'foo')` — never a column reference. Letting such a
+                // literal fall through to the generic `ident_matches` rewrite at
+                // the bottom of this arm would silently rewrite the literal's
+                // *value* whenever its text happened to equal `old_col`: renaming
+                // `foo` -> `bar` would turn `DEFAULT 'foo'` into `DEFAULT "bar"`,
+                // which re-parses as a column reference rather than the original
+                // string constant (schema corruption, not just re-spelling).
+                let string_in_name_position = expect_parent_table
+                    || skip_below.is_some()
+                    || expect_collation
+                    || (depth == 1 && (at_def_start || saw_col_name));
+                if matches!(tok, Token::String(_)) && !string_in_name_position {
+                    // Nothing to reset: the guard above already establishes that
+                    // every flag the catch-all arm below would clear is false
+                    // here, so a non-name string literal is simply skipped.
+                    idx += 1;
+                    continue;
+                }
                 if expect_parent_table {
                     expect_parent_table = false;
                     if depth == 1 {
@@ -497,7 +535,7 @@ pub fn rename_column(
                     at_def_start = false;
                     saw_col_name = true;
                     if ident_matches(tok, old_col) {
-                        targets.push((*span, matches!(tok, Token::DelimitedIdentifier(_))));
+                        targets.push((*span, is_quoted_ident(tok)));
                     }
                     idx += 1;
                     continue;
@@ -527,7 +565,7 @@ pub fn rename_column(
                     continue;
                 }
                 if ident_matches(tok, old_col) {
-                    targets.push((*span, matches!(tok, Token::DelimitedIdentifier(_))));
+                    targets.push((*span, is_quoted_ident(tok)));
                 }
             }
             _ => {
@@ -552,7 +590,23 @@ pub fn rename_column(
     // Rewrite from the last span backward so earlier byte offsets stay valid.
     let mut out = create_sql.to_string();
     for (span, was_quoted) in targets.iter().rev() {
-        out.replace_range(span.start..span.end, &emit_renamed_ident(new_col, *was_quoted));
+        let mut replacement = emit_renamed_ident(new_col, *was_quoted);
+        // Guard against token-gluing (altercol.test 23.0): a double-quoted
+        // replacement immediately followed — with no separating whitespace in
+        // the original text — by another `"`-delimited token (e.g. the
+        // adjacent type name in `'a'"b"`, no space) would merge into a SINGLE
+        // mis-lexed identifier once rewritten (`"x""b"` reads as one
+        // escaped-quote identifier, not two tokens). SQLite's own token-based
+        // rewriter inserts a space in exactly this situation to keep the two
+        // tokens lexically distinct; we do the same, using `span.end` in the
+        // *original* text (stable across this reverse iteration — only
+        // already-rewritten spans strictly to the right can have shifted, and
+        // this reads the position immediately after the current span, which
+        // they never touch).
+        if replacement.ends_with('"') && create_sql.as_bytes().get(span.end) == Some(&b'"') {
+            replacement.push(' ');
+        }
+        out.replace_range(span.start..span.end, &replacement);
     }
     Some(out)
 }
@@ -604,11 +658,10 @@ pub fn rename_references_column(
                         break;
                     }
                 }
-                Token::Identifier(_) | Token::DelimitedIdentifier(_)
+                Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::String(_)
                     if depth == 1 && ident_matches(&tokens[j].0, old_col) =>
                 {
-                    targets
-                        .push((tokens[j].1, matches!(tokens[j].0, Token::DelimitedIdentifier(_))));
+                    targets.push((tokens[j].1, is_quoted_ident(&tokens[j].0)));
                 }
                 _ => {}
             }
@@ -1071,6 +1124,61 @@ mod tests {
         let sql = "CREATE TABLE t (a INTEGER, b TEXT)";
         let out = rename_column(sql, "t", "b", "new col").unwrap();
         assert_eq!(out, "CREATE TABLE t (a INTEGER, \"new col\" TEXT)");
+    }
+
+    #[test]
+    fn rename_column_string_literal_def_no_space() {
+        // altercol.test 23.0: `'a'"b"` — a single-quoted-string column name
+        // (`Token::String`, per the `nm ::= id | STRING` grammar rule) with a
+        // double-quoted type immediately following (no space). Renaming the
+        // string-literal-spelled column must still be found in the
+        // definition-name scan (issue #6174) and re-emitted double-quoted
+        // (SQLite always re-quotes on rewrite, regardless of the original
+        // quote style).
+        let sql = "CREATE TABLE t1('a'\"b\",c)";
+        let out = rename_column(sql, "t1", "a", "x").unwrap();
+        assert_eq!(out, "CREATE TABLE t1(\"x\" \"b\",c)");
+    }
+
+    #[test]
+    fn rename_column_leaves_default_string_literal_untouched() {
+        // A single-quoted token is identifier-like ONLY in `nm` (name) grammar
+        // positions. In a `DEFAULT` expression it is a string *constant*, so a
+        // literal whose text happens to equal the renamed column must survive
+        // byte-for-byte — rewriting it to `"bar"` would change the default's
+        // meaning (a double-quoted token re-parses as a column reference first).
+        let sql = "CREATE TABLE t (foo TEXT DEFAULT 'foo')";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT DEFAULT 'foo')");
+    }
+
+    #[test]
+    fn rename_column_leaves_check_string_literal_untouched() {
+        // Same hazard inside a CHECK constraint's expression: the column
+        // *reference* `foo` is rewritten, the string constant `'foo'` is not.
+        let sql = "CREATE TABLE t (foo TEXT, b TEXT CHECK (foo <> 'foo'))";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT, b TEXT CHECK (bar <> 'foo'))");
+    }
+
+    #[test]
+    fn rename_column_string_literal_name_with_matching_default_literal() {
+        // Both halves at once: the column *name* is spelled as a single-quoted
+        // string (a legal `nm`, rewritten and re-quoted double), while the
+        // identically spelled `DEFAULT` literal in expression position is left
+        // alone.
+        let sql = "CREATE TABLE t ('foo' TEXT DEFAULT 'foo')";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (\"bar\" TEXT DEFAULT 'foo')");
+    }
+
+    #[test]
+    fn rename_column_generated_expr_string_literal_untouched() {
+        // GENERATED ALWAYS AS (...) is another `expr` position: only the real
+        // column reference is rewritten.
+        let sql = "CREATE TABLE t (foo TEXT, g TEXT GENERATED ALWAYS AS (foo || 'foo'))";
+        let out = rename_column(sql, "t", "foo", "bar").unwrap();
+        assert_eq!(out, "CREATE TABLE t (bar TEXT, g TEXT GENERATED ALWAYS AS (bar || 'foo'))");
     }
 
     #[test]

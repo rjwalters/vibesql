@@ -30,17 +30,30 @@ use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
 
-/// Pre-drop check: abort if any existing view or trigger is already broken
-/// (references a column that does not resolve against the *current* schema).
+/// Pre-drop check: abort if any existing view or trigger *in the same schema
+/// as `table_name`* is already broken (references a column that does not
+/// resolve against the *current* schema).
 ///
 /// Matches SQLite's first schema re-parse: the inner error carries no
 /// "after drop column" suffix because the object was broken before the drop.
-pub(super) fn precheck_schema_objects(database: &Database) -> Result<(), ExecutorError> {
-    check_schema_objects(database, None)
+/// Scoped to `table_name`'s own schema (main vs. temp vs. an attached
+/// database) because SQLite's schema reload (`renameReloadSchema` /
+/// `sqlite3InitOne`) only re-parses the ONE schema (`iDb`) the altered table
+/// lives in — a broken trigger/view that lives in a *different* schema is
+/// left untouched and must not abort this ALTER (altercol.test 17.3: a
+/// broken main-schema trigger `u7t` must not block `ALTER TABLE uu7 ...`
+/// on the unrelated temp-schema table `uu7`, even though `uu7`'s own
+/// temp-schema trigger `uu7t` is equally broken and DOES abort it).
+pub(super) fn precheck_schema_objects(
+    database: &Database,
+    table_name: &str,
+) -> Result<(), ExecutorError> {
+    check_schema_objects(database, table_name, None)
 }
 
 /// Post-drop check: abort if dropping `column` from `table_name` would leave a
-/// dependent table-level CHECK, view, or trigger referencing a gone column.
+/// dependent table-level CHECK, view, or trigger (in `table_name`'s own
+/// schema — see [`precheck_schema_objects`]) referencing a gone column.
 ///
 /// Resolution runs against a *simulated* post-drop schema (the altered table's
 /// column set minus `column`), so nothing needs to be rolled back on failure.
@@ -64,16 +77,34 @@ pub(super) fn postcheck_schema_objects(
         }
     }
 
-    check_schema_objects(database, Some((table_name, column)))
+    check_schema_objects(database, table_name, Some((table_name, column)))
 }
 
-/// Shared pre-/post-check walk over every view and trigger in the schema.
+/// The schema `table_name` lives in, in the form view/trigger definitions use
+/// to record their own owning schema: the literal `"main"` for the main
+/// schema (views/triggers store `None` there), `"temp"` for the (per-session
+/// internal-named) temp schema, or the attached-database name verbatim.
+///
+/// Falls back to `"main"` when `table_name` cannot be resolved (defensive
+/// only — callers already confirmed the table exists before reaching here).
+fn table_schema_label(database: &Database, table_name: &str) -> String {
+    match database.catalog.resolve_table_schema_name(table_name) {
+        Some(schema) if vibesql_catalog::Catalog::is_temp_schema(&schema) => "temp".to_string(),
+        Some(schema) => schema,
+        None => "main".to_string(),
+    }
+}
+
+/// Shared pre-/post-check walk over every view and trigger *in `table_name`'s
+/// own schema* (see [`precheck_schema_objects`] for why this is scoped rather
+/// than whole-catalog).
 ///
 /// `dropped` is `None` for the pre-check (validate against the current
 /// schema) and `Some((table, column))` for the post-check (validate against
 /// the schema as it would look after dropping `column` from `table`).
 fn check_schema_objects(
     database: &Database,
+    table_name: &str,
     dropped: Option<(&str, &str)>,
 ) -> Result<(), ExecutorError> {
     // SQLite: "Do not complain about syntax errors in the schema if in PRAGMA
@@ -99,6 +130,16 @@ fn check_schema_objects(
 
     let suffix = if dropped.is_some() { " after drop column" } else { "" };
 
+    // Views/triggers in this catalog are only ever tagged `None` (main) or
+    // `Some("temp")` (see `ViewDefinition`/`TriggerDefinition::schema` — there
+    // is no attached-database tag), so the re-parse scope collapses to a
+    // binary temp/non-temp split: an object is in-scope only when its OWN
+    // `is_temp()` matches whether the ALTERED TABLE's schema is temp. Scoping
+    // by the object's own declared schema (not the table it targets) matches
+    // SQLite, where e.g. a `CREATE TEMP TRIGGER ... ON <main table>` is
+    // reloaded by a `temp`-schema re-parse, not a `main` one.
+    let owner_is_temp = table_schema_label(database, table_name).eq_ignore_ascii_case("temp");
+
     // Resolve the altered table to its canonical catalog name once so FROM
     // references in any spelling ("T1", "main.t1", ...) simulate the drop.
     let sim = DropSimulation::new(database, dropped);
@@ -109,6 +150,9 @@ fn check_schema_objects(
     // `main` view that shares a name with a `temp`/attached-schema view
     // (mirrors the trigger loop immediately below — issue #6296).
     for view in database.catalog.iter_views() {
+        if view.is_temp() != owner_is_temp {
+            continue;
+        }
         if let Some(missing) = find_missing_column_in_view(view, &sim) {
             return Err(ExecutorError::Other(format!(
                 "error in view {}{}: no such column: {}",
@@ -122,6 +166,9 @@ fn check_schema_objects(
     // resolves temp-first and would skip a `main` trigger that shares a name with
     // a `temp` trigger (issue #6296).
     for trigger in database.catalog.iter_triggers() {
+        if trigger.is_temp() != owner_is_temp {
+            continue;
+        }
         if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
             return Err(ExecutorError::Other(format!(
                 "error in trigger {}{}: {}",
