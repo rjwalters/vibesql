@@ -422,6 +422,121 @@ async fn test_cross_session_visibility() {
     assert_eq!(data_rows.len(), 2, "Client1 should see both rows in shared database");
 }
 
+/// Test: SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT over the wire
+/// protocol (#6654).
+///
+/// Before this fix, `session.rs`'s standalone (non-replicated) statement
+/// dispatch handled `Statement::Savepoint`, `Statement::RollbackToSavepoint`,
+/// and `Statement::ReleaseSavepoint` by immediately returning a canned
+/// success message WITHOUT calling into the transaction manager or database
+/// at all — so a client doing `SAVEPOINT sp1; INSERT ...; ROLLBACK TO sp1;`
+/// was told the rollback succeeded while the INSERT silently stuck around.
+/// This test asserts on actual row state (via SELECT), not just that the
+/// SAVEPOINT/ROLLBACK TO/RELEASE commands returned success messages — the
+/// old stub would also pass a message-only assertion.
+#[tokio::test]
+async fn test_savepoint_rollback_to_undoes_writes() {
+    let server = TestServer::start().await;
+    let client = connect(&server).await;
+
+    client
+        .simple_query("CREATE TABLE savepoint_test (id INT, name VARCHAR(100))")
+        .await
+        .expect("Failed to create table");
+
+    client.simple_query("BEGIN").await.expect("BEGIN should succeed");
+    client
+        .simple_query("INSERT INTO savepoint_test (id, name) VALUES (1, 'Alice')")
+        .await
+        .expect("First INSERT should succeed");
+
+    client.simple_query("SAVEPOINT sp1").await.expect("SAVEPOINT should succeed");
+    client
+        .simple_query("INSERT INTO savepoint_test (id, name) VALUES (2, 'Bob')")
+        .await
+        .expect("Second INSERT should succeed");
+
+    // Row-state check while still inside the transaction: both rows visible
+    // to this session before the rollback.
+    let rows = client
+        .simple_query("SELECT * FROM savepoint_test ORDER BY id")
+        .await
+        .expect("SELECT before ROLLBACK TO should succeed");
+    let count: usize = rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).count();
+    assert_eq!(count, 2, "Both rows should be visible before ROLLBACK TO SAVEPOINT");
+
+    client
+        .simple_query("ROLLBACK TO SAVEPOINT sp1")
+        .await
+        .expect("ROLLBACK TO SAVEPOINT should succeed");
+
+    // Row-state check: Bob's INSERT must actually be undone, not just
+    // acknowledged.
+    let rows = client
+        .simple_query("SELECT * FROM savepoint_test ORDER BY id")
+        .await
+        .expect("SELECT after ROLLBACK TO should succeed");
+    let data_rows: Vec<_> =
+        rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).collect();
+    assert_eq!(
+        data_rows.len(),
+        1,
+        "ROLLBACK TO SAVEPOINT must undo the write made after the savepoint"
+    );
+    if let SimpleQueryMessage::Row(row) = data_rows[0] {
+        assert_eq!(row.get(0), Some("1"));
+        assert_eq!(row.get(1), Some("Alice"));
+    }
+
+    client.simple_query("COMMIT").await.expect("COMMIT should succeed");
+
+    // Row-state check after commit: still just Alice's row.
+    let rows = client
+        .simple_query("SELECT * FROM savepoint_test ORDER BY id")
+        .await
+        .expect("SELECT after COMMIT should succeed");
+    let count: usize = rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).count();
+    assert_eq!(count, 1, "Only the pre-savepoint row should survive the COMMIT");
+}
+
+/// Test: RELEASE SAVEPOINT keeps the buffered write (it is not a rollback),
+/// and the write persists across COMMIT (#6654).
+#[tokio::test]
+async fn test_release_savepoint_keeps_writes() {
+    let server = TestServer::start().await;
+    let client = connect(&server).await;
+
+    client
+        .simple_query("CREATE TABLE release_savepoint_test (id INT)")
+        .await
+        .expect("Failed to create table");
+
+    client.simple_query("BEGIN").await.expect("BEGIN should succeed");
+    client.simple_query("SAVEPOINT sp1").await.expect("SAVEPOINT should succeed");
+    client
+        .simple_query("INSERT INTO release_savepoint_test (id) VALUES (1)")
+        .await
+        .expect("INSERT should succeed");
+    client.simple_query("RELEASE SAVEPOINT sp1").await.expect("RELEASE should succeed");
+
+    // RELEASE does not undo writes made under the savepoint.
+    let rows = client
+        .simple_query("SELECT * FROM release_savepoint_test")
+        .await
+        .expect("SELECT after RELEASE should succeed");
+    let count: usize = rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).count();
+    assert_eq!(count, 1, "RELEASE SAVEPOINT must not undo the write");
+
+    client.simple_query("COMMIT").await.expect("COMMIT should succeed");
+
+    let rows = client
+        .simple_query("SELECT * FROM release_savepoint_test")
+        .await
+        .expect("SELECT after COMMIT should succeed");
+    let count: usize = rows.iter().filter(|msg| matches!(msg, SimpleQueryMessage::Row(_))).count();
+    assert_eq!(count, 1, "The row released (not rolled back) must survive COMMIT");
+}
+
 /// Test 7: Transaction isolation - uncommitted data not visible to other sessions
 ///
 /// This test verifies READ COMMITTED isolation semantics:
