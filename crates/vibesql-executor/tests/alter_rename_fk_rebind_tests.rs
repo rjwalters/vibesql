@@ -205,6 +205,32 @@ fn rename_parent_rebinds_two_fks_in_one_child() {
     );
 }
 
+/// Issue #6634 / PR #6640: a parent table named via a single-quoted string
+/// literal (SQLite's `nm ::= id | STRING` grammar rule) must have its FK
+/// child rewritten in place on rename, exercised through the public
+/// `ALTER TABLE ... RENAME TO` path — not just `alter_rewrite`'s unit-level
+/// helper functions. Before the fix, `ident_matches`/`table_name_index`
+/// only recognized `Token::Identifier`/`Token::DelimitedIdentifier`, so a
+/// string-literal-spelled name silently fell back to invalidating
+/// `sql_source` (dropping the REFERENCES clause) instead of rewriting it.
+#[test]
+fn rename_string_literal_named_parent_rebinds_child_fk() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    create_with_source(&mut db, "CREATE TABLE 'p 1 \"parent one\"'(id INTEGER PRIMARY KEY)");
+    create_with_source(&mut db, "CREATE TABLE c(x REFERENCES 'p 1 \"parent one\"'(id))");
+
+    alter(&mut db, "ALTER TABLE 'p 1 \"parent one\"' RENAME TO p");
+
+    let schema = db.catalog.get_table("c").expect("c exists");
+    assert_eq!(schema.foreign_keys.len(), 1);
+    assert_eq!(
+        schema.foreign_keys[0].parent_table, "p",
+        "child FK must be re-bound to the new parent name, not dropped"
+    );
+    assert_eq!(table_sql(&db, "c"), "CREATE TABLE c(x REFERENCES \"p\"(id))");
+}
+
 #[test]
 fn rename_self_referential_fk_follows_rename() {
     let mut db = Database::new();
