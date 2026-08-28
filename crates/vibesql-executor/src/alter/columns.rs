@@ -460,11 +460,12 @@ pub(super) fn execute_drop_column(
         )));
     }
 
-    // Pre-drop schema re-parse: a view or trigger that is *already* broken —
-    // even one unrelated to this table — aborts the ALTER before anything is
-    // touched, matching SQLite's first schema re-parse (no "after drop column"
-    // suffix; the object was broken before the drop). See issue #5795.
-    super::drop_column_checks::precheck_schema_objects(database)?;
+    // Pre-drop schema re-parse: a view or trigger in the SAME SCHEMA as this
+    // table that is *already* broken — even one unrelated to this specific
+    // table — aborts the ALTER before anything is touched, matching SQLite's
+    // first schema re-parse (no "after drop column" suffix; the object was
+    // broken before the drop). See issue #5795.
+    super::drop_column_checks::precheck_schema_objects(database, table_name)?;
 
     // Dependent-object validation: dropping the column must not leave an
     // explicit index (plain or expression/partial) dangling. SQLite re-parses
@@ -694,7 +695,7 @@ pub(super) fn execute_rename_column(
     // column that does not exist — aborts the ALTER with
     // `error in <type> <name>: <inner error>`, leaving the schema untouched.
     // Runs before any mutation so a failed RENAME COLUMN is atomic.
-    super::drop_column_checks::precheck_schema_objects(database)?;
+    super::drop_column_checks::precheck_schema_objects(database, &stmt.table_name)?;
 
     let table = database
         .get_table_mut(&stmt.table_name)
