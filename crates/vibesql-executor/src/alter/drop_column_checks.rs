@@ -20,6 +20,8 @@
 //! a DROP COLUMN SQLite allows. Constructs we do not descend into are treated
 //! as valid (false negatives only).
 
+use std::collections::HashSet;
+
 use vibesql_ast::{
     visitor::{walk_expression, walk_statement, ExpressionVisitor, StatementVisitor, VisitResult},
     ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FromClause, InsertSource,
@@ -181,6 +183,82 @@ fn check_schema_objects(
 }
 
 // ============================================================================
+// Per-object "already broken" snapshot (ALTER TABLE ... RENAME TO fallback)
+// ============================================================================
+
+/// The set of views/triggers whose stored SQL does **not** re-resolve against
+/// the current schema, captured as of one instant in time.
+///
+/// Used by `ALTER TABLE ... RENAME TO`'s dependent-object rewrite to reproduce
+/// SQLite's *per-object* fallback. `renameTableFunc` (`alter.c`) attempts the
+/// rewrite for each dependent object individually and, when re-parsing /
+/// re-resolving that object's SQL fails, ends in:
+///
+/// ```c
+/// if( rc!=SQLITE_OK ){
+///   if( rc==SQLITE_ERROR && sqlite3WritableSchema(db) ){
+///     sqlite3_result_value(context, argv[3]);   /* input SQL, unchanged */
+///   }else{
+///     sqlite3_result_error_code(context, rc);
+///   }
+/// }
+/// ```
+///
+/// — i.e. under `PRAGMA writable_schema=ON` only *that one* object is left
+/// with stale SQL; every other, well-formed dependent object is still
+/// rewritten normally. Objects are keyed by `(is_temp, lowercased name)`
+/// because views and triggers are keyed per schema and a `temp` object may
+/// share a name with a `main` namesake (#6296).
+#[derive(Default)]
+pub(super) struct BrokenSchemaObjects {
+    views: HashSet<(bool, String)>,
+    triggers: HashSet<(bool, String)>,
+}
+
+impl BrokenSchemaObjects {
+    /// Was `view` already broken when the snapshot was taken?
+    pub(super) fn is_view_broken(&self, view: &ViewDefinition) -> bool {
+        self.views.contains(&(view.is_temp(), view.name.to_ascii_lowercase()))
+    }
+
+    /// Was `trigger` already broken when the snapshot was taken?
+    pub(super) fn is_trigger_broken(&self, trigger: &TriggerDefinition) -> bool {
+        self.triggers.contains(&(trigger.is_temp(), trigger.name.to_ascii_lowercase()))
+    }
+}
+
+/// Snapshot every view/trigger that fails the same static re-resolution
+/// [`check_schema_objects`] uses to raise `error in view|trigger <name>: ...`.
+///
+/// **Must be called before the rename mutates the catalog.** The trigger
+/// resolver reports `no such table` for body references that do not resolve,
+/// so once the old table name is gone from the catalog *every* dependent
+/// trigger would look broken and the per-object fallback would degenerate back
+/// into the wholesale suppression it exists to avoid. This mirrors SQLite,
+/// where `renameParseSql` resolves each object against the still-pre-rename
+/// in-memory schema (the reload only happens at the end of the ALTER, via
+/// `renameReloadSchema`).
+///
+/// Unlike [`check_schema_objects`] this is not scoped to one schema: the
+/// rewrite pass itself walks the whole catalog, and the fallback decision is
+/// genuinely per-object in SQLite.
+pub(super) fn snapshot_broken_schema_objects(database: &Database) -> BrokenSchemaObjects {
+    let sim = DropSimulation::new(database, None);
+    let mut broken = BrokenSchemaObjects::default();
+    for view in database.catalog.iter_views() {
+        if find_missing_column_in_view(view, &sim).is_some() {
+            broken.views.insert((view.is_temp(), view.name.to_ascii_lowercase()));
+        }
+    }
+    for trigger in database.catalog.iter_triggers() {
+        if find_trigger_resolution_error(trigger, &sim).is_some() {
+            broken.triggers.insert((trigger.is_temp(), trigger.name.to_ascii_lowercase()));
+        }
+    }
+    broken
+}
+
+// ============================================================================
 // Simulated post-drop schema resolution
 // ============================================================================
 
@@ -199,7 +277,7 @@ fn check_schema_objects(
 /// altered table's columns as they were *before* the rename, silently
 /// missing exactly the newly-introduced ambiguity it exists to catch
 /// (altercol.test 16.1.1).
-struct DropSimulation<'a> {
+pub(super) struct DropSimulation<'a> {
     db: &'a Database,
     /// `(canonical altered-table name, dropped column)`; `None` = pre-check.
     dropped: Option<(String, &'a str)>,
@@ -209,7 +287,7 @@ struct DropSimulation<'a> {
 }
 
 impl<'a> DropSimulation<'a> {
-    fn new(db: &'a Database, dropped: Option<(&str, &'a str)>) -> Self {
+    pub(super) fn new(db: &'a Database, dropped: Option<(&str, &'a str)>) -> Self {
         let dropped = dropped.map(|(table, column)| {
             let canonical = db
                 .catalog
