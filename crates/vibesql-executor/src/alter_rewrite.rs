@@ -1020,6 +1020,27 @@ mod tests {
     }
 
     #[test]
+    fn rename_table_string_literal_name() {
+        // SQLite's `nm ::= id | STRING` grammar rule lets `CREATE TABLE
+        // 'my table'(...)` name a table via a single-quoted string literal; the
+        // header rewrite must locate it via `table_name_index`'s `Token::String`
+        // arm rather than falling back to invalidating `sql_source` (issue #6634).
+        let sql = "CREATE TABLE 'p 1 \"parent one\"'(id INTEGER PRIMARY KEY)";
+        let out = rename_table(sql, "p").unwrap();
+        assert_eq!(out, "CREATE TABLE \"p\"(id INTEGER PRIMARY KEY)");
+    }
+
+    #[test]
+    fn rename_references_parent_string_literal_old_name() {
+        // A FK parent named via a single-quoted string literal (`REFERENCES
+        // '...'`) must be matched by `ident_matches`'s `Token::String` arm, not
+        // silently ignored and fall back to schema invalidation (issue #6634).
+        let sql = "CREATE TABLE c(x REFERENCES 'p 1 \"parent one\"'(id))";
+        let out = rename_references_parent(sql, "p 1 \"parent one\"", "p").unwrap();
+        assert_eq!(out, "CREATE TABLE c(x REFERENCES \"p\"(id))");
+    }
+
+    #[test]
     fn rename_references_parent_no_match_returns_none() {
         let sql = "CREATE TABLE c(x REFERENCES other(id))";
         assert!(rename_references_parent(sql, "p", "p_new").is_none());
