@@ -1088,6 +1088,23 @@ proc translate_error_to_sqlite {vibesql_error} {
         return "near \"$parse_msg\": syntax error"
     }
 
+    # `type mismatch on DEFAULT` is SQLite's own exact wording (alter.c's
+    # sqlite3AlterFinishAddColumn quick-check pass, surfaced verbatim by
+    # crates/vibesql-executor/src/alter/columns.rs) for a STRICT table's
+    # `ALTER TABLE ... ADD COLUMN ... DEFAULT <value>` whose backfilled
+    # default violates the new column's declared strict type (alter-20.2).
+    # It must be returned AS-IS, before the generic "type mismatch" rule
+    # below would otherwise substring-match it and clobber it into the
+    # unrelated `datatype mismatch` wording. At the time that generic rule
+    # was added (#4375) no engine message used the bare phrase "type
+    # mismatch" at all — every current occurrence in the engine already
+    # emits SQLite's own literal `datatype mismatch` wording directly, so
+    # this alter-columns.rs message is the ONLY "type mismatch" text this
+    # shim now sees; the anchored, more specific check must run first.
+    if {[regexp -nocase {^type mismatch on DEFAULT$} $error_msg]} {
+        return $error_msg
+    }
+
     # Type mismatch
     if {[regexp -nocase {type mismatch} $error_msg]} {
         return "datatype mismatch"
