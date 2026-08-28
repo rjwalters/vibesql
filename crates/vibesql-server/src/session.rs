@@ -1267,11 +1267,9 @@ impl Session {
 
             Statement::RollbackToSavepoint(savepoint_stmt) => {
                 let mut db = self.db.write().await;
-                let message = vibesql_executor::RollbackToSavepointExecutor::execute(
-                    savepoint_stmt,
-                    &mut db,
-                )
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let message =
+                    vibesql_executor::RollbackToSavepointExecutor::execute(savepoint_stmt, &mut db)
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
                 self.txn_manager.sync_active(db.in_transaction());
                 Ok(ExecutionResult::Other { message })
             }
