@@ -201,6 +201,24 @@ pub(super) fn execute_rename_table(
         .cloned()
         .collect();
 
+    // Which dependent views/triggers are *already* broken (their stored SQL does
+    // not re-resolve against the schema as it stands right now)? Under
+    // `PRAGMA writable_schema=ON` those specific objects — and only those — keep
+    // their stale SQL instead of being rewritten by the dependent-object pass
+    // near the end of this function; see the comment on that pass and
+    // `drop_column_checks::snapshot_broken_schema_objects`.
+    //
+    // Taken here, *before* the drop+create below, because the resolver reports
+    // `no such table` for unresolvable body references: once the old table name
+    // is gone from the catalog, every dependent trigger would look broken.
+    // Skipped entirely (empty set = nothing suppressed) unless writable_schema
+    // is ON, so the default path pays nothing for it.
+    let broken_before_rename = if database.writable_schema() {
+        super::drop_column_checks::snapshot_broken_schema_objects(database)
+    } else {
+        Default::default()
+    };
+
     // `database.drop_table` below CASCADE-drops every index on the table
     // being dropped — including `UNIQUE` indexes — via the generic
     // table-drop path. That is correct for a genuine `DROP TABLE`, but for
@@ -344,13 +362,40 @@ pub(super) fn execute_rename_table(
     // exception: those are gated purely on `legacy_alter_table`.) This is not
     // exercised by e_fkey-61.2.2 itself (which sets `foreign_keys=OFF`), but
     // matches the reference implementation exactly.
+    // `PRAGMA writable_schema=ON` does **not** suppress the dependent-object
+    // rewrite pass below wholesale. SQLite's `renameTableFunc` (`alter.c`)
+    // attempts the rewrite for each dependent view/trigger *individually* and
+    // only falls back to "return this object's input SQL unchanged" when that
+    // one object fails to re-parse/re-resolve (`rc==SQLITE_ERROR &&
+    // sqlite3WritableSchema(db)`); a well-formed dependent object is still
+    // rewritten normally with writable_schema ON. So the suppression is
+    // per-object and conditioned on that object being broken, not a blanket
+    // skip — verified against sqlite3 3.51.0 (PR #6653 review).
+    //
+    // That is what `broken_before_rename` (snapshotted above, pre-mutation)
+    // encodes: under writable_schema, an object listed there keeps its stale
+    // SQL; everything else is rewritten. altercol.test 23.20 exercises exactly
+    // this — `t4v1` (`SELECT id, c1, c99 FROM t4`, no such column `c99`) and
+    // trigger `r3` (body inserts into the never-created `t3`) are both already
+    // broken, so both are left alone and only `t4`'s own schema row changes.
+    //
+    // This differs from `check_schema_objects`'s trade-off, which *is* a
+    // wholesale skip under writable_schema: that function is pure validation
+    // (abort or don't), whereas these two calls actively mutate schema text
+    // for every dependent object, so skipping them wholesale would silently
+    // leave healthy triggers/views dangling at the old table name.
     let legacy = database.legacy_alter_table();
     if !legacy {
         // Propagate the rename into any trigger definitions that reference the
         // old table name. Rewrites table references inside trigger bodies and
         // the trigger's ON-target, and keeps the stored `sqlite_master.sql`
         // text consistent. See `crate::trigger_rename`.
-        rewrite_triggers_for_rename(database, &stmt.table_name, &stmt.new_table_name);
+        rewrite_triggers_for_rename(
+            database,
+            &stmt.table_name,
+            &stmt.new_table_name,
+            &broken_before_rename,
+        );
     }
 
     if !legacy || database.foreign_keys_enabled() {
@@ -376,8 +421,15 @@ pub(super) fn execute_rename_table(
         // (issue #6303). Mirrors `rewrite_views_for_column_rename`'s two-phase
         // compute/commit shape, but table-reference rewriting is purely
         // lexical (see `rewrite_table_refs_in_view_sql`) so there is no
-        // ambiguity to abort on.
-        rewrite_views_for_table_rename(database, &stmt.table_name, &stmt.new_table_name);
+        // ambiguity to abort on. An individual view that was already broken
+        // is skipped under writable_schema — see the doc comment on the
+        // trigger-rewrite call above.
+        rewrite_views_for_table_rename(
+            database,
+            &stmt.table_name,
+            &stmt.new_table_name,
+            &broken_before_rename,
+        );
     }
 
     // Invalidate the database-level columnar cache for both old and new table names.
@@ -445,7 +497,18 @@ fn rebind_child_foreign_keys(database: &mut Database, old_name: &str, new_name: 
 /// - `triggered_action` (the raw body SQL used when the trigger fires);
 /// - `sql_definition` (the verbatim `CREATE TRIGGER` text shown in
 ///   `sqlite_master`/`sqlite_schema`).
-fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name: &str) {
+///
+/// A trigger listed in `broken` (only ever non-empty under `PRAGMA
+/// writable_schema=ON`) is left entirely untouched — including its ON-target —
+/// matching SQLite's per-object "return the input SQL unchanged" fallback for a
+/// dependent object whose own re-parse/re-resolve fails. Every other trigger is
+/// still rewritten normally.
+fn rewrite_triggers_for_rename(
+    database: &mut Database,
+    old_name: &str,
+    new_name: &str,
+    broken: &super::drop_column_checks::BrokenSchemaObjects,
+) {
     // Snapshot trigger definitions up front. Triggers are keyed per schema, so a
     // name-only `get_trigger` resolves temp-first and would rewrite a `temp`
     // trigger twice while leaving its `main` namesake untouched (issue #6296).
@@ -453,6 +516,12 @@ fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name
     // mutate below.
     let existing_triggers: Vec<_> = database.catalog.iter_triggers().cloned().collect();
     for existing in existing_triggers {
+        // This trigger's own SQL did not re-resolve before the rename, and
+        // writable_schema is ON: leave its stored text (and ON-target) exactly
+        // as the user hand-edited it.
+        if broken.is_trigger_broken(&existing) {
+            continue;
+        }
         // Does this trigger reference the renamed table anywhere?
         let on_target_match = existing.table_name.eq_ignore_ascii_case(old_name);
         let body_text = match &existing.triggered_action {
@@ -508,13 +577,27 @@ fn rewrite_triggers_for_rename(database: &mut Database, old_name: &str, new_name
 /// untouched (still naming the old table) rather than risk leaving the view in
 /// a half-updated state. `sqlite_master.sql` reflects the rename either way, so
 /// a fresh load re-resolves the view correctly even in that unexpected case.
-fn rewrite_views_for_table_rename(database: &mut Database, old_name: &str, new_name: &str) {
+///
+/// A view listed in `broken` (only ever non-empty under `PRAGMA
+/// writable_schema=ON`) is left untouched, matching SQLite's per-object
+/// "return the input SQL unchanged" fallback for a dependent object whose own
+/// re-parse/re-resolve fails. Every other view is still rewritten normally.
+fn rewrite_views_for_table_rename(
+    database: &mut Database,
+    old_name: &str,
+    new_name: &str,
+    broken: &super::drop_column_checks::BrokenSchemaObjects,
+) {
     let view_names = database.catalog.list_views();
     let mut pending: Vec<(String, String)> = Vec::new();
     for name in view_names {
         let Some(view) = database.catalog.get_view(&name) else {
             continue;
         };
+        // Already-broken view + writable_schema ON: leave its stored SQL alone.
+        if broken.is_view_broken(view) {
+            continue;
+        }
         // Prefer the verbatim `CREATE VIEW` text; fall back to reconstructing it
         // from the parsed query when a view was stored without captured source,
         // so a view still tracks the rename either way.
