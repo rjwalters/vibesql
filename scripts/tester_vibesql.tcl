@@ -9986,8 +9986,20 @@ proc sqlite3_mprintf_int {args} {
             continue
         }
         # Extract value from between pipes: | value |
-        if {[regexp {^\|\s*(.*?)\s*\|$} $line -> value]} {
-            return $value
+        #
+        # Deliberately NOT a regex. `sqlite3_mprintf_int` exists precisely to
+        # drive VibeSQL's printf() with the same pathological field widths
+        # SQLite's own printf.test uses to probe overflow handling (e.g.
+        # printf-1.17.1's `%2147483647d`, clamped by the engine to a bounded
+        # but still six-figure-character field — see PRINTF_MAX_FIELD_LEN in
+        # crates/vibesql-executor/src/evaluator/functions/sqlite_compat/string_funcs.rs,
+        # #6172). A `^\|\s*(.*?)\s*\|$` pattern combines a lazy quantifier
+        # with anchors at both ends, which is O(n^2) in Tcl's backtracking
+        # regex engine for a line this long — observed hanging this proc for
+        # 50+ minutes of CPU time on a single call. `string index`/`string
+        # range` bounds checks are O(n) and match the same "| ... |" shape.
+        if {[string index $line 0] eq "|" && [string index $line end] eq "|"} {
+            return [string trim [string range $line 1 end-1]]
         }
     }
 
