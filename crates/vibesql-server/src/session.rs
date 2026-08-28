@@ -1249,19 +1249,40 @@ impl Session {
 
             Statement::Rollback(_) => self.rollback().await,
 
-            Statement::RollbackToSavepoint(_savepoint_stmt) => {
-                // TODO: Implement savepoints in SessionTransactionManager
-                Ok(ExecutionResult::Other { message: "ROLLBACK TO SAVEPOINT".to_string() })
+            // Savepoints (#6654): delegate to the same `Database` API the
+            // CLI uses (`vibesql-cli/src/executor/mod.rs`) instead of
+            // no-opping. `SAVEPOINT` outside an explicit `BEGIN` and the
+            // matching outermost `RELEASE` implicitly open/close a
+            // transaction at the storage layer (SQLite autocommit
+            // semantics) bypassing this session's own `begin`/`commit`, so
+            // `txn_manager.sync_active` re-syncs the session-level active
+            // flag the wire protocol's `ReadyForQuery` status reports.
+            Statement::Savepoint(savepoint_stmt) => {
+                let mut db = self.db.write().await;
+                let message = vibesql_executor::SavepointExecutor::execute(savepoint_stmt, &mut db)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                self.txn_manager.sync_active(db.in_transaction());
+                Ok(ExecutionResult::Other { message })
             }
 
-            Statement::Savepoint(_savepoint_stmt) => {
-                // TODO: Implement savepoints in SessionTransactionManager
-                Ok(ExecutionResult::Other { message: "SAVEPOINT".to_string() })
+            Statement::RollbackToSavepoint(savepoint_stmt) => {
+                let mut db = self.db.write().await;
+                let message = vibesql_executor::RollbackToSavepointExecutor::execute(
+                    savepoint_stmt,
+                    &mut db,
+                )
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+                self.txn_manager.sync_active(db.in_transaction());
+                Ok(ExecutionResult::Other { message })
             }
 
-            Statement::ReleaseSavepoint(_release_stmt) => {
-                // TODO: Implement savepoints in SessionTransactionManager
-                Ok(ExecutionResult::Other { message: "RELEASE SAVEPOINT".to_string() })
+            Statement::ReleaseSavepoint(release_stmt) => {
+                let mut db = self.db.write().await;
+                let message =
+                    vibesql_executor::ReleaseSavepointExecutor::execute(release_stmt, &mut db)
+                        .map_err(|e| anyhow::anyhow!("{}", e))?;
+                self.txn_manager.sync_active(db.in_transaction());
+                Ok(ExecutionResult::Other { message })
             }
 
             // PRAGMA statements are SQLite-specific configuration commands
@@ -1641,6 +1662,82 @@ mod tests {
 
         // Can't commit when not in transaction
         assert!(session.commit().await.is_err());
+    }
+
+    /// #6654: SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT must
+    /// actually delegate to the `Database` transaction API instead of
+    /// no-opping. Asserts on row state (via a follow-up SELECT), not just
+    /// that the statements return success — the old stub also returned
+    /// success without ever touching the database.
+    #[tokio::test]
+    async fn test_savepoint_rollback_to_undoes_writes() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        session.execute("CREATE TABLE t (id INT)").await.unwrap();
+        session.begin_transaction().await.unwrap();
+        session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+        session.execute("SAVEPOINT sp1").await.unwrap();
+        session.execute("INSERT INTO t VALUES (2)").await.unwrap();
+
+        // Row-state check via the real db, not just a message check.
+        {
+            let db = session.shared_database().read().await;
+            let table = db.get_table("t").unwrap();
+            assert_eq!(table.row_count(), 2, "both rows visible before ROLLBACK TO");
+        }
+
+        session.execute("ROLLBACK TO SAVEPOINT sp1").await.unwrap();
+
+        {
+            let db = session.shared_database().read().await;
+            let table = db.get_table("t").unwrap();
+            assert_eq!(
+                table.row_count(),
+                1,
+                "ROLLBACK TO SAVEPOINT must undo the write made after the savepoint"
+            );
+        }
+
+        session.commit().await.unwrap();
+
+        let db = session.shared_database().read().await;
+        let table = db.get_table("t").unwrap();
+        assert_eq!(table.row_count(), 1, "only the pre-savepoint row should survive COMMIT");
+    }
+
+    /// #6654: RELEASE SAVEPOINT must not undo writes made under the
+    /// savepoint (it is not a rollback) and the session's transaction
+    /// status must stay in sync when SAVEPOINT/RELEASE implicitly open and
+    /// close a transaction outside of BEGIN/COMMIT.
+    #[tokio::test]
+    async fn test_savepoint_outside_begin_implicit_transaction_and_release() {
+        let db = create_shared_db();
+        let mut session = Session::new("testdb".to_string(), "testuser".to_string(), db);
+
+        session.execute("CREATE TABLE t (id INT)").await.unwrap();
+
+        // No explicit BEGIN: SAVEPOINT opens an implicit transaction.
+        assert!(!session.in_transaction());
+        session.execute("SAVEPOINT sp1").await.unwrap();
+        assert!(
+            session.in_transaction(),
+            "SAVEPOINT outside BEGIN must be reflected in session transaction status"
+        );
+
+        session.execute("INSERT INTO t VALUES (1)").await.unwrap();
+        session.execute("RELEASE SAVEPOINT sp1").await.unwrap();
+
+        // Releasing the outermost (only) savepoint of an implicit
+        // transaction auto-commits it.
+        assert!(
+            !session.in_transaction(),
+            "RELEASE of the outermost implicit savepoint must auto-commit"
+        );
+
+        let db = session.shared_database().read().await;
+        let table = db.get_table("t").unwrap();
+        assert_eq!(table.row_count(), 1, "the write must survive the implicit auto-commit");
     }
 
     #[tokio::test]

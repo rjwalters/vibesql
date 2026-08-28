@@ -284,6 +284,32 @@ impl SessionTransactionManager {
             state.record_delete(table_name, row_index, row);
         }
     }
+
+    /// Force the manager's active flag to match the storage layer's actual
+    /// transaction state.
+    ///
+    /// `SAVEPOINT` (outside an explicit `BEGIN`) and the matching outermost
+    /// `RELEASE` implicitly open/close a transaction at the `Database` level
+    /// (SQLite autocommit semantics — see `vibesql_executor::SavepointExecutor`
+    /// / `ReleaseSavepointExecutor`), bypassing this session's `begin()` /
+    /// `commit()` / `rollback()`. Without this, the session's `in_transaction()`
+    /// — which the wire protocol reports as the `ReadyForQuery` transaction
+    /// status — would silently drift from the real storage-layer state
+    /// (#6654). `active` should be `Database::in_transaction()` right after
+    /// the savepoint operation runs; a no-op when already in sync.
+    pub fn sync_active(&mut self, active: bool) {
+        match (active, self.current.is_some()) {
+            (true, false) => {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.current = Some(TransactionState::new(id));
+            }
+            (false, true) => {
+                self.current = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Errors that can occur during transaction management.
@@ -458,6 +484,40 @@ mod tests {
         assert_eq!(id1, 1);
         assert_eq!(id2, 2);
         assert_eq!(id3, 3);
+    }
+
+    #[test]
+    fn test_sync_active_opens_implicit_transaction() {
+        let mut mgr = SessionTransactionManager::new();
+
+        // SAVEPOINT outside BEGIN implicitly opened a transaction at the
+        // storage layer; sync_active(true) must reflect that here too.
+        assert!(!mgr.in_transaction());
+        mgr.sync_active(true);
+        assert!(mgr.in_transaction());
+    }
+
+    #[test]
+    fn test_sync_active_closes_implicit_transaction() {
+        let mut mgr = SessionTransactionManager::new();
+        mgr.sync_active(true);
+        assert!(mgr.in_transaction());
+
+        // Outermost RELEASE auto-committed the implicit transaction.
+        mgr.sync_active(false);
+        assert!(!mgr.in_transaction());
+    }
+
+    #[test]
+    fn test_sync_active_is_noop_when_already_in_sync() {
+        let mut mgr = SessionTransactionManager::new();
+
+        mgr.sync_active(false);
+        assert!(!mgr.in_transaction());
+
+        let id = mgr.begin().unwrap();
+        mgr.sync_active(true);
+        assert_eq!(mgr.transaction_id(), Some(id));
     }
 
     #[test]
