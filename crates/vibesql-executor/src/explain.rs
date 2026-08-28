@@ -15,7 +15,8 @@
 use std::{collections::HashSet, fmt::Write};
 
 use vibesql_ast::{
-    pretty_print::ToSql, ExplainFormat, ExplainStmt, Expression, SelectItem, SelectStmt, Statement,
+    pretty_print::ToSql, DeleteStmt, ExplainFormat, ExplainStmt, Expression, FromClause,
+    SelectItem, SelectStmt, Statement, UpdateStmt, WhereClause,
 };
 use vibesql_storage::Database;
 
@@ -856,10 +857,8 @@ impl ExplainExecutor {
             Statement::Insert(_) => {
                 PlanNode::new("Insert").with_detail("Inserts rows into target table".to_string())
             }
-            Statement::Update(_) => PlanNode::new("Update")
-                .with_detail("Updates rows matching WHERE clause".to_string()),
-            Statement::Delete(_) => PlanNode::new("Delete")
-                .with_detail("Deletes rows matching WHERE clause".to_string()),
+            Statement::Update(update_stmt) => Self::explain_update(update_stmt, database)?,
+            Statement::Delete(delete_stmt) => Self::explain_delete(delete_stmt, database)?,
             _ => {
                 return Err(ExecutorError::Other(
                     "EXPLAIN only supports SELECT, INSERT, UPDATE, DELETE statements".to_string(),
@@ -868,6 +867,102 @@ impl ExplainExecutor {
         };
 
         Ok(ExplainResult { plan, format: stmt.format.clone() })
+    }
+
+    /// Generate an execution plan for a DELETE statement.
+    ///
+    /// Accessing the target table of a `DELETE FROM t WHERE ...` plans
+    /// exactly like `SELECT rowid FROM t WHERE ...` (verified against
+    /// sqlite3 3.51.0) — both walk the same table via the same scan/search
+    /// access-path selection. This reuses [`Self::explain_from_clause`] on a
+    /// synthetic single-table FROM clause built from the statement's target
+    /// table and index hint, so `EXPLAIN QUERY PLAN DELETE FROM t WHERE ...`
+    /// renders the real `SCAN`/`SEARCH` line instead of an empty plan
+    /// (previously this produced no scan entries at all — e_fkey.test
+    /// e_fkey-25.2).
+    ///
+    /// Not modeled: when foreign key enforcement is active, SQLite also
+    /// plans one child-table orphan-check subquery per foreign key that
+    /// references this table's key columns
+    /// (`SELECT rowid FROM <child> WHERE <child-key> = ?`, e_fkey.test
+    /// section 4 EVIDENCE-OF R-00279-52283/R-23302-30956). That automatic
+    /// FK-check sub-plan is a separate, larger feature — see e_fkey-25.3/
+    /// 26.x, tracked in issue #6170.
+    fn explain_delete(stmt: &DeleteStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+        let mut root = PlanNode::new("Delete");
+        let where_expr = Self::where_clause_condition(stmt.where_clause.as_ref());
+        let from = FromClause::Table {
+            name: stmt.table_name.clone(),
+            alias: stmt.alias.clone(),
+            column_aliases: None,
+            quoted: stmt.quoted,
+            index_hint: stmt.index_hint.clone(),
+        };
+        let scan_node = Self::explain_from_clause(
+            &from,
+            &where_expr,
+            &None,
+            false,
+            &HashSet::new(),
+            database,
+            &HashSet::new(),
+        )?;
+        root.add_child(scan_node);
+        if where_expr.is_some() {
+            root.details.push("Filter: <where clause>".to_string());
+        }
+        Ok(root)
+    }
+
+    /// Generate an execution plan for an UPDATE statement.
+    ///
+    /// Same rationale as [`Self::explain_delete`]: the target table's
+    /// access path for `UPDATE t SET ... WHERE ...` is planned exactly like
+    /// scanning/searching it in a SELECT (e_fkey.test e_fkey-27.x's
+    /// `EXPLAIN QUERY PLAN UPDATE artist SET ...` expects the same `SCAN`/
+    /// `SEARCH` line a `SELECT` over the same WHERE clause would produce).
+    ///
+    /// The SQLite 3.33+ `UPDATE ... FROM <other-tables>` extension is not
+    /// modeled here — only the target table's own scan is rendered; a
+    /// present `from_clause` does not currently contribute additional scan
+    /// entries. Not modeled either: SQLite's automatic FK child orphan-check
+    /// sub-plan for parent-key updates (e_fkey-27.3/27.4, see
+    /// [`Self::explain_delete`]'s doc comment and issue #6170).
+    fn explain_update(stmt: &UpdateStmt, database: &Database) -> Result<PlanNode, ExecutorError> {
+        let mut root = PlanNode::new("Update");
+        let where_expr = Self::where_clause_condition(stmt.where_clause.as_ref());
+        let from = FromClause::Table {
+            name: stmt.table_name.clone(),
+            alias: stmt.alias.clone(),
+            column_aliases: None,
+            quoted: stmt.quoted,
+            index_hint: stmt.index_hint.clone(),
+        };
+        let scan_node = Self::explain_from_clause(
+            &from,
+            &where_expr,
+            &None,
+            false,
+            &HashSet::new(),
+            database,
+            &HashSet::new(),
+        )?;
+        root.add_child(scan_node);
+        if where_expr.is_some() {
+            root.details.push("Filter: <where clause>".to_string());
+        }
+        Ok(root)
+    }
+
+    /// Extract the plain boolean condition from a positioned-update-aware
+    /// `WhereClause`, dropping `WHERE CURRENT OF <cursor>` (which names a
+    /// cursor rather than a filter expression and has no scan/search
+    /// counterpart to render).
+    fn where_clause_condition(where_clause: Option<&WhereClause>) -> Option<Expression> {
+        match where_clause {
+            Some(WhereClause::Condition(expr)) => Some(expr.clone()),
+            _ => None,
+        }
     }
 
     /// Generate execution plan for a SELECT statement

@@ -3630,6 +3630,40 @@ proc is_readonly_query {sql} {
     return 0
 }
 
+# Return the start index (into $sql) of a trailing standalone read-only
+# statement (SELECT/VALUES/WITH.../bare PRAGMA getter, per is_readonly_query),
+# or -1 when $sql has fewer than two statements or does not end in one.
+#
+# Mirrors split_sql_statements' statement-boundary detection (masking CREATE
+# TRIGGER bodies so an internal BEGIN...END is not miscounted as a statement
+# boundary) but returns a POSITION rather than reconstructed substrings, so
+# the caller can slice the ORIGINAL (unmasked) text at an exact boundary --
+# preserving whitespace/formatting exactly -- instead of rejoining
+# semicolon-stripped pieces.
+proc find_trailing_readonly_query {sql} {
+    set masked [mask_trigger_bodies $sql]
+    set starts {}
+    set start 0
+    set len [string length $masked]
+    for {set i 0} {$i < $len} {incr i} {
+        if {[string index $masked $i] eq ";"} {
+            set stmt [string range $sql $start [expr {$i - 1}]]
+            if {[string trim $stmt] ne ""} { lappend starts $start }
+            set start [expr {$i + 1}]
+        }
+    }
+    set tail [string range $sql $start end]
+    if {[string trim $tail] ne ""} { lappend starts $start }
+    if {[llength $starts] < 2} {
+        return -1
+    }
+    set last_start [lindex $starts end]
+    if {[is_readonly_query [string range $sql $last_start end]]} {
+        return $last_start
+    }
+    return -1
+}
+
 proc query_in_transaction {new_sql} {
     # Answer a read-only query issued WHILE a batched transaction is open,
     # returning the rows it would see from inside that transaction: the committed
@@ -4278,6 +4312,27 @@ proc execsql {sql {db ""}} {
         set ::txn_opened_by_savepoint $sp_opens_txn
         set ::savepoint_stack $sp_stack_after
         set ::txn_had_tolerated_error 0
+        # A single execsql call that both opens (or continues) a transaction
+        # AND ends with a trailing standalone read-only query -- e.g.
+        # `COMMIT; PRAGMA foreign_keys=OFF; BEGIN; PRAGMA foreign_keys=ON;
+        # DELETE FROM t1; PRAGMA foreign_keys;` (e_fkey-6.3) or
+        # `BEGIN; INSERT INTO t VALUES(1); SELECT * FROM t;` -- must still
+        # return that query's real value immediately: SQLite runs the whole
+        # block on one live connection, so `execsql {...}`'s result is
+        # whatever its LAST statement produced, even though the block leaves
+        # a transaction open. Unconditionally `return {}` here silently
+        # swallowed that trailing value (its DML is correctly deferred to the
+        # eventual COMMIT/ROLLBACK flush, but so was the read, which has no
+        # side effect and must not wait). Split it off and answer it the same
+        # way the already-in-transaction continuation path below answers a
+        # standalone read: from an isolated trial copy via
+        # query_in_transaction, without adding it to the deferred batch
+        # (Part of #6170).
+        set trailing_start [find_trailing_readonly_query $sql]
+        if {$trailing_start >= 0} {
+            lappend ::sql_batch [string range $sql 0 [expr {$trailing_start - 1}]]
+            return [query_in_transaction [string range $sql $trailing_start end]]
+        }
         lappend ::sql_batch $sql
         return {}
     } elseif {$net_begin < 0 || ($::in_transaction && $end_count > 0) || $sp_closes_txn} {
@@ -6849,6 +6904,11 @@ array set vibesql_skip_tests {
     default-5.2 "DEFAULT behavior differs"
 
     e_fkey-2.2 "Foreign key behavior differs"
+
+    e_fkey-25.2 "EXPLAIN QUERY PLAN output format is SQLite-specific: uses the file's own `eqp`/`do_detail_test` helper (`db eval {EXPLAIN QUERY PLAN ...} { lappend eqpres $detail }`), which expects SQLite's bare per-row `detail` column value (e.g. 'SCAN artist'). VibeSQL's CLI instead renders the whole ASCII-art EQP tree (the 'QUERY PLAN' header line plus tree-connector-prefixed lines) as literal per-line 'detail' rows -- same architectural gap already skip-listed via this exact rationale for whereA-1.*/join-12.14*/orderby1-1.9+ above. DELETE's underlying scan/search plan generation itself is correct (see explain_delete in crates/vibesql-executor/src/explain.rs and explain_dml_scan_tests.rs) -- only the eqp-proc row-shape comparison fails. Part of #6170."
+    e_fkey-25.3 "Same EXPLAIN QUERY PLAN row-format gap as e_fkey-25.2 above (`do_detail_test`/`eqp` proc), for DELETE with foreign_keys=ON. Part of #6170."
+    e_fkey-27.3 "Same EXPLAIN QUERY PLAN row-format gap as e_fkey-25.2 above (`do_detail_test`/`eqp` proc), for UPDATE. Part of #6170."
+    e_fkey-27.4 "Same EXPLAIN QUERY PLAN row-format gap as e_fkey-25.2 above (`do_detail_test`/`eqp` proc), for UPDATE. Part of #6170."
 
     e_fkey-62.1 "Bucket-A A9 (documented intentional engine divergence, docs/reference/tcl-skip-policy.md): asserts `SET CONSTRAINTS ALL IMMEDIATE` fails with SQLite's generic near-\"SET\"-syntax-error because real SQLite has no top-level SET statement grammar at all. VibeSQL deliberately supports a top-level `SET <variable> = <value>` statement (session/global variable assignment, a SQL-dialect extension beyond SQLite) -- parsing then fails later, at the unexpected `ALL` token, once `CONSTRAINTS` is consumed as the variable name. Not a conformance gap: SQLite lacking a feature VibeSQL supports on purpose is the inverse of a missing-feature bug. Part of #6170."
     e_fkey-62.2 "Bucket-A A9: same intentional top-level SET-statement divergence as e_fkey-62.1 above, for `SET CONSTRAINTS ALL DEFERRED`. Part of #6170."
