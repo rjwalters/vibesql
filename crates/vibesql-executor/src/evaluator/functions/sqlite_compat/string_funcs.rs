@@ -110,6 +110,33 @@ pub(crate) fn concat_ws(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
     Ok(SqlValue::Varchar(parts.join(&separator).into()))
 }
 
+/// Upper bound on a single PRINTF() field's width/precision.
+///
+/// SQLite's own `printf()`/`mprintf()` refuses to materialize an
+/// attacker- or typo-supplied field width like `%2147483647d` (real
+/// SQLite's `sqlite3_mprintf` fails such requests rather than actually
+/// allocating multiple gigabytes). VibeSQL's implementation used the
+/// parsed width/precision directly as a `String::repeat()`/`.repeat()`
+/// count with no upper bound, so a format string containing an
+/// absurdly large literal width or precision (or one supplied via a
+/// `%.*d`-style argument) would attempt a multi-gigabyte allocation.
+/// When that string was later captured by a caller with its own size
+/// limits (e.g. Tcl's `Tcl_SetObjLength`, which uses a 32-bit length
+/// internally), the result was an integer-overflow abort, not just a
+/// slow query (see e_expr/printf.test conformance work, #6172).
+///
+/// Deliberately kept in the low thousands rather than something like
+/// 1,000,000: no legitimate report-formatting use of PRINTF() needs a
+/// single field anywhere near that wide, and a single-line CLI table row
+/// of that size was independently observed to make the SQLite TCL test
+/// harness's `exec`-based subprocess capture (`sqlite3_mprintf_int` in
+/// `scripts/tester_vibesql.tcl`) take minutes per call even after the
+/// crash itself was fixed — a single huge *line* (as opposed to a large
+/// total result set split across many lines) is apparently a pathological
+/// case for Tcl's own I/O buffering. Every site that turns a parsed
+/// width/precision into an actual allocation clamps to this bound first.
+const PRINTF_MAX_FIELD_LEN: usize = 10_000;
+
 /// Parsed printf format specifier
 #[derive(Default)]
 struct FormatSpec {
@@ -182,14 +209,18 @@ pub(crate) fn printf(args: &[SqlValue]) -> Result<SqlValue, ExecutorError> {
             if arg_index < format_args.len() {
                 let prec_val = &format_args[arg_index];
                 arg_index += 1;
-                // Convert the precision argument to usize
+                // Convert the precision argument to usize, clamped so a
+                // caller-supplied precision (e.g. `printf('%.*c', 2147483647, 65)`)
+                // can never drive an unbounded allocation below.
                 spec.precision = match prec_val {
-                    SqlValue::Integer(i) => Some((*i).max(0) as usize),
-                    SqlValue::Bigint(i) => Some((*i).max(0) as usize),
-                    SqlValue::Smallint(i) => Some((*i).max(0) as usize),
-                    SqlValue::Numeric(n) => Some((*n).max(0.0) as usize),
-                    SqlValue::Real(r) => Some((*r).max(0.0) as usize),
-                    SqlValue::Double(d) => Some((*d).max(0.0) as usize),
+                    SqlValue::Integer(i) => Some(((*i).max(0) as usize).min(PRINTF_MAX_FIELD_LEN)),
+                    SqlValue::Bigint(i) => Some(((*i).max(0) as usize).min(PRINTF_MAX_FIELD_LEN)),
+                    SqlValue::Smallint(i) => Some(((*i).max(0) as usize).min(PRINTF_MAX_FIELD_LEN)),
+                    SqlValue::Numeric(n) => {
+                        Some(((*n).max(0.0) as usize).min(PRINTF_MAX_FIELD_LEN))
+                    }
+                    SqlValue::Real(r) => Some(((*r).max(0.0) as usize).min(PRINTF_MAX_FIELD_LEN)),
+                    SqlValue::Double(d) => Some(((*d).max(0.0) as usize).min(PRINTF_MAX_FIELD_LEN)),
                     _ => Some(0),
                 };
             } else {
@@ -254,7 +285,14 @@ fn parse_format_spec(chars: &mut std::iter::Peekable<std::str::Chars>) -> Format
         }
     }
     if !width_str.is_empty() {
-        spec.width = width_str.parse().ok();
+        // Clamp: a literal width like `%2147483647d` must not drive an
+        // unbounded `.repeat()` allocation in `apply_width` below. A width
+        // too large even for `usize` (astronomically unlikely, but the
+        // digit string itself has no length limit) also falls back to the
+        // cap via `unwrap_or`.
+        spec.width = Some(
+            width_str.parse::<usize>().unwrap_or(PRINTF_MAX_FIELD_LEN).min(PRINTF_MAX_FIELD_LEN),
+        );
     }
 
     // Parse precision
@@ -274,7 +312,13 @@ fn parse_format_spec(chars: &mut std::iter::Peekable<std::str::Chars>) -> Format
                     break;
                 }
             }
-            spec.precision = Some(prec_str.parse().unwrap_or(0));
+            // Clamp for the same reason as the literal width above (e.g.
+            // `%.2147483648d`): precision feeds both `format_char`'s
+            // char-repeat and (via string truncation) is otherwise safe,
+            // but must never be trusted as an unbounded allocation size.
+            spec.precision = Some(
+                prec_str.parse::<usize>().unwrap_or(PRINTF_MAX_FIELD_LEN).min(PRINTF_MAX_FIELD_LEN),
+            );
         }
     }
 
@@ -773,6 +817,76 @@ mod tests {
             printf(&[SqlValue::Varchar("100%%".into())]).unwrap(),
             SqlValue::Varchar("100%".into())
         );
+    }
+
+    /// Regression test for #6172 (SQLite TCL `printf.test` 1.17.1): a literal
+    /// field width that overflows any reasonable buffer (e.g. i32::MAX) must
+    /// not make PRINTF() attempt a multi-gigabyte allocation. Before the
+    /// `PRINTF_MAX_FIELD_LEN` clamp, `apply_width` computed
+    /// `padding = width - s.len()` directly from the parsed width and called
+    /// `" ".repeat(padding)`, so `printf('%2147483647d', 1)` tried to
+    /// allocate a ~2GB string — harmless in isolation, but any consumer with
+    /// its own length limits (e.g. Tcl's `Tcl_SetObjLength`, a 32-bit count
+    /// internally) aborted with an integer-overflow crash when that output
+    /// was captured, taking down the entire enclosing TCL test file.
+    #[test]
+    fn test_printf_huge_literal_width_is_bounded() {
+        let result =
+            printf(&[SqlValue::Varchar("%2147483647d".into()), SqlValue::Integer(1)]).unwrap();
+        match result {
+            SqlValue::Varchar(s) => {
+                assert!(
+                    s.len() <= PRINTF_MAX_FIELD_LEN + 16,
+                    "printf() must clamp an absurd literal width instead of materializing it; got {} bytes",
+                    s.len()
+                );
+            }
+            other => panic!("expected Varchar result, got {other:?}"),
+        }
+    }
+
+    /// Regression test for #6172 (SQLite TCL `printf.test` 1.17.4): same
+    /// hazard as above, but for a literal *precision* (`%.2147483648d`)
+    /// rather than width — precision feeds `format_char`'s `.repeat()` for
+    /// `%c`/`%.*c` conversions and must be bounded the same way.
+    #[test]
+    fn test_printf_huge_literal_precision_is_bounded() {
+        let result =
+            printf(&[SqlValue::Varchar("%.2147483648d".into()), SqlValue::Integer(1)]).unwrap();
+        match result {
+            SqlValue::Varchar(s) => {
+                assert!(
+                    s.len() <= PRINTF_MAX_FIELD_LEN + 16,
+                    "printf() must clamp an absurd literal precision instead of materializing it; got {} bytes",
+                    s.len()
+                );
+            }
+            other => panic!("expected Varchar result, got {other:?}"),
+        }
+    }
+
+    /// Regression test for #6172: the same hazard reachable via an
+    /// argument-supplied precision (`%.*c`) rather than a literal digit
+    /// string in the format — e.g. `printf('%.*c', 2147483647, 65)` must not
+    /// try to repeat a character two billion times.
+    #[test]
+    fn test_printf_huge_arg_precision_is_bounded() {
+        let result = printf(&[
+            SqlValue::Varchar("%.*c".into()),
+            SqlValue::Integer(2_147_483_647),
+            SqlValue::Integer(65),
+        ])
+        .unwrap();
+        match result {
+            SqlValue::Varchar(s) => {
+                assert!(
+                    s.len() <= PRINTF_MAX_FIELD_LEN + 16,
+                    "printf() must clamp an absurd argument-supplied precision instead of materializing it; got {} bytes",
+                    s.len()
+                );
+            }
+            other => panic!("expected Varchar result, got {other:?}"),
+        }
     }
 
     #[test]
