@@ -216,6 +216,86 @@ fn materialize_window_values_rows(
     Ok(out)
 }
 
+/// Whether this INSERT's prepare-time FK schema validation must also walk the
+/// *descendant* closure — i.e. report a broken FK that some **other** table
+/// declares against the INSERT's target (the "parent side" of the check).
+///
+/// This mirrors the skip condition at the head of SQLite's parent-side loop in
+/// `sqlite3FkCheck()`:
+///
+/// ```c
+/// if( !pFKey->isDeferred && !(db->flags & SQLITE_DeferFKs)
+///  && !pParse->pToplevel && !pParse->isMultiWrite
+/// ){
+///   /* Inserting a single row into a parent table cannot cause (or fix)
+///   ** an immediate foreign key violation. So do nothing in this case.  */
+///   continue;
+/// }
+/// ```
+///
+/// The `continue` skips the whole loop body — including the
+/// `sqlite3FkLocateIndex()` call that raises `foreign key mismatch` — so the
+/// broken child's definition is never resolved. That skip applies only to a
+/// **single-row, top-level, non-multi-write** INSERT. This function evaluates
+/// the *statement-form* half of the condition (`pParse->pToplevel`,
+/// `pParse->isMultiWrite`); the *per-FK / session* half (`pFKey->isDeferred`,
+/// `SQLITE_DeferFKs`) is evaluated inside `validate_fk_schema_for_dml`.
+///
+/// Empirically verified against `sqlite3` 3.51.0 using the broken-FK shape
+/// `CREATE TABLE p(a PRIMARY KEY, b); CREATE TABLE c(x REFERENCES p(b));`
+/// (broken because `p.b` is backed by no PK/UNIQUE/non-partial UNIQUE INDEX):
+///
+/// | statement against the parent `p`                             | real SQLite |
+/// |--------------------------------------------------------------|-------------|
+/// | `INSERT INTO p VALUES(1,2)`                                  | ok          |
+/// | `INSERT INTO p DEFAULT VALUES`                               | ok          |
+/// | `INSERT OR IGNORE`/`OR ABORT`/`OR FAIL`/`OR ROLLBACK ... VALUES(1,2)` | ok |
+/// | `INSERT INTO p VALUES(1,2) ON CONFLICT DO NOTHING`           | ok          |
+/// | `INSERT INTO p VALUES(1,2),(3,4)`                            | mismatch    |
+/// | `INSERT INTO p SELECT 1,2`                                   | mismatch    |
+/// | `INSERT OR REPLACE INTO p VALUES(1,2)`                       | mismatch    |
+/// | `INSERT INTO p VALUES(1,2) ON CONFLICT(a) DO UPDATE SET b=3` | mismatch    |
+/// | `INSERT INTO p VALUES(1,2) RETURNING a`                      | mismatch    |
+/// | `INSERT INTO p VALUES(1,2)` from inside a trigger body       | mismatch    |
+///
+/// SQLite's own conformance suite asserts the VALUES-vs-SELECT half of this
+/// contrast side by side: `e_fkey-19.2`/`e_fkey-21.2` use
+/// `INSERT INTO parent VALUES(...)` and expect success, while
+/// `e_fkey-20.$tn.6` deliberately uses `INSERT INTO $ptbl SELECT ?, ?` to get
+/// the mismatch (Part of #6170).
+fn insert_checks_fk_descendants(stmt: &vibesql_ast::InsertStmt, in_trigger_body: bool) -> bool {
+    // `pParse->pToplevel != 0` — an INSERT compiled as part of a trigger
+    // sub-program is never on the skip path.
+    if in_trigger_body {
+        return true;
+    }
+
+    // `pParse->isMultiWrite` — SQLite sets this for any INSERT that may write
+    // more than the single row it was handed: a SELECT source, a multi-row
+    // VALUES list (parsed as a compound SELECT of VALUES), REPLACE conflict
+    // handling (which deletes conflicting rows first), an upsert DO UPDATE arm,
+    // or a RETURNING coroutine.
+    match &stmt.source {
+        vibesql_ast::InsertSource::Select(_) => return true,
+        vibesql_ast::InsertSource::Values(rows) if rows.len() > 1 => return true,
+        _ => {}
+    }
+    if stmt.conflict_clause == Some(vibesql_ast::ConflictClause::Replace) {
+        return true;
+    }
+    if stmt
+        .on_conflict
+        .iter()
+        .any(|c| matches!(c.action, vibesql_ast::OnConflictAction::DoUpdate { .. }))
+    {
+        return true;
+    }
+    if stmt.on_duplicate_key_update.is_some() {
+        return true;
+    }
+    stmt.returning.is_some()
+}
+
 fn execute_insert_internal(
     db: &mut vibesql_storage::Database,
     stmt: &vibesql_ast::InsertStmt,
@@ -327,8 +407,11 @@ fn execute_insert_internal(
     // must be reported even when this INSERT's source produces zero rows
     // (`INSERT INTO t SELECT ... FROM empty`) — the per-row FK validation
     // below never runs in that case. Also covers INSERT into the *parent*
-    // side of a broken FK declared by some other (child) table.
-    crate::foreign_key_check::validate_fk_schema_for_dml(db, table_name)?;
+    // side of a broken FK declared by some other (child) table, but only for
+    // the statement forms real SQLite reports it for — see
+    // `insert_checks_fk_descendants` for the empirically-verified matrix.
+    let check_descendants = insert_checks_fk_descendants(stmt, trigger_context.is_some());
+    crate::foreign_key_check::validate_fk_schema_for_dml(db, table_name, check_descendants)?;
 
     // Schema-aware trigger firing (triggerD-3.1/3.2): resolve which schema this
     // INSERT's target table actually lives in (temp shadows main for unqualified

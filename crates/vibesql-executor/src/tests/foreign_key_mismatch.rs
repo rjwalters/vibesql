@@ -231,9 +231,11 @@ fn delete_from_parent_with_mismatched_child_key_errors() {
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
-    // Seed `p` *before* creating the broken child `c` — once `c`'s FK
-    // definition exists, even an INSERT into `p` itself would (correctly)
-    // raise the same mismatch, per SQLite's statement-prepare-time check.
+    // Seed `p` *before* creating the broken child `c`. (A single-row
+    // `INSERT INTO p VALUES(...)` would in fact still succeed after `c`
+    // exists — see
+    // `insert_into_parent_with_mismatched_child_key_depends_on_statement_form`
+    // — but seeding first keeps this test independent of that nuance.)
     exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
     exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
     exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
@@ -251,7 +253,7 @@ fn update_on_parent_with_mismatched_child_key_errors() {
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
-    // Seed `p` before creating the broken child `c` (see comment in
+    // Seed `p` before creating the broken child `c` (see the comment in
     // `delete_from_parent_with_mismatched_child_key_errors` above).
     exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
     exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap();
@@ -266,17 +268,59 @@ fn update_on_parent_with_mismatched_child_key_errors() {
 }
 
 #[test]
-fn insert_into_parent_with_mismatched_child_key_errors() {
+fn insert_into_parent_with_mismatched_child_key_depends_on_statement_form() {
+    // Parent-side prepare-time detection is *statement-form sensitive* in real
+    // SQLite, not unconditional. SQLite's `sqlite3FkCheck()` skips its entire
+    // parent-side loop — including the `sqlite3FkLocateIndex()` call that
+    // raises "foreign key mismatch" — for a single-row, top-level,
+    // non-multi-write INSERT, on the grounds that "inserting a single row into
+    // a parent table cannot cause (or fix) an immediate foreign key
+    // violation".
+    //
+    // This test originally (#6341) asserted that the plain `INSERT INTO p
+    // VALUES(1, 2)` form errors. That was an over-broad artifact of VibeSQL
+    // firing the descendant walk on every INSERT; empirically verified against
+    // real `sqlite3` 3.51.0 with exactly this schema:
+    //
+    //     sqlite> PRAGMA foreign_keys=ON;
+    //     sqlite> CREATE TABLE p(a PRIMARY KEY, b);
+    //     sqlite> CREATE TABLE c(x REFERENCES p(b));
+    //     sqlite> INSERT INTO p VALUES(1, 2);            -- succeeds
+    //     sqlite> INSERT INTO p VALUES(1, 2),(3, 4);     -- foreign key mismatch - "c" referencing
+    // "p"     sqlite> INSERT INTO p SELECT 1, 2;             -- foreign key mismatch - "c"
+    // referencing "p"
+    //
+    // SQLite's own conformance suite encodes the same contrast: e_fkey-19.2
+    // and e_fkey-21.2 insert into the parent with single-row VALUES and expect
+    // success, while e_fkey-20.$tn.6 deliberately switches to
+    // `INSERT INTO $ptbl SELECT ?, ?` to get the mismatch. So the assertion
+    // below is inverted for the VALUES form and the multi-row / SELECT forms
+    // now carry the "parent side is still detected" intent this test was
+    // written for (Part of #6170).
     let mut db = Database::new();
     db.set_foreign_keys_enabled(true);
 
     exec_sql(&mut db, "CREATE TABLE p(a PRIMARY KEY, b)").unwrap();
     exec_sql(&mut db, "CREATE TABLE c(x REFERENCES p(b))").unwrap();
 
-    let err = exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)").unwrap_err();
+    // Single-row VALUES: SQLite's skip path — must succeed.
+    let r = exec_sql(&mut db, "INSERT INTO p VALUES(1, 2)");
+    assert!(r.is_ok(), "single-row INSERT ... VALUES into the parent should succeed, got: {:?}", r);
+
+    // Multi-row VALUES is a multi-write statement in SQLite (the VALUES list is
+    // parsed as a compound SELECT) — the broken child is reported.
+    let err = exec_sql(&mut db, "INSERT INTO p VALUES(3, 4), (5, 6)").unwrap_err();
     assert!(
         err.contains("foreign key mismatch") && err.contains("\"c\"") && err.contains("\"p\""),
-        "expected mismatch wording, got: {}",
+        "expected mismatch wording for multi-row VALUES, got: {}",
+        err
+    );
+
+    // INSERT ... SELECT is likewise multi-write — the broken child is reported.
+    let err = exec_sql(&mut db, "INSERT INTO p SELECT 7, 8").unwrap_err();
+    assert!(
+        err.contains("foreign key mismatch") && err.contains("\"c\"") && err.contains("\"p\""),
+        "expected mismatch wording for INSERT ... SELECT, got: {}",
         err
     );
 }

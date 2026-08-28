@@ -6927,6 +6927,9 @@ array set vibesql_skip_tests {
     e_fkey-27.3 "Same EXPLAIN QUERY PLAN row-format gap as e_fkey-25.2 above (`do_detail_test`/`eqp` proc), for UPDATE. Part of #6170."
     e_fkey-27.4 "Same EXPLAIN QUERY PLAN row-format gap as e_fkey-25.2 above (`do_detail_test`/`eqp` proc), for UPDATE. Part of #6170."
 
+    e_fkey-51.2 "Cascade failure from e_fkey-51.1's TCL-registered 'db func maxparent maxparent' (e_fkey.test line 2324), the same C-API harness limitation as check-7.2/date-15.2/window6-2.0/e_expr's 'db func' entries above (#5720) -- e_fkey-51.1 is correctly auto-skipped, but its execsql block is also the sole DDL source for tables `parent`/`child` (and the ON UPDATE SET DEFAULT column whose DEFAULT expression calls maxparent()), so every later test that assumes that schema exists cascades to 'no such table: parent'. Same cascade shape as trigger6/nan (#5470/#6172): a C-API-gated setup test is the sole source of schema for the tests that follow it. Part of #6170."
+    e_fkey-51.3 "Same cascade-from-skipped-db-func-setup as e_fkey-51.2 above ('no such table: child'). Part of #6170."
+
     e_fkey-62.1 "Bucket-A A9 (documented intentional engine divergence, docs/reference/tcl-skip-policy.md): asserts `SET CONSTRAINTS ALL IMMEDIATE` fails with SQLite's generic near-\"SET\"-syntax-error because real SQLite has no top-level SET statement grammar at all. VibeSQL deliberately supports a top-level `SET <variable> = <value>` statement (session/global variable assignment, a SQL-dialect extension beyond SQLite) -- parsing then fails later, at the unexpected `ALL` token, once `CONSTRAINTS` is consumed as the variable name. Not a conformance gap: SQLite lacking a feature VibeSQL supports on purpose is the inverse of a missing-feature bug. Part of #6170."
     e_fkey-62.2 "Bucket-A A9: same intentional top-level SET-statement divergence as e_fkey-62.1 above, for `SET CONSTRAINTS ALL DEFERRED`. Part of #6170."
 
