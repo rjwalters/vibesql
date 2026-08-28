@@ -344,8 +344,21 @@ pub(super) fn execute_rename_table(
     // exception: those are gated purely on `legacy_alter_table`.) This is not
     // exercised by e_fkey-61.2.2 itself (which sets `foreign_keys=OFF`), but
     // matches the reference implementation exactly.
+    // `PRAGMA writable_schema=ON` additionally suppresses the whole dependent-
+    // object rewrite pass below (trigger/view text propagation), not merely
+    // the validation aborts `precheck_schema_objects`/`postcheck_schema_objects`
+    // apply to RENAME COLUMN/DROP COLUMN — verified against sqlite3 3.51.0
+    // (altercol.test 23.20): renaming `t4` to `t4new` while writable_schema is
+    // ON leaves a dependent trigger's dangling `INSERT INTO t4(...)` body
+    // untouched (still naming `t4`, not `t4new`), even though that trigger's
+    // reference genuinely matches the renamed table and would otherwise be
+    // rewritten. Scoped to trigger/view rewriting only, mirroring
+    // `check_schema_objects`'s trade-off: writable_schema exists so a
+    // connection can hand-edit `sqlite_master.sql` directly and have the next
+    // schema-mutating statement leave that hand-edited state alone rather than
+    // "fixing" it.
     let legacy = database.legacy_alter_table();
-    if !legacy {
+    if !legacy && !database.writable_schema() {
         // Propagate the rename into any trigger definitions that reference the
         // old table name. Rewrites table references inside trigger bodies and
         // the trigger's ON-target, and keeps the stored `sqlite_master.sql`
@@ -367,7 +380,7 @@ pub(super) fn execute_rename_table(
         rebind_child_foreign_keys(database, &stmt.table_name, &stmt.new_table_name);
     }
 
-    if !legacy {
+    if !legacy && !database.writable_schema() {
         // Propagate the rename into any dependent VIEW definitions that
         // reference the old table name. Rewrites view bodies the same way it
         // rewrites trigger bodies and FK REFERENCES clauses on
@@ -376,7 +389,8 @@ pub(super) fn execute_rename_table(
         // (issue #6303). Mirrors `rewrite_views_for_column_rename`'s two-phase
         // compute/commit shape, but table-reference rewriting is purely
         // lexical (see `rewrite_table_refs_in_view_sql`) so there is no
-        // ambiguity to abort on.
+        // ambiguity to abort on. Also skipped while writable_schema is ON —
+        // see the doc comment on the trigger-rewrite gate above.
         rewrite_views_for_table_rename(database, &stmt.table_name, &stmt.new_table_name);
     }
 

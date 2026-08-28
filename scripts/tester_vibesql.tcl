@@ -1676,6 +1676,32 @@ proc register_temp_views_triggers {sql} {
         }
     }
 
+    # CREATE VIEW temp.<name> — the schema-qualified spelling of a TEMP view,
+    # not recognized by the unqualified-TEMP-keyword $vpat regex above
+    # (altercol.test 16.2.1's `CREATE VIEW temp.v5 AS SELECT ... FROM t1`,
+    # #6174). Mirrors register_qualified_temp_tables's rationale for the
+    # analogous `CREATE TABLE temp.<name>` gap (#6363): the shim's per-batch
+    # CLI process model loses session-scoped TEMP objects between batches, so
+    # a later batch referencing `v5` sees "no such table: v5" unless this
+    # CREATE is replayed too. Unlike TEMP tables — which strip_temp_table_keyword
+    # demotes to real, durably-persisted tables, so their qualified-form replay
+    # needs `IF NOT EXISTS` to avoid colliding with the already-persisted
+    # table — TEMP views stay genuinely session-scoped in VibeSQL and never
+    # already exist in a fresh per-batch process, so replaying the verbatim
+    # captured DDL (same as the unqualified case above) is always safe.
+    set vqpat {\yCREATE\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?temp\s*\.\s*(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    foreach {m name} [regexp -all -inline -indices -nocase $vqpat $sql] {
+        lassign $m ms me
+        set nm [string range $sql [lindex $name 0] [lindex $name 1]]
+        set key [string tolower [string trim $nm {[]"`}]]
+        set ddl [extract_temp_object_ddl $sql $ms 0]
+        dict set ::temp_view_replay_ddl $key $ddl
+        dict set ::temp_vt_created_this_batch $key 1
+        if {[regexp -nocase {\yFROM\s+(?:(?:temp|main)\s*\.\s*)?(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)} $ddl - src]} {
+            dict set ::temp_view_table $key [string tolower [string trim $src {[]"`}]]
+        }
+    }
+
     # CREATE TEMP TRIGGER <name> [BEFORE|AFTER|INSTEAD OF] <event> ON <table>
     # Capture the target table so DROP TABLE can purge dependent triggers (SQLite
     # auto-drops a table's triggers, so a stale replay would abort on a missing
