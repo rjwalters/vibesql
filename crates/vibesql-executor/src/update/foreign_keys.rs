@@ -366,8 +366,21 @@ impl ForeignKeyValidator {
                 // count as "referencing" the parent under our snapshot.
                 // Equally, our own in-txn child writes participate via
                 // the widened BEGIN-time snapshot (#5223). Off-state
-                // (`mvcc_enabled` OFF) preserves the pre-MVCC behavior of
-                // walking every physical row via `scan().iter()`.
+                // (`mvcc_enabled` OFF) uses `scan_live()`, which filters
+                // out rows marked deleted via the deletion bitmap but not
+                // yet physically compacted (`Table::compact_if_needed`
+                // only compacts once >50% of a table's rows are deleted,
+                // so a table with e.g. one deleted row out of two leaves
+                // that row sitting in `scan()`'s raw storage). Without
+                // this filter, a DELETE that removes the only child row
+                // referencing a parent key, followed by an UPDATE of that
+                // parent key in the *same* statement batch/transaction,
+                // spuriously found the just-deleted child row still
+                // "referencing" the parent and raised a false-positive
+                // "cannot update a parent row" violation whenever the
+                // table also held >=1 other still-live row for a
+                // different key (so the 50% compaction threshold wasn't
+                // crossed) — e_fkey-14.4 (#6170).
                 let snapshot = crate::mvcc::read_snapshot(db);
                 let child_table = db.get_table(&table_name).unwrap();
 
@@ -393,6 +406,22 @@ impl ForeignKeyValidator {
                         .iter()
                         .map(|&col_idx| child_row.values[col_idx].clone())
                         .collect();
+                    // EVIDENCE-OF R-23980-48859: a NULL foreign-key column
+                    // never references any parent row, so it can never be an
+                    // orphaned/cascaded child of THIS parent-key change even
+                    // when the parent key being updated is itself NULL.
+                    // `fk_values_equal`'s `child == parent` fast path treats
+                    // `Null == Null` as a match (correct for its other
+                    // callers, which already filter NULL FK values out
+                    // before calling it — see `collect_constraints_with_old`
+                    // above), so without this guard a child row with a NULL
+                    // FK column was spuriously swept into an `ON UPDATE
+                    // CASCADE`/RESTRICT/NO ACTION action whenever the
+                    // parent's OLD key value was also NULL (e_fkey-47.4,
+                    // #6170).
+                    if child_fk_values.iter().any(|v| v.is_null()) {
+                        return false;
+                    }
                     child_fk_values.iter().zip(&old_parent_key_values).enumerate().all(
                         |(i, (cv, pv))| {
                             crate::foreign_key_check::fk_values_equal(
@@ -425,9 +454,7 @@ impl ForeignKeyValidator {
                     {
                         let _ = &snapshot;
                         child_table
-                            .scan()
-                            .iter()
-                            .enumerate()
+                            .scan_live()
                             .filter_map(|(idx, child_row)| {
                                 if matches_fk(child_row) {
                                     Some((idx, child_row.clone()))
