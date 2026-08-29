@@ -47,6 +47,23 @@ pub struct IndexManager {
     /// SipHash seed), so a second connection against the same on-disk database
     /// previously saw a scrambled index order (pragma.test 23.3, #6175).
     pub(super) indexes: IndexMap<String, IndexMetadata>,
+    /// Reverse lookup from a normalized *bare* index name to the storage
+    /// keys of every **non-main-schema** index sharing that name (issue
+    /// #6665). `resolve_index_key`'s "temp schema shadows main" preference
+    /// only ever needs to consider non-main-schema indexes, so keeping this
+    /// tiny, separately-maintained map (empty for the overwhelmingly common
+    /// case of a database with no TEMP/ATTACH-ed schemas) lets that lookup
+    /// avoid scanning every index in the database. Maintained exclusively
+    /// through [`Self::insert_index`] / [`Self::remove_index`] — anything
+    /// that mutates `indexes` directly instead MUST keep this in sync itself
+    /// or use those helpers.
+    pub(super) non_main_indexes_by_name: HashMap<String, Vec<String>>,
+    /// Reverse lookup from a lowercased `table_name` to the storage keys of
+    /// every index defined on that table (issue #6665), used by
+    /// [`Self::list_indexes_for_table`] to avoid scanning every index in the
+    /// database. Maintained exclusively through [`Self::insert_index`] /
+    /// [`Self::remove_index`], mirroring [`Self::non_main_indexes_by_name`].
+    pub(super) indexes_by_table: HashMap<String, Vec<String>>,
     /// Actual index data (normalized_index_name -> data)
     pub(super) index_data: HashMap<String, IndexData>,
     /// Resource budget configuration
@@ -90,6 +107,8 @@ impl IndexManager {
 
         IndexManager {
             indexes: IndexMap::new(),
+            non_main_indexes_by_name: HashMap::new(),
+            indexes_by_table: HashMap::new(),
             index_data: HashMap::new(),
             config: DatabaseConfig::default(),
             resource_tracker: ResourceTracker::new(),
@@ -108,6 +127,8 @@ impl IndexManager {
 
         IndexManager {
             indexes: IndexMap::new(),
+            non_main_indexes_by_name: HashMap::new(),
+            indexes_by_table: HashMap::new(),
             index_data: HashMap::new(),
             config,
             resource_tracker: ResourceTracker::new(),
@@ -163,9 +184,58 @@ impl IndexManager {
     /// disk-backed indexes continue to work after reset.
     pub fn reset(&mut self) {
         self.indexes.clear();
+        self.non_main_indexes_by_name.clear();
+        self.indexes_by_table.clear();
         self.index_data.clear();
         self.resource_tracker = ResourceTracker::new();
         self.pending_expression_rebuilds.clear();
+    }
+
+    /// Insert (or replace) index metadata under its storage `key`,
+    /// maintaining the [`Self::non_main_indexes_by_name`] reverse lookup that
+    /// [`Self::resolve_index_key`] relies on to implement "temp schema
+    /// shadows main" preference without scanning every index in the
+    /// database (issue #6665). Every production call site that adds an
+    /// entry to `self.indexes` MUST go through this method (or
+    /// [`Self::remove_index`] for removal) instead of touching the field
+    /// directly, or the reverse lookup can drift out of sync.
+    pub(super) fn insert_index(
+        &mut self,
+        key: String,
+        metadata: IndexMetadata,
+    ) -> Option<IndexMetadata> {
+        if !metadata.schema.eq_ignore_ascii_case(DEFAULT_INDEX_SCHEMA) {
+            let bare = normalize_index_name(&metadata.index_name);
+            self.non_main_indexes_by_name.entry(bare).or_default().push(key.clone());
+        }
+        let table_key = metadata.table_name.to_lowercase();
+        self.indexes_by_table.entry(table_key).or_default().push(key.clone());
+        self.indexes.insert(key, metadata)
+    }
+
+    /// Remove index metadata stored under `key`, maintaining the reverse
+    /// lookups (see [`Self::insert_index`]).
+    pub(super) fn remove_index(&mut self, key: &str) -> Option<IndexMetadata> {
+        let removed = self.indexes.shift_remove(key);
+        if let Some(meta) = &removed {
+            if !meta.schema.eq_ignore_ascii_case(DEFAULT_INDEX_SCHEMA) {
+                let bare = normalize_index_name(&meta.index_name);
+                if let Some(keys) = self.non_main_indexes_by_name.get_mut(&bare) {
+                    keys.retain(|k| k != key);
+                    if keys.is_empty() {
+                        self.non_main_indexes_by_name.remove(&bare);
+                    }
+                }
+            }
+            let table_key = meta.table_name.to_lowercase();
+            if let Some(keys) = self.indexes_by_table.get_mut(&table_key) {
+                keys.retain(|k| k != key);
+                if keys.is_empty() {
+                    self.indexes_by_table.remove(&table_key);
+                }
+            }
+        }
+        removed
     }
 
     // ========================================================================
@@ -310,12 +380,16 @@ impl IndexManager {
 
         let normalized = normalize_index_name(index_name);
 
-        // Temp schema shadows main: prefer a non-main-schema index with this name.
-        if let Some((key, _)) = self.indexes.iter().find(|(_, meta)| {
-            !meta.schema.eq_ignore_ascii_case(DEFAULT_INDEX_SCHEMA)
-                && normalize_index_name(&meta.index_name) == normalized
-        }) {
-            return Some(key.clone());
+        // Temp schema shadows main: prefer a non-main-schema index with this
+        // name. `non_main_indexes_by_name` tracks only non-main-schema
+        // indexes (issue #6665), so this is a single hash lookup into a map
+        // that is empty for the common case of a database with no
+        // TEMP/ATTACH-ed schemas, instead of a linear scan over every index
+        // in the database.
+        if let Some(keys) = self.non_main_indexes_by_name.get(&normalized) {
+            if let Some(key) = keys.first() {
+                return Some(key.clone());
+            }
         }
 
         // Otherwise the main-schema (bare) key.
@@ -600,6 +674,25 @@ impl IndexManager {
     /// List all indexes
     pub fn list_indexes(&self) -> Vec<String> {
         self.indexes.keys().cloned().collect()
+    }
+
+    /// List all indexes for a specific table (case-insensitive exact match on
+    /// the stored `table_name`, preserving the historical semantics of this
+    /// method exactly — see [`IndexMetadata::matches_table`] for the
+    /// separate, schema-aware matching rule used elsewhere).
+    ///
+    /// O(1) amortized via the [`Self::indexes_by_table`] reverse lookup
+    /// (issue #6665): the previous implementation (in
+    /// `Operations::list_indexes_for_table`) called [`Self::list_indexes`]
+    /// and then [`Self::get_index`] — i.e. [`Self::resolve_index_key`] —
+    /// once per index name in the *entire* database, making one call O(N) in
+    /// the total index count even though the result only ever contains
+    /// indexes for one table; a later, single-pass-filter version of this
+    /// method was still O(N) per call for the same reason (it still had to
+    /// scan every index to find the ones for this table).
+    pub fn list_indexes_for_table(&self, table_name: &str) -> Vec<String> {
+        let normalized_search = table_name.to_lowercase();
+        self.indexes_by_table.get(&normalized_search).cloned().unwrap_or_default()
     }
 
     /// Attach (or clear) a partial-index WHERE clause on an existing
@@ -1943,6 +2036,151 @@ mod tests {
         assert!(
             sorted_ivfflat_ids(&manager, &[0.0, 0.0], 3).contains(&0),
             "ROLLBACK restores the deleted row in the vector index"
+        );
+    }
+
+    // ========================================================================
+    // resolve_index_key / list_indexes_for_table algorithmic-complexity fix
+    // (issue #6665)
+    // ========================================================================
+
+    fn mk_index_metadata(index_name: &str, table_name: &str, schema: &str) -> IndexMetadata {
+        IndexMetadata {
+            index_name: index_name.to_string(),
+            table_name: table_name.to_string(),
+            schema: schema.to_string(),
+            unique: false,
+            columns: vec![vibesql_ast::IndexColumn::new_column(
+                "c".to_string(),
+                vibesql_ast::OrderDirection::Asc,
+            )],
+            where_clause: None,
+        }
+    }
+
+    /// Correctness regression for the `non_main_indexes_by_name` reverse
+    /// lookup introduced to make `resolve_index_key` avoid scanning every
+    /// index in the database (issue #6665): a temp-schema index must still
+    /// shadow a same-named main-schema index for an unqualified lookup, and
+    /// dropping the temp-schema index must fall back to the main-schema one
+    /// — exactly the behavior the previous full-scan implementation gave.
+    #[test]
+    fn temp_schema_index_still_shadows_same_named_main_index() {
+        let mut manager = IndexManager::new();
+
+        let main_key =
+            super::super::index_metadata::make_index_key(DEFAULT_INDEX_SCHEMA, "idx_shared");
+        manager.insert_index(
+            main_key.clone(),
+            mk_index_metadata("idx_shared", "t_main", DEFAULT_INDEX_SCHEMA),
+        );
+
+        // Unqualified lookup resolves to the (only) main-schema index.
+        assert_eq!(manager.resolve_index_key("idx_shared"), Some(main_key.clone()));
+        assert_eq!(manager.get_index("idx_shared").unwrap().table_name, "t_main");
+
+        // A same-named temp-schema index shadows it for unqualified lookups.
+        let temp_key = super::super::index_metadata::make_index_key("temp_1", "idx_shared");
+        manager.insert_index(temp_key.clone(), mk_index_metadata("idx_shared", "t_temp", "temp_1"));
+
+        assert_eq!(
+            manager.resolve_index_key("idx_shared"),
+            Some(temp_key.clone()),
+            "unqualified lookup must prefer the non-main-schema index"
+        );
+        assert_eq!(manager.get_index("idx_shared").unwrap().table_name, "t_temp");
+
+        // Explicit schema qualification still targets exactly that schema,
+        // bypassing the shadowing preference entirely.
+        assert_eq!(manager.resolve_index_key("main.idx_shared"), Some(main_key.clone()));
+        assert_eq!(manager.resolve_index_key("temp_1.idx_shared"), Some(temp_key.clone()));
+
+        // Dropping the shadowing temp index must fall back to main again —
+        // this is the part that a stale `non_main_indexes_by_name` entry
+        // (e.g. from a `remove_index` that forgot to clean it up) would
+        // silently break, resolving to a dangling key or the wrong schema.
+        assert!(manager.remove_index(&temp_key).is_some());
+        assert_eq!(manager.resolve_index_key("idx_shared"), Some(main_key));
+        assert_eq!(manager.get_index("idx_shared").unwrap().table_name, "t_main");
+    }
+
+    /// Correctness regression for the `indexes_by_table` reverse lookup:
+    /// `list_indexes_for_table` must return exactly the indexes on the named
+    /// table (case-insensitive exact match on `table_name`, the historical
+    /// semantics of this method — see its doc comment), never indexes
+    /// belonging to other tables, regardless of insertion order.
+    #[test]
+    fn list_indexes_for_table_returns_only_matching_indexes() {
+        let mut manager = IndexManager::new();
+
+        let key_a1 = super::super::index_metadata::make_index_key(DEFAULT_INDEX_SCHEMA, "idx_a1");
+        let key_a2 = super::super::index_metadata::make_index_key(DEFAULT_INDEX_SCHEMA, "idx_a2");
+        let key_b1 = super::super::index_metadata::make_index_key(DEFAULT_INDEX_SCHEMA, "idx_b1");
+
+        manager
+            .insert_index(key_a1.clone(), mk_index_metadata("idx_a1", "T_A", DEFAULT_INDEX_SCHEMA));
+        manager.insert_index(key_b1, mk_index_metadata("idx_b1", "t_b", DEFAULT_INDEX_SCHEMA));
+        manager
+            .insert_index(key_a2.clone(), mk_index_metadata("idx_a2", "t_a", DEFAULT_INDEX_SCHEMA));
+
+        // Case-insensitive match against the differently-cased stored name.
+        let mut for_a = manager.list_indexes_for_table("t_a");
+        for_a.sort();
+        let mut expected_a = vec![key_a1, key_a2];
+        expected_a.sort();
+        assert_eq!(for_a, expected_a, "must return exactly table t_a's indexes, none of t_b's");
+
+        // A table with no indexes returns an empty list, not a panic.
+        assert!(manager.list_indexes_for_table("t_nonexistent").is_empty());
+
+        // Removing one of table A's indexes updates the reverse lookup too.
+        manager.remove_index(&expected_a[0]);
+        assert_eq!(manager.list_indexes_for_table("t_a").len(), 1);
+    }
+
+    /// Performance-characteristic regression for issue #6665: creating N
+    /// indexes (one per distinct table, mirroring the `e_fkey`-style
+    /// sequential `CREATE TABLE`/`CREATE INDEX` chain) and calling
+    /// `list_indexes_for_table` once per table — exactly what
+    /// `record_unique_index_keys` does on every INSERT — must take time
+    /// roughly linear in N. Before this fix, `list_indexes_for_table` was
+    /// O(N) per call (`list_indexes()` + a `get_index()`/`resolve_index_key()`
+    /// call per name, itself O(N) again), so this loop was O(N^2)-per-call /
+    /// O(N^3) overall and would time out long before N reached the size
+    /// tested here.
+    #[test]
+    fn list_indexes_for_table_scales_linearly_with_total_index_count() {
+        let mut manager = IndexManager::new();
+        const N: usize = 4000;
+
+        let start = std::time::Instant::now();
+        for i in 0..N {
+            let table_name = format!("t{i}");
+            let index_name = format!("idx_t{i}");
+            let key =
+                super::super::index_metadata::make_index_key(DEFAULT_INDEX_SCHEMA, &index_name);
+            manager.insert_index(
+                key,
+                mk_index_metadata(&index_name, &table_name, DEFAULT_INDEX_SCHEMA),
+            );
+            // Exactly the access pattern of `record_unique_index_keys`: one
+            // `list_indexes_for_table` call per insert into the growing set
+            // of tables/indexes.
+            let found = manager.list_indexes_for_table(&table_name);
+            assert_eq!(found.len(), 1);
+        }
+        let elapsed = start.elapsed();
+
+        // Generous bound: this loop is algorithmically O(N) after the fix
+        // (each `list_indexes_for_table` call is O(1) amortized). The
+        // previous O(N^3) behavior would take on the order of minutes to
+        // hours at N=4000, not low-single-digit seconds, so this bound only
+        // guards against a regression back to superlinear behavior — it is
+        // not a tight perf assertion.
+        assert!(
+            elapsed.as_secs() < 5,
+            "N={N} create+lookup loop took {elapsed:?}; expected roughly-linear scaling, \
+             suspect a regression to the pre-#6665 O(N^2)/O(N^3) behavior"
         );
     }
 }
