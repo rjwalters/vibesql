@@ -238,7 +238,21 @@ where
 {
     let armed = db.arm_statement_savepoint();
 
-    match f(db) {
+    // Statement-end FK check (SQLite's "immediate" NO ACTION semantics,
+    // #6170): capture the deferred-FK queue length *before* running the
+    // statement so `check_statement_scoped_fk_violations` (chained via
+    // `and_then`, so it runs only after `f` itself succeeds — right after
+    // every row, cascade, and AFTER trigger the statement fires — but
+    // before the statement savepoint is released) only considers entries
+    // this statement itself queued. A failure here is treated identically
+    // to any other non-`RAISE` error below: it rolls back the whole
+    // statement.
+    let fk_queue_start = db.deferred_fk_violations().len();
+
+    match f(db).and_then(|v| {
+        crate::transaction::check_statement_scoped_fk_violations(db, fk_queue_start)?;
+        Ok(v)
+    }) {
         Ok(v) => {
             if armed {
                 db.release_statement_savepoint();
@@ -322,7 +336,16 @@ where
         return f(db);
     }
 
-    match f(db) {
+    // See the identical comment in `run_inside_transaction`: capture the
+    // deferred-FK queue length before the statement runs so the
+    // statement-end check below only considers violations this statement
+    // itself queued (#6170).
+    let fk_queue_start = db.deferred_fk_violations().len();
+
+    match f(db).and_then(|v| {
+        crate::transaction::check_statement_scoped_fk_violations(db, fk_queue_start)?;
+        Ok(v)
+    }) {
         Ok(v) => {
             // Statement succeeded: commit the implicit transaction so the
             // changes (and their WAL ops) become durable as one auto-commit

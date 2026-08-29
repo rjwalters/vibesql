@@ -278,17 +278,63 @@ fn check_child_references_impl(
                 }
             }
             ReferentialAction::NoAction => {
-                // NO ACTION can be deferred (Phase C2 of #5085). Queue
-                // every orphaned child row so that COMMIT-time re-check
-                // verifies each one finds a parent. If not deferred,
-                // fail immediately as before.
+                // NO ACTION is SQLite's "immediate" default action, but
+                // unlike RESTRICT it is checked at true *statement* end —
+                // not per affected row — so later rows, FK-cascade-fired
+                // child rewrites, and AFTER triggers within the same
+                // statement all get a chance to repair the violation
+                // before it is raised (fkey2-12.2.2, e_fkey-31.*/42.*: a
+                // self-healing `AFTER DELETE`/`AFTER UPDATE` trigger that
+                // restores the missing parent row or clears the child's FK
+                // column must be allowed to run before this check fires).
+                //
+                // The statement-end re-check only actually runs when
+                // `raise_scope::run_top_level_dml`'s wrapper armed a
+                // transaction/savepoint for *this* statement, which it
+                // only does when `raise_scope::table_may_fire_trigger`
+                // says a trigger *could* fire — i.e. whenever any trigger
+                // exists anywhere in the database (its conservative
+                // cascade-reachability rule; see that function's doc
+                // comment). `in_txn` alone is NOT a reliable proxy for
+                // this: an explicit `BEGIN ... COMMIT` around a
+                // trigger-free statement also makes `in_txn` true, but
+                // never gets the wrapper (the trigger-free fast path
+                // bypasses it entirely) — queueing unconditionally there
+                // would silently defer the violation past this statement
+                // to the next explicit COMMIT, breaking SQLite's "immediate
+                // FK is immediate even inside a transaction" contract
+                // (e_fkey-31.4, fkey2-1.4.*). So only take the new
+                // statement-end path when a trigger could actually run;
+                // otherwise fall back to the original immediate-or-
+                // genuinely-deferred decision, which is unaffected by this
+                // change (immediate vs. statement-end checking is
+                // unobservable there, since nothing in the statement could
+                // repair the violation anyway).
                 // NOT DEFERRABLE constraints ignore any INITIALLY DEFERRED
                 // clause (e_fkey-34.*: only a `DEFERRABLE INITIALLY
                 // DEFERRED` constraint may be violated mid-transaction);
                 // the session `defer_foreign_keys` override is not gated
                 // on `is_deferrable` (EVIDENCE-OF R-18981-16292, fkey6-1.8).
-                let should_defer =
-                    in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
+                //
+                // `exclude_self_table` is only ever `true` on the DROP
+                // TABLE path ([`check_drop_table_references`]), which never
+                // goes through `raise_scope::run_top_level_dml` at all (it
+                // is DDL, not top-level DML) — so `check_statement_scoped_fk_violations`
+                // can never run for it, regardless of triggers. DROP TABLE
+                // also never fires triggers on the dropped table itself
+                // (EVIDENCE-OF R-14208-23986/R-11078-03945, see that
+                // function's doc comment), so there is no same-statement
+                // repair to wait for either way. Gate `could_self_heal` on
+                // `!exclude_self_table` so DROP TABLE always keeps the
+                // original immediate-or-genuinely-deferred behavior
+                // (e_fkey-58.3: `BEGIN; DROP TABLE p` with an unrelated
+                // trigger elsewhere in the database must still fail
+                // immediately, not silently defer past the DROP).
+                let could_self_heal = !exclude_self_table && db.catalog.has_any_triggers();
+                let should_defer = in_txn
+                    && (session_defer
+                        || (fk.is_deferrable && fk.initially_deferred)
+                        || could_self_heal);
                 if should_defer {
                     queue_orphaned_children(db, &child_table_name, &fk, fk_idx, &parent_key_values);
                 } else {
