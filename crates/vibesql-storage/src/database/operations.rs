@@ -1100,23 +1100,14 @@ impl Operations {
     }
 
     /// List all indexes for a specific table
+    ///
+    /// Delegates to [`IndexManager::list_indexes_for_table`], which filters
+    /// `self.indexes` directly in a single pass (issue #6665) instead of the
+    /// previous `list_indexes()` + per-name `get_index()` double indirection
+    /// that made this O(N) in the *total* number of indexes in the database
+    /// for every call.
     pub fn list_indexes_for_table(&self, table_name: &str) -> Vec<String> {
-        // Normalize for case-insensitive comparison
-        let normalized_search = table_name.to_lowercase();
-
-        self.index_manager
-            .list_indexes()
-            .into_iter()
-            .filter(|index_name| {
-                self.index_manager
-                    .get_index(index_name)
-                    .map(|metadata| {
-                        // Normalize both sides for comparison
-                        metadata.table_name.to_lowercase() == normalized_search
-                    })
-                    .unwrap_or(false)
-            })
-            .collect()
+        self.index_manager.list_indexes_for_table(table_name)
     }
 
     /// Check if a column has any user-defined index (B-tree or spatial)

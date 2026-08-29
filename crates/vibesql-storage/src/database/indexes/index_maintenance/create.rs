@@ -91,7 +91,7 @@ impl IndexManager {
                 columns,
                 where_clause,
             };
-            self.indexes.insert(normalized_name.clone(), metadata);
+            self.insert_index(normalized_name.clone(), metadata);
             self.resource_tracker.register_index(
                 normalized_name.clone(),
                 0,
@@ -126,7 +126,7 @@ impl IndexManager {
             where_clause,
         };
 
-        self.indexes.insert(normalized_name.clone(), metadata);
+        self.insert_index(normalized_name.clone(), metadata);
 
         // Choose backend based on table size
         // In test builds, DISK_BACKED_THRESHOLD is usize::MAX to disable disk-backed indexes
@@ -331,7 +331,7 @@ impl IndexManager {
             where_clause: None,
         };
 
-        self.indexes.insert(normalized_name.clone(), metadata);
+        self.insert_index(normalized_name.clone(), metadata);
 
         // For expression indexes, always use in-memory storage for now
         // (disk-backed expression index support can be added later)
@@ -452,7 +452,7 @@ impl IndexManager {
             where_clause: None,
         };
 
-        self.indexes.insert(normalized_name.clone(), metadata);
+        self.insert_index(normalized_name.clone(), metadata);
 
         // Store index data
         self.index_data.insert(normalized_name.clone(), IndexData::IVFFlat { index: ivfflat });
@@ -526,7 +526,7 @@ impl IndexManager {
             where_clause: None,
         };
 
-        self.indexes.insert(normalized_name.clone(), metadata);
+        self.insert_index(normalized_name.clone(), metadata);
 
         // Store index data
         self.index_data.insert(normalized_name.clone(), IndexData::IVFFlat { index: ivfflat });
@@ -728,7 +728,7 @@ impl IndexManager {
             where_clause: None,
         };
 
-        self.indexes.insert(normalized_name.clone(), metadata);
+        self.insert_index(normalized_name.clone(), metadata);
 
         // Store index data
         self.index_data.insert(normalized_name.clone(), IndexData::Hnsw { index: hnsw });
@@ -849,7 +849,7 @@ impl IndexManager {
             .resolve_index_key(index_name)
             .ok_or_else(|| StorageError::IndexNotFound(index_name.to_string()))?;
 
-        if self.indexes.shift_remove(&normalized).is_none() {
+        if self.remove_index(&normalized).is_none() {
             return Err(StorageError::IndexNotFound(index_name.to_string()));
         }
         // Also remove the index data
@@ -903,7 +903,7 @@ impl IndexManager {
 
         // Drop each index
         for index_name in &indexes_to_drop {
-            self.indexes.shift_remove(index_name);
+            self.remove_index(index_name);
             self.index_data.remove(index_name);
             self.pending_expression_rebuilds.remove(index_name);
 
@@ -950,7 +950,7 @@ impl IndexManager {
 
         let mut taken = Vec::with_capacity(keys_to_take.len());
         for key in &keys_to_take {
-            let Some(meta) = self.indexes.shift_remove(key) else { continue };
+            let Some(meta) = self.remove_index(key) else { continue };
             let Some(data) = self.index_data.remove(key) else { continue };
             taken.push((meta, data));
         }
@@ -979,7 +979,7 @@ impl IndexManager {
                 None => new_table_name.to_string(),
             };
             let key = make_index_key(&meta.schema, &meta.index_name);
-            self.indexes.insert(key.clone(), meta);
+            self.insert_index(key.clone(), meta);
             self.index_data.insert(key, data);
         }
     }
