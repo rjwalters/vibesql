@@ -179,3 +179,115 @@ fn legacy_on_foreign_keys_on_fk_rewrite_still_fires() {
         "child table c1's FK must still be rewritten when foreign_keys=ON"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `legacy_alter_table` gating of the whole-schema *precheck*
+// (`precheck_schema_objects`), not just the dependent-object rewrite above.
+//
+// PR #6663 wired `precheck_schema_objects` into `execute_rename_table` so an
+// already-broken trigger/view anywhere in the schema aborts a RENAME TO
+// (altertab3.test 4.1.2/4.2.1, issue #6174). `RENAME TO` is the one ALTER form
+// where SQLite skips that whole schema reparse under `PRAGMA
+// legacy_alter_table=ON`, so the precheck needs the same gate the rewrite pass
+// already has. Verified against sqlite3 3.51.0 (PR #6663 review):
+//
+// ```
+// sqlite> PRAGMA legacy_alter_table=ON;
+// sqlite> CREATE TABLE t1(a, b);
+// sqlite> CREATE TABLE t3(e, f);
+// sqlite> CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(new.a, new.b); END;
+// sqlite> ALTER TABLE t3 RENAME TO t4;   -- succeeds, no error
+// ```
+//
+// (`RENAME COLUMN`/`DROP COLUMN`, the other two `precheck_schema_objects` call
+// sites, still abort under `legacy_alter_table=ON` in real SQLite — only the
+// message degrades — so they stay ungated.)
+// ---------------------------------------------------------------------------
+
+/// Shared fixture: an *already-broken* trigger (`tr1 ON t1` inserts into `t2`,
+/// which was never created) plus a completely unrelated table `t3` whose
+/// RENAME TO is what the gating tests exercise.
+fn build_broken_trigger_fixture(db: &mut Database) {
+    exec(db, "CREATE TABLE t1(a, b)").unwrap();
+    exec(db, "CREATE TABLE t3(e, f)").unwrap();
+    exec(
+        db,
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(new.a, new.b); END",
+    )
+    .unwrap();
+}
+
+/// `legacy_alter_table=ON`: the whole-schema precheck is suppressed, so an
+/// already-broken *unrelated* trigger does not block renaming `t3` — matching
+/// real sqlite3 3.51.0 under the same pragma.
+#[test]
+fn legacy_on_broken_unrelated_trigger_does_not_block_rename_to() {
+    let mut db = Database::new();
+    build_broken_trigger_fixture(&mut db);
+    db.set_legacy_alter_table(true);
+
+    exec(&mut db, "ALTER TABLE t3 RENAME TO t4")
+        .expect("legacy_alter_table=ON must suppress the whole-schema reparse on RENAME TO");
+
+    assert!(db.get_table("t3").is_none(), "t3 must have been renamed away");
+    assert!(db.get_table("t4").is_some(), "t4 must exist after the rename");
+    assert!(
+        db.catalog.get_trigger("tr1").is_some(),
+        "the broken trigger is untouched by the rename, not dropped"
+    );
+}
+
+/// Control for the test above: with `legacy_alter_table=OFF` (the default) the
+/// same fixture still aborts the RENAME TO with SQLite's schema-reparse error,
+/// so the gate suppresses the precheck only under legacy mode.
+#[test]
+fn legacy_off_broken_unrelated_trigger_still_blocks_rename_to() {
+    let mut db = Database::new();
+    build_broken_trigger_fixture(&mut db);
+    assert!(!db.legacy_alter_table(), "legacy_alter_table must default to OFF");
+
+    let err = exec(&mut db, "ALTER TABLE t3 RENAME TO t4")
+        .expect_err("legacy_alter_table=OFF must still reject on a broken schema object");
+    assert_eq!(err.to_string(), "error in trigger tr1: no such table: main.t2");
+    assert!(db.get_table("t3").is_some(), "a rejected ALTER leaves t3 in place");
+    assert!(db.get_table("t4").is_none(), "a rejected ALTER must not create t4");
+}
+
+/// Same gating for an already-broken *view* (`c99` is not a column of `t4`):
+/// under `legacy_alter_table=ON` it does not block renaming the unrelated
+/// table `t3`.
+#[test]
+fn legacy_on_broken_unrelated_view_does_not_block_rename_to() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t4(id INTEGER PRIMARY KEY, c1 INT)").unwrap();
+    exec(&mut db, "CREATE VIEW t4v1 AS SELECT id, c1, c99 FROM t4").unwrap();
+    exec(&mut db, "CREATE TABLE t3(e, f)").unwrap();
+    db.set_legacy_alter_table(true);
+
+    exec(&mut db, "ALTER TABLE t3 RENAME TO t5")
+        .expect("legacy_alter_table=ON must suppress the whole-schema reparse on RENAME TO");
+
+    assert!(db.get_table("t3").is_none(), "t3 must have been renamed away");
+    assert!(db.get_table("t5").is_some(), "t5 must exist after the rename");
+    let view = db.catalog.get_view("t4v1").expect("the broken view must survive");
+    assert_eq!(
+        view.sql_definition.as_deref(),
+        Some("CREATE VIEW t4v1 AS SELECT id, c1, c99 FROM t4"),
+        "the unrelated broken view is left exactly as it was"
+    );
+}
+
+/// Control for the view case: `legacy_alter_table=OFF` still rejects.
+#[test]
+fn legacy_off_broken_unrelated_view_still_blocks_rename_to() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t4(id INTEGER PRIMARY KEY, c1 INT)").unwrap();
+    exec(&mut db, "CREATE VIEW t4v1 AS SELECT id, c1, c99 FROM t4").unwrap();
+    exec(&mut db, "CREATE TABLE t3(e, f)").unwrap();
+
+    let err = exec(&mut db, "ALTER TABLE t3 RENAME TO t5")
+        .expect_err("legacy_alter_table=OFF must still reject on a broken schema object");
+    assert_eq!(err.to_string(), "error in view t4v1: no such column: c99");
+    assert!(db.get_table("t3").is_some(), "a rejected ALTER leaves t3 in place");
+    assert!(db.get_table("t5").is_none(), "a rejected ALTER must not create t5");
+}

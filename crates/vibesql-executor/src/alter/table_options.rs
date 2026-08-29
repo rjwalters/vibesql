@@ -149,6 +149,36 @@ pub(super) fn execute_rename_table(
         .get_table(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
+    // Whole-schema dependent-object re-validation, matching SQLite's schema
+    // re-parse on ALTER TABLE RENAME TO (the same check RENAME COLUMN and DROP
+    // COLUMN already run): a view or trigger that is *already* broken — e.g. a
+    // trigger body that inserts into a table that was never created, or a view
+    // that references a column that does not exist — aborts the ALTER with
+    // `error in <type> <name>: <inner error>`, leaving the schema untouched.
+    // This is intentionally schema-wide, not scoped to triggers/views that
+    // reference `stmt.table_name`: SQLite's schema reload re-parses every
+    // object in the same schema on any RENAME, so an unrelated already-broken
+    // trigger blocks renaming a completely different table too (altertab3.test
+    // 4.1.2/4.2.1, issue #6174). Runs before any mutation so a failed RENAME TO
+    // is atomic.
+    //
+    // Gated on `legacy_alter_table=OFF`, matching the dependent-object *rewrite*
+    // pass further down this function. `RENAME TO` is the one ALTER form where
+    // SQLite skips the whole schema reparse under `PRAGMA
+    // legacy_alter_table=ON`: verified against sqlite3 3.51.0 that with a
+    // never-created `t2` referenced from trigger `tr1 ON t1`, `PRAGMA
+    // legacy_alter_table=ON; ALTER TABLE t3 RENAME TO t4;` succeeds silently
+    // (and still does with `foreign_keys=ON` — the FK-rewrite exception SQLite
+    // documents for legacy mode does not extend to the trigger/view reparse).
+    // The other two `precheck_schema_objects` call sites — `RENAME COLUMN` and
+    // `DROP COLUMN` in `columns.rs` — are deliberately *not* gated: real SQLite
+    // still aborts those under `legacy_alter_table=ON` given the same broken
+    // dependent object (only the message degrades to a generic `SQL logic
+    // error`), so the pattern does not transfer to them (PR #6663 review).
+    if !database.legacy_alter_table() {
+        super::drop_column_checks::precheck_schema_objects(database, &stmt.table_name)?;
+    }
+
     // The table's own bare (unqualified, exact-case) name as it was created —
     // this is exactly the text `create_implicit_indexes`
     // (`crates/vibesql-executor/src/create_table.rs`) embedded when minting
