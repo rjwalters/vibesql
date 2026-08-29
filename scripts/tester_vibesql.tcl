@@ -8382,8 +8382,45 @@ proc uses_sqlite_internals {script {name ""}} {
         return [list 1 "uses REGEXP operator (requires custom function)"]
     }
 
-    # SQLite MATCH operator - used for FTS (Full Text Search), not standard SQL
-    if {[regexp -nocase {\sMATCH\s} $script]} {
+    # SQLite MATCH operator - used for FTS (Full Text Search), not standard SQL.
+    #
+    # BUT: `MATCH` is also the keyword introducing the SQL-standard FK
+    # match-type clause -- `FOREIGN KEY(...) REFERENCES tbl [(cols)] MATCH
+    # {SIMPLE|PARTIAL|FULL}` (R-24728-13230/R-24450-46174: SQLite parses this
+    # but only ever enforces MATCH SIMPLE semantics). That is unrelated to FTS
+    # and VibeSQL both parses and enforces it correctly (e_fkey-62.*, part of
+    # #6170) -- a blanket `\sMATCH\s` match incorrectly skipped every one of
+    # those tests as an "FTS feature" gap.
+    #
+    # Only treat a script as using the FTS MATCH operator when it contains at
+    # least one `MATCH` occurrence NOT accounted for by the FK match-type
+    # clause. "Accounted for" is checked two ways because `do_test <name>
+    # {script} <expected>` passes its `{script}` argument to this proc BEFORE
+    # Tcl variable substitution happens (`{...}` suppresses substitution; that
+    # only happens later, at `uplevel` time in the caller's scope) -- so
+    # e_fkey.test's own `foreach zMatch {SIMPLE PARTIAL FULL ...} { do_test
+    # e_fkey-62.$zMatch.1 { execsql "... MATCH $zMatch); " } {} }` reaches this
+    # scan as the literal, unsubstituted text `MATCH $zMatch`, never as `MATCH
+    # SIMPLE`:
+    #   1. `MATCH` directly followed by one of the three match-type keywords
+    #      (case-insensitive; the literal-keyword case, e.g. e_fkey-62.1/62.2's
+    #      own comments), or
+    #   2. `MATCH` appearing as part of a `REFERENCES <table>[(cols)] MATCH`
+    #      clause -- the only SQL construct where `MATCH` can legally follow a
+    #      REFERENCES target this closely -- which also covers the
+    #      pre-substitution `MATCH $zMatch` shape above regardless of what the
+    #      Tcl variable ultimately evaluates to.
+    # A genuine FTS query is always `<col-or-table> MATCH <search-expr>` (a
+    # quoted string literal or bind parameter, never immediately preceded by a
+    # REFERENCES clause), so counting "total MATCH occurrences" against
+    # "occurrences accounted for by one of the two FK-clause shapes above"
+    # tells them apart.
+    set total_match_uses [regexp -all -nocase {\yMATCH\y} $script]
+    set fk_match_type_uses [regexp -all -nocase {\yMATCH\y\s+(?:SIMPLE|PARTIAL|FULL)\y} $script]
+    set fk_match_clause_uses [regexp -all -nocase \
+        {\yREFERENCES\y\s+[^\s(]+\s*(?:\([^)]*\)\s*)?\yMATCH\y} $script]
+    set fk_match_uses [expr {max($fk_match_type_uses, $fk_match_clause_uses)}]
+    if {$total_match_uses > $fk_match_uses} {
         return [list 1 "uses MATCH operator (FTS feature)"]
     }
 
