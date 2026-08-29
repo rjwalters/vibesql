@@ -17,6 +17,17 @@
 //! Expected behavior (verified against sqlite3 3.51.x): the trigger's
 //! INSERT succeeds, so `DELETE FROM t1` (which fires the trigger once per
 //! deleted row) leaves the table exactly as it started.
+//!
+//! A second, independent bug blocked the same fkey2-12.2.2 scenario once the
+//! first was fixed: a trigger's `WHEN EXISTS (subquery)` clause referencing
+//! `old.<col>` (or `new.<col>`) is evaluated by substituting the pseudo-
+//! variable with a plain `Expression::Literal`, which carries no collating
+//! sequence. A comparison such as `WHERE old.x = y` inside the subquery then
+//! silently reverted from `x`'s declared `COLLATE NOCASE` to BINARY, so a
+//! case-differing match (`old.x = 'A'` vs. `y = 'a'`) incorrectly evaluated
+//! to false and the trigger never fired its self-healing INSERT. Fixed by
+//! substituting a `CollatedLiteral` carrying the column's declared collation
+//! instead (mirrors the outer-column substitution fix for #6086/#6099/#6105).
 
 use vibesql_executor::{
     CreateTableExecutor, DeleteExecutor, InsertExecutor, SelectExecutor, TriggerExecutor,
@@ -102,5 +113,33 @@ fn after_delete_trigger_reinserts_nocase_unique_row_successfully() {
     exec(&mut db, "DELETE FROM t1");
 
     let rows = query(&db, "SELECT x FROM t1 ORDER BY x");
+    assert_eq!(texts(&rows, 0), vec!["A".to_string(), "B".to_string()]);
+}
+
+/// fkey2-12.2.2: a `WHEN EXISTS (SELECT 1 FROM t2 WHERE old.x = y)` guard on
+/// the `AFTER DELETE` trigger must apply `x`'s declared `COLLATE NOCASE` when
+/// comparing `old.x` against `t2.y` inside the subquery, so a case-differing
+/// match (`'A'` vs. `'a'`) still fires the trigger and reinserts the row.
+#[test]
+fn after_delete_trigger_when_exists_subquery_uses_declared_collation_for_old_column() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(x COLLATE NOCASE PRIMARY KEY)");
+    exec(
+        &mut db,
+        "CREATE TRIGGER tt1 AFTER DELETE ON t1 \
+         WHEN EXISTS (SELECT 1 FROM t2 WHERE old.x = y) \
+         BEGIN INSERT INTO t1 VALUES(old.x); END",
+    );
+    exec(&mut db, "CREATE TABLE t2(y)");
+    exec(&mut db, "INSERT INTO t1 VALUES('A')");
+    exec(&mut db, "INSERT INTO t1 VALUES('B')");
+    // Lowercase in t2 vs. uppercase in t1: only a NOCASE-aware comparison
+    // inside the WHEN subquery matches.
+    exec(&mut db, "INSERT INTO t2 VALUES('a')");
+    exec(&mut db, "INSERT INTO t2 VALUES('b')");
+
+    exec(&mut db, "DELETE FROM t1");
+
+    let rows = query(&db, "SELECT * FROM t1 ORDER BY x");
     assert_eq!(texts(&rows, 0), vec!["A".to_string(), "B".to_string()]);
 }
