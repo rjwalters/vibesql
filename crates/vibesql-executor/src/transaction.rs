@@ -145,7 +145,7 @@ impl CommitExecutor {
 /// With the `mvcc_enabled` feature OFF (default), the storage-layer
 /// `is_row_visible` reduces to a deletion-bitmap check and the snapshot
 /// argument is ignored, preserving pre-MVCC semantics.
-fn check_deferred_fk_violations(
+pub(crate) fn check_deferred_fk_violations(
     db: &Database,
     pending: &[vibesql_storage::DeferredFkViolation],
     snapshot: &vibesql_storage::TxnSnapshot,
@@ -288,6 +288,94 @@ fn check_deferred_fk_violations(
     }
 
     None
+}
+
+/// Statement-end re-validation of "immediate" (non-cross-statement-deferred)
+/// `NO ACTION` foreign-key violations queued during the just-completed
+/// top-level DML statement.
+///
+/// SQLite's default `NO ACTION` action is checked at the true end of the
+/// *statement* — after every affected row, FK-cascade-fired child rewrite,
+/// and AFTER trigger the statement itself runs — not per row (fkey2-12.2.2,
+/// e_fkey-31.*/42.*: a self-healing `AFTER INSERT/UPDATE/DELETE` trigger
+/// gets a chance to restore the missing parent row, or rewrite the
+/// referencing child's FK column, before the violation is raised). The
+/// DELETE/UPDATE FK-cascade code (`delete/integrity.rs`,
+/// `update/foreign_keys.rs`) now always queues a `NO ACTION` orphan via
+/// [`vibesql_storage::Database::queue_deferred_fk_violation`] instead of
+/// raising immediately, so this function — called by
+/// [`crate::raise_scope::run_top_level_dml`]'s wrappers right after the
+/// statement's own work completes, but before the statement/implicit
+/// transaction commits — is what actually enforces "immediate" semantics.
+///
+/// `queue_start` is the queue length captured *before* the statement ran;
+/// only entries queued at or after that index (i.e. by this statement) are
+/// considered. Each such entry is re-classified here exactly as it would
+/// have been at queue time (same `defer_foreign_keys` pragma, same
+/// constraint's own `is_deferrable`/`initially_deferred` flags — neither
+/// can change mid-statement):
+///
+/// - **Genuinely cross-statement-deferred** (session `defer_foreign_keys=ON`, or `DEFERRABLE
+///   INITIALLY DEFERRED`): left untouched in the queue for the real COMMIT-time check
+///   ([`CommitExecutor::check_deferred_fk_only`]).
+/// - **Otherwise ("immediate")**: re-validated right now against the current database state. Any
+///   still-violated entry fails the statement (the caller's existing non-`RAISE` error handling
+///   then rolls back everything the statement applied, matching SQLite's whole-statement rollback
+///   on an immediate FK failure). If every immediate entry has been resolved (e.g. an AFTER trigger
+///   repaired it), they are dropped from the queue so they are not redundantly re-checked — or kept
+///   alive — at the real COMMIT.
+pub(crate) fn check_statement_scoped_fk_violations(
+    db: &mut Database,
+    queue_start: usize,
+) -> Result<(), ExecutorError> {
+    let queued = db.deferred_fk_violations();
+    if queued.len() <= queue_start {
+        return Ok(());
+    }
+
+    let session_defer = db.defer_foreign_keys();
+    let mut immediate: Vec<(usize, vibesql_storage::DeferredFkViolation)> = Vec::new();
+    for (offset, violation) in queued[queue_start..].iter().enumerate() {
+        let idx = queue_start + offset;
+        let is_cross_statement_deferred = session_defer
+            || db
+                .catalog
+                .get_table(&violation.child_table)
+                .and_then(|schema| schema.foreign_keys.get(violation.fk_index))
+                .map(|fk| fk.is_deferrable && fk.initially_deferred)
+                .unwrap_or(false);
+        if !is_cross_statement_deferred {
+            immediate.push((idx, violation.clone()));
+        }
+    }
+    if immediate.is_empty() {
+        return Ok(());
+    }
+
+    // Re-use the same commit-time-style re-validation logic COMMIT itself
+    // uses: does a matching child row still exist, and does a matching
+    // parent row now exist? (See `check_deferred_fk_violations`'s own doc
+    // comment for why a fresh "commit-time" snapshot is the right view even
+    // though this isn't a real COMMIT — it captures every write this
+    // statement itself made, including any AFTER-trigger repair.)
+    let snapshot = db.capture_commit_time_snapshot();
+    let to_check: Vec<_> = immediate.iter().map(|(_, v)| v.clone()).collect();
+    if let Some(err_msg) = check_deferred_fk_violations(db, &to_check, &snapshot) {
+        return Err(ExecutorError::ConstraintViolation(err_msg));
+    }
+
+    // Every immediate entry resolved — drop just those from the queue,
+    // leaving any genuinely cross-statement-deferred entries (from this
+    // statement or an earlier one in the same explicit transaction) intact.
+    let immediate_indices: std::collections::HashSet<usize> =
+        immediate.into_iter().map(|(idx, _)| idx).collect();
+    let all = db.take_deferred_fk_violations();
+    for (idx, violation) in all.into_iter().enumerate() {
+        if !immediate_indices.contains(&idx) {
+            db.queue_deferred_fk_violation(violation);
+        }
+    }
+    Ok(())
 }
 
 /// Count deferred FK violations whose constraints would still fail

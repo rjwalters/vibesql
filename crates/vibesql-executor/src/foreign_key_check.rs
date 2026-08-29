@@ -835,25 +835,51 @@ pub(crate) fn check_fk_row_existence(
         }
     }
 
-    // Step 6: defer-or-error decision. Outside a transaction, deferred
-    // constraints still error immediately (matches SQLite — deferred
-    // enforcement requires a transaction context). Mismatch errors are
-    // never deferred, but the caller already filtered those out before
-    // reaching this helper.
+    // Step 6: defer-or-error decision. Outside a transaction, there is no
+    // active-transaction queue to host the violation, so it always errors
+    // immediately (matches SQLite — deferred enforcement requires a
+    // transaction context). Mismatch errors are never deferred, but the
+    // caller already filtered those out before reaching this helper.
+    //
+    // Inside a transaction, this is SQLite's default "immediate" FK
+    // action, but immediate is checked at true *statement* end — not the
+    // instant this row is validated — so a same-statement AFTER INSERT
+    // trigger gets a chance to insert the missing parent row before the
+    // violation is raised (e_fkey-31.3/31.4/31.5). The statement-end
+    // re-check (`raise_scope::check_statement_scoped_fk_violations`) only
+    // actually runs when `raise_scope::run_top_level_dml`'s wrapper armed a
+    // transaction/savepoint for *this* statement, which only happens when
+    // a trigger could fire somewhere in the database — `in_txn` alone is
+    // NOT a reliable proxy for that: an explicit `BEGIN ... COMMIT` around
+    // a trigger-free statement also makes `in_txn` true, but never gets
+    // the wrapper (the trigger-free fast path bypasses it entirely), so
+    // returning `Deferred` there would silently defer the violation past
+    // this statement to the next explicit COMMIT, breaking SQLite's
+    // "immediate FK is immediate even inside a transaction" contract
+    // (e_fkey-31.2/31.4, fkey2-1.4.*). So only take the new statement-end
+    // path when `db.catalog.has_any_triggers()` (see the identical
+    // reasoning in `delete/integrity.rs`'s `NoAction` arm); otherwise fall
+    // back to the original immediate-or-genuinely-deferred decision,
+    // unaffected by this change. When we do return `Deferred`, the caller
+    // queues it exactly like a genuinely cross-statement-deferred
+    // violation, and the statement-end re-check raises now if still
+    // violated (dropping the "constraint 'X' violated: key (Y) not found"
+    // detail in favor of the generic "FOREIGN KEY constraint failed" text
+    // — harmless, since the TCL shim normalizes both to the same string),
+    // or silently drops the (now resolved) entry. A constraint that is
+    // genuinely `DEFERRABLE INITIALLY DEFERRED` (or under session
+    // `defer_foreign_keys=ON`) is re-classified there too and left queued
+    // for the real COMMIT-time check.
+    //
+    // NOT DEFERRABLE constraints ignore any (meaningless-but-parseable)
+    // INITIALLY DEFERRED clause for the *cross-statement* defer decision
+    // (e_fkey-34.*), but that distinction is made downstream in
+    // `check_statement_scoped_fk_violations`, not here.
     let session_defer = db.defer_foreign_keys();
     let in_txn = db.in_transaction();
-    // NOT DEFERRABLE constraints are always checked immediately regardless
-    // of any (meaningless-but-parseable) INITIALLY DEFERRED clause — SQLite
-    // grammar allows "NOT DEFERRABLE INITIALLY DEFERRED" but the INITIALLY
-    // clause only takes effect when the constraint is actually DEFERRABLE
-    // (e_fkey-34.*: only a `DEFERRABLE INITIALLY DEFERRED` constraint may be
-    // violated mid-transaction; all six other DEFERRABLE/NOT DEFERRABLE x
-    // INITIALLY DEFERRED/IMMEDIATE combinations must error immediately).
-    // `PRAGMA defer_foreign_keys=ON` is a blanket per-transaction override
-    // that defers *every* constraint regardless of its own DEFERRABLE
-    // status (EVIDENCE-OF R-18981-16292, fkey6-1.8), so `session_defer` is
-    // intentionally NOT gated on `fk.is_deferrable`.
-    let should_defer = in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
+    let could_self_heal = db.catalog.has_any_triggers();
+    let should_defer =
+        in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred) || could_self_heal);
     if should_defer {
         return Ok(FkRowCheck::Deferred(DeferredFkViolation {
             child_table: table_name.to_string(),

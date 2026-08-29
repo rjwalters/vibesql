@@ -176,13 +176,28 @@ impl ForeignKeyValidator {
                 continue;
             }
 
-            // NOT DEFERRABLE constraints are always checked immediately
-            // regardless of any (meaningless-but-parseable) INITIALLY
-            // DEFERRED clause; `defer_foreign_keys` is a blanket override
-            // that is not gated on `is_deferrable` (see foreign_key_check.rs
-            // for the full rationale, e_fkey-34.*, fkey6-1.8).
-            let should_defer =
-                in_txn && (session_defer || (fk.is_deferrable && fk.initially_deferred));
+            // Inside a transaction, SQLite's default "immediate" FK action
+            // is checked at true *statement* end, not the instant this row
+            // is validated — so a same-statement AFTER UPDATE trigger gets
+            // a chance to insert the missing parent row before the
+            // violation is raised. But the statement-end re-check
+            // (`raise_scope::check_statement_scoped_fk_violations`) only
+            // actually runs when `raise_scope::run_top_level_dml`'s wrapper
+            // armed a transaction/savepoint for *this* statement, which
+            // only happens when a trigger could fire somewhere in the
+            // database (see the identical reasoning — and its
+            // `e_fkey-31.4`/`fkey2-1.4.*` counter-example — in
+            // `delete/integrity.rs`'s `NoAction` arm). So only take the new
+            // statement-end path when `db.catalog.has_any_triggers()`;
+            // otherwise fall back to the original immediate-or-genuinely-
+            // deferred decision, unaffected by this change. NOT DEFERRABLE
+            // constraints' (meaningless-but-parseable) INITIALLY DEFERRED
+            // clause is re-classified downstream (e_fkey-34.*), not here.
+            let could_self_heal = db.catalog.has_any_triggers();
+            let should_defer = in_txn
+                && (session_defer
+                    || (fk.is_deferrable && fk.initially_deferred)
+                    || could_self_heal);
             if should_defer {
                 deferred.push(DeferredFkViolation {
                     child_table: table_name.to_string(),
@@ -620,17 +635,39 @@ impl ForeignKeyValidator {
                             }
                         }
                         vibesql_catalog::ReferentialAction::NoAction => {
-                            // NO ACTION can be deferred (Phase C2 of
-                            // #5085). When deferred, queue every
-                            // orphaned child row for COMMIT-time
-                            // re-validation; otherwise fail immediately.
+                            // NO ACTION is SQLite's "immediate" default
+                            // action, but unlike RESTRICT it is checked at
+                            // true *statement* end — not per affected row
+                            // — so an AFTER trigger fired later in the
+                            // same statement gets a chance to repair the
+                            // violation before it is raised (e_fkey-42.2/
+                            // 42.3: an `AFTER UPDATE` trigger on the
+                            // parent rewrites the child's FK column to
+                            // match the new key).
+                            //
+                            // The statement-end re-check only actually runs
+                            // when `raise_scope::run_top_level_dml`'s
+                            // wrapper armed a transaction/savepoint for
+                            // *this* statement, which only happens when a
+                            // trigger could fire somewhere in the database
+                            // (see the identical reasoning — and its
+                            // `e_fkey-31.4`/`fkey2-1.4.*` counter-example —
+                            // in `delete/integrity.rs`'s `NoAction` arm).
+                            // So only take the new statement-end path when
+                            // `db.catalog.has_any_triggers()`; otherwise
+                            // fall back to the original immediate-or-
+                            // genuinely-deferred decision, unaffected by
+                            // this change.
                             // NOT DEFERRABLE constraints ignore any
                             // INITIALLY DEFERRED clause (see
                             // foreign_key_check.rs / e_fkey-34.*); the
                             // session `defer_foreign_keys` override is not
                             // gated on `is_deferrable`.
+                            let could_self_heal = db.catalog.has_any_triggers();
                             let should_defer = in_txn
-                                && (session_defer || (fk.is_deferrable && fk.initially_deferred));
+                                && (session_defer
+                                    || (fk.is_deferrable && fk.initially_deferred)
+                                    || could_self_heal);
                             if should_defer {
                                 deferred_parent_orphans.push((
                                     table_name.clone(),
