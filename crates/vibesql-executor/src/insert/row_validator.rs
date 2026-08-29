@@ -257,8 +257,19 @@ impl<'a> RowValidator<'a> {
             if collated {
                 // Collation-aware scan: the hash index cannot surface collated
                 // duplicates, so compare every row with the key-part collation.
+                //
+                // Must use `scan_visible` (deletion-bitmap + MVCC aware), not
+                // the raw `table.scan()`: within an interleaved per-row DELETE
+                // loop, a row's UNIQUE/PK index entries and deletion bitmap are
+                // updated *before* its AFTER DELETE trigger fires, but physical
+                // compaction is deferred until the whole DELETE statement
+                // finishes. A trigger-driven INSERT that re-inserts the same
+                // key (e.g. `AFTER DELETE ... INSERT INTO t1 VALUES(old.x)`)
+                // must not see the not-yet-compacted, already-tombstoned row as
+                // a live duplicate (issue #6658).
+                let snapshot = crate::mvcc::read_snapshot(self.db);
                 let pk_indices = self.schema.get_primary_key_indices().unwrap_or_default();
-                for existing_row in table.scan() {
+                for (_idx, existing_row) in table.scan_visible(&snapshot) {
                     let existing_pk_values: Vec<vibesql_types::SqlValue> = pk_indices
                         .iter()
                         .filter_map(|&idx| existing_row.get(idx).cloned())
@@ -345,9 +356,13 @@ impl<'a> RowValidator<'a> {
                     ));
                 }
             } else {
-                // Scan (collation-aware when `collated`, exact otherwise).
+                // Scan (collation-aware when `collated`, exact otherwise). Must
+                // use `scan_visible` here too, for the same reason as the
+                // PRIMARY KEY check above (issue #6658): a tombstoned-but-not-
+                // yet-compacted row must not count as an existing duplicate.
+                let snapshot = crate::mvcc::read_snapshot(self.db);
                 let unique_indices = &unique_constraint_indices[constraint_idx];
-                for existing_row in table.scan() {
+                for (_idx, existing_row) in table.scan_visible(&snapshot) {
                     let existing_unique_values: Vec<vibesql_types::SqlValue> = unique_indices
                         .iter()
                         .filter_map(|&idx| existing_row.get(idx).cloned())

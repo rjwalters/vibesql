@@ -814,6 +814,15 @@ impl ExpressionEvaluator<'_> {
 ///
 /// Resolution errors (e.g. `NEW` not available for a DELETE trigger, or an
 /// unknown column) are propagated.
+///
+/// The substituted value carries the pseudo-column's *declared* collation as
+/// a [`vibesql_ast::Expression::CollatedLiteral`] rather than a bare
+/// [`vibesql_ast::Expression::Literal`] (issue #6658), mirroring the outer-
+/// column substitution fix for #6086/#6099/#6105. A bare `Literal` has no
+/// collating sequence, so a comparison such as `WHERE old.x = y` — where
+/// `old.x`'s underlying column `x` is `COLLATE NOCASE` — would silently
+/// revert to BINARY once `old.x` is substituted, breaking a same-statement
+/// AFTER-trigger self-heal keyed on a case-insensitive match (fkey2-12.2.2).
 fn substitute_trigger_pseudo_vars(
     subquery: &vibesql_ast::SelectStmt,
     trigger_ctx: &crate::trigger_execution::TriggerContext<'_>,
@@ -833,7 +842,19 @@ fn substitute_trigger_pseudo_vars(
             }
             if let vibesql_ast::Expression::PseudoVariable { pseudo_table, column } = &expr {
                 match self.trigger_ctx.resolve_pseudo_var(*pseudo_table, column) {
-                    Ok(value) => return vibesql_ast::Expression::Literal(value),
+                    Ok(value) => {
+                        // Declared collation of the underlying column (`None`
+                        // for a pseudo-column like rowid, or a real column
+                        // with no explicit COLLATE — both default to BINARY).
+                        let declared_collation =
+                            self.trigger_ctx.table_schema.get_column_index(column).and_then(
+                                |idx| self.trigger_ctx.table_schema.columns[idx].collation.clone(),
+                            );
+                        return vibesql_ast::Expression::CollatedLiteral {
+                            value,
+                            collation: declared_collation.unwrap_or_else(|| "BINARY".to_string()),
+                        };
+                    }
                     Err(e) => {
                         self.error = Some(e);
                         return expr;
