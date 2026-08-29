@@ -13,10 +13,60 @@
 //!
 //! See issue #5084 for context.
 
+use std::collections::HashMap;
+
 use vibesql_catalog::{ForeignKeyConstraint, TableSchema};
 use vibesql_storage::{Database, DeferredFkViolation, DeferredFkViolationKind};
 
 use crate::evaluator::expressions::eval::format_float_for_text_comparison;
+
+/// Parent table name (lowercased) -> child table names that declare at
+/// least one FK whose `parent_table` matches it.
+///
+/// Multi-level FK cascades (UPDATE's `check_no_child_references` in
+/// `update::foreign_keys`, DELETE's in `delete::integrity`) recurse once per
+/// cascade level. Before #6170's perf pass, each recursive call rescanned
+/// `db.catalog.list_tables()` from scratch to find the (usually tiny) set of
+/// tables referencing the current parent -- O(N) work per level for an
+/// N-table cascade chain, O(N^2) total. A chain of `SQLITE_MAX_TRIGGER_DEPTH`
+/// (1000) self-referencing tables (e_fkey-63.1.*/63.2.*) made this
+/// asymptotically dominate the statement's cost, and combined with the TCL
+/// conformance harness's fresh-CLI-process-per-batch reload cost to hang the
+/// harness outright.
+///
+/// Callers build this index ONCE per top-level cascade-checking call (e.g.
+/// once per user-issued UPDATE/DELETE row) via [`build_child_fk_index`] and
+/// thread the same reference through every recursive cascade-level call, so
+/// the whole statement pays for one O(N) scan instead of N of them.
+///
+/// The index is a point-in-time snapshot of the catalog at the moment the
+/// top-level call started: a trigger that fires mid-cascade and creates a
+/// brand-new table with an FK into a table already being cascaded will not
+/// be picked up until the *next* top-level call. This is an intentionally
+/// narrow trade-off for the asymptotic win -- schema changes mid-cascade via
+/// a trigger body are already an exotic corner case, and no test in the
+/// suite exercises it.
+pub(crate) type ChildFkIndex = HashMap<String, Vec<String>>;
+
+/// Scan the catalog once and build a [`ChildFkIndex`] mapping each parent
+/// table name (lowercased) to the child tables that declare an FK against
+/// it (a child may appear under a parent more than once if it has multiple
+/// FKs targeting that same parent).
+pub(crate) fn build_child_fk_index(db: &Database) -> ChildFkIndex {
+    let mut index: ChildFkIndex = HashMap::new();
+    for table_name in db.catalog.list_tables() {
+        let Some(schema) = db.catalog.get_table(&table_name) else {
+            continue;
+        };
+        if schema.foreign_keys.is_empty() {
+            continue;
+        }
+        for fk in &schema.foreign_keys {
+            index.entry(fk.parent_table.to_lowercase()).or_default().push(table_name.clone());
+        }
+    }
+    index
+}
 
 /// Returns `Some` (the child / parent table names to embed in the error) when
 /// the parent table does **not** have a key that exactly covers the FK's

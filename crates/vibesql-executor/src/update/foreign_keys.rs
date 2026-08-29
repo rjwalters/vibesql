@@ -2,7 +2,10 @@
 
 use vibesql_storage::{Database, DeferredFkViolation, DeferredFkViolationKind};
 
-use crate::errors::ExecutorError;
+use crate::{
+    errors::ExecutorError,
+    foreign_key_check::{build_child_fk_index, ChildFkIndex},
+};
 
 /// Validator for foreign key constraints
 pub struct ForeignKeyValidator;
@@ -230,11 +233,32 @@ impl ForeignKeyValidator {
         parent_row: &vibesql_storage::Row,
         new_parent_row: &vibesql_storage::Row,
     ) -> Result<(), ExecutorError> {
-        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
+        // Skip FK enforcement when PRAGMA foreign_keys is OFF (default) --
+        // avoid the index build entirely in the (default) disabled case.
         if !db.foreign_keys_enabled() {
             return Ok(());
         }
+        // Built once for this top-level UPDATE row and threaded through
+        // every recursive multi-level-cascade call below instead of being
+        // rebuilt from a fresh catalog scan at every cascade depth (#6170
+        // perf; see `foreign_key_check::ChildFkIndex`).
+        let child_index = build_child_fk_index(db);
+        Self::check_no_child_references_impl(
+            db,
+            parent_table_name,
+            parent_row,
+            new_parent_row,
+            &child_index,
+        )
+    }
 
+    fn check_no_child_references_impl(
+        db: &mut Database,
+        parent_table_name: &str,
+        parent_row: &vibesql_storage::Row,
+        new_parent_row: &vibesql_storage::Row,
+        child_index: &ChildFkIndex,
+    ) -> Result<(), ExecutorError> {
         let _parent_schema = db
             .catalog
             .get_table(parent_table_name)
@@ -254,16 +278,11 @@ impl ForeignKeyValidator {
         // the loop below via `resolved_parent_indices_for_fk`, mirroring the
         // resolution INSERT/DELETE already use (`foreign_key_check.rs`).
 
-        // Optimization: Check if any table in the database has foreign keys at all
-        // If not, skip the expensive scan of all tables
-        let has_any_fks = db.catalog.list_tables().iter().any(|table_name| {
-            db.catalog
-                .get_table(table_name)
-                .map(|schema| !schema.foreign_keys.is_empty())
-                .unwrap_or(false)
-        });
-
-        if !has_any_fks {
+        // Optimization: consult the pre-built reverse index instead of
+        // rescanning every table in the catalog (#6170 perf). No table
+        // declares an FK against `parent_table_name` -> nothing to do.
+        let candidate_children = child_index.get(&parent_table_name.to_lowercase());
+        if candidate_children.map(|c| c.is_empty()).unwrap_or(true) {
             return Ok(());
         }
 
@@ -296,9 +315,18 @@ impl ForeignKeyValidator {
             Vec<(usize, vibesql_storage::Row)>,
         )> = Vec::new();
 
-        // Scan all tables in the database to find foreign keys that reference this table.
-        for table_name in db.catalog.list_tables() {
-            let child_schema = db.catalog.get_table(&table_name).unwrap().clone();
+        // `candidate_children` narrows the scan from "every table in the
+        // catalog" to just the tables that actually declare an FK against
+        // `parent_table_name` (#6170 perf). Cloned out of the index (owned
+        // `Vec<String>`) so the loop body is free to take further borrows of
+        // `db` without fighting the index's own borrow.
+        let candidate_children: Vec<String> = candidate_children.cloned().unwrap_or_default();
+        for table_name in candidate_children {
+            let Some(child_schema) = db.catalog.get_table(&table_name).cloned() else {
+                // Table vanished since the index was built (e.g. dropped by
+                // a trigger mid-cascade) -- nothing to check against it.
+                continue;
+            };
 
             // Skip tables without foreign keys (optimization)
             if child_schema.foreign_keys.is_empty() {
@@ -806,7 +834,13 @@ impl ForeignKeyValidator {
                 // table before the row is written, mirroring the DELETE-side
                 // cascade's recursive `check_no_child_references` call for
                 // multi-level chains (fkey2-3.1.*).
-                Self::check_no_child_references(db, &table_name, &old_row, &new_row)?;
+                Self::check_no_child_references_impl(
+                    db,
+                    &table_name,
+                    &old_row,
+                    &new_row,
+                    child_index,
+                )?;
 
                 let child_table = db.get_table_mut(&table_name).unwrap();
                 child_table
