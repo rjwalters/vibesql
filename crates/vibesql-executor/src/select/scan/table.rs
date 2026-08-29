@@ -54,8 +54,8 @@ use crate::{
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
 
 thread_local! {
-    /// Canonical (case-folded) names of views currently being materialized on
-    /// this thread.
+    /// Schema-qualified identities of the views currently being materialized on
+    /// this thread, as `(canonical schema, view name)` pairs.
     ///
     /// SQLite catches a self-referencing view *statically*, at prepare time,
     /// by walking the view's expanded reference graph before ever running it
@@ -67,7 +67,27 @@ thread_local! {
     /// recursing until the process aborts on a stack overflow rather than
     /// returning a SQL error. This stack makes that recursion detectable one
     /// level before it would repeat, so the query fails cleanly instead.
-    static ACTIVE_VIEW_EXPANSIONS: RefCell<Vec<String>> = RefCell::new(Vec::new());
+    ///
+    /// The identity is schema-qualified, not the bare view name: VibeSQL
+    /// supports same-named views in different schemas (`main.v` and `aux.v`
+    /// are two distinct views), so a bare-name key would report a perfectly
+    /// legal `CREATE VIEW aux.v AS SELECT * FROM v` — where `v` resolves to
+    /// `main.v` — as circular (#6660). The schema component is the view's own
+    /// [`ViewDefinition::schema`] canonicalized the same way the catalog's
+    /// storage key is (an absent schema means the default `main` schema,
+    /// compared case-insensitively), so resolving the *same* view through a
+    /// different spelling — bare `v` vs. an explicit `main.v` — still yields
+    /// one identity and genuine self-reference is still caught.
+    static ACTIVE_VIEW_EXPANSIONS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+}
+
+/// Canonical schema component of a view's re-entrancy key.
+///
+/// Mirrors `view_storage_key`'s normalization in `vibesql-catalog`: `None`
+/// means the default (`main`) schema, and schema names are compared
+/// case-insensitively.
+fn canonical_view_schema(schema: Option<&str>) -> String {
+    schema.unwrap_or(vibesql_catalog::DEFAULT_SCHEMA).to_ascii_lowercase()
 }
 
 /// RAII guard recording a view as "currently being materialized" for the
@@ -85,13 +105,22 @@ thread_local! {
 struct ViewExpansionGuard;
 
 impl ViewExpansionGuard {
-    fn enter(view_name: &str) -> Result<Self, ExecutorError> {
-        let already_active = ACTIVE_VIEW_EXPANSIONS
-            .with(|stack| stack.borrow().iter().any(|n| n.eq_ignore_ascii_case(view_name)));
+    /// `view_schema` is the view's own [`ViewDefinition::schema`] (`None` for
+    /// the main schema), NOT the qualifier the query happened to spell — see
+    /// `ACTIVE_VIEW_EXPANSIONS` for why the key must be schema-qualified.
+    fn enter(view_schema: Option<&str>, view_name: &str) -> Result<Self, ExecutorError> {
+        let schema_key = canonical_view_schema(view_schema);
+        let already_active = ACTIVE_VIEW_EXPANSIONS.with(|stack| {
+            stack
+                .borrow()
+                .iter()
+                .any(|(s, n)| *s == schema_key && n.eq_ignore_ascii_case(view_name))
+        });
         if already_active {
             return Err(ExecutorError::Other(format!("view {view_name} is circularly defined")));
         }
-        ACTIVE_VIEW_EXPANSIONS.with(|stack| stack.borrow_mut().push(view_name.to_string()));
+        ACTIVE_VIEW_EXPANSIONS
+            .with(|stack| stack.borrow_mut().push((schema_key, view_name.to_string())));
         Ok(Self)
     }
 }
@@ -596,7 +625,7 @@ pub(crate) fn execute_table_scan(
         // `ViewExpansionGuard`'s doc comment for why this is required (a
         // self-referencing view otherwise recurses until the process aborts
         // on a stack overflow instead of reporting a SQL error).
-        let _view_expansion_guard = ViewExpansionGuard::enter(&view.name)?;
+        let _view_expansion_guard = ViewExpansionGuard::enter(view.schema.as_deref(), &view.name)?;
 
         // Execute the view's query to get the result
         // We need to execute the entire SELECT statement, not just the FROM clause

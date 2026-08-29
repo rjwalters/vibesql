@@ -104,3 +104,48 @@ fn guard_is_released_after_circular_error_so_later_queries_still_work() {
         run_select(&db, "SELECT * FROM v2").expect_err("second query must also report the cycle");
     assert_eq!(err.to_string(), "view v2 is circularly defined");
 }
+
+/// Two *distinct* views that merely share a bare name across schemas — an
+/// already-supported VibeSQL feature (see
+/// `schema_qualified_view_tests::main_and_attached_schema_views_with_same_name_coexist`)
+/// — must not be mistaken for a cycle when one is nested inside the other.
+///
+/// `aux.v` references `main.v`, which references the base table `main.t`:
+/// legal, non-circular SQL that executes fine in sqlite3. Keying the
+/// re-entrancy guard on the bare view name (rather than a schema-qualified
+/// identity) reported this as `"view v is circularly defined"` (#6660).
+#[test]
+fn cross_schema_same_named_views_are_not_circular() {
+    let mut db = Database::new();
+    db.catalog.attach_database("aux", ":memory:").expect("ATTACH DATABASE");
+    run_ddl(&mut db, "CREATE TABLE t(x INTEGER)");
+    run_ddl(&mut db, "INSERT INTO t(x) VALUES (1)");
+    run_ddl(&mut db, "CREATE VIEW v AS SELECT * FROM t");
+    // aux.v references main.v, NOT itself.
+    run_ddl(&mut db, "CREATE VIEW aux.v AS SELECT * FROM v");
+
+    run_select(&db, "SELECT * FROM aux.v")
+        .expect("aux.v nesting main.v is not circular and must execute");
+    // The main-schema view still reads normally on its own, too.
+    run_select(&db, "SELECT * FROM main.v").expect("main.v must still execute");
+}
+
+/// The schema-qualified key must not *lose* a genuine cycle when the
+/// self-reference is spelled with an explicit `main.` qualifier: the guard
+/// keys on the resolved view's own `ViewDefinition::schema` (canonicalized to
+/// `main` when absent), not on the qualifier the query happened to write, so
+/// bare `v2` and `main.v2` are one identity.
+#[test]
+fn self_reference_through_explicit_main_qualifier_is_still_detected() {
+    let mut db = Database::new();
+    run_ddl(&mut db, "CREATE TABLE v0(a)");
+    run_ddl(
+        &mut db,
+        "CREATE VIEW v2(v3) AS WITH x1 AS (SELECT * FROM main.v2) \
+         SELECT v3 AS x, v3 AS y FROM main.v2",
+    );
+
+    let err = run_select(&db, "SELECT * FROM v2")
+        .expect_err("a main.-qualified self-reference is still a cycle");
+    assert_eq!(err.to_string(), "view v2 is circularly defined");
+}
