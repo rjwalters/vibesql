@@ -10,7 +10,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use vibesql_catalog::TableIdentifier;
 
@@ -52,6 +52,57 @@ use crate::{
 /// The row-oriented representation-cache path is gated by the adaptive,
 /// signal-driven `Database::should_use_columnar` instead of this bare row count.
 const SIMD_COLUMNAR_THRESHOLD: usize = 500;
+
+thread_local! {
+    /// Canonical (case-folded) names of views currently being materialized on
+    /// this thread.
+    ///
+    /// SQLite catches a self-referencing view *statically*, at prepare time,
+    /// by walking the view's expanded reference graph before ever running it
+    /// (see `select::view_reference_guard`, which guards the *exponential
+    /// reference-count* pathology the same way). VibeSQL instead resolves a
+    /// view in the FROM clause by *executing* its query (below): a view whose
+    /// body references itself, directly or through a chain of other views,
+    /// re-enters this same function for the same view with no base case,
+    /// recursing until the process aborts on a stack overflow rather than
+    /// returning a SQL error. This stack makes that recursion detectable one
+    /// level before it would repeat, so the query fails cleanly instead.
+    static ACTIVE_VIEW_EXPANSIONS: RefCell<Vec<String>> = RefCell::new(Vec::new());
+}
+
+/// RAII guard recording a view as "currently being materialized" for the
+/// duration of [`ViewExpansionGuard::enter`]'s caller's scope, so a nested
+/// self-reference (direct, or through a chain of other views) can be
+/// detected and reported as SQLite's `"view <name> is circularly defined"`
+/// error instead of recursing without bound.
+///
+/// Callers that revalidate a view body as part of a larger operation (e.g.
+/// ALTER TABLE RENAME's dependent-object revalidation) already wrap any error
+/// surfaced here in `"error in view <name>: "` (see `advanced_objects::views`),
+/// so this produces the same `"error in view v2: view v2 is circularly
+/// defined"` composite message SQLite reports in that context, and the bare
+/// `"view v2 is circularly defined"` message for a plain `SELECT * FROM v2`.
+struct ViewExpansionGuard;
+
+impl ViewExpansionGuard {
+    fn enter(view_name: &str) -> Result<Self, ExecutorError> {
+        let already_active = ACTIVE_VIEW_EXPANSIONS
+            .with(|stack| stack.borrow().iter().any(|n| n.eq_ignore_ascii_case(view_name)));
+        if already_active {
+            return Err(ExecutorError::Other(format!("view {view_name} is circularly defined")));
+        }
+        ACTIVE_VIEW_EXPANSIONS.with(|stack| stack.borrow_mut().push(view_name.to_string()));
+        Ok(Self)
+    }
+}
+
+impl Drop for ViewExpansionGuard {
+    fn drop(&mut self) {
+        ACTIVE_VIEW_EXPANSIONS.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 
 /// Apply SQL:1999 E051-09 column aliases to a table schema
 ///
@@ -539,6 +590,13 @@ pub(crate) fn execute_table_scan(
     if let Some(view) = database.catalog.get_view(table_name) {
         // Check SELECT privilege on the view
         PrivilegeChecker::check_select(database, table_name)?;
+
+        // Detect a view whose body references itself, directly or through a
+        // chain of other views, BEFORE recursing into it — see
+        // `ViewExpansionGuard`'s doc comment for why this is required (a
+        // self-referencing view otherwise recurses until the process aborts
+        // on a stack overflow instead of reporting a SQL error).
+        let _view_expansion_guard = ViewExpansionGuard::enter(&view.name)?;
 
         // Execute the view's query to get the result
         // We need to execute the entire SELECT statement, not just the FROM clause
