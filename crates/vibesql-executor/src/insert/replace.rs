@@ -499,6 +499,12 @@ fn enforce_replace_fk_actions(
     let in_txn = db.in_transaction();
     let session_defer = db.defer_foreign_keys();
 
+    // Built once for this REPLACE conflict-resolution pass and threaded
+    // through every `cascade_delete` call below so a multi-level cascade
+    // reuses it instead of rescanning the whole catalog per level (#6170
+    // perf; see `delete::integrity::ChildFkIndex`).
+    let child_index = crate::foreign_key_check::build_child_fk_index(db);
+
     for (child_table_name, fk, fk_idx) in &matching_fks {
         let parent_indices = crate::foreign_key_check::resolved_parent_indices_for_fk(db, fk);
         if parent_indices.is_empty()
@@ -535,6 +541,7 @@ fn enforce_replace_fk_actions(
                         &deleted_key,
                         in_txn,
                         session_defer,
+                        &child_index,
                     )?;
                 }
                 ReferentialAction::SetNull => {

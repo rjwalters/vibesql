@@ -4,7 +4,10 @@ use vibesql_catalog::ReferentialAction;
 use vibesql_storage::{DeferredFkViolation, DeferredFkViolationKind};
 use vibesql_types::SqlValue;
 
-use crate::errors::ExecutorError;
+use crate::{
+    errors::ExecutorError,
+    foreign_key_check::{build_child_fk_index, ChildFkIndex},
+};
 
 /// Handle referential integrity for a row being deleted.
 ///
@@ -26,7 +29,13 @@ pub fn check_no_child_references(
     parent_table_name: &str,
     parent_row: &vibesql_storage::Row,
 ) -> Result<(), ExecutorError> {
-    check_child_references_impl(db, parent_table_name, parent_row, false)
+    // Skip FK enforcement when PRAGMA foreign_keys is OFF (default) --
+    // avoid the index build entirely in the (default) disabled case.
+    if !db.foreign_keys_enabled() {
+        return Ok(());
+    }
+    let child_index = build_child_fk_index(db);
+    check_child_references_impl(db, parent_table_name, parent_row, false, &child_index)
 }
 
 /// Emulate SQLite's implicit `DELETE FROM <table>` that a `DROP TABLE`
@@ -89,8 +98,11 @@ pub fn check_drop_table_references(
         None => return Ok(()),
     };
 
+    // Build the child-FK index once for every parent row in this implicit
+    // DELETE, not once per row (#6170 perf; see `ChildFkIndex` doc comment).
+    let child_index = build_child_fk_index(db);
     for parent_row in &parent_rows {
-        check_child_references_impl(db, table_name, parent_row, true)?;
+        check_child_references_impl(db, table_name, parent_row, true, &child_index)?;
     }
 
     Ok(())
@@ -100,11 +112,16 @@ pub fn check_drop_table_references(
 /// [`check_drop_table_references`]. When `exclude_self_table` is true, foreign
 /// keys whose child table is `parent_table_name` are skipped (the DROP TABLE
 /// self-reference case above); otherwise all child tables are considered.
+///
+/// `child_index` is built once by the top-level caller and threaded through
+/// every recursive multi-level-cascade call (see [`ChildFkIndex`]) instead
+/// of being rebuilt from a fresh catalog scan at every cascade depth.
 fn check_child_references_impl(
     db: &mut vibesql_storage::Database,
     parent_table_name: &str,
     parent_row: &vibesql_storage::Row,
     exclude_self_table: bool,
+    child_index: &ChildFkIndex,
 ) -> Result<(), ExecutorError> {
     // Skip FK enforcement when PRAGMA foreign_keys is OFF (default)
     if !db.foreign_keys_enabled() {
@@ -116,15 +133,11 @@ fn check_child_references_impl(
         .get_table(parent_table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(parent_table_name.to_string()))?;
 
-    // Optimization: Check if any table in the database has foreign keys at all
-    let has_any_fks = db.catalog.list_tables().iter().any(|table_name| {
-        db.catalog
-            .get_table(table_name)
-            .map(|schema| !schema.foreign_keys.is_empty())
-            .unwrap_or(false)
-    });
-
-    if !has_any_fks {
+    // Optimization: consult the pre-built reverse index instead of
+    // rescanning every table in the catalog (#6170 perf). No table declares
+    // an FK against `parent_table_name` -> nothing else to do.
+    let candidate_children = child_index.get(&parent_table_name.to_lowercase());
+    if candidate_children.map(|c| c.is_empty()).unwrap_or(true) {
         return Ok(());
     }
 
@@ -165,7 +178,13 @@ fn check_child_references_impl(
         Vec<SqlValue>, // parent_key_values for THIS FK
     )> = Vec::new();
 
-    for table_name in db.catalog.list_tables() {
+    // `candidate_children` narrows the scan from "every table in the
+    // catalog" to just the tables that actually declare an FK against
+    // `parent_table_name` (#6170 perf). A table can appear more than once
+    // if it has multiple FKs targeting this same parent; the per-FK loop
+    // below still checks each FK's own `parent_table` so duplicates are
+    // harmless (they just repeat an already-cheap re-check).
+    for table_name in candidate_children.into_iter().flatten() {
         // DROP TABLE's implicit DELETE skips self-referential FKs: once the
         // whole table is removed both sides of the reference disappear, so it
         // can never be violated (see `check_drop_table_references`).
@@ -173,7 +192,11 @@ fn check_child_references_impl(
             continue;
         }
 
-        let child_schema = db.catalog.get_table(&table_name).unwrap();
+        let Some(child_schema) = db.catalog.get_table(table_name) else {
+            // Table vanished since the index was built (e.g. dropped by a
+            // trigger mid-cascade) -- nothing to check against it.
+            continue;
+        };
 
         if child_schema.foreign_keys.is_empty() {
             continue;
@@ -217,7 +240,7 @@ fn check_child_references_impl(
             // it must not count as a blocking child reference (fkey2-16.1.*).
             // Identify that row by full equality to the row being deleted.
             let self_ref_table = table_name.eq_ignore_ascii_case(parent_table_name);
-            let child_table = db.get_table(&table_name).unwrap();
+            let child_table = db.get_table(table_name).unwrap();
             let has_references = child_table.scan_visible(&snapshot).any(|(_, child_row)| {
                 if self_ref_table && child_row.values.as_slice() == parent_row.values.as_slice() {
                     return false;
@@ -247,7 +270,7 @@ fn check_child_references_impl(
 
             if has_references {
                 actions_to_perform.push((
-                    table_name.clone(),
+                    table_name.to_string(),
                     fk.clone(),
                     fk_idx,
                     fk.on_delete.clone(),
@@ -358,6 +381,7 @@ fn check_child_references_impl(
                     &parent_key_values,
                     in_txn,
                     session_defer,
+                    child_index,
                 )?;
             }
             ReferentialAction::SetNull => {
@@ -470,6 +494,7 @@ pub(crate) fn cascade_delete(
     parent_key_values: &[SqlValue],
     in_txn: bool,
     session_defer: bool,
+    child_index: &ChildFkIndex,
 ) -> Result<(), ExecutorError> {
     // Resolve parent-side collations before borrowing the child table so
     // FK comparisons honor NOCASE/RTRIM (#5147).
@@ -581,7 +606,7 @@ pub(crate) fn cascade_delete(
         // Recursively check integrity for this child row before deleting.
         // This handles multi-level CASCADE (grandchildren, etc.) and runs
         // after the child's BEFORE trigger, matching sqlite3 ordering.
-        check_no_child_references(db, child_table_name, child_row)?;
+        check_child_references_impl(db, child_table_name, child_row, false, child_index)?;
 
         // Delete this child row.
         let child_table_mut = db.get_table_mut(child_table_name).unwrap();
