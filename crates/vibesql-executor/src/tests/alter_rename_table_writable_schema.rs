@@ -126,20 +126,44 @@ fn view_query_sql(view: &vibesql_catalog::ViewDefinition) -> String {
     view.query.to_sql()
 }
 
-/// The fallback is scoped to `writable_schema=ON`: with the pragma OFF (the
-/// default) every dependent object — broken or not — is rewritten exactly as
-/// before, so the default path is untouched by the per-object gate.
+/// With `writable_schema` OFF (the default), an already-broken dependent view
+/// aborts the whole `RENAME TO` — matching `precheck_schema_objects` (issue
+/// #6174, altertab3.test 4.1.2/4.2.1 shape) and re-verified directly against
+/// sqlite3 3.51.0 with `PRAGMA legacy_alter_table=OFF` (the modern, non-legacy
+/// semantics the SQLite test suite itself assumes as baseline):
+///
+/// ```text
+/// sqlite> PRAGMA legacy_alter_table=OFF;
+/// sqlite> CREATE TABLE t4(id INTEGER PRIMARY KEY, c1 INT, c2 INT);
+/// sqlite> CREATE VIEW t4v1 AS SELECT id, c1, c99 FROM t4;
+/// sqlite> ALTER TABLE t4 RENAME TO t4new;
+/// Error: stepping, error in view t4v1: no such column: c99
+/// ```
+///
+/// (Superseded 2026-08-29: this test previously asserted the *opposite* —
+/// that the rename silently succeeds and rewrites the broken view — which
+/// only holds under `legacy_alter_table=ON`, the pre-3.25 compatibility mode
+/// vibesql does not model as a separate pragma. The bare `sqlite3` CLI on this
+/// host happens to default `legacy_alter_table` to `ON`, which is what made
+/// the original assertion look verified; with the modern `OFF` semantics the
+/// whole test suite (and vibesql) actually targets, real SQLite rejects this
+/// exactly like the trigger case below.)
 #[test]
-fn rename_table_rewrites_broken_view_when_writable_schema_is_off() {
+fn rename_table_rejects_broken_view_when_writable_schema_is_off() {
     let mut db = Database::new();
     exec(&mut db, "CREATE TABLE t4(id INTEGER PRIMARY KEY, c1 INT, c2 INT)").unwrap();
     exec(&mut db, "CREATE VIEW t4v1 AS SELECT id, c1, c99 FROM t4").unwrap();
 
-    exec(&mut db, "ALTER TABLE t4 RENAME TO t4new").unwrap();
+    let err = exec(&mut db, "ALTER TABLE t4 RENAME TO t4new").unwrap_err();
+    assert_eq!(err.to_string(), "error in view t4v1: no such column: c99");
 
+    // The failed ALTER leaves the schema untouched: t4 keeps its name and the
+    // view's stored SQL is unmodified.
+    assert!(db.get_table("t4").is_some());
+    assert!(db.get_table("t4new").is_none());
     let view = db.catalog.get_view("t4v1").expect("t4v1 must survive");
     let sql = view.sql_definition.clone().unwrap_or_else(|| view_query_sql(view));
-    assert!(sql.contains("t4new"), "writable_schema=OFF keeps the unconditional rewrite: {sql}");
+    assert!(!sql.contains("t4new"), "a rejected ALTER must not rewrite the broken view: {sql}");
 }
 
 /// A trigger whose *body* references a table that does not exist is broken in

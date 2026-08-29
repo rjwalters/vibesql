@@ -284,3 +284,83 @@ fn rename_on_main_table_still_reports_broken_main_view() {
     );
     assert!(has_column(&db, "main.m1", "c"));
 }
+
+// ---------------------------------------------------------------------------
+// RENAME TO
+// ---------------------------------------------------------------------------
+//
+// `execute_rename_table` (`ALTER TABLE ... RENAME TO ...`) runs the same
+// `precheck_schema_objects` whole-(same-)schema walk RENAME COLUMN and DROP
+// COLUMN already ran (issue #6174, altertab3.test 4.1.2/4.1.3/4.2.1/4.2.3):
+// SQLite's schema reload on any RENAME re-parses every object in the ALTERED
+// TABLE's own schema, so an *unrelated*, already-broken trigger or view in
+// that schema blocks a RENAME TO of a completely different table, and the
+// scoping rules (own-schema only, most-broken-object-wins) are identical to
+// RENAME COLUMN's.
+
+/// A trigger that references a table that was never created aborts a RENAME
+/// TO of a *different*, unrelated table in the same schema — the exact shape
+/// of altertab3.test 4.1.2 (`ALTER TABLE t3 RENAME TO t4` fails because an
+/// unrelated trigger on `t1` inserts into nonexistent `t2`).
+#[test]
+fn rename_to_rejected_when_unrelated_trigger_references_missing_table() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a, b)");
+    create_table(&mut db, "CREATE TABLE t3(e, f)");
+    create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t2 VALUES(new.a, new.b); END",
+    );
+
+    assert_eq!(
+        alter_err(&mut db, "ALTER TABLE t3 RENAME TO t4"),
+        "error in trigger tr1: no such table: main.t2"
+    );
+    // The failed ALTER leaves t3 untouched (not renamed to t4).
+    assert!(db.get_table("t3").is_some());
+    assert!(db.get_table("t4").is_none());
+}
+
+/// RENAME TO succeeds normally when every trigger/view in the schema still
+/// resolves (the overwhelmingly common case — this precheck must not become a
+/// blanket regression).
+#[test]
+fn rename_to_succeeds_when_dependents_are_valid() {
+    let mut db = Database::new();
+    create_table(&mut db, "CREATE TABLE t1(a, b)");
+    create_table(&mut db, "CREATE TABLE t3(e, f)");
+    create_trigger(
+        &mut db,
+        "CREATE TRIGGER tr1 AFTER INSERT ON t1 BEGIN INSERT INTO t1 VALUES(new.a, new.b); END",
+    );
+
+    try_alter(&mut db, "ALTER TABLE t3 RENAME TO t4")
+        .expect("a valid, unrelated trigger must not block RENAME TO");
+    assert!(db.get_table("t3").is_none());
+    assert!(db.get_table("t4").is_some());
+}
+
+/// With a broken trigger in *both* schemas, a main-table RENAME TO reports the
+/// MAIN trigger, never the unrelated temp-schema one.
+///
+/// (There is no `temp`-schema counterpart of this test: `ALTER TABLE
+/// temp.<t> RENAME TO <new>` fails in this bare `Database::new()` harness even
+/// with *no* trigger at all — `create_table_with_identifier` requires the
+/// target schema to be pre-registered, which only a full session/CLI startup
+/// does for `temp`. That gap is pre-existing and orthogonal to the
+/// `precheck_schema_objects` scoping this file covers.)
+#[test]
+fn rename_to_on_main_table_reports_its_own_main_trigger() {
+    let mut db = db_with_broken_trigger_in_each_schema();
+
+    let msg = alter_err(&mut db, "ALTER TABLE main.m1 RENAME TO m2");
+    assert!(
+        msg.contains("trigger mtr"),
+        "main-table rename must report the main trigger, got: {msg}"
+    );
+    assert!(
+        !msg.contains("trigger ptr"),
+        "main-table rename must not report the temp-schema trigger, got: {msg}"
+    );
+    assert!(db.get_table("main.m1").is_some());
+}

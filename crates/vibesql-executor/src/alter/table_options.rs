@@ -149,6 +149,20 @@ pub(super) fn execute_rename_table(
         .get_table(&stmt.table_name)
         .ok_or_else(|| ExecutorError::TableNotFound(stmt.table_name.clone()))?;
 
+    // Whole-schema dependent-object re-validation, matching SQLite's schema
+    // re-parse on ALTER TABLE RENAME TO (the same check RENAME COLUMN and DROP
+    // COLUMN already run): a view or trigger that is *already* broken — e.g. a
+    // trigger body that inserts into a table that was never created, or a view
+    // that references a column that does not exist — aborts the ALTER with
+    // `error in <type> <name>: <inner error>`, leaving the schema untouched.
+    // This is intentionally schema-wide, not scoped to triggers/views that
+    // reference `stmt.table_name`: SQLite's schema reload re-parses every
+    // object in the same schema on any RENAME, so an unrelated already-broken
+    // trigger blocks renaming a completely different table too (altertab3.test
+    // 4.1.2/4.2.1, issue #6174). Runs before any mutation so a failed RENAME TO
+    // is atomic.
+    super::drop_column_checks::precheck_schema_objects(database, &stmt.table_name)?;
+
     // The table's own bare (unqualified, exact-case) name as it was created —
     // this is exactly the text `create_implicit_indexes`
     // (`crates/vibesql-executor/src/create_table.rs`) embedded when minting
