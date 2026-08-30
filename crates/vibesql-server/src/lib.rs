@@ -11,7 +11,6 @@ pub mod observability;
 pub mod protocol;
 pub mod registry;
 pub mod replication;
-pub mod scheduler;
 pub mod session;
 pub mod subscription;
 pub mod transaction;
@@ -28,9 +27,6 @@ pub use protocol::{
 };
 pub use registry::{DatabaseRegistry, SharedDatabase};
 pub use replication::{ReplicationHandle, SqlError};
-pub use scheduler::{
-    ScheduleExecutor, ScheduleExecutorConfig, SchedulerManager, SchedulerManagerConfig,
-};
 pub use session::{Column, ExecutionResult, ReadConsistency, Row, Session};
 pub use subscription::{
     create_partial_row_update, extract_table_dependencies, extract_table_refs,
