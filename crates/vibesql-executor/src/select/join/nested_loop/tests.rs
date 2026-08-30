@@ -443,7 +443,14 @@ mod parallel_tests {
         );
 
         let db = Database::default();
-        let timeout_ctx = crate::timeout::TimeoutContext::new_default();
+        // Use a generous timeout budget instead of `new_default()`'s 300s.
+        // This is a synthetic large-dataset stress test (10,000 x 1,000 rows),
+        // not a timeout-behavior test, so it shouldn't be racing a fixed
+        // wall-clock budget. On a heavily loaded shared build host, rayon's
+        // worker threads can get CPU-starved even while pegged near 100% of
+        // their own thread time, causing the 300s default to fire as a
+        // spurious failure unrelated to any real regression (#6667).
+        let timeout_ctx = crate::timeout::TimeoutContext::new(instant::Instant::now(), 3600);
 
         // Condition: left.key = right.key
         let condition = vibesql_ast::Expression::BinaryOp {
