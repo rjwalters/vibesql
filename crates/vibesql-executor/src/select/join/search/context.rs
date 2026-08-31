@@ -3,7 +3,6 @@
 use std::collections::BTreeSet;
 
 use super::{config::ParallelSearchConfig, reorder::JoinEdge, state::CascadingFilterState};
-use crate::optimizer::aggregate_analysis::AggregateAnalysis;
 
 /// Context for join order search operations
 ///
@@ -24,10 +23,6 @@ pub(super) struct JoinOrderContext {
     pub edge_selectivities: std::collections::HashMap<(String, String), f64>,
     /// Configuration for parallel search
     pub config: ParallelSearchConfig,
-    /// Aggregate analysis for GROUP BY/HAVING optimization
-    /// When present, cardinalities may be adjusted to account for post-aggregate filtering
-    #[allow(dead_code)]
-    pub aggregate_analysis: Option<AggregateAnalysis>,
 }
 
 impl JoinOrderContext {

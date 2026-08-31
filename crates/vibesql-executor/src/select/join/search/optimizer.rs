@@ -1,7 +1,6 @@
 //! Public API for join order optimization
 
 use super::{config::ParallelSearchConfig, context::JoinOrderContext, reorder::JoinOrderAnalyzer};
-use crate::optimizer::aggregate_analysis::AggregateAnalysis;
 
 /// Performs join order optimization via exhaustive search
 pub struct JoinOrderSearch {
@@ -60,50 +59,6 @@ impl JoinOrderSearch {
             table_base_cardinalities,
             edge_selectivities,
             config: ParallelSearchConfig::with_table_count(num_tables),
-            aggregate_analysis: None,
-        };
-
-        Self { context }
-    }
-
-    /// Create a new join order search with aggregate-aware optimization
-    ///
-    /// This version accepts aggregate analysis results and can adjust join order
-    /// decisions based on GROUP BY/HAVING clauses. When HAVING filters are selective,
-    /// the optimizer may prefer different join orders that enable early aggregation.
-    ///
-    /// # Parameters
-    /// - `alias_to_table`: Maps table aliases to actual table names for database lookups.
-    pub fn from_analyzer_with_aggregates(
-        analyzer: &JoinOrderAnalyzer,
-        database: &vibesql_storage::Database,
-        table_local_predicates: &std::collections::HashMap<String, Vec<vibesql_ast::Expression>>,
-        alias_to_table: &std::collections::HashMap<String, String>,
-        aggregate_analysis: AggregateAnalysis,
-    ) -> Self {
-        let edges = analyzer.edges().to_vec();
-        let edge_selectivities =
-            JoinOrderContext::compute_edge_selectivities(&edges, database, alias_to_table);
-
-        let num_tables = analyzer.tables().len();
-
-        // Extract base cardinalities (before filters) for cascading filter tracking
-        let table_base_cardinalities =
-            JoinOrderContext::extract_base_cardinalities(analyzer, database, alias_to_table);
-
-        let context = JoinOrderContext {
-            all_tables: analyzer.tables().clone(),
-            edges,
-            table_cardinalities: JoinOrderContext::extract_cardinalities_with_selectivity(
-                analyzer,
-                database,
-                table_local_predicates,
-                alias_to_table,
-            ),
-            table_base_cardinalities,
-            edge_selectivities,
-            config: ParallelSearchConfig::with_table_count(num_tables),
-            aggregate_analysis: Some(aggregate_analysis),
         };
 
         Self { context }
