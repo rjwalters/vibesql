@@ -834,6 +834,14 @@ impl ForeignKeyValidator {
                 // table before the row is written, mirroring the DELETE-side
                 // cascade's recursive `check_no_child_references` call for
                 // multi-level chains (fkey2-3.1.*).
+                //
+                // A declarative FK UPDATE CASCADE counts as one level of
+                // trigger recursion even though no `CREATE TRIGGER` is
+                // involved (EVIDENCE-OF R-42264-30503, e_fkey-63.2.4, #6170)
+                // -- guard the descent with the same depth counter/limit
+                // `RecursionGuard` uses for real trigger firing (mirrors the
+                // DELETE-side cascade guard in `delete::integrity::cascade_delete`).
+                let _depth_guard = crate::trigger_execution::RecursionGuard::new(db)?;
                 Self::check_no_child_references_impl(
                     db,
                     &table_name,

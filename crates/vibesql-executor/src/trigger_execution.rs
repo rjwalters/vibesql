@@ -118,7 +118,16 @@ thread_local! {
 
 /// RAII guard for managing trigger recursion depth
 /// Increments depth on creation, decrements on drop
-struct RecursionGuard;
+///
+/// `pub(crate)` so `crate::delete::integrity` and `crate::update::foreign_keys`
+/// can guard the recursive descent into the next level of a declarative FK
+/// CASCADE/UPDATE-CASCADE chain with the same counter and limit as real
+/// trigger recursion. SQLite's EVIDENCE-OF R-42264-30503: "for the purposes of
+/// [`SQLITE_MAX_TRIGGER_DEPTH`/`SQLITE_LIMIT_TRIGGER_DEPTH`], foreign key
+/// actions are considered trigger programs" — a plain `REFERENCES ...
+/// ON DELETE/UPDATE CASCADE` chain with no `CREATE TRIGGER` in sight must
+/// still trip the same depth limit (e_fkey-63.1.4/63.2.4, #6170).
+pub(crate) struct RecursionGuard;
 
 impl RecursionGuard {
     /// Create a new recursion guard, incrementing the depth
@@ -130,7 +139,7 @@ impl RecursionGuard {
     ///
     /// # Returns
     /// Ok(RecursionGuard) if depth is within limits, Err if limit exceeded
-    fn new(db: &Database) -> Result<Self, ExecutorError> {
+    pub(crate) fn new(db: &Database) -> Result<Self, ExecutorError> {
         let limit = effective_trigger_depth_limit(db);
         TRIGGER_RECURSION_DEPTH.with(|depth| {
             let current = depth.get();

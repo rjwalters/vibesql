@@ -606,6 +606,15 @@ pub(crate) fn cascade_delete(
         // Recursively check integrity for this child row before deleting.
         // This handles multi-level CASCADE (grandchildren, etc.) and runs
         // after the child's BEFORE trigger, matching sqlite3 ordering.
+        //
+        // A declarative FK CASCADE counts as one level of trigger recursion
+        // even though no `CREATE TRIGGER` is involved (EVIDENCE-OF
+        // R-42264-30503, e_fkey-63.1.4, #6170) -- guard the descent into the
+        // next level with the same depth counter/limit `RecursionGuard` uses
+        // for real trigger firing, so a chain deeper than
+        // `SQLITE_LIMIT_TRIGGER_DEPTH`/`SQLITE_MAX_TRIGGER_DEPTH` raises "too
+        // many levels of trigger recursion" instead of cascading unbounded.
+        let _depth_guard = crate::trigger_execution::RecursionGuard::new(db)?;
         check_child_references_impl(db, child_table_name, child_row, false, child_index)?;
 
         // Delete this child row.
