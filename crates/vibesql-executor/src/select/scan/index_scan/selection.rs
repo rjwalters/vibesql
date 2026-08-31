@@ -29,10 +29,8 @@ const EXPRESSION_INDEX_SELECTIVITY: f64 = 0.33;
 ///
 /// SQLite routes `IS NULL` branches to a *different* index lookup than equality
 /// (`=`) branches: `d IS NULL` seeks the NULL key, while `d = ?` seeks a concrete
-/// value. Preserving this distinction in the plan representation lets later PRs
-/// dispatch each branch to the correct lookup. For PR 1 it is dead-but-tested
-/// metadata; the `branch_predicate` carries the original expression regardless.
-#[allow(dead_code)] // PR 1: plan representation only; consumed in PR 2+.
+/// value. Preserving this distinction in the plan representation lets execution
+/// dispatch each branch to the correct lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OrBranchKind {
     /// `col IS NULL` — seeks the NULL key (distinct from `=`).
@@ -48,7 +46,6 @@ pub(crate) enum OrBranchKind {
 /// branches as `INDEX <ordinal>` keyed by this original position (e.g. where9-3.1
 /// expects `INDEX 1` / `INDEX 3` for a three-term OR whose middle term is folded
 /// away), so the analyzer must preserve original ordinals.
-#[allow(dead_code)] // PR 1: plan representation only; consumed in PR 2+.
 #[derive(Debug, Clone)]
 pub(crate) struct OrBranch {
     /// 1-based term position in the original OR expression.
@@ -77,11 +74,6 @@ pub(crate) enum IndexScanChoice {
     /// indexable. Each branch lookup yields a set of rowids; the union
     /// (deduplicated by rowid) is the result, with `residual` applied as a
     /// post-filter for the non-OR AND-conjuncts.
-    ///
-    /// NOTE (PR 1): this variant is plan representation only. Selection and
-    /// execution intentionally never produce or consume it yet — it is
-    /// dead-but-tested code. Behavior is byte-identical to before.
-    #[allow(dead_code)]
     MultiIndexOr {
         /// One entry per indexable OR branch, in original-branch ordinal order.
         branches: Vec<OrBranch>,
