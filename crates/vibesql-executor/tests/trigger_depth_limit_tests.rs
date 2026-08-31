@@ -12,6 +12,7 @@
 
 use vibesql_executor::{
     CreateTableExecutor, DeleteExecutor, InsertExecutor, SelectExecutor, TriggerExecutor,
+    UpdateExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -35,6 +36,9 @@ fn try_exec(db: &mut Database, sql: &str) -> Result<(), String> {
         }
         Statement::Delete(s) => {
             DeleteExecutor::execute(&s, db).map_err(|e| e.to_string())?;
+        }
+        Statement::Update(s) => {
+            UpdateExecutor::execute(&s, db).map_err(|e| e.to_string())?;
         }
         other => panic!("unsupported statement in test helper: {other:?}"),
     }
@@ -149,4 +153,107 @@ fn runtime_limit_above_cap_does_not_raise_the_stack_safe_cap() {
         .expect("spawn thread")
         .join()
         .expect("cap must error, not overflow the stack");
+}
+
+/// EVIDENCE-OF: R-42264-30503 "For the purposes of these limits, foreign key
+/// actions are considered trigger programs." A chain of `ON DELETE CASCADE`
+/// foreign keys must count against the runtime trigger-recursion-depth limit
+/// exactly like recursive triggers do (SQLite e_fkey-63.1.3: a 5-level cascade
+/// stays within a limit of 5).
+#[test]
+fn fk_cascade_delete_chain_within_limit_succeeds() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    exec(&mut db, "CREATE TABLE t0(a PRIMARY KEY, b)");
+    exec(&mut db, "INSERT INTO t0 VALUES('x0', NULL)");
+    for i in 1..=5 {
+        let prev = i - 1;
+        exec(
+            &mut db,
+            &format!("CREATE TABLE t{i}(a PRIMARY KEY, b REFERENCES t{prev} ON DELETE CASCADE)"),
+        );
+        exec(&mut db, &format!("INSERT INTO t{i} VALUES('x{i}', 'x{prev}')"));
+    }
+
+    // sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, 5)
+    db.set_trigger_depth_limit(5);
+
+    exec(&mut db, "DELETE FROM t0");
+    assert_eq!(count(&db, "SELECT count(*) FROM t5"), 0);
+}
+
+/// EVIDENCE-OF: R-42264-30503, continued (SQLite e_fkey-63.1.4: a 6-level
+/// cascade exceeds a limit of 5 and aborts with the same wording as recursive
+/// trigger overflow, rather than cascading unbounded).
+#[test]
+fn fk_cascade_delete_chain_beyond_limit_aborts() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    exec(&mut db, "CREATE TABLE t0(a PRIMARY KEY, b)");
+    exec(&mut db, "INSERT INTO t0 VALUES('x0', NULL)");
+    for i in 1..=6 {
+        let prev = i - 1;
+        exec(
+            &mut db,
+            &format!("CREATE TABLE t{i}(a PRIMARY KEY, b REFERENCES t{prev} ON DELETE CASCADE)"),
+        );
+        exec(&mut db, &format!("INSERT INTO t{i} VALUES('x{i}', 'x{prev}')"));
+    }
+
+    db.set_trigger_depth_limit(5);
+
+    let err = try_exec(&mut db, "DELETE FROM t0")
+        .expect_err("cascade chain deeper than the runtime limit must abort");
+    assert_eq!(err, "too many levels of trigger recursion");
+
+    // The aborted statement rolled back: t0's row is untouched.
+    assert_eq!(count(&db, "SELECT count(*) FROM t0"), 1);
+}
+
+/// EVIDENCE-OF: R-42264-30503 for `ON UPDATE CASCADE` (SQLite e_fkey-63.2.3/
+/// 63.2.4): the FK chain here uses the child's PRIMARY KEY as the FK column
+/// (`test_on_update_recursion`'s shape), so a parent-key UPDATE cascades
+/// through primary-key rewrites at every level.
+#[test]
+fn fk_update_cascade_chain_within_limit_succeeds() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    exec(&mut db, "CREATE TABLE t0(a PRIMARY KEY)");
+    exec(&mut db, "INSERT INTO t0 VALUES('xxx')");
+    for i in 1..=5 {
+        let prev = i - 1;
+        exec(
+            &mut db,
+            &format!("CREATE TABLE t{i}(a PRIMARY KEY REFERENCES t{prev} ON UPDATE CASCADE)"),
+        );
+        exec(&mut db, &format!("INSERT INTO t{i} VALUES('xxx')"));
+    }
+
+    db.set_trigger_depth_limit(5);
+
+    exec(&mut db, "UPDATE t0 SET a = 'yyy'");
+    assert_eq!(count(&db, "SELECT count(*) FROM t5 WHERE a = 'yyy'"), 1);
+}
+
+/// EVIDENCE-OF: R-42264-30503 for `ON UPDATE CASCADE`, beyond-limit case.
+#[test]
+fn fk_update_cascade_chain_beyond_limit_aborts() {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    exec(&mut db, "CREATE TABLE t0(a PRIMARY KEY)");
+    exec(&mut db, "INSERT INTO t0 VALUES('xxx')");
+    for i in 1..=6 {
+        let prev = i - 1;
+        exec(
+            &mut db,
+            &format!("CREATE TABLE t{i}(a PRIMARY KEY REFERENCES t{prev} ON UPDATE CASCADE)"),
+        );
+        exec(&mut db, &format!("INSERT INTO t{i} VALUES('xxx')"));
+    }
+
+    db.set_trigger_depth_limit(5);
+
+    let err = try_exec(&mut db, "UPDATE t0 SET a = 'yyy'")
+        .expect_err("cascade chain deeper than the runtime limit must abort");
+    assert_eq!(err, "too many levels of trigger recursion");
 }
