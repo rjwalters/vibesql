@@ -536,9 +536,7 @@ impl SelectExecutor<'_> {
             } else {
                 // Check if SELECT list contains aggregate functions
                 // Aggregates without GROUP BY need special handling (fall back to row-oriented)
-                let has_aggregates =
-                    crate::optimizer::aggregate_analysis::AggregateAnalysis::analyze(stmt)
-                        .has_aggregates;
+                let has_aggregates = crate::optimizer::aggregate_analysis::has_aggregates(stmt);
                 if has_aggregates {
                     log::debug!(
                         "Columnar join: aggregates without GROUP BY not supported, falling back"
