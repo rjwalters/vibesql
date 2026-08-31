@@ -57,15 +57,15 @@
   ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@vitest/coverage-v8": "^4.1.10",
-    "eslint": "^10.8.1",
+    "eslint": "^10.9.1",
     "prettier": "^3.9.6",
     "react": "^19.2.8",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.67.0",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^4.1.10"
   }
 }
