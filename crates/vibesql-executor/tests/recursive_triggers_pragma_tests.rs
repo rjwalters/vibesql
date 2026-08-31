@@ -14,7 +14,8 @@
 //! file under `PRAGMA recursive_triggers = off`.
 
 use vibesql_executor::{
-    CreateTableExecutor, InsertExecutor, SelectExecutor, TriggerExecutor, UpdateExecutor,
+    CreateTableExecutor, DeleteExecutor, InsertExecutor, SelectExecutor, TriggerExecutor,
+    UpdateExecutor,
 };
 use vibesql_parser::Parser;
 use vibesql_storage::Database;
@@ -38,6 +39,9 @@ fn exec(db: &mut Database, sql: &str) {
         }
         Statement::Update(s) => {
             UpdateExecutor::execute(&s, db).expect("UPDATE failed");
+        }
+        Statement::Delete(s) => {
+            DeleteExecutor::execute(&s, db).expect("DELETE failed");
         }
         other => panic!("unsupported statement in test helper: {other:?}"),
     }
@@ -242,4 +246,59 @@ fn toggle_mid_session_takes_effect() {
         12,
         "ON again: 45,44,43,42,41 added by recursion (5 rows)",
     );
+}
+
+/// EVIDENCE-OF: R-44355-00270 "The PRAGMA recursive_triggers setting does not
+/// affect the operation of foreign key actions." (SQLite `e_fkey-64.*`, run
+/// there for each of `recursive_triggers` in `{0, 1, ON, OFF}`.)
+///
+/// A self-referential `ON DELETE CASCADE` chain (`t1(a PRIMARY KEY, b
+/// REFERENCES t1 ON DELETE CASCADE)` seeded 1<-2<-3<-4<-5) must fully cascade
+/// from a single `DELETE FROM t1 WHERE a = 1` regardless of the
+/// `recursive_triggers` pragma: FK actions are not gated by that pragma at
+/// all (unlike genuine recursive trigger re-firing, see
+/// `off_suppresses_self_refiring_trigger3_6_shape` above, which the pragma
+/// DOES affect). This is the one FK conformance corner of `e_fkey.test`
+/// SQLite's own suite could not durably verify against VibeSQL in CI: the
+/// file's immediately preceding `e_fkey-63.*` block (`SQLITE_MAX_TRIGGER_DEPTH`
+/// stress test, see `trigger_depth_limit_tests.rs`) drives thousands of
+/// per-statement CLI-process spawns through the TCL harness, which can
+/// exceed the harness's per-file wall-clock timeout under host load before
+/// reaching this final section -- confirmed correct by direct CLI probe
+/// during the #6170 conformance sweep. This test pins the behavior
+/// permanently in the Rust suite, independent of harness timing.
+fn assert_self_referential_cascade_ignores_pragma(recursive_triggers: bool) {
+    let mut db = Database::new();
+    db.set_foreign_keys_enabled(true);
+    db.set_recursive_triggers(recursive_triggers);
+
+    exec(&mut db, "CREATE TABLE t1(a PRIMARY KEY, b REFERENCES t1 ON DELETE CASCADE)");
+    exec(&mut db, "INSERT INTO t1 VALUES(1, NULL)");
+    exec(&mut db, "INSERT INTO t1 VALUES(2, 1)");
+    exec(&mut db, "INSERT INTO t1 VALUES(3, 2)");
+    exec(&mut db, "INSERT INTO t1 VALUES(4, 3)");
+    exec(&mut db, "INSERT INTO t1 VALUES(5, 4)");
+    assert_eq!(query(&db, "SELECT count(*) FROM t1"), vec![vec![i(5)]]);
+    assert_eq!(query(&db, "SELECT count(*) FROM t1 WHERE a = 1"), vec![vec![i(1)]]);
+
+    exec(&mut db, "DELETE FROM t1 WHERE a = 1");
+
+    // The whole chain cascades away: deleting a=1 cascades to a=2 (which
+    // referenced it), which cascades to a=3, and so on down to a=5.
+    assert_eq!(
+        query(&db, "SELECT count(*) FROM t1"),
+        vec![vec![i(0)]],
+        "recursive_triggers={recursive_triggers}: FK CASCADE must fully unwind \
+         the self-referential chain regardless of the pragma",
+    );
+}
+
+#[test]
+fn fk_cascade_delete_ignores_recursive_triggers_pragma_off() {
+    assert_self_referential_cascade_ignores_pragma(false);
+}
+
+#[test]
+fn fk_cascade_delete_ignores_recursive_triggers_pragma_on() {
+    assert_self_referential_cascade_ignores_pragma(true);
 }
