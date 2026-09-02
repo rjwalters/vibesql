@@ -6,4 +6,4 @@
  */
 
 // Import and initialize Monaco's editor worker
-import 'monaco-editor/esm/vs/editor/editor.worker.js'
+import 'monaco-editor/editor/editor.worker.js'
