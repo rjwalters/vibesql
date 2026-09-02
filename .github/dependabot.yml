@@ -72,6 +72,13 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    ignore:
+      # TypeScript 7 is unsupported by typescript-eslint (crashes `pnpm lint`
+      # outright, not just a lint-finding regression); pinned to the 6.x line
+      # in package.json until typescript-eslint/typescript-eslint#10940 lands
+      # upstream. Drop this once typescript-eslint supports TS 7.1+. See #6689.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       dependencies:
         patterns:
