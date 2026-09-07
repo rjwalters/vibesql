@@ -68,7 +68,7 @@ describe('VibeSqlClient', () => {
 
   describe('queries', () => {
     it('should throw error if not connected', async () => {
-      expect(async () => {
+      await expect(async () => {
         await client.query('SELECT 1');
       }).rejects.toThrow(ConnectionError);
     });
