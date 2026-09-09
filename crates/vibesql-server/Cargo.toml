@@ -75,7 +75,7 @@ tracing-opentelemetry = "0.33"
 # Utilities
 bytes = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "6.0"
+dirs = "7.0"
 rand = "0.10"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
