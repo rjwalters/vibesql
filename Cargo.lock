@@ -1258,9 +1258,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-deque"
-version = "0.8.7"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb"
+checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
@@ -1548,9 +1548,9 @@ dependencies = [
 
 [[package]]
 name = "dirs"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
 dependencies = [
  "dirs-sys",
 ]
@@ -2575,9 +2575,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.14.1"
+version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07aa2048142242915a31d35844fb311e0e53fcca590c3a0a40dcf1b841fa09eb"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
@@ -3395,9 +3395,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "opendal"
-version = "0.58.2"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33dbff14cc9bb085224256d6a81289d2f3202e85b06f408d42534b42162a4231"
+checksum = "379a66c8c20c51a2321e444338ebc16a6cc0c73e39e43e9a3eea376bd71fef49"
 dependencies = [
  "ctor",
  "opendal-core",
@@ -3414,9 +3414,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-core"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48dbcef97d3eb7591db2c18d5cae95c836bcce07359b98d98dd6f4e861eb77b7"
+checksum = "a43405d217dfdfb543f58847336d3af672897dd1939bb7dcf314b63cf364f1c9"
 dependencies = [
  "anyhow",
  "asyncband",
@@ -3440,9 +3440,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-http-transport-reqwest"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85663452ea32bbc17e8f79ab29788c846d116ec7de31451be9c787e462dcb36c"
+checksum = "401999057db611e592f883fcf2cbd6754ff37af587deaadd07b8c1398b2b6b06"
 dependencies = [
  "bytes",
  "futures",
@@ -3454,9 +3454,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-concurrent-limit"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03f9e144b5228d741c3763ade8711d9b72e5fb6d998e779f2d7a09da0b5a3eba"
+checksum = "fba1dd0742261925fc0eb910773ec39cbc1336c55d41e13b19f3af970ad5a126"
 dependencies = [
  "asyncband",
  "futures",
@@ -3466,9 +3466,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-logging"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2de17c61cd32e9d8d7d8efb91795e714dbccbafbc3c4e219e1542f4d6324161"
+checksum = "d0fd963f9d32dd276521479d7f1f3a265d669b03a75f2062a4570a26b1b17421"
 dependencies = [
  "log",
  "opendal-core",
@@ -3476,9 +3476,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-retry"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e94db301964a25366090484d61e6da16d5979cc8faf02c3e12210dc74fafed38"
+checksum = "06306202c97c54fb41bdbbdcb854c8798823f0022ae7aac7a40c8a1023aa83a6"
 dependencies = [
  "backon",
  "log",
@@ -3487,9 +3487,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-layer-timeout"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08956ddda07465449bfd48825f4f0f25e0351278ac974eaa659895d9d74f2c80"
+checksum = "6bd334cbd0a0bc934146733e74a80a5faf8db8e014781a25f6d9d80d7b87c981"
 dependencies = [
  "opendal-core",
  "tokio",
@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-service-azblob"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d278d2fb57661947d1c9fb44047e432b2782c48dc085b7abc99fe6e18c26cf8"
+checksum = "ba0d2662ddf0de1f838db5dc48fafb8212ed1a5c7980bc164aa67809696c309c"
 dependencies = [
  "base64 0.23.0",
  "bytes",
@@ -3518,9 +3518,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-service-azure-common"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcc1bfdac4f54d9018c462dd32ad9e2f68fdf584f825c811550c8ffc87894cd"
+checksum = "6348e3c0d7ff77a9b05c5b7f3d744ed395c2b2511812d3b37a934218002248f8"
 dependencies = [
  "http",
  "opendal-core",
@@ -3528,9 +3528,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-service-fs"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7ef1e1c45f3f89282a59073897e0d685e51385fed0aea771714789525cff996"
+checksum = "fb9caf04d6d38713299dd4abac984b95ab16ee20e1ff09160f495c5a64644083"
 dependencies = [
  "bytes",
  "log",
@@ -3542,9 +3542,9 @@ dependencies = [
 
 [[package]]
 name = "opendal-service-gcs"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da1f2a8c975fd22fea01f0409bcb8774f1ac02ad79863a3490098203121555d3"
+checksum = "1ccbf8450652bfe7b3ae69b7decce090c95c120ad565048f9a5a77dac2917a19"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3559,13 +3559,14 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
 name = "opendal-service-s3"
-version = "0.58.2"
+version = "0.59.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c64335f9f24ccb62ac36f1d976342b48611a75ba61979813a4f78a4ebd94de42"
+checksum = "388b1d39b62535c62803754ebef89808859558697366dbedd0299345887ba461"
 dependencies = [
  "base64 0.23.0",
  "bytes",
@@ -7418,27 +7419,27 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.3"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+checksum = "bf06bd8162af0734b344780deb55b42a2429ae430870d13fcc12f238e880fe6e"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "7.2.4"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
+checksum = "ae42c0555055784c70058d19ba8e275528e8a99a706684868ace5da4e716a4ab"
 dependencies = [
  "zstd-sys",
 ]
 
 [[package]]
 name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
+version = "2.1.0+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
+checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
 dependencies = [
  "cc",
  "pkg-config",
