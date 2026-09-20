@@ -610,6 +610,21 @@ _strip_fenced_code_blocks() {
 # anchor (the #5234 repro used backticks specifically to mark the reference as
 # hypothetical, not live).
 #
+# #6416 tolerance: real PR bodies phrase the declaration less rigidly than the
+# original adjacency regex allowed — `Part of the FK enforcement family issue
+# #6170 (epic #5779).` (prose between the phrase and the reference) and
+# `**Part of #6170** (not `Closes` ...)` (markdown emphasis) both failed to
+# match on live PR #6409, silently skipping the post-merge label reset. The
+# pattern therefore now accepts, in the house style of parse_dependencies
+# (#4508) and warn-operator-gated.sh: emphasis/colon characters around the
+# phrase (`[*_:[:space:]]*` — also absorbing a second `*` when the bullet
+# group consumed the first of a `**` bold opener), and arbitrary same-sentence
+# prose between the phrase and the `#N` (`[^.#]*`). Two hard bounds keep the
+# #5234 discipline: the interstitial cannot contain `#` (the FIRST reference
+# after the phrase is the declared one — `Part of #6170 (epic #5779)` never
+# registers #5779) and cannot contain `.` (no crossing a sentence boundary —
+# `Part of the reason X works. See #9999` is prose, not a declaration).
+#
 # The second stage extracts `#N` tokens FIRST and only then strips the `#`.
 # Scanning the whole matched span for any digit run would also pick up the
 # numbered-list marker's own ordinal (`3. Part of #789` -> `3` and `789`),
@@ -621,7 +636,7 @@ _partial_increment_refs() {
   { printf '%s\n' "$1" \
       | _strip_fenced_code_blocks \
       | sed -E 's/`[^`]*`//g' \
-      | grep -oiE '^[[:space:]]*([-*+>]|[0-9]+\.)?[[:space:]]*(Part of|Contributes to)[[:space:]]+#[0-9]+' \
+      | grep -oiE '^[[:space:]]*([-*+>]|[0-9]+\.)?[*_:[:space:]]*(Part of|Contributes to)[^.#]*#[0-9]+' \
       | grep -oE '#[0-9]+' \
       | tr -d '#' \
       | sort -un; } || true
@@ -665,12 +680,15 @@ _closing_ref_snippets() {
 # sides of the conflict and judge for themselves whether the declaration was
 # real (AC #4, #5234). Runs the identical fenced-block/inline-code-span
 # stripping as _partial_increment_refs so the quoted snippet always matches
-# what was actually matched, never a code-block artifact.
+# what was actually matched, never a code-block artifact. Shares the #6416
+# tolerance (emphasis + same-sentence prose before the `#N`, bounded by no-`#`
+# and no-`.` interstitials) so pre-merge warnings quote exactly the phrasings
+# the post-merge reset will act on.
 _partial_increment_ref_snippets() {
   { printf '%s\n' "$1" \
       | _strip_fenced_code_blocks \
       | sed -E 's/`[^`]*`//g' \
-      | grep -oiE "^[[:space:]]*([-*+>]|[0-9]+\\.)?[[:space:]]*(Part of|Contributes to)[[:space:]]+#$2\\b" \
+      | grep -oiE "^[[:space:]]*([-*+>]|[0-9]+\\.)?[*_:[:space:]]*(Part of|Contributes to)[^.#]*#$2\\b" \
       | sed -E 's/^[[:space:]]+//' \
       | sort -u | tr '\n' '|' | sed 's/|$//; s/|/", "/g'; } || true
 }
