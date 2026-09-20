@@ -151,10 +151,25 @@ fn check_schema_objects(
     // `get_view` resolves temp-first-then-main-then-attached and could skip a
     // `main` view that shares a name with a `temp`/attached-schema view
     // (mirrors the trigger loop immediately below — issue #6296).
-    for view in database.catalog.iter_views() {
-        if view.is_temp() != owner_is_temp {
-            continue;
-        }
+    //
+    // Both walks sort by name before raising an error: the catalog stores
+    // views/triggers in `HashMap`s whose iteration order is randomized per
+    // process, so with more than one broken in-scope object the *reported*
+    // error would otherwise differ run to run for the same database and
+    // statement (observed as altercol-17.3 flapping between two failure
+    // texts). SQLite's reload order is its schema-table order (creation
+    // order), which the catalog does not track; name order is the same
+    // deterministic tie-break the persistence layer already applies to these
+    // maps for the same reason (persistence/save.rs).
+    let mut views: Vec<&ViewDefinition> =
+        database.catalog.iter_views().filter(|view| view.is_temp() == owner_is_temp).collect();
+    views.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    for view in views {
         if let Some(missing) = find_missing_column_in_view(view, &sim) {
             return Err(ExecutorError::Other(format!(
                 "error in view {}{}: no such column: {}",
@@ -166,11 +181,20 @@ fn check_schema_objects(
     // Iterate trigger definitions directly rather than via `list_triggers()` +
     // `get_trigger()`: triggers are keyed per schema, so a name-only `get_trigger`
     // resolves temp-first and would skip a `main` trigger that shares a name with
-    // a `temp` trigger (issue #6296).
-    for trigger in database.catalog.iter_triggers() {
-        if trigger.is_temp() != owner_is_temp {
-            continue;
-        }
+    // a `temp` trigger (issue #6296). Sorted by name for deterministic error
+    // attribution — see the views loop above.
+    let mut triggers: Vec<&TriggerDefinition> = database
+        .catalog
+        .iter_triggers()
+        .filter(|trigger| trigger.is_temp() == owner_is_temp)
+        .collect();
+    triggers.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    for trigger in triggers {
         if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
             return Err(ExecutorError::Other(format!(
                 "error in trigger {}{}: {}",
