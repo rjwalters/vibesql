@@ -16,8 +16,8 @@
 //! - **Local variables**: DECLARE and SET for variable management
 //! - **Control flow**: IF, WHILE, LOOP, REPEAT statements
 //! - **Labels**: Named blocks for LEAVE and ITERATE
-//! - **Recursion**: Function calls with depth limiting (max 100)
-//! - **Read-only functions**: Functions cannot modify database tables
+//! - **Function DDL**: CREATE/DROP FUNCTION are accepted and catalogued, but user-defined function
+//!   bodies are not executed (see below)
 //!
 //! # Examples
 //!
@@ -54,6 +54,10 @@
 //!
 //! ## Creating a Function
 //!
+//! Note: `CREATE FUNCTION` is DDL-only today. The function is registered in the
+//! catalog, but calling it from an expression returns an `UnsupportedFeature`
+//! error and the body is never run. See `docs/reference/PROCEDURES_FUNCTIONS.md`.
+//!
 //! ```sql
 //! CREATE FUNCTION factorial(n INT) RETURNS INT
 //!   DETERMINISTIC
@@ -69,9 +73,6 @@
 //!
 //!   RETURN result;
 //! END;
-//!
-//! SELECT factorial(5);
-//! -- Output: 120
 //! ```
 //!
 //! ## Control Flow with Labels
@@ -99,7 +100,6 @@
 //! - [`context`]: Execution context with variables, parameters, and scope management
 //! - [`executor`]: Execute individual procedural statements
 //! - [`control_flow`]: Control flow execution (IF, WHILE, LOOP, REPEAT)
-//! - [`function`]: User-defined function execution and recursion handling
 //!
 //! # Function Characteristics
 //!
@@ -141,8 +141,6 @@
 pub mod context;
 pub mod control_flow;
 pub mod executor;
-pub mod function;
 
 pub use context::{ControlFlow, ExecutionContext};
 pub use executor::execute_procedural_statement;
-pub use function::execute_user_function;
