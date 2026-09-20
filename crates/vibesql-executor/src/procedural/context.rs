@@ -40,8 +40,6 @@ pub struct ExecutionContext {
     recursion_depth: usize,
     /// Maximum allowed recursion depth
     max_recursion: usize,
-    /// Whether this is a function context (read-only, cannot modify data)
-    pub(crate) is_function: bool,
     /// Track which parameters are OUT/INOUT and their target variable names
     /// Key: parameter name (uppercase), Value: target variable name (as specified in CALL)
     out_parameters: HashMap<String, String>,
@@ -56,7 +54,6 @@ impl ExecutionContext {
             labels: HashMap::new(),
             recursion_depth: 0,
             max_recursion: MAX_RECURSION_DEPTH,
-            is_function: false,
             out_parameters: HashMap::new(),
         }
     }
@@ -69,7 +66,6 @@ impl ExecutionContext {
             labels: HashMap::new(),
             recursion_depth: depth,
             max_recursion: MAX_RECURSION_DEPTH,
-            is_function: false,
             out_parameters: HashMap::new(),
         }
     }

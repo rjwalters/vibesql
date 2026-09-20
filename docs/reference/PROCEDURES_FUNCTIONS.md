@@ -141,29 +141,35 @@ SELECT @sum, @count, @msg;
 
 ## User-Defined Functions
 
+> **⚠️ UNIMPLEMENTED — DDL only.** `CREATE FUNCTION` and `DROP FUNCTION` statements
+> parse, validate, and register/deregister the function in the catalog, but
+> **user-defined functions cannot be executed**. Any reference to a user-defined
+> function in an expression (e.g. `SELECT my_func(...)`) returns an
+> `UnsupportedFeature` error, and `BEGIN...END` function bodies are never run.
+> See [#6672](https://github.com/rjwalters/vibesql/issues/6672) for the tracking
+> history. The syntax below is documented for the *DDL surface that is accepted*;
+> none of it is executable today.
+
 ### Creating Functions
 
 Functions differ from procedures:
-- Functions RETURN a value and can be used in SELECT expressions
-- Functions are read-only (cannot INSERT, UPDATE, DELETE)
+- Functions RETURN a value and are *intended* for use in SELECT expressions (not yet implemented — see banner)
+- Functions are designed to be read-only (cannot INSERT, UPDATE, DELETE)
 - Functions only support IN parameters
-- Functions have recursion depth limiting (max 100 levels)
 
 #### Simple Function Syntax
 
-For simple return expressions:
+For simple return expressions (DDL accepted; body not executed):
 
 ```sql
 CREATE FUNCTION add_ten(x INT) RETURNS INT
   DETERMINISTIC
   RETURN x + 10;
-
-SELECT add_ten(5);  -- Output: 15
 ```
 
 #### Complex Function Syntax
 
-For functions with control flow:
+For functions with control flow (DDL accepted; body not executed):
 
 ```sql
 CREATE FUNCTION factorial(n INT) RETURNS INT
@@ -180,8 +186,6 @@ BEGIN
 
   RETURN result;
 END;
-
-SELECT factorial(5);  -- Output: 120
 ```
 
 ### Function Characteristics
@@ -243,29 +247,14 @@ CREATE FUNCTION double_value(x INT) RETURNS INT
   RETURN x * 2;
 ```
 
-### Using Functions
+### Calling Functions
 
-Functions can be used anywhere expressions are allowed:
-
-```sql
--- In SELECT clause
-SELECT product_name, calculate_discount(price) AS discounted_price
-FROM products;
-
--- In WHERE clause
-SELECT * FROM products
-WHERE calculate_discount(price) < 50;
-
--- In expressions
-SELECT product_name,
-       price,
-       calculate_discount(price) AS discounted,
-       price - calculate_discount(price) AS savings
-FROM products;
-
--- Nested function calls
-SELECT factorial(add_ten(5));  -- factorial(15) = 1307674368000
-```
+**Not implemented.** Referencing a user-defined function from an expression —
+SELECT lists, WHERE clauses, nested calls — always fails with an
+`UnsupportedFeature` error ("User-defined function '...' found but cannot be
+executed in this context"). There is no runtime fallback. Until execution is
+implemented, use built-in functions, or move the logic into a stored procedure
+invoked via `CALL` (procedures are executed and do support `BEGIN...END` bodies).
 
 ## Procedural Statements
 
