@@ -58,3 +58,36 @@ fn temp_schema_trigger_missing_table_is_left_unqualified() {
     let err = exec(&mut db, "ALTER TABLE uu7 RENAME x TO xxx").unwrap_err();
     assert_eq!(err.to_string(), "error in trigger uu7t: no such table: u8");
 }
+
+#[test]
+fn broken_trigger_selection_is_deterministic() {
+    // altercol-17.3's shim shape: TWO broken main-schema triggers (u7t left
+    // broken by 17.1's expected failure, uu7t on the renamed table — the
+    // shim's `CREATE TEMP TABLE` demotion makes both main). The catalog
+    // stores triggers in a HashMap whose iteration order is randomized per
+    // process, so without the name-sorted walk in `check_schema_objects` the
+    // ALTER reported u7t or uu7t nondeterministically across CLI processes
+    // (observed as altercol-17.3 flapping). The reported trigger must be a
+    // stable function of the schema, not of process-local hash seeds.
+    for _ in 0..32 {
+        let mut db = Database::new();
+        exec(&mut db, "CREATE TABLE u7(x, y, z)").unwrap();
+        exec(
+            &mut db,
+            "CREATE TRIGGER u7t AFTER INSERT ON u7 BEGIN \
+             INSERT INTO u8 VALUES(new.x, new.y, new.z); END",
+        )
+        .unwrap();
+        exec(&mut db, "CREATE TABLE uu7(x, y, z)").unwrap();
+        exec(
+            &mut db,
+            "CREATE TRIGGER uu7t AFTER INSERT ON uu7 BEGIN \
+             INSERT INTO u8 VALUES(new.x, new.y, new.z); END",
+        )
+        .unwrap();
+
+        // u7t sorts before uu7t, so it is the deterministically-reported one.
+        let err = exec(&mut db, "ALTER TABLE uu7 RENAME x TO xxx").unwrap_err();
+        assert_eq!(err.to_string(), "error in trigger u7t: no such table: main.u8");
+    }
+}
