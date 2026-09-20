@@ -161,11 +161,8 @@ fn check_schema_objects(
     // order), which the catalog does not track; name order is the same
     // deterministic tie-break the persistence layer already applies to these
     // maps for the same reason (persistence/save.rs).
-    let mut views: Vec<&ViewDefinition> = database
-        .catalog
-        .iter_views()
-        .filter(|view| view.is_temp() == owner_is_temp)
-        .collect();
+    let mut views: Vec<&ViewDefinition> =
+        database.catalog.iter_views().filter(|view| view.is_temp() == owner_is_temp).collect();
     views.sort_by(|a, b| {
         a.name
             .to_ascii_lowercase()
