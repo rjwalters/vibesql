@@ -34,12 +34,12 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.1",
     "@types/react": "^19.3.0",
     "eslint": "^10.10.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   },
   "peerDependencies": {
     "@vibesql/client": "workspace:*",
