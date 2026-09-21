@@ -1,197 +1,36 @@
-//! Transaction isolation support for server sessions.
+//! Per-session mirror of the storage layer's transaction-active flag.
 //!
-//! This module provides transaction state management for individual sessions,
-//! enabling READ COMMITTED isolation level for shared databases.
+//! Real transaction semantics — BEGIN/COMMIT/ROLLBACK, SAVEPOINT/RELEASE, and
+//! the snapshot-based undo used for rollback — live in the storage layer
+//! ([`vibesql_storage::TransactionManager`]). This module owns nothing of that.
 //!
-//! # Architecture
+//! What it owns is a **session-local copy of "am I inside a transaction?"**,
+//! plus a monotonically increasing id for the current transaction. The wire
+//! protocol needs that flag synchronously to fill in the `ReadyForQuery`
+//! transaction-status indicator after every command, at a point where the
+//! async lock guarding the shared `Database` is not held (see
+//! `connection/query.rs`), so the session keeps its own copy rather than
+//! reading `Database::in_transaction()` directly.
 //!
-//! When multiple sessions share a database via `DatabaseRegistry`, each session
-//! needs its own transaction state to provide proper isolation:
+//! Because it is a copy, it can drift. `BEGIN`/`COMMIT`/`ROLLBACK` go through
+//! [`SessionTransactionManager::begin`] / [`commit`] / [`rollback`], but
+//! `SAVEPOINT` outside an explicit `BEGIN` (and the matching outermost
+//! `RELEASE`) implicitly opens/closes a transaction at the `Database` level
+//! without touching this manager. [`SessionTransactionManager::sync_active`]
+//! exists to force the copy back into agreement with the storage layer after
+//! those operations (#6654).
 //!
-//! - **READ COMMITTED**: Uncommitted changes in one transaction are NOT visible to other sessions.
-//!   Only committed changes propagate to other sessions.
-//!
-//! # Implementation
-//!
-//! We use a copy-on-write approach:
-//! 1. On BEGIN: Create a snapshot of affected tables as writes occur
-//! 2. During transaction: Writes go to the session's local buffer
-//! 3. On COMMIT: Atomically merge buffer changes into shared database
-//! 4. On ROLLBACK: Discard the buffer (no changes to shared database)
-//!
-//! This provides READ COMMITTED semantics where:
-//! - Other sessions always read committed data
-//! - A session in a transaction sees its own uncommitted changes
-//! - Committed changes become visible to all sessions
+//! [`commit`]: SessionTransactionManager::commit
+//! [`rollback`]: SessionTransactionManager::rollback
 
-use std::collections::HashMap;
-
-use vibesql_storage::Row;
-
-/// A change made during a transaction that needs to be applied on commit.
-#[derive(Debug, Clone, PartialEq)]
-#[allow(clippy::large_enum_variant)]
-pub enum TransactionChange {
-    /// A row was inserted
-    Insert { table_name: String, row: Row },
-    /// A row was updated (old values for rollback reference)
-    Update { table_name: String, row_index: usize, old_row: Row, new_row: Row },
-    /// A row was deleted
-    Delete { table_name: String, row_index: usize, row: Row },
-    /// A table was created
-    CreateTable { table_name: String },
-    /// A table was dropped
-    DropTable { table_name: String },
-    /// An index was created
-    CreateIndex { index_name: String, table_name: String },
-    /// An index was dropped
-    DropIndex { index_name: String },
-}
-
-/// Transaction state for a session.
+/// Tracks whether a session is currently inside a transaction.
 ///
-/// Tracks uncommitted changes during an active transaction, providing
-/// READ COMMITTED isolation when multiple sessions share a database.
-#[derive(Debug)]
-pub struct TransactionState {
-    /// Transaction ID (monotonically increasing)
-    pub id: u64,
-    /// Whether we're in an active transaction block
-    pub active: bool,
-    /// Changes made during this transaction (in order)
-    changes: Vec<TransactionChange>,
-    /// Inserted rows indexed by table name (for reads during transaction)
-    inserted_rows: HashMap<String, Vec<Row>>,
-    /// Deleted row indices indexed by table name (to filter from reads)
-    deleted_indices: HashMap<String, Vec<usize>>,
-    /// Updated rows: table_name -> (row_index -> new_row)
-    updated_rows: HashMap<String, HashMap<usize, Row>>,
-}
-
-impl TransactionState {
-    /// Create a new transaction state with the given ID.
-    pub fn new(id: u64) -> Self {
-        Self {
-            id,
-            active: true,
-            changes: Vec::new(),
-            inserted_rows: HashMap::new(),
-            deleted_indices: HashMap::new(),
-            updated_rows: HashMap::new(),
-        }
-    }
-
-    /// Record an insert operation.
-    pub fn record_insert(&mut self, table_name: String, row: Row) {
-        self.changes
-            .push(TransactionChange::Insert { table_name: table_name.clone(), row: row.clone() });
-        self.inserted_rows.entry(table_name).or_default().push(row);
-    }
-
-    /// Record an update operation.
-    pub fn record_update(
-        &mut self,
-        table_name: String,
-        row_index: usize,
-        old_row: Row,
-        new_row: Row,
-    ) {
-        self.changes.push(TransactionChange::Update {
-            table_name: table_name.clone(),
-            row_index,
-            old_row,
-            new_row: new_row.clone(),
-        });
-        self.updated_rows.entry(table_name).or_default().insert(row_index, new_row);
-    }
-
-    /// Record a delete operation.
-    pub fn record_delete(&mut self, table_name: String, row_index: usize, row: Row) {
-        self.changes.push(TransactionChange::Delete {
-            table_name: table_name.clone(),
-            row_index,
-            row,
-        });
-        self.deleted_indices.entry(table_name).or_default().push(row_index);
-    }
-
-    /// Record a table creation.
-    pub fn record_create_table(&mut self, table_name: String) {
-        self.changes.push(TransactionChange::CreateTable { table_name });
-    }
-
-    /// Record a table drop.
-    pub fn record_drop_table(&mut self, table_name: String) {
-        self.changes.push(TransactionChange::DropTable { table_name });
-    }
-
-    /// Record an index creation.
-    pub fn record_create_index(&mut self, index_name: String, table_name: String) {
-        self.changes.push(TransactionChange::CreateIndex { index_name, table_name });
-    }
-
-    /// Record an index drop.
-    pub fn record_drop_index(&mut self, index_name: String) {
-        self.changes.push(TransactionChange::DropIndex { index_name });
-    }
-
-    /// Get rows inserted in this transaction for a table.
-    pub fn get_inserted_rows(&self, table_name: &str) -> Option<&Vec<Row>> {
-        self.inserted_rows.get(table_name)
-    }
-
-    /// Get indices of rows deleted in this transaction for a table.
-    pub fn get_deleted_indices(&self, table_name: &str) -> Option<&Vec<usize>> {
-        self.deleted_indices.get(table_name)
-    }
-
-    /// Get updated rows for a table (index -> new_row).
-    pub fn get_updated_rows(&self, table_name: &str) -> Option<&HashMap<usize, Row>> {
-        self.updated_rows.get(table_name)
-    }
-
-    /// Check if a row at a given index was deleted in this transaction.
-    pub fn is_deleted(&self, table_name: &str, row_index: usize) -> bool {
-        self.deleted_indices.get(table_name).is_some_and(|indices| indices.contains(&row_index))
-    }
-
-    /// Get the updated version of a row if it was updated in this transaction.
-    pub fn get_updated_row(&self, table_name: &str, row_index: usize) -> Option<&Row> {
-        self.updated_rows.get(table_name).and_then(|updates| updates.get(&row_index))
-    }
-
-    /// Consume the transaction state and return all changes for commit.
-    pub fn take_changes(self) -> Vec<TransactionChange> {
-        self.changes
-    }
-
-    /// Get all changes (for inspection without consuming).
-    pub fn changes(&self) -> &[TransactionChange] {
-        &self.changes
-    }
-
-    /// Check if there are any uncommitted changes.
-    pub fn has_changes(&self) -> bool {
-        !self.changes.is_empty()
-    }
-
-    /// Clear all changes (for rollback).
-    pub fn clear(&mut self) {
-        self.changes.clear();
-        self.inserted_rows.clear();
-        self.deleted_indices.clear();
-        self.updated_rows.clear();
-    }
-}
-
-/// Manager for session transaction state.
-///
-/// Each session has its own `SessionTransactionManager` to track
-/// its transaction state independently of other sessions.
+/// Each session owns one of these; it is a mirror of the storage layer's
+/// transaction state, not a source of truth (see the module docs).
 #[derive(Debug, Default)]
 pub struct SessionTransactionManager {
-    /// Current transaction state (None if no active transaction)
-    current: Option<TransactionState>,
+    /// Id of the active transaction (`None` when no transaction is active)
+    active_id: Option<u64>,
     /// Next transaction ID to assign
     next_id: u64,
 }
@@ -199,90 +38,49 @@ pub struct SessionTransactionManager {
 impl SessionTransactionManager {
     /// Create a new session transaction manager.
     pub fn new() -> Self {
-        Self { current: None, next_id: 1 }
+        Self { active_id: None, next_id: 1 }
     }
 
     /// Begin a new transaction.
     ///
     /// Returns an error if a transaction is already active.
     pub fn begin(&mut self) -> Result<u64, TransactionError> {
-        if self.current.is_some() {
+        if self.active_id.is_some() {
             return Err(TransactionError::AlreadyInTransaction);
         }
 
         let id = self.next_id;
         self.next_id += 1;
-        self.current = Some(TransactionState::new(id));
+        self.active_id = Some(id);
         Ok(id)
     }
 
     /// Commit the current transaction.
     ///
-    /// Returns the changes to be applied to the shared database.
-    pub fn commit(&mut self) -> Result<Vec<TransactionChange>, TransactionError> {
-        let state = self.current.take().ok_or(TransactionError::NoActiveTransaction)?;
-        Ok(state.take_changes())
+    /// Only clears this session's active flag — the storage layer performs the
+    /// actual commit.
+    pub fn commit(&mut self) -> Result<(), TransactionError> {
+        self.active_id.take().ok_or(TransactionError::NoActiveTransaction)?;
+        Ok(())
     }
 
     /// Rollback the current transaction.
     ///
-    /// Discards all uncommitted changes.
+    /// Only clears this session's active flag — the storage layer performs the
+    /// actual rollback.
     pub fn rollback(&mut self) -> Result<(), TransactionError> {
-        self.current.take().ok_or(TransactionError::NoActiveTransaction)?;
+        self.active_id.take().ok_or(TransactionError::NoActiveTransaction)?;
         Ok(())
     }
 
     /// Check if a transaction is currently active.
     pub fn in_transaction(&self) -> bool {
-        self.current.as_ref().is_some_and(|s| s.active)
+        self.active_id.is_some()
     }
 
     /// Get the current transaction ID, if any.
     pub fn transaction_id(&self) -> Option<u64> {
-        self.current.as_ref().map(|s| s.id)
-    }
-
-    /// Get mutable access to the current transaction state.
-    pub fn current_mut(&mut self) -> Option<&mut TransactionState> {
-        self.current.as_mut()
-    }
-
-    /// Get read access to the current transaction state.
-    pub fn current(&self) -> Option<&TransactionState> {
-        self.current.as_ref()
-    }
-
-    /// Record an insert in the current transaction.
-    ///
-    /// No-op if not in a transaction.
-    pub fn record_insert(&mut self, table_name: String, row: Row) {
-        if let Some(state) = &mut self.current {
-            state.record_insert(table_name, row);
-        }
-    }
-
-    /// Record an update in the current transaction.
-    ///
-    /// No-op if not in a transaction.
-    pub fn record_update(
-        &mut self,
-        table_name: String,
-        row_index: usize,
-        old_row: Row,
-        new_row: Row,
-    ) {
-        if let Some(state) = &mut self.current {
-            state.record_update(table_name, row_index, old_row, new_row);
-        }
-    }
-
-    /// Record a delete in the current transaction.
-    ///
-    /// No-op if not in a transaction.
-    pub fn record_delete(&mut self, table_name: String, row_index: usize, row: Row) {
-        if let Some(state) = &mut self.current {
-            state.record_delete(table_name, row_index, row);
-        }
+        self.active_id
     }
 
     /// Force the manager's active flag to match the storage layer's actual
@@ -298,14 +96,14 @@ impl SessionTransactionManager {
     /// (#6654). `active` should be `Database::in_transaction()` right after
     /// the savepoint operation runs; a no-op when already in sync.
     pub fn sync_active(&mut self, active: bool) {
-        match (active, self.current.is_some()) {
+        match (active, self.active_id.is_some()) {
             (true, false) => {
                 let id = self.next_id;
                 self.next_id += 1;
-                self.current = Some(TransactionState::new(id));
+                self.active_id = Some(id);
             }
             (false, true) => {
-                self.current = None;
+                self.active_id = None;
             }
             _ => {}
         }
@@ -319,8 +117,6 @@ pub enum TransactionError {
     AlreadyInTransaction,
     /// Attempted to commit/rollback when no transaction is active.
     NoActiveTransaction,
-    /// A conflict was detected during commit.
-    CommitConflict(String),
 }
 
 impl std::fmt::Display for TransactionError {
@@ -332,9 +128,6 @@ impl std::fmt::Display for TransactionError {
             TransactionError::NoActiveTransaction => {
                 write!(f, "No transaction in progress")
             }
-            TransactionError::CommitConflict(msg) => {
-                write!(f, "Commit conflict: {}", msg)
-            }
         }
     }
 }
@@ -343,13 +136,7 @@ impl std::error::Error for TransactionError {}
 
 #[cfg(test)]
 mod tests {
-    use vibesql_types::SqlValue;
-
     use super::*;
-
-    fn make_row(values: Vec<SqlValue>) -> Row {
-        Row::new(values)
-    }
 
     #[test]
     fn test_begin_transaction() {
@@ -390,75 +177,20 @@ mod tests {
     }
 
     #[test]
-    fn test_record_insert() {
+    fn test_commit_clears_in_transaction() {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
+        assert!(mgr.in_transaction());
 
-        let row =
-            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("test"))]);
-        mgr.record_insert("users".to_string(), row.clone());
-
-        let state = mgr.current().unwrap();
-        assert!(state.has_changes());
-
-        let inserted = state.get_inserted_rows("users").unwrap();
-        assert_eq!(inserted.len(), 1);
-        assert_eq!(inserted[0].values, row.values);
-    }
-
-    #[test]
-    fn test_record_delete() {
-        let mut mgr = SessionTransactionManager::new();
-        mgr.begin().unwrap();
-
-        let row = make_row(vec![SqlValue::Integer(1)]);
-        mgr.record_delete("users".to_string(), 5, row);
-
-        let state = mgr.current().unwrap();
-        assert!(state.is_deleted("users", 5));
-        assert!(!state.is_deleted("users", 6));
-        assert!(!state.is_deleted("other_table", 5));
-    }
-
-    #[test]
-    fn test_record_update() {
-        let mut mgr = SessionTransactionManager::new();
-        mgr.begin().unwrap();
-
-        let old_row =
-            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("old"))]);
-        let new_row =
-            make_row(vec![SqlValue::Integer(1), SqlValue::Varchar(arcstr::ArcStr::from("new"))]);
-        mgr.record_update("users".to_string(), 3, old_row, new_row.clone());
-
-        let state = mgr.current().unwrap();
-        let updated = state.get_updated_row("users", 3).unwrap();
-        assert_eq!(updated.values, new_row.values);
-        assert!(state.get_updated_row("users", 4).is_none());
-    }
-
-    #[test]
-    fn test_commit_returns_changes() {
-        let mut mgr = SessionTransactionManager::new();
-        mgr.begin().unwrap();
-
-        let row1 = make_row(vec![SqlValue::Integer(1)]);
-        let row2 = make_row(vec![SqlValue::Integer(2)]);
-        mgr.record_insert("users".to_string(), row1);
-        mgr.record_insert("users".to_string(), row2);
-
-        let changes = mgr.commit().unwrap();
-        assert_eq!(changes.len(), 2);
+        mgr.commit().unwrap();
         assert!(!mgr.in_transaction());
+        assert_eq!(mgr.transaction_id(), None);
     }
 
     #[test]
-    fn test_rollback_discards_changes() {
+    fn test_rollback_clears_in_transaction() {
         let mut mgr = SessionTransactionManager::new();
         mgr.begin().unwrap();
-
-        let row = make_row(vec![SqlValue::Integer(1)]);
-        mgr.record_insert("users".to_string(), row);
 
         mgr.rollback().unwrap();
         assert!(!mgr.in_transaction());
@@ -518,19 +250,5 @@ mod tests {
         let id = mgr.begin().unwrap();
         mgr.sync_active(true);
         assert_eq!(mgr.transaction_id(), Some(id));
-    }
-
-    #[test]
-    fn test_no_op_when_not_in_transaction() {
-        let mut mgr = SessionTransactionManager::new();
-
-        // These should not panic and should be no-ops
-        let row = make_row(vec![SqlValue::Integer(1)]);
-        mgr.record_insert("users".to_string(), row.clone());
-        mgr.record_delete("users".to_string(), 0, row.clone());
-        mgr.record_update("users".to_string(), 0, row.clone(), row);
-
-        // Should not be in transaction
-        assert!(!mgr.in_transaction());
     }
 }
