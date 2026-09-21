@@ -1145,7 +1145,17 @@ fn strip_schema_qualifier(sql: &str, schema_name: &str) -> String {
         let b = bytes[i];
 
         // Copy quoted spans verbatim (never treat their contents as an
-        // identifier to match against).
+        // identifier to match against) — EXCEPT when the span is a schema
+        // qualifier: a quoted identifier whose content matches schema_name and
+        // whose next byte is '.'. `CREATE TRIGGER 'on'.trig5` / `"ON".trig4`
+        // carry the attachment's schema as the user wrote it (#6708), and the
+        // attached-db dump must elide that qualifier exactly like the bare
+        // `on.trig5` form below — the reload session has no such schema (the
+        // file being reloaded IS that schema), so keeping it fails with a
+        // spurious "unknown database". A quoted span immediately followed by
+        // '.' is an identifier in any valid SQLite text (a string literal
+        // followed by '.' is not valid SQL), so matching on content+dot is
+        // safe even though single quotes can also delimit string literals.
         if matches!(b, b'\'' | b'"' | b'`' | b'[') {
             let (close, doubled) = match b {
                 b'\'' => (b'\'', true),
@@ -1167,6 +1177,23 @@ fn strip_schema_qualifier(sql: &str, schema_name: &str) -> String {
                     break;
                 }
                 i += 1;
+            }
+            // #6708: qualifier-shaped quoted span — content equals the schema
+            // name (doubled delimiters collapsed for the comparison) and a
+            // '.' immediately follows the span. Drop both.
+            let inner = &sql[start + 1..i - 1];
+            let close_str = char::from(close).to_string();
+            let unescaped: String = if doubled {
+                inner.replace(&close_str.repeat(2), &close_str)
+            } else {
+                inner.to_string()
+            };
+            if i < bytes.len()
+                && bytes[i] == b'.'
+                && unescaped.eq_ignore_ascii_case(schema_name)
+            {
+                i += 1;
+                continue;
             }
             out.push_str(&sql[start..i]);
             continue;
@@ -1715,12 +1742,19 @@ mod tests {
 
     #[test]
     fn test_strip_schema_qualifier_never_edits_quoted_identifiers() {
-        // Documented limitation, asserted so a future change is deliberate: a
-        // pre-quoted schema name is left as-is (this engine's own DDL
-        // reconstruction never emits one).
-        assert_eq!(strip(r#"SELECT * FROM "aux".t"#, "aux"), r#"SELECT * FROM "aux".t"#);
-        assert_eq!(strip("SELECT * FROM `aux`.t", "aux"), "SELECT * FROM `aux`.t");
-        assert_eq!(strip("SELECT * FROM [aux].t", "aux"), "SELECT * FROM [aux].t");
+        // AMENDED by #6708 (2026-09-21): a quoted schema qualifier IS now
+        // stripped when its content matches the schema name. The original
+        // contract ("this engine's own DDL reconstruction never emits one")
+        // was falsified by the preserved-SQL path: a trigger's verbatim
+        // `sql_definition` keeps the qualifier exactly as the user wrote it
+        // (`CREATE TRIGGER "ON".trig4 ...`, `'on'.trig5 ...`), and the
+        // attached-db dump reloads into a session where that schema does not
+        // exist (the file IS the schema) — keeping the qualifier fails the
+        // reload with a spurious "unknown database" (measured: the
+        // alter-3.2.9 round-trip). Quoted spans that do not match the schema
+        // name remain verbatim:
+        assert_eq!(strip(r#"SELECT * FROM "other".t"#, "aux"), r#"SELECT * FROM "other".t"#);
+        assert_eq!(strip("SELECT * FROM `other`.t", "aux"), "SELECT * FROM `other`.t");
         // A column literally named `aux.x` via quoting is untouched, while an
         // unquoted qualifier in the same statement still goes.
         assert_eq!(strip(r#"SELECT "aux.x" FROM aux.t"#, "aux"), r#"SELECT "aux.x" FROM t"#);
@@ -1755,6 +1789,34 @@ mod tests {
             strip("SELECT aux.x, b.y FROM t AS aux JOIN u AS b ON aux.x = b.x", "aux"),
             "SELECT x, b.y FROM t AS aux JOIN u AS b ON x = b.x"
         );
+    }
+
+    #[test]
+    fn strip_schema_qualifier_strips_quoted_qualifier_forms() {
+        // #6708: a schema qualifier written in any of SQLite's four quoting
+        // forms must be elided exactly like the bare form — the attached-db
+        // dump reloads into a session where that schema does not exist (the
+        // file IS the schema), so keeping the qualifier fails the reload with
+        // a spurious "unknown database".
+        assert_eq!(
+            strip("CREATE TRIGGER 'on'.trig5 AFTER INSERT ON t1 BEGIN SELECT 1; END", "on"),
+            "CREATE TRIGGER trig5 AFTER INSERT ON t1 BEGIN SELECT 1; END"
+        );
+        assert_eq!(
+            strip("CREATE TRIGGER \"ON\".trig4 AFTER INSERT ON 'ON' BEGIN SELECT 1; END", "on"),
+            "CREATE TRIGGER trig4 AFTER INSERT ON 'ON' BEGIN SELECT 1; END"
+        );
+        assert_eq!(strip("CREATE INDEX `on`.i1 ON t1(a)", "on"), "CREATE INDEX i1 ON t1(a)");
+        assert_eq!(strip("CREATE INDEX [on].i2 ON t1(a)", "on"), "CREATE INDEX i2 ON t1(a)");
+        // A quoted span NOT matching the schema name, or not followed by '.',
+        // is copied verbatim — including string literals in trigger bodies.
+        assert_eq!(strip("INSERT INTO t VALUES ('on')", "on"), "INSERT INTO t VALUES ('on')");
+        assert_eq!(strip("SELECT 'off'.x", "on"), "SELECT 'off'.x");
+        // Doubled-delimiter escapes inside the qualifier unescape before the
+        // comparison: 'o''n' is the identifier `o'n` (embedded apostrophe),
+        // so it matches a schema spelled the same way — not `on`.
+        assert_eq!(strip("CREATE TRIGGER 'o''n'.tr FROM t", "o'n"), "CREATE TRIGGER tr FROM t");
+        assert_eq!(strip("CREATE TRIGGER 'o''n'.tr FROM t", "on"), "CREATE TRIGGER 'o''n'.tr FROM t");
     }
 
     #[test]

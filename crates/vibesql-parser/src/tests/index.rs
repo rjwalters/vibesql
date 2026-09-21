@@ -936,3 +936,21 @@ fn test_reindex_schema_qualified() {
         other => panic!("Expected Reindex, got: {:?}", other),
     }
 }
+
+#[test]
+fn test_create_index_single_quoted_schema_qualifier() {
+    // #6708 (optional AC, same class as the trigger form): SQLite's
+    // "string as identifier" quirk applies to the schema-qualified index-name
+    // position too — `CREATE INDEX 'on'.i1 ON t1(a)` is an index named i1 in
+    // the schema `on` (de-quoted), matching the trigger/table positions.
+    let sql = "CREATE INDEX 'on'.i1 ON t1(a)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateIndex(index) => {
+            assert_eq!(index.schema.as_deref(), Some("on"), "schema must be de-quoted");
+            assert_eq!(index.index_name, "i1");
+        }
+        _ => panic!("Expected CreateIndex statement"),
+    }
+}
