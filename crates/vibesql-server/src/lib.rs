@@ -33,8 +33,6 @@ pub use subscription::{
     SelectiveColumnConfig, Subscription, SubscriptionConfig, SubscriptionError, SubscriptionId,
     SubscriptionManager, SubscriptionUpdate,
 };
-pub use transaction::{
-    SessionTransactionManager, TransactionChange, TransactionError, TransactionState,
-};
+pub use transaction::{SessionTransactionManager, TransactionError};
 // Re-export ChangeEvent from storage layer for consistency
 pub use vibesql_storage::ChangeEvent;

@@ -1418,8 +1418,9 @@ impl Session {
     /// Begin a transaction
     ///
     /// Starts a new transaction for this session. While in a transaction:
-    /// - Changes are tracked for potential rollback
-    /// - The storage layer manages transaction state
+    /// - The storage layer manages transaction state (snapshots, savepoints, rollback)
+    /// - The session tracks only an "in a transaction" flag, which the wire protocol reports as the
+    ///   `ReadyForQuery` transaction status
     pub async fn begin_transaction(&mut self) -> Result<ExecutionResult> {
         // Track session-level transaction state
         self.txn_manager.begin().map_err(|e| anyhow::anyhow!("{}", e))?;
@@ -1437,8 +1438,8 @@ impl Session {
     /// Commits all changes made during this transaction.
     /// After commit, changes are permanent and visible to all sessions.
     pub async fn commit(&mut self) -> Result<ExecutionResult> {
-        // Commit session-level transaction state (clears buffered change tracking)
-        let _changes = self.txn_manager.commit().map_err(|e| anyhow::anyhow!("{}", e))?;
+        // Clear the session-level transaction-active flag
+        self.txn_manager.commit().map_err(|e| anyhow::anyhow!("{}", e))?;
 
         // Commit in the shared database storage layer
         let mut db = self.db.write().await;
