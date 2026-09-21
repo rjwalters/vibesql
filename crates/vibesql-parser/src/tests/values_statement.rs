@@ -185,3 +185,23 @@ fn test_values_without_semicolon() {
     assert!(stmt.values.is_some());
     assert_eq!(stmt.values.unwrap().len(), 1);
 }
+
+#[test]
+fn test_with_clause_before_values_in_create_view() {
+    // altertab3.test 22.5: a WITH clause may precede VALUES as a view body
+    // (SQLite treats VALUES as a SELECT form), not only at statement level.
+    match parse("CREATE VIEW v2(b) AS WITH t3 AS (SELECT b FROM v2) VALUES(1)") {
+        Statement::CreateView(create) => {
+            assert_eq!(create.query.with_clause.as_ref().map(|c| c.len()), Some(1));
+            assert_eq!(create.query.values.as_ref().map(|v| v.len()), Some(1));
+        }
+        other => panic!("Expected CreateView, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_with_clause_before_values_in_scalar_subquery() {
+    // altertab3.test 21.1: `(WITH x(a) AS (...) VALUES(1))` as a scalar subquery.
+    let stmt = parse_select("SELECT (WITH x(a) AS (SELECT 1) VALUES(2)) + 1");
+    assert_eq!(stmt.select_list.len(), 1);
+}

@@ -170,6 +170,17 @@ fn check_schema_objects(
             .then_with(|| a.name.cmp(&b.name))
     });
     for view in views {
+        // SQLite's schema re-parse resolves each view's body, so a view that
+        // (transitively) selects from itself aborts the ALTER with
+        // `error in view <name>: view <name> is circularly defined`
+        // (altertab3.test 22.2/22.4/23.3). Checked before column resolution
+        // because it is reported when the view body is first expanded.
+        if view_is_circular(database, view) {
+            return Err(ExecutorError::Other(format!(
+                "error in view {}{}: view {} is circularly defined",
+                view.name, suffix, view.name
+            )));
+        }
         if let Some(missing) = find_missing_column_in_view(view, &sim) {
             return Err(ExecutorError::Other(format!(
                 "error in view {}{}: no such column: {}",
@@ -386,6 +397,104 @@ fn reparse_view_query(sql_definition: &str) -> Option<SelectStmt> {
         Statement::CreateView(create) => Some(*create.query),
         _ => None,
     }
+}
+
+/// Names (as written, unqualified/qualified) of the schema relations `view`'s
+/// defining query actually selects from — FROM tables, joined tables, derived
+/// tables, and the bodies of CTEs that are *referenced*. A CTE that is defined
+/// but never used contributes nothing (SQLite only expands a CTE when a FROM
+/// item names it, so `WITH t3 AS (SELECT b FROM v2) VALUES(1)` is not a cycle
+/// — altertab3.test 22.6), and CTE names themselves are not schema objects.
+/// Subqueries nested inside expressions are not descended into (conservative:
+/// a missed edge can only under-report a cycle).
+fn view_from_relations(view: &ViewDefinition) -> Vec<String> {
+    let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
+    let query = reparsed.as_ref().unwrap_or(&view.query);
+    let mut out: Vec<String> = Vec::new();
+    let mut scope: Vec<(&str, &SelectStmt)> = Vec::new();
+    let mut expanded: HashSet<*const SelectStmt> = HashSet::new();
+    relations_of_select(query, &mut scope, &mut expanded, &mut out);
+    out
+}
+
+fn relations_of_select<'a>(
+    select: &'a SelectStmt,
+    scope: &mut Vec<(&'a str, &'a SelectStmt)>,
+    expanded: &mut HashSet<*const SelectStmt>,
+    out: &mut Vec<String>,
+) {
+    let mark = scope.len();
+    if let Some(ctes) = &select.with_clause {
+        for cte in ctes {
+            scope.push((cte.name.as_str(), cte.query.as_ref()));
+        }
+    }
+    if let Some(from) = &select.from {
+        relations_of_from(from, scope, expanded, out);
+    }
+    if let Some(set_op) = &select.set_operation {
+        relations_of_select(&set_op.right, scope, expanded, out);
+    }
+    scope.truncate(mark);
+}
+
+fn relations_of_from<'a>(
+    from: &'a FromClause,
+    scope: &mut Vec<(&'a str, &'a SelectStmt)>,
+    expanded: &mut HashSet<*const SelectStmt>,
+    out: &mut Vec<String>,
+) {
+    match from {
+        FromClause::Table { name, .. } => {
+            let cte = if name.contains('.') {
+                None
+            } else {
+                scope.iter().rev().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, q)| *q)
+            };
+            match cte {
+                // Expand each referenced CTE body once (also guards
+                // self-referencing recursive CTEs).
+                Some(body) => {
+                    if expanded.insert(body as *const SelectStmt) {
+                        relations_of_select(body, scope, expanded, out);
+                    }
+                }
+                None => out.push(name.clone()),
+            }
+        }
+        FromClause::Join { left, right, .. } => {
+            relations_of_from(left, scope, expanded, out);
+            relations_of_from(right, scope, expanded, out);
+        }
+        FromClause::Subquery { query, .. } => relations_of_select(query, scope, expanded, out),
+        FromClause::Values { .. } | FromClause::TableFunction { .. } => {}
+    }
+}
+
+/// Is `view` reachable from its own defining query through a chain of views
+/// (including the direct `CREATE VIEW v AS SELECT * FROM v` self-reference)?
+/// Only cycles passing through `view` itself are reported, so a view that
+/// merely reads from some *other* circular view is attributed to that view.
+fn view_is_circular(db: &Database, view: &ViewDefinition) -> bool {
+    let target = view.name.to_ascii_lowercase();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut stack: Vec<String> = view_from_relations(view);
+    while let Some(name) = stack.pop() {
+        let bare = name.rsplit('.').next().unwrap_or(&name).to_ascii_lowercase();
+        if bare == target {
+            return true;
+        }
+        if !visited.insert(bare) {
+            continue;
+        }
+        if db.catalog.get_table(&name).is_some() {
+            continue;
+        }
+        if let Some(next) = db.catalog.get_view(&name) {
+            stack.extend(view_from_relations(next));
+        }
+    }
+    false
 }
 
 /// First column reference in `view`'s defining query that does not resolve

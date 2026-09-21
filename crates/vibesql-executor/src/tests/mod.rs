@@ -70,6 +70,7 @@ mod aggregate_random_patterns;
 mod aggregate_without_from;
 mod alter_add_column_restrictions;
 mod alter_precheck_trigger_missing_table_qualifier;
+mod alter_rename_circular_view_precheck;
 mod alter_rename_collision;
 mod alter_rename_column_triggers;
 mod alter_rename_table_legacy_gating;
