@@ -73,6 +73,22 @@ impl Parser {
             None
         };
 
+        // SQLite treats a bare VALUES as a SELECT form, so a WITH clause may
+        // precede VALUES anywhere a SELECT is accepted — CREATE VIEW bodies,
+        // scalar subqueries (`(WITH x AS (...) VALUES(1))`), CTE bodies, and
+        // INSERT sources — not just at statement level (altertab3.test 21.1,
+        // 22.5, 19.x; issue #6174). The top-level path is handled separately in
+        // `parse_with_statement`.
+        if with_clause.is_some() && self.peek_keyword(Keyword::Values) {
+            let mut values_stmt = self.parse_values_statement_internal(
+                allow_order_limit,
+                validate_end_tokens,
+                allow_returning,
+            )?;
+            values_stmt.with_clause = with_clause;
+            return Ok(values_stmt);
+        }
+
         self.expect_keyword(Keyword::Select)?;
 
         // Parse optional set quantifier (DISTINCT or ALL)
