@@ -263,6 +263,11 @@ EOF
 cat > "$STUB_DIR/issue-789.json" <<'EOF'
 {"state":"open","labels":[{"name":"loom:building"}]}
 EOF
+# #6416 fixtures: PR #6409's real-world phrasings target issue #6170 (open,
+# loom:building) — the issue that was left stuck when the regex missed.
+cat > "$STUB_DIR/issue-6170.json" <<'EOF'
+{"state":"open","labels":[{"name":"loom:building"}]}
+EOF
 
 # Canned `pulls/<N>/commits` payload: one JSON commit object per message given.
 # Written in the GitHub REST shape the script reads (.[].commit.message).
@@ -514,6 +519,46 @@ quoted_body='Context from the epic:
 > Part of #456'
 assert_eq "456" "$(_partial_increment_refs "$quoted_body")" \
   "Blockquote marker: '> Part of #456' still counts as a declaration"
+
+# PA8 (#6416): prose between the phrase and the reference — the exact opening
+# line of live PR #6409. The FIRST `#N` after the phrase is the declaration;
+# the parenthetical `(epic #5779)` that follows is not extracted.
+pr6409_prose='Part of the FK enforcement family issue #6170 (epic #5779).'
+assert_eq "6170" "$(_partial_increment_refs "$pr6409_prose")" \
+  "#6416 prose tolerance: 'Part of the ... issue #6170 (epic #5779).' yields ONLY 6170"
+
+# PA9 (#6416): markdown emphasis around the phrase — PR #6409's dedicated
+# declaration line. The bullet group consumes the first `*` of the `**` bold
+# opener; the emphasis class consumes the second. Italic `_..._` likewise.
+assert_eq "6170" "$(_partial_increment_refs '**Part of #6170** (not `Closes` - the family issue stays open)')" \
+  "#6416 emphasis tolerance: '**Part of #6170**' is a declaration (backticked 'Closes' blanked first)"
+assert_eq "6170" "$(_partial_increment_refs '_Part of #6170_')" \
+  "#6416 emphasis tolerance: italic '_Part of #6170_' also matches"
+
+# PA10 (#6416): colon after the phrase — the dependency-parse house form
+# (test-dependency-parse.sh, #4508) now reads uniformly here too.
+assert_eq "303" "$(_partial_increment_refs 'Part of: #303')" \
+  "#6416 colon form: 'Part of: #303' matches, aligning with parse_dependencies (#4508)"
+
+# PA11 (#6416 negative): the interstitial cannot cross a sentence boundary —
+# prose that merely begins with the phrase stays excluded.
+assert_eq "" "$(_partial_increment_refs 'Part of the reason this works is documented elsewhere. See #9999.')" \
+  "#6416 sentence bound: '... elsewhere. See #9999.' is prose, NOT a declaration"
+
+# T18 (#6416 end-to-end): PR #6409's actual body shape drives the post-merge
+# reset — #6170 is swapped back to loom:issue, and nothing else is touched.
+reset_log
+PR_JSON="$(jq -n --arg body 'Implements a first slice: FK enforcement planning.
+
+Part of the FK enforcement family issue #6170 (epic #5779).
+
+**Part of #6170** (not `Closes` - the family issue stays open for further increments)' '{body: $body}')"
+_reset_partial_increment_labels
+log="$(read_log)"
+assert_contains "$log" "issue edit 6170 --repo owner/repo --remove-label loom:building --add-label loom:issue" \
+  "#6416 end-to-end: PR #6409 body resets #6170 loom:building -> loom:issue"
+assert_not_contains "$log" "issue edit 5779" \
+  "#6416 end-to-end: parenthetical epic ref #5779 is NOT mutated"
 
 echo ""
 echo "Testing _check_partial_increment_close_conflict (pre-merge guard)..."
