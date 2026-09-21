@@ -2132,20 +2132,26 @@ proc register_attach_state {sql} {
     # an alias THIS batch already attaches itself.
     set ::attach_created_this_batch [dict create]
 
-    set attach_pat {^ATTACH(?:\s+DATABASE)?\s+.+\s+AS\s+(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
-    set detach_pat {^DETACH(?:\s+DATABASE)?\s+(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
+    # 2026-09-20 (#6574 Part 3): the alias alternation now also accepts a
+    # single-quoted alias ('ON') -- alter.test 3.2.x ATTACHes AS 'ON', and
+    # neither this pattern nor pragma_cookie_file_key's copy matched the
+    # quoted form, so the ATTACH executed but was never replayed into the
+    # next batch. The key trim below strips the quotes alongside the other
+    # delimiters.
+    set attach_pat {^ATTACH(?:\s+DATABASE)?\s+.+\s+AS\s+(\[[^\]]+\]|"[^"]+"|'[^']+'|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
+    set detach_pat {^DETACH(?:\s+DATABASE)?\s+(\[[^\]]+\]|"[^"]+"|'[^']+'|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$}
 
     foreach stmt [split_sql_statements $sql] {
         set t [string trim $stmt]
         if {[regexp -nocase $detach_pat $t - alias]} {
-            set key [string tolower [string trim $alias {[]"`}]]
+            set key [string tolower [string trim $alias {[]"'`}]]
             dict unset ::attach_replay_ddl $key
             dict unset ::attach_created_this_batch $key
             continue
         }
         if {$::suppress_temp_registration} { continue }
         if {[regexp -nocase $attach_pat $t - alias]} {
-            set key [string tolower [string trim $alias {[]"`}]]
+            set key [string tolower [string trim $alias {[]"'`}]]
             dict set ::attach_replay_ddl $key $t
             dict set ::attach_created_this_batch $key 1
         }
@@ -2857,7 +2863,7 @@ proc pragma_cookie_file_key {schema} {
     }
     if {[dict exists $::attach_replay_ddl $s]} {
         set ddl [dict get $::attach_replay_ddl $s]
-        if {[regexp -nocase {^ATTACH(?:\s+DATABASE)?\s+(.+)\s+AS\s+(?:\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$} $ddl - pathexpr]} {
+        if {[regexp -nocase {^ATTACH(?:\s+DATABASE)?\s+(.+)\s+AS\s+(?:\[[^\]]+\]|"[^"]+"|'[^']+'|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)\s*$} $ddl - pathexpr]} {
             set pathexpr [string trim $pathexpr]
             if {[regexp {^'((?:[^']|'')*)'$} $pathexpr - inner]} {
                 return [string map {'' '} $inner]
@@ -7694,6 +7700,12 @@ array set vibesql_skip_tests {
     alter2-10.3 "Part of #6595: cascades from alter2-10.1 — same 'no such column: b' cascade as alter2-10.2."
     alter2-10.4 "Part of #6595: cascades from alter2-10.1 — same 'no such column: b' cascade as alter2-10.2/10.3."
 
+    alter-11.9 "Bucket-A (2026-09-20 disposition of #6574's residual): cascade of alter-11.7 (auto-skipped for the %HH/badutf reason above) -- t11c is never created, so the SELECT over it reports 'Table t11c not found'. Nothing asserts this test's output downstream (alter-12.1 starts from a fresh CREATE TABLE t12). Part of #6574."
+    alter-11.10 "Bucket-A (2026-09-20 disposition of #6574's residual): same alter-11.7 cascade as alter-11.9 -- t11c never exists. Side-effect-free SELECT. Part of #6574."
+    alter2-4.3 "Bucket-A (2026-09-20 disposition of #6574's residual): uses the sqlite3_errcode C-API TCL command (compiled into SQLite's own test harness) to inspect the error code of the preceding statement; the shim implements no sqlite3_errcode. Side-effect-free (no SQL executed). Fails today with 'invalid command name sqlite3_errcode'. Part of #6574."
+    alter2-4.4 "Bucket-A (2026-09-20 disposition of #6574's residual): expects 'unsupported file format' from an image alter2-4.1 would have written via hexio_write as format 5 -- but alter2-4.1 is hexio-skip-listed (Bucket 3 above), so the format-5 image never exists and the expected error never fires. Cascade of the hexio limitation, not an engine gap. Side-effect-free (catchsql SELECT). Part of #6574."
+    alter2-4.5 "Bucket-A (2026-09-20 disposition of #6574's residual): sqlite3_errcode C-API command, same as alter2-4.3. Side-effect-free. Part of #6574."
+
     alter3-9.13 "Bucket-A: alter3-9.10's setup block creates `t2` via `ATTACH ':memory:' AS aux1; CREATE TABLE aux1.t2(x,y); INSERT INTO t2 ...` -- same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as fkey2-14.1aux.2 (#6363/#6310 Phase 3 only replays the ATTACH statement itself, reattaching an empty `:memory:` db; there is no mechanism, nor could there be one for a `:memory:` target, to replay the aux-schema DDL/data created in an earlier batch). The sibling `t0` (a `CREATE TEMP TABLE`, not ATTACHed) survives via the ATTACH-setup rescue documented on reset_db's `::attach_skipped` gate above, which is why alter3-9.11/9.12 (t0-based) PASS while 9.13/9.14 (t2-based) cannot -- ATTACHed `:memory:` data has no rescue path by construction, since there is nothing to replay it from. `t2` is genuinely gone by the time this separate do_test's fresh CLI process reaches it, reporting 'no such table: t2' instead of the expected constraint-violation error. Verified this does not strand any later test: alter3-9.14 is the file's last test before finish_test. Part of #6174."
     alter3-9.14 "Same `ATTACH ':memory:'` per-batch-respawn data-loss limitation as alter3-9.13 above. Part of #6174."
 
@@ -7801,8 +7813,10 @@ array set vibesql_skip_tests {
 #     SQLite's connection-scoped TEMP-table lifetime (see `::db_close_pending`
 #     / `::pending_temp_drop_names` above `strip_temp_table_keyword`).
 #
-#     alter-1.6 STILL fails, but its residual diff is now a narrower,
-#     STRUCTURALLY DIFFERENT root cause, unrelated to the reconnect boundary:
+#     alter-1.6 PASSES as of #6612 (verified 2026-09-20, run_id 891 against
+#     e9a2d5d0d) — the objlist self-listing divergence that used to remain
+#     after #6609's reconnect-boundary fix is gone. The historical analysis
+#     below is retained for the record; only the status line changed:
 #     `objlist` — a TEMP table created fresh in the post-reopen session —
 #     "self-lists" itself in its own `INSERT INTO objlist SELECT ... FROM
 #     sqlite_master` statement, because that demotes-to-persistent within the
@@ -7825,10 +7839,28 @@ array set vibesql_skip_tests {
 #     future un-skip of alter-1.7, so it stays intentionally left failing
 #     rather than skip-listed, same cascade-avoidance reasoning as the
 #     alter-3.3.3 note above. Part of #6574.
-#   * Bucket 5 (#6597) — alter-6.2../6.6 identifier-escaping failures.
-#   * alter2-4.3/4.5 ("invalid command name sqlite3_errcode") and alter2-4.4
-#     (expects "unsupported file format" from the format-5 image alter2-4.1
-#     would have written).
+#   * Bucket 5 (#6597, CLOSED) — alter-6.2../6.6 identifier-escaping
+#     failures; all pass as of the 2026-09-20 re-measurement (run_id 891).
+#   * alter-3.2.4/3.2.5 and alter-1.8.1..1.8.7 remain under the file-scope
+#     ATTACH auto-skip: 2026-09-20 (#6574 Part 3) attempted enrollment +
+#     per-test allows and REVERTED it after measurement showed 80 failures /
+#     23 passed (vs the 7/73 baseline) — alter-1.8.2 collides on replayed
+#     CREATE TABLE t4 ("Index 'sqlite_autoindex_t4_1' ... already exists")
+#     and from alter-3.2.4 onward the MAIN test db refuses to open (WAL
+#     open-refusal cascade). The single-quoted-alias ('ON') regex groundwork
+#     in attach_pat / pragma_cookie_file_key is kept, so re-enrollment is a
+#     one-line change once that per-batch replay interaction is root-caused.
+#     alter-3.2.9 additionally hides a genuine engine gap — filed as #6708
+#     (CREATE TRIGGER on a quoted attached-schema name resolves wrongly).
+#   * alter-11.4 — deliberately left FAILING (2026-09-20, #6574): its script
+#     is `INSERT INTO t11b VALUES(3,4)` followed by the %HH-escaped
+#     sqlite3_exec SELECT (the badutf/#5844 divergence). The INSERT is
+#     load-bearing — alter-11.5/11.6 (which PASS: their bracketed/quoted
+#     `%HH` forms parse fine in the shim) SELECT that very row back out of
+#     t11b — so skip-listing 11.4 regresses them (measured: run 900, 11.5
+#     and 11.6 failed). Same cascade-avoidance reasoning as alter2-3.3/3.4
+#     above. alter-11.9/11.10 ARE skip-listed (pure SELECTs over t11c, a
+#     table auto-skipped 11.7 never creates; nothing downstream reads them).
 #   * alter2-filescope-err.1/.2/.3 — the file-scope
 #     `set default_file_format [expr $SQLITE_DEFAULT_FILE_FORMAT==4 ? 4 : 1]`
 #     at alter2.test line 291 plus its two cascaded successors. These markers
@@ -8281,6 +8313,18 @@ array set vibesql_temp_master_ok {
 # TEMP-table-demotion limitation already documented for table.test/autoinc.test
 # in #6429. Tracked as a follow-up issue rather than fixed here (engine-level
 # work, out of scope for a TCL-shim-only issue).
+# 2026-09-20 (#6574 Part 3): `alter` enrollment was attempted, measured, and
+# REJECTED. Enrolling alter + allowing 1.8.x/3.2.x produced 80 failures / 23
+# passed (baseline 7/73): alter-1.8.2 collides on replayed CREATE TABLE t4
+# ("Index 'sqlite_autoindex_t4_1' on table 't4' already exists") and from
+# alter-3.2.4 onward the MAIN test db refuses to open ("Failed to open
+# WAL-backed database ... refusing to open: newest WAL ..."), cascading ~70
+# downstream tests. The Curator's single-CLI-session verification of the
+# ATTACH 'ON' SQL could not see this -- the failure lives in the per-batch
+# replay architecture, not the SQL. Enrollment needs that WAL interaction
+# root-caused first; the single-quoted-alias regex groundwork in attach_pat +
+# pragma_cookie_file_key is kept so re-enrollment is a one-line change once
+# it is.
 variable vibesql_attach_replay_files
 array set vibesql_attach_replay_files {
     trigger1 1
@@ -8392,6 +8436,10 @@ array set vibesql_attach_replay_files {
 # verified clean are listed; 10.2-10.11 and 20.1 stay skipped (their existing,
 # non-cascading, non-regressing behavior) pending the follow-up issues
 # tracking each of these three distinct gaps.
+# alter-1.8.1..1.8.7 / alter-3.2.1..3.2.9 were attempted with the (rejected)
+# alter enrollment -- see the vibesql_attach_replay_files comment above for
+# the measured 80-failure WAL/autoindex cascade that sent them back to the
+# file-scope auto-skip.
 variable vibesql_attach_ok
 array set vibesql_attach_ok {
     trigger1-10.0 1
