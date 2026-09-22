@@ -1402,3 +1402,41 @@ fn test_create_trigger_on_unrecognized_schema_target_preserves_qualifier() {
         _ => panic!("Expected CreateTrigger statement"),
     }
 }
+
+#[test]
+fn test_create_trigger_single_quoted_schema_qualifier_dequotes() {
+    // #6708: SQLite accepts a string literal anywhere an identifier is
+    // expected, so `CREATE TRIGGER 'on'.trig5 ...` is a trigger named trig5 in
+    // the schema `on` (de-quoted) — NOT a trigger whose schema is the literal
+    // text `'on'` with quotes. The parser used to carry the verbatim source
+    // for quoted qualifiers only for the " , [ and ` forms, so the single-
+    // quoted form reached the executor as `'on'` and failed schema_exists
+    // with a spurious "unknown database 'on'" (alter.test alter-3.2.9).
+    let sql = "CREATE TRIGGER 'on'.trig5 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.schema.as_deref(), Some("on"), "schema must be de-quoted");
+            assert_eq!(trigger.trigger_name, "trig5");
+            assert_eq!(trigger.table_name, "t1");
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}
+
+#[test]
+fn test_create_trigger_double_quoted_schema_keeps_verbatim_spelling() {
+    // The pre-#6708 behavior for the OTHER quoted forms is unchanged: a
+    // double-quoted qualifier keeps its verbatim spelling so an
+    // "unknown database" error echoes the case as written (trigger7-1.2).
+    let sql = "CREATE TRIGGER \"Aux\".tr1 AFTER INSERT ON t1 BEGIN SELECT 1; END;";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateTrigger(trigger) => {
+            assert_eq!(trigger.schema.as_deref(), Some("Aux"));
+        }
+        _ => panic!("Expected CreateTrigger statement"),
+    }
+}

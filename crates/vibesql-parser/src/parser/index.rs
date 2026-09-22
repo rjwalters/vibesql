@@ -155,13 +155,28 @@ impl Parser {
     fn parse_index_name_with_optional_schema(
         &mut self,
     ) -> Result<(Option<String>, String), ParseError> {
+        // #6708: a single-quoted string literal is also accepted as a name
+        // token here — SQLite's "string as identifier" quirk applies to the
+        // schema-qualified index-name position too (`CREATE INDEX 'on'.i1
+        // ON t1(a)`, alter.test alter-3.2.9's neighborhood). The schema parse
+        // below then de-quotes the String token the same way
+        // `parse_table_ref` does for trigger/table names.
         let first_is_name_like = matches!(
             self.peek(),
-            Token::Identifier(_) | Token::DelimitedIdentifier(_) | Token::Keyword { .. }
+            Token::Identifier(_)
+                | Token::DelimitedIdentifier(_)
+                | Token::Keyword { .. }
+                | Token::String(_)
         );
 
         if first_is_name_like && self.peek_at_offset(1) == &Token::Symbol('.') {
-            let schema = self.parse_identifier_or_keyword()?;
+            let schema = match self.peek().clone() {
+                Token::String(name) => {
+                    self.advance();
+                    name
+                }
+                _ => self.parse_identifier_or_keyword()?,
+            };
             self.expect_token(Token::Symbol('.'))?;
             let index_name = self.parse_identifier_or_fallback_keyword()?;
             Ok((Some(schema), index_name))

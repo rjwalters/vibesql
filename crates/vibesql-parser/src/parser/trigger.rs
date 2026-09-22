@@ -154,11 +154,17 @@ impl Parser {
                 if !schema_name.eq_ignore_ascii_case("main")
                     && !schema_name.eq_ignore_ascii_case("temp")
                 {
+                    // #6708: a single-quoted string literal ('on') is also a
+                    // quoted form — carry the DE-quoted schema_name, never the
+                    // raw source, or stmt.schema reaches the executor as the
+                    // literal text 'on' (quotes included) and schema_exists
+                    // fails with a spurious "unknown database 'on'".
                     let verbatim = match schema_source.as_deref() {
                         Some(src)
                             if !src.starts_with('"')
                                 && !src.starts_with('[')
-                                && !src.starts_with('`') =>
+                                && !src.starts_with('`')
+                                && !src.starts_with('\'') =>
                         {
                             src.to_string()
                         }
