@@ -11,6 +11,7 @@
 - [Server Configuration](server-config.md) - Server configuration reference
 - [HTTP API](http-api.md) - REST and GraphQL endpoints
 - [Transactions](transactions.md) - Transaction handling and durability hints
+- [Server Metrics](observability/metrics.md) - Prometheus-compatible metrics via OpenTelemetry
 
 ### Extended Features
 - [Scheduled Functions](scheduled-functions.md) - Cron jobs and scheduled tasks
@@ -43,6 +44,7 @@
 - [Dogfooding Benchmarks](development/DOGFOODING_BENCHMARKS.md) - Internal performance tracking
 - [MIRI Testing](development/MIRI.md) - Undefined behavior detection
 - [Publishing Checklist](PUBLISHING_CHECKLIST.md) - Release process
+- [Deployment](deployment/) - Web demo deployment and Cloudflare CDN configuration
 
 ### Performance
 - [Performance Overview](performance/) - Performance documentation hub
@@ -65,5 +67,6 @@
 ## Internal
 
 - [archive/](archive/) - Completed investigations and historical docs
+- [bugs/](bugs/) - Open bug investigation write-ups
 - [lessons/](lessons/) - Development insights and lessons learned
 - [templates/](templates/) - Document templates (ADR, architecture, implementation)

@@ -9,10 +9,12 @@ The operator system is organized into specialized modules by operator category:
 ```
 operators/
 ├── mod.rs           # Central registry and trait definitions
-├── arithmetic.rs    # +, -, *, /
-├── comparison.rs    # =, <>, <, <=, >, >=
+├── arithmetic/      # +, -, *, /, % (one file per operator)
+├── comparison/      # =, <> (equality.rs); <, <=, >, >= (ordering.rs)
+├── bitwise.rs       # |, &, ~, <<, >>
 ├── logical.rs       # AND, OR
-└── string.rs        # || (concatenation)
+├── string.rs        # || (concatenation)
+└── vector.rs        # <->, <#>, <=> vector distance operators
 ```
 
 ## Benefits of This Design
@@ -126,11 +128,11 @@ To add a new operator:
 Run operator tests:
 ```bash
 # All operator tests
-cargo test --package executor operators
+cargo test --package vibesql-executor operators
 
 # Specific operator category
-cargo test --package executor operators::arithmetic
-cargo test --package executor operators::comparison
+cargo test --package vibesql-executor operators::arithmetic
+cargo test --package vibesql-executor operators::comparison
 ```
 
 ## Performance Considerations
