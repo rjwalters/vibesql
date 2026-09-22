@@ -1188,10 +1188,7 @@ fn strip_schema_qualifier(sql: &str, schema_name: &str) -> String {
             } else {
                 inner.to_string()
             };
-            if i < bytes.len()
-                && bytes[i] == b'.'
-                && unescaped.eq_ignore_ascii_case(schema_name)
-            {
+            if i < bytes.len() && bytes[i] == b'.' && unescaped.eq_ignore_ascii_case(schema_name) {
                 i += 1;
                 continue;
             }
@@ -1816,7 +1813,10 @@ mod tests {
         // comparison: 'o''n' is the identifier `o'n` (embedded apostrophe),
         // so it matches a schema spelled the same way — not `on`.
         assert_eq!(strip("CREATE TRIGGER 'o''n'.tr FROM t", "o'n"), "CREATE TRIGGER tr FROM t");
-        assert_eq!(strip("CREATE TRIGGER 'o''n'.tr FROM t", "on"), "CREATE TRIGGER 'o''n'.tr FROM t");
+        assert_eq!(
+            strip("CREATE TRIGGER 'o''n'.tr FROM t", "on"),
+            "CREATE TRIGGER 'o''n'.tr FROM t"
+        );
     }
 
     #[test]
