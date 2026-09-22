@@ -106,6 +106,12 @@ fi
 source "$SCRIPT_DIR/lib/forge-helpers.sh"
 forge_detect
 
+# Verifies the actual post-push ref state when a --force-with-lease push
+# reports a rejection (#6695) — see lib/push-lease-verify.sh for why this
+# is needed (Git LFS pre-push hook racing the lease re-check).
+# shellcheck source=lib/push-lease-verify.sh
+source "$SCRIPT_DIR/lib/push-lease-verify.sh"
+
 REPO_NWO="$(forge_get_repo_nwo "gh" 2>/dev/null || true)"
 
 # ---- core reconciliation functions (extracted by tests) ----
@@ -202,10 +208,39 @@ Parent branch \`$parent_branch\` advanced (amended/pushed) after this child bran
         RSC_FAILURE=2
         return 0
     fi
+
+    # Version-bearing-file sync gate (#7168): a rebase silently absorbs
+    # whatever version-bearing values origin/$parent_branch already had. A
+    # file the child's own commits never touched (in practice
+    # .loom/install-metadata.json) never raises a git conflict, so it can
+    # end up stale relative to VERSION/the files that WERE part of the
+    # conflict-free merge -- invisible until CI's "Installer Integration
+    # Tests" fails. `git rebase <upstream> <branch>` (used above) checks out
+    # $child_branch first, so the working tree here already reflects the
+    # rebased child -- skipped under --dry-run since no rebase actually ran.
+    if [[ "$DRY_RUN" != "true" ]] && [[ -x "$SCRIPT_DIR/version-check-gate.sh" ]]; then
+        if ! "$SCRIPT_DIR/version-check-gate.sh" --fix-hint "then push."; then
+            err "Version-bearing files are out of sync for '$child_branch' after rebase onto '$parent_branch' (see BLOCKER:/Fix: above)."
+            RSC_FAILURE=2
+            return 0
+        fi
+    fi
+
     if ! run git push --force-with-lease; then
-        err "force-with-lease push rejected for '$child_branch' (someone else pushed). Fetch, review, and retry."
-        RSC_FAILURE=2
-        return 0
+        # A reported rejection is not always a real one (#6695): Git LFS's
+        # pre-push hook can race the lease re-check on a branch with pending
+        # LFS objects, so the ref update lands while the printed rejection
+        # reflects a stale read. Verify the LIVE remote ref before trusting
+        # the reported failure.
+        local push_race_sha
+        push_race_sha="$(git rev-parse "$child_branch" 2>/dev/null || true)"
+        if [[ "$DRY_RUN" != "true" ]] && push_landed_despite_rejection origin "$child_branch" "$push_race_sha"; then
+            warn "PUSH-LEASE-RACE-DETECTED: push --force-with-lease reported a rejection for '$child_branch', but origin already reflects the update ($push_race_sha) — likely the Git LFS pre-push hook racing the lease re-check (#6695). Treating as landed and continuing."
+        else
+            err "force-with-lease push rejected for '$child_branch' (someone else pushed). Fetch, review, and retry."
+            RSC_FAILURE=2
+            return 0
+        fi
     fi
     ok "Rebased child PR #$child_pr ($child_branch) onto origin/$parent_branch and force-pushed (base unchanged, still stacked on $parent_branch)"
     return 0

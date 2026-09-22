@@ -59,7 +59,7 @@ agents each writing to the same fixed path race on it: one's `create-pr.sh
 agent's body between its write and your read, silently publishing a PR or
 comment with the wrong title, wrong `Closes #N`, or wrong content — with
 nothing failing and no error anywhere (#6381, near-miss in a consumer repo,
-`2AMLogic/pickwell` PR 188). The same collision applies outside wave dispatch
+a private-repo PR). The same collision applies outside wave dispatch
 too: two independent `/loom:sweep` runs (different terminals, same host) can
 just as easily race on an unnamespaced `/tmp` path.
 

@@ -111,6 +111,91 @@ assert_eq "SESSION_LIMIT" \
     "SESSION_LIMIT still precedes the credit class"
 
 echo
+echo "--- classify_error: TOKEN_EXPIRED covers a REVOKED OAuth token, incl. the JSON envelope (#6614) ---"
+
+# The verbatim death-tail from the incident in #6614: an operator's `/login` on
+# the host revoked the pooled credential mid-flight. Before the fix, the JSON
+# envelope defeated the `401[^a-z]*authentication_error` pattern (the `[^a-z]*`
+# gap cannot cross `{"type":"`), nothing matched "revoked", and the death fell
+# through to the RECOVERABLE catch-all — so claude-wrapper.sh retried the same
+# revoked credential MAX_RETRIES (5) times instead of marking it bad + rotating.
+while IFS='|' read -r desc output expected; do
+    [[ -z "$desc" ]] && continue
+    actual="$(classify_error "$output" 1)"
+    assert_eq "$expected" "$actual" "$desc"
+done <<'EOF'
+the verbatim incident wording (#6614)|Failed to authenticate. API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}|TOKEN_EXPIRED
+nested error envelope the API also serves|API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."}}|TOKEN_EXPIRED
+prose form, no JSON at all|Failed to authenticate. API Error: 401 OAuth access token has been revoked|TOKEN_EXPIRED
+past-tense variant|Your access token was revoked|TOKEN_EXPIRED
+JSON authentication_error with some OTHER message|{"type":"authentication_error","message":"Invalid API key"}|TOKEN_EXPIRED
+pre-#6614 plain form still classifies|API Error: 401 authentication_error|TOKEN_EXPIRED
+negative: a revoked thing that is not a token|The reviewer revoked their approval and the ruleset was revoked|RECOVERABLE
+EOF
+
+# The exit-code-first guarantee (#3233) for the new phrasing, checked with the
+# real exit code rather than smuggling it through the table above.
+assert_eq "SUCCESS" \
+    "$(classify_error 'API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}' 0)" \
+    "a CLEAN exit whose output quotes the revoked-token 401 stays SUCCESS (#3233)"
+
+# TOKEN_EXPIRED must be FATAL, not transient: that is what makes
+# claude-wrapper.sh mark the account bad and rotate instead of retrying the
+# same dead credential (the 5x retry loop reported in #6614).
+TESTS_RUN=$((TESTS_RUN + 1))
+if classification_is_transient TOKEN_EXPIRED; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: TOKEN_EXPIRED is NOT transient (no retry against the same revoked token)"
+else
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: TOKEN_EXPIRED is NOT transient (no retry against the same revoked token)"
+fi
+
+echo
+echo "--- classify_error: Kimi Code CLI (#8561) needs no provider table; the generic transients already cover it ---"
+
+# Issue #8561 was filed against a documented Kimi print-mode contract of
+# "75 = transient (rate limit / 5xx / timeout)". Probing the pinned CLI
+# (@moonshot-ai/kimi-code 2.0.2) disproved it: 75 is emitted nowhere in the
+# shipped bundle. Kimi absorbs transients IN-PROCESS — a 429 is retried up to
+# ten times with exponential backoff — and only the exhaustion of that ladder
+# reaches the process boundary, as exit 1. Full probe evidence:
+# docs/experiments/kimi-harness-probe-2026-09-22.json.
+#
+# So no `_classify_error_kimi` table was added and no 75 special case exists.
+# These assertions pin WHY that is safe rather than an oversight: the strings
+# Kimi actually emits already land on RECOVERABLE through the generic,
+# provider-independent table, which is precisely the retry-with-backoff verdict
+# the phantom 75 mapping was meant to produce. If someone later adds a kimi
+# table, these must keep passing.
+while IFS='|' read -r desc output expected; do
+    [[ -z "$desc" ]] && continue
+    actual="$(classify_error "$output" 1 kimi)"
+    assert_eq "$expected" "$actual" "$desc"
+done <<'EOF'
+429 retry-ladder exhaustion, verbatim from 2.0.2|error: failed to run prompt: provider.rate_limit: 429 rate limit exceeded|RECOVERABLE
+turn.step.retrying NDJSON meta event, verbatim from 2.0.2|{"role":"meta","type":"turn.step.retrying","failed_attempt":9,"next_attempt":10,"max_attempts":10,"error_name":"APIProviderRateLimitError","error_message":"429 rate limit exceeded","status_code":429}|RECOVERABLE
+unrecognised Kimi config fault falls through to the daemon-mode catch-all|error: failed to run prompt: No model configured. Run `kimi` and use /login to sign in.|RECOVERABLE
+EOF
+
+# An unknown provider selector must never make classification FAIL — "kimi"
+# matches no table in _classify_error_provider by design, and the exit-code-first
+# rules still apply ahead of any output inspection.
+assert_eq "SUCCESS" "$(classify_error 'provider.rate_limit: 429 rate limit exceeded' 0 kimi)" \
+    "a CLEAN Kimi exit stays SUCCESS even when its stream quoted a 429 (#3233)"
+assert_eq "TIMEOUT" "$(classify_error '' 124 kimi)" \
+    "timeout(1) on a Kimi launch is provider-independent TIMEOUT"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if classification_is_transient "$(classify_error 'error: failed to run prompt: provider.rate_limit: 429 rate limit exceeded' 1 kimi)"; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: Kimi's rate-limit exhaustion is retryable (the verdict the phantom exit-75 mapping wanted)"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: Kimi's rate-limit exhaustion is retryable (the verdict the phantom exit-75 mapping wanted)"
+fi
+
+echo
 echo "--- classification_is_transient: TOKEN_EXHAUSTED stays retryable (rotation path consumes it first) ---"
 
 for _category in TOKEN_EXHAUSTED MODEL_CREDITS_EXHAUSTED; do

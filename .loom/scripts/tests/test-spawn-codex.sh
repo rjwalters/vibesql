@@ -29,6 +29,14 @@
 #      roles exit 78 before the CLI starts on any not-ready state; read-only
 #      roles keep the conservative fallback with an explicit warning; the
 #      capability manifest stays evidence-gated at `partial`
+#  12. account-provider resolution from the runtime manifest (#5609)
+#  13. session-exec mode (#6926): detection via the on-disk
+#      `.session-managed.json` marker, the `LOOM_CODEX_SESSION_EXEC`
+#      auto/0/1 gate, interactive-dispatch refusal, missing-docker and
+#      stopped-container failures, and an end-to-end mocked `docker exec`
+#      dispatch proving exit-code passthrough, classify-error.sh
+#      compatibility, and transcript/session reporting are unchanged vs.
+#      bare-metal
 #
 # Usage:
 #   ./.loom/scripts/tests/test-spawn-codex.sh
@@ -400,6 +408,11 @@ assert_contains "-m sonnet" "$out" "LOOM_CODEX_MODEL_CHECK=0 disables the refusa
 echo ""
 echo "Testing spawn-codex.sh ChatGPT-plan auth-mode guard..."
 
+# Issue #8277: the expected v2 terminal record, built from its four varying
+# fields so the long literal is not repeated at every assertion site.
+_tr() { printf '# LOOM_TERMINAL_RESULT v=2 provider=codex account=%s category=%s exit_code=%s model=%s' "$1" "$2" "$3" "$4"; }
+
+
 AUTHMODE_BIN="$TMPROOT/authmode-bin"
 mkdir -p "$AUTHMODE_BIN"
 AUTHMODE_ARGV_FILE="$TMPROOT/authmode-argv.txt"
@@ -451,6 +464,11 @@ assert_not_contains "-m gpt-5-codex" "$(cat "$AUTHMODE_ARGV_FILE")" \
     "the pinned model is NOT forwarded to the ChatGPT-plan profile's codex invocation"
 assert_contains "AUTHMODE-FINAL" "$out" \
     "the invocation still runs (on the account's own default) rather than being refused outright"
+# Issue #8277: the v2 terminal record reports the model that was ACTUALLY in
+# flight. The pin was stripped before exec, so the account's own default ran —
+# naming the dropped model here would pin a class-scoped credit-exhaustion
+# hold on a class that never ran, and leave the class that DID run selectable.
+assert_contains "$(_tr unknown SUCCESS 0 none)" "$out" "a DROPPED pin reports model=none (#8277)"
 
 # (2) An API-key profile: no conflict, the pinned model passes through
 # unchanged.
@@ -460,6 +478,7 @@ assert_not_contains "authenticated via a ChatGPT plan" "$out" \
     "an API-key profile is never warned about the auth-mode conflict"
 assert_contains "-m gpt-5-codex" "$(cat "$AUTHMODE_ARGV_FILE")" \
     "the pinned model IS forwarded to an API-key profile's codex invocation"
+assert_contains "$(_tr unknown SUCCESS 0 gpt-5-codex)" "$out" "an in-flight model IS named (#8277)"
 
 # (3) No model pinned at all: the guard has nothing to check and never shells
 # out to `codex login status` (the mocked codex still errors if it did, since
@@ -738,10 +757,8 @@ assert_contains "spawn-codex: session=$MOCK_SESSION" "$mock_stderr" \
     "the 'session id:' line is parsed and reported as the transcript join key"
 assert_contains "spawn-codex: tokens_used=2502" "$mock_stderr" \
     "'tokens used' is parsed (comma-stripped) and reported"
-assert_contains \
-    "# LOOM_TERMINAL_RESULT v=1 provider=codex account=unknown category=SUCCESS exit_code=0" \
-    "$mock_stderr" \
-    "a successful child emits one strict structured terminal record"
+assert_contains "$(_tr unknown SUCCESS 0 none)" "$mock_stderr" \
+    "a successful child emits one strict structured record, no model pinned"
 assert_not_contains "MOCK-SAW-STDIN" "$mock_stderr" \
     "the child's stdin is /dev/null (no <stdin> append, no hang)"
 
@@ -769,9 +786,7 @@ set -e
 assert_eq "42" "$classified_rc" \
     "structured classification preserves the original child exit code"
 terminal_record="$(printf '%s\n' "$classified_stderr" | grep '^# LOOM_TERMINAL_RESULT ' || true)"
-assert_eq \
-    "# LOOM_TERMINAL_RESULT v=1 provider=codex account=profile-a category=TOKEN_EXPIRED exit_code=42" \
-    "$terminal_record" \
+assert_eq "$(_tr profile-a TOKEN_EXPIRED 42 none)" "$terminal_record" \
     "the structured record matches the direct Codex classifier and carries account identity"
 assert_not_contains "recognizable-secret" "$terminal_record" \
     "the structured record never copies raw child output"
@@ -825,11 +840,14 @@ assert_contains "session id: $MOCK_SESSION" "$mock_stderr" \
 echo ""
 echo "Testing LOOM_RUNTIME=codex dispatch through spawn-worker.sh..."
 
+source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin --self-only "$SCRIPTS_DIR" spawn-worker
+
 STAGE="$TMPROOT/stage"
 WS="$TMPROOT/ws"
 mkdir -p "$STAGE/lib" "$WS/.loom"
 cp "$SCRIPTS_DIR/spawn-worker.sh" "$STAGE/spawn-worker.sh"
-cp "$SCRIPTS_DIR/lib/config-resolver.sh" "$STAGE/lib/config-resolver.sh"
+cp "$SCRIPTS_DIR/lib/"{config-resolver,locate-daemon-bin,loom-tools}.sh "$STAGE/lib/"
 cp "$SPAWN_CODEX" "$STAGE/spawn-codex.sh"
 # A stub claude runner so the "available runtimes" list and the default path
 # stay realistic without ever reaching the real token-selection code.
@@ -852,18 +870,16 @@ assert_contains "routed" "$out" "the prompt survives the dispatcher hop"
 assert_not_contains "stub-claude reached" "$out" \
     "codex dispatch does not also reach the claude runner"
 
-if command -v jq >/dev/null 2>&1; then
-    printf '{ "runtimes": { "default": "codex" } }\n' > "$WS/.loom/config.json"
-    out="$(env -u LOOM_RUNTIME -u CODEX_HOME -u LOOM_CODEX_HOME \
-        LOOM_WORKSPACE="$WS" LOOM_CONFIG_DEFAULTS_FILE="" \
-        LOOM_SWEEP_NICE=0 LOOM_CODEX_NO_EXEC=1 LOOM_SPAWN_NO_EXPORT=1 \
-        bash "$STAGE/spawn-worker.sh" -p "cfg" 2>&1 || true)"
-    assert_contains "runtime=codex (from config (runtimes.default))" "$out" \
-        "runtimes.default=codex resolves through the dispatcher"
-    assert_contains "spawn-codex would-exec" "$out" \
-        "config-resolved codex dispatch reaches spawn-codex.sh"
-    rm -f "$WS/.loom/config.json"
-fi
+printf '{ "runtimes": { "default": "codex" } }\n' > "$WS/.loom/config.json"
+out="$(env -u LOOM_RUNTIME -u CODEX_HOME -u LOOM_CODEX_HOME \
+    LOOM_WORKSPACE="$WS" LOOM_CONFIG_DEFAULTS_FILE="" \
+    LOOM_SWEEP_NICE=0 LOOM_CODEX_NO_EXEC=1 LOOM_SPAWN_NO_EXPORT=1 \
+    bash "$STAGE/spawn-worker.sh" -p "cfg" 2>&1 || true)"
+assert_contains "runtime=codex (from config (runtimes.default))" "$out" \
+    "runtimes.default=codex resolves through the dispatcher"
+assert_contains "spawn-codex would-exec" "$out" \
+    "config-resolved codex dispatch reaches spawn-codex.sh"
+rm -f "$WS/.loom/config.json"
 
 # codex moving from unknown -> known must not weaken the unknown-runtime guard.
 set +e
@@ -1327,7 +1343,7 @@ STUB
             LOOM_SWEEP_NICE=0 \
             LOOM_WORKSPACE="$PROVIDER_WS" LOOM_DAEMON_BIN="$PROVIDER_BIN/loom-daemon" \
             PATH="$PROVIDER_BIN:$PATH" \
-            bash "$SPAWN_CODEX" -p "hi" >/dev/null 2>&1 || true
+            bash "$SPAWN_CODEX" "$@" -p "hi" >/dev/null 2>&1 || true
         cat "$PROVIDER_ARGV_LOG" 2>/dev/null || echo "<no selection call captured>"
     }
 
@@ -1339,6 +1355,13 @@ JSON
     argv="$(run_provider_select)"
     assert_contains "--provider codex" "$argv" \
         "spawn-codex.sh passes the manifest's accountProvider (codex) to tokens select (#5609)"
+    assert_not_contains "--model" "$argv" "no --model flag when no model was pinned (#8277)"
+
+    # Issue #8277: an explicitly pinned model narrows account selection past a
+    # class-scoped MODEL_CREDITS_EXHAUSTED hold (#8058 Phase 2) — threaded
+    # into the SAME `tokens select` call this section already exercises.
+    argv="$(run_provider_select -m gpt-5-codex)"
+    assert_contains "--model gpt-5-codex" "$argv" "-m is threaded into tokens select (#8277)"
 
     # A runtime manifest present but missing the accountProvider field falls
     # back to claude (D8's fail-open default), never fails closed.
@@ -1352,6 +1375,263 @@ JSON
     rm -rf "$PROVIDER_WS"
 else
     echo "  SKIP: jq unavailable — account-provider resolution needs it"
+fi
+
+# ============================================================
+# Section 13: session-exec mode (issue #6926, Epic #6896 Phase 2)
+#
+# Hermetic: a fake `docker` shim on a temp PATH stands in for a real
+# `loom-worker-session` container, delegating the actual `codex exec`
+# invocation to Section 8's fake `codex` shim so the mocked end-to-end
+# dispatch below exercises the IDENTICAL stream-split / session-id /
+# tokens-used / exit-code / classify-error.sh path bare-metal dispatch does —
+# only the outer `docker exec <container>` wrapper differs.
+# ============================================================
+
+echo ""
+echo "Testing spawn-codex.sh session-exec mode (#6926)..."
+
+# A profile adopted by a prior `loom-daemon accounts session start` —
+# marked with the exact sentinel session_lifecycle::mark_session_managed
+# writes.
+SESSION_PROFILE="$TMPROOT/profiles/session-acct"
+mkdir -p "$SESSION_PROFILE"
+printf '{"token":"stub"}\n' > "$SESSION_PROFILE/auth.json"
+printf '{"schema_version":1,"container_name":"loom-codex-session-session-acct","adopted_at_unix":0}\n' \
+    > "$SESSION_PROFILE/.session-managed.json"
+
+# --- argv assembly (LOOM_CODEX_NO_EXEC — never touches docker or codex) ---
+
+out="$(run_auth "LOOM_CODEX_HOME=$SESSION_PROFILE" -- -p "hi")"
+assert_contains "profile 'session-acct' is session-managed" "$out" \
+    "a session-managed profile is detected via the on-disk marker"
+assert_contains "-e CARGO_INCREMENTAL=0 loom-codex-session-session-acct codex exec" "$out" \
+    "session-exec mode dispatches via docker exec into the account's container, with CARGO_INCREMENTAL=0 carried across the boundary (#6926, #8456; the --workdir/--env prefix is asserted in test-spawn-codex-session-exec.sh, #8518)"
+would_exec_line="$(printf '%s\n' "$out" | grep '^spawn-codex would-exec:' || true)"
+assert_not_contains "tmux" "$would_exec_line" \
+    "the resolved dispatch invocation itself never mentions tmux (docker exec only, no send-keys)"
+
+# A non-adopted profile (the common/regression case, incl. the pre-existing
+# GOOD_PROFILE from Section 6) is completely unaffected.
+out="$(run_auth "LOOM_CODEX_HOME=$GOOD_PROFILE" -- -p "hi")"
+assert_contains "would-exec: codex exec" "$out" \
+    "a non-session-managed profile dispatches bare-metal, unchanged (regression-free default)"
+assert_not_contains "docker exec" "$out" \
+    "a non-session-managed profile never routes through docker"
+assert_not_contains "session-managed" "$out" \
+    "a non-session-managed profile is never reported as session-managed"
+
+# LOOM_CODEX_SESSION_EXEC=0 forces bare-metal even for an adopted profile
+# (the escape hatch).
+out="$(run_auth "LOOM_CODEX_HOME=$SESSION_PROFILE" LOOM_CODEX_SESSION_EXEC=0 -- -p "hi")"
+assert_contains "would-exec: codex exec" "$out" \
+    "LOOM_CODEX_SESSION_EXEC=0 forces bare-metal dispatch even for an adopted profile"
+assert_not_contains "would-exec: docker exec" "$out" \
+    "LOOM_CODEX_SESSION_EXEC=0 never assembles a docker exec invocation"
+assert_contains "forces bare-metal dispatch" "$out" \
+    "LOOM_CODEX_SESSION_EXEC=0 logs a warning naming the override"
+
+# LOOM_CODEX_SESSION_EXEC=1 forces session-exec even with no marker present.
+NO_MARKER_PROFILE="$TMPROOT/profiles/forced"
+mkdir -p "$NO_MARKER_PROFILE"
+printf '{"token":"stub"}\n' > "$NO_MARKER_PROFILE/auth.json"
+out="$(run_auth "LOOM_CODEX_HOME=$NO_MARKER_PROFILE" LOOM_CODEX_SESSION_EXEC=1 -- -p "hi")"
+assert_contains "-e CARGO_INCREMENTAL=0 loom-codex-session-forced codex exec" "$out" \
+    "LOOM_CODEX_SESSION_EXEC=1 forces session-exec even without the marker file"
+assert_contains "forces session-exec mode though" "$out" \
+    "LOOM_CODEX_SESSION_EXEC=1 warns that the profile was never adopted"
+
+# An invalid value fails closed with a named diagnostic.
+set +e
+bad_out="$(env -u CODEX_HOME -u LOOM_CODEX_PROFILE LOOM_SWEEP_NICE=0 LOOM_CODEX_NO_EXEC=1 \
+    LOOM_CODEX_HOME="$GOOD_PROFILE" LOOM_CODEX_SESSION_EXEC=bogus \
+    bash "$SPAWN_CODEX" -p "hi" 2>&1)"
+bad_rc=$?
+set -e
+assert_eq "78" "$bad_rc" "an invalid LOOM_CODEX_SESSION_EXEC value exits 78 (EX_CONFIG)"
+assert_contains "Invalid LOOM_CODEX_SESSION_EXEC" "$bad_out" \
+    "the invalid-value message names the offending variable"
+
+# --- interactive dispatch is refused against an adopted profile ---
+
+set +e
+interactive_out="$(env -u CODEX_HOME -u LOOM_CODEX_PROFILE LOOM_SWEEP_NICE=0 \
+    LOOM_CODEX_HOME="$SESSION_PROFILE" \
+    bash "$SPAWN_CODEX" 2>&1)"
+interactive_rc=$?
+set -e
+assert_eq "78" "$interactive_rc" \
+    "an interactive (no -p) run against a session-managed profile is refused"
+assert_contains "session attach" "$interactive_out" \
+    "the refusal names \`accounts session attach\` as the interactive alternative"
+
+# --- missing docker binary -> 127 (session-exec's runtime-missing facet) ---
+#
+# `/usr/bin:/bin` alone isn't enough here, unlike Section 7's analogous
+# missing-`codex` check: GitHub Actions Ubuntu runners ship a real `docker`
+# at /usr/bin/docker, so appending those dirs verbatim would still resolve
+# `command -v docker` successfully in CI even though this test wants it to
+# fail (it only "worked" locally because dev machines don't keep `docker` in
+# /usr/bin or /bin). Build a PATH that mirrors every dir on the real PATH but
+# with any `docker` executable filtered out, so every other coreutils
+# dependency spawn-codex.sh needs before reaching the binary check stays
+# resolvable, while `docker` itself genuinely cannot be found anywhere.
+NODOCKER_BIN="$TMPROOT/no-docker-bin"
+mkdir -p "$NODOCKER_BIN"
+IFS=':' read -r -a _real_path_dirs <<< "$PATH"
+for _dir in "${_real_path_dirs[@]}"; do
+    [[ -d "$_dir" ]] || continue
+    for _f in "$_dir"/*; do
+        [[ -e "$_f" ]] || continue
+        _base="$(basename "$_f")"
+        [[ "$_base" == "docker" ]] && continue
+        [[ -e "$NODOCKER_BIN/$_base" ]] && continue
+        ln -s "$_f" "$NODOCKER_BIN/$_base" 2>/dev/null || true
+    done
+done
+
+set +e
+nodocker_out="$(env -u CODEX_HOME -u LOOM_CODEX_PROFILE LOOM_SWEEP_NICE=0 \
+    LOOM_CODEX_HOME="$SESSION_PROFILE" \
+    PATH="$NODOCKER_BIN" \
+    bash "$SPAWN_CODEX" -p "hi" 2>&1)"
+nodocker_rc=$?
+set -e
+assert_eq "127" "$nodocker_rc" \
+    "a missing docker binary in session-exec mode exits 127, NOT 78"
+assert_contains "'docker' command not found in PATH" "$nodocker_out" \
+    "the missing-docker message names the binary"
+
+# --- session container not running -> named 78, not a raw docker error ---
+
+STOPPED_DOCKER_BIN="$TMPROOT/docker-bin-stopped"
+mkdir -p "$STOPPED_DOCKER_BIN"
+cat > "$STOPPED_DOCKER_BIN/docker" <<'STOPPEDDOCKER'
+#!/usr/bin/env bash
+if [[ "$1" == "inspect" ]]; then
+    echo "false"
+    exit 0
+fi
+echo "unexpected docker invocation: $*" >&2
+exit 1
+STOPPEDDOCKER
+chmod +x "$STOPPED_DOCKER_BIN/docker"
+
+set +e
+stopped_out="$(env -u CODEX_HOME -u LOOM_CODEX_PROFILE LOOM_SWEEP_NICE=0 \
+    LOOM_CODEX_HOME="$SESSION_PROFILE" \
+    PATH="$STOPPED_DOCKER_BIN:/usr/bin:/bin" \
+    bash "$SPAWN_CODEX" -p "hi" 2>&1)"
+stopped_rc=$?
+set -e
+assert_eq "78" "$stopped_rc" \
+    "a stopped/absent session container exits 78, not a raw docker exec failure"
+assert_contains "is not running" "$stopped_out" \
+    "the failure states the container is not running"
+assert_contains "session start" "$stopped_out" \
+    "the failure names \`accounts session start\` as the fix"
+
+# --- end-to-end mocked dispatch through docker exec ---
+#
+# Same fake codex shim Section 8 uses (MOCK_BIN/codex, MOCK_SESSION), now
+# reached through a fake `docker exec` wrapper — proving the seven-point
+# runtime-adapter contract (exit codes, classify-error.sh, transcript
+# capture, observability markers) is identical whether spawn-codex.sh runs
+# bare-metal or in session-exec mode.
+
+SESSION_DOCKER_BIN="$TMPROOT/docker-bin-session"
+mkdir -p "$SESSION_DOCKER_BIN"
+SESSION_DOCKER_EXEC_ARGV="$TMPROOT/docker-exec-argv.txt"
+cat > "$SESSION_DOCKER_BIN/docker" <<DOCKERSHIM
+#!/usr/bin/env bash
+# Fake docker CLI test double (issue #6926): supports just enough of the
+# surface session-exec mode uses -- \`inspect -f '{{.State.Running}}'\` and
+# \`exec <container> codex ...\` -- delegating the actual codex invocation to
+# the same fake codex shim Section 8 uses via a plain \`exec\`, so stdin/
+# stdout/stderr and the exit code all flow through exactly as they would for
+# a real container.
+if [[ "\$1" == "inspect" ]]; then
+    echo "true"
+    exit 0
+fi
+if [[ "\$1" == "exec" ]]; then
+    shift
+    # Options precede the container name (real docker exec is clap-parsed);
+    # -e/--env KEY=VALUE pairs are exported so the exec'd process sees them,
+    # the way real docker exec seeds its environment (#8456's
+    # CARGO_INCREMENTAL=0 and #8518's LOOM_WORKSPACE ride this path), and
+    # --workdir DIR is honoured with a cd, the way real docker exec starts
+    # the process in that directory (#8518).
+    while [[ "\$1" == -* ]]; do if [[ "\$1" == "--workdir" ]]; then cd "\$2"; else export "\$2"; fi; shift 2; done
+    _container="\$1"
+    shift
+    printf '%s\n' "\$_container \$*" > "$SESSION_DOCKER_EXEC_ARGV"
+    exec "\$@"
+fi
+echo "unexpected docker invocation: \$*" >&2
+exit 1
+DOCKERSHIM
+chmod +x "$SESSION_DOCKER_BIN/docker"
+
+run_session_mock() {
+    local -a envs=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do envs+=("$1"); shift; done
+    shift || true
+    env -u CODEX_HOME -u LOOM_CODEX_PROFILE LOOM_SWEEP_NICE=0 \
+        MOCK_ARGV_FILE="$MOCK_ARGV_FILE" \
+        PATH="$SESSION_DOCKER_BIN:$MOCK_BIN:$PATH" \
+        LOOM_CODEX_HOME="$SESSION_PROFILE" \
+        ${envs[@]+"${envs[@]}"} \
+        bash "$SPAWN_CODEX" "$@"
+}
+
+session_stdout="$(run_session_mock -- -p "hi" 2>/dev/null)"
+assert_eq "MOCK-FINAL-MESSAGE" "$session_stdout" \
+    "session-exec stdout carries ONLY the agent's final message, identical to bare-metal"
+
+session_stderr="$({ run_session_mock -- -p "hi" >/dev/null; } 2>&1)"
+assert_contains "spawn-codex: session=$MOCK_SESSION" "$session_stderr" \
+    "session-exec parses the transcript join key identically to bare-metal"
+assert_contains "spawn-codex: tokens_used=2502" "$session_stderr" \
+    "session-exec parses tokens_used identically to bare-metal"
+assert_contains "$(_tr session-acct SUCCESS 0 none)" "$session_stderr" \
+    "session-exec emits the same structured record classify-error.sh bare-metal does"
+assert_contains "# LOOM_CLI_START runtime=codex" "$session_stderr" \
+    "session-exec still emits the LOOM_CLI_START observability marker"
+assert_not_contains "MOCK-SAW-STDIN" "$session_stderr" \
+    "session-exec closes the exec'd process's stdin, same as bare-metal (never a hang)"
+
+assert_contains "loom-codex-session-session-acct codex exec" "$(cat "$SESSION_DOCKER_EXEC_ARGV")" "docker exec targets the account's own session container with the codex exec argv"
+
+set +e
+run_session_mock MOCK_RC=42 -- -p "hi" >/dev/null 2>&1
+session_exit_rc=$?
+set -e
+assert_eq "42" "$session_exit_rc" \
+    "session-exec preserves exit-code passthrough (PIPESTATUS), identical to bare-metal"
+
+# Transcript-path resolution still works through the bind mount (the same
+# host-side CODEX_HOME directory the container's mount source is).
+mkdir -p "$SESSION_PROFILE/sessions/2026/07/29"
+SESSION_TRANSCRIPT="$SESSION_PROFILE/sessions/2026/07/29/rollout-2026-07-29T15-08-10-${MOCK_SESSION}.jsonl"
+: > "$SESSION_TRANSCRIPT"
+session_transcript_stderr="$({ run_session_mock -- -p "hi" >/dev/null; } 2>&1)"
+assert_contains "spawn-codex: transcript=$SESSION_TRANSCRIPT" "$session_transcript_stderr" \
+    "session-exec resolves the concrete transcript JSONL path exactly like bare-metal"
+
+# --- static check: the actual dispatch-invocation assembly never mentions
+#     tmux (the log/header PROSE mentions "tmux send-keys" deliberately, to
+#     document what this mode does NOT do — this checks the CODE that builds
+#     CODEX_INVOKE, not the file as a whole). ---
+
+TESTS_RUN=$((TESTS_RUN + 1))
+invoke_assembly="$(grep -A3 'CODEX_INVOKE=(docker exec' "$SPAWN_CODEX" || true)"
+if [[ -n "$invoke_assembly" && "$invoke_assembly" != *tmux* ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: the session-exec dispatch invocation is assembled from docker/codex only, never tmux"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: the session-exec dispatch invocation must never reference tmux"
 fi
 
 # ============================================================

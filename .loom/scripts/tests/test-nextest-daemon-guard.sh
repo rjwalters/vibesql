@@ -16,6 +16,11 @@
 # this suite is hermetic and never touches a real daemon or tmux session,
 # regardless of whether the host running it happens to have either.
 #
+# Also covers #6607: `integration_basic.rs` shares the same `-L loom` tmux
+# socket hazard class but is non-destructive, so the guard must warn about it
+# without adding it to the exclusion filter — see the dedicated assertions
+# below.
+#
 # Every case pins the candidate pid-file list via the guard's shared
 # TEST-ONLY seam `LOOM_CI_DAEMON_PIDFILE_CANDIDATES` (`none` = no candidates
 # at all — see defaults/scripts/lib/live-daemon-guard.sh), so no assertion
@@ -113,6 +118,18 @@ check "$([[ "$guard_err" == *"$LIVE_PID_FILE"* ]] && echo 0 || echo 1)" \
     "live pid file: the guard names the exact pid file it found" "$guard_err"
 check "$([[ "$guard_err" == *"integration_security"* && "$guard_err" == *"integration_factory_reset"* ]] && echo 0 || echo 1)" \
     "live pid file: the guard names the two excluded binaries" "$guard_err"
+
+# `integration_basic` (#6607) is a related-but-different hazard: non-
+# destructive, so it must stay in the run (not appear in the exclusion
+# filter), but the guard should still warn loudly that it can flake under
+# tmux contention with a live daemon.
+check "$([[ "$LIVE_RESOLVED" != *"integration_basic"* ]] && echo 0 || echo 1)" \
+    "live pid file: --resolve's exclusion filter does NOT name integration_basic (#6607, non-destructive)" \
+    "$LIVE_RESOLVED"
+check "$([[ "$guard_err" == *"integration_basic"* ]] && echo 0 || echo 1)" \
+    "live pid file: the guard warns about integration_basic by name (#6607)" "$guard_err"
+check "$([[ "$guard_err" == *"NOT excluded"* || "$guard_err" == *"FLAKE"* ]] && echo 0 || echo 1)" \
+    "live pid file: the integration_basic warning is clearly non-excluding (#6607)" "$guard_err"
 
 # ---------- 3. a STALE pid file also trips the guard --------------------------
 # The daemon-integration binaries kill every loom-* session unconditionally in

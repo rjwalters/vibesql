@@ -304,10 +304,23 @@ forge_split_nwo() {
 
 # --- Forge-Dispatched Operations ---
 
+# forge_detect_merge_method() (#7754) lives in the sibling module below --
+# forge-helpers.sh is already over the file-size ratchet's threshold and
+# frozen at its current size (scripts/file-size-baseline.txt), so new
+# functionality is split out rather than added here.
+# shellcheck source=./forge-merge-method.sh
+source "$_LOOM_FORGE_HELPERS_LIB_DIR/forge-merge-method.sh"
+
 # Merge a PR via the forge API.
-# Usage: forge_merge_pr NWO PR_NUMBER [EXPECTED_HEAD_SHA]
-# GitHub: PUT /repos/{nwo}/pulls/{n}/merge with merge_method=squash
-# Gitea: POST /repos/{owner}/{repo}/pulls/{n}/merge with Do=squash
+# Usage: forge_merge_pr NWO PR_NUMBER [EXPECTED_HEAD_SHA] [MERGE_METHOD]
+# GitHub: PUT /repos/{nwo}/pulls/{n}/merge with merge_method=<MERGE_METHOD>
+# Gitea: POST /repos/{owner}/{repo}/pulls/{n}/merge with Do=<MERGE_METHOD>
+#
+# MERGE_METHOD (optional, #7754): one of "squash"/"merge"/"rebase". Defaults
+# to "squash" when omitted -- preserves this function's pre-#7754 behavior
+# for any caller that has not been updated to pass a detected method (e.g.
+# via forge_detect_merge_method). Callers that need to respect a target
+# repo's actual allowed strategies MUST pass this explicitly.
 #
 # EXPECTED_HEAD_SHA (optional, #5579): an optimistic-concurrency precondition —
 # the SHA the PR's head branch must currently match for the merge to proceed.
@@ -332,30 +345,36 @@ forge_split_nwo() {
 # ErrSHADoesNotMatch, which routers/api/v1/repo/pull.go maps to HTTP 409 with
 # message "head out of date".
 forge_merge_pr() {
-  local nwo="$1"
-  local pr_number="$2"
-  local expected_head_sha="${3:-}"
+  local nwo="$1" pr_number="$2"
+  local expected_head_sha="${3:-}" merge_method="${4:-squash}"
 
   if [[ "$FORGE_TYPE" == "gitea" ]]; then
     forge_split_nwo "$nwo"
     if [[ -n "$expected_head_sha" ]]; then
       gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-        -d "$(jq -nc --arg sha "$expected_head_sha" \
-          '{"Do":"squash","delete_branch_after_merge":false,"head_commit_id":$sha}')"
+        -d "$(jq -nc --arg method "$merge_method" --arg sha "$expected_head_sha" \
+          '{"Do":$method,"delete_branch_after_merge":false,"head_commit_id":$sha}')"
     else
       gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-        -d '{"Do":"squash","delete_branch_after_merge":false}'
+        -d "$(jq -nc --arg method "$merge_method" '{"Do":$method,"delete_branch_after_merge":false}')"
     fi
   else
+    # Routed through the #6074 permission ladder (#6752): a stale/scope-limited
+    # App installation token 403s this PUT with "Resource not accessible by
+    # integration", which is recoverable with a stronger credential -- the
+    # failure that killed the merge of PR #6751 on 2026-08-22. Every other
+    # failure (409 head-mismatch, "Base branch was modified", 405 merge in
+    # progress) carries no such signature and falls through unretried, so the
+    # callers' existing substring classifiers are unaffected.
     if [[ -n "$expected_head_sha" ]]; then
-      gh api "repos/$nwo/pulls/$pr_number/merge" \
+      forge_gh_perm_safe api "repos/$nwo/pulls/$pr_number/merge" \
         -X PUT \
-        -f merge_method=squash \
+        -f merge_method="$merge_method" \
         -f sha="$expected_head_sha" 2>&1
     else
-      gh api "repos/$nwo/pulls/$pr_number/merge" \
+      forge_gh_perm_safe api "repos/$nwo/pulls/$pr_number/merge" \
         -X PUT \
-        -f merge_method=squash 2>&1
+        -f merge_method="$merge_method" 2>&1
     fi
   fi
 }
@@ -526,11 +545,18 @@ forge_delete_branch() {
 }
 
 # Enable auto-merge on a PR.
-# Usage: forge_auto_merge NWO PR_NUMBER [EXPECTED_HEAD_SHA]
+# Usage: forge_auto_merge NWO PR_NUMBER [EXPECTED_HEAD_SHA] [MERGE_METHOD]
 # GitHub: GraphQL enablePullRequestAutoMerge mutation (pure API, no
 #         working-tree dependency — `gh pr merge --auto` does a local
 #         checkout that collides with worktrees owning the head branch).
 # Gitea: POST /repos/{owner}/{repo}/pulls/{n}/merge with merge_when_checks_succeed
+#
+# MERGE_METHOD (optional, #7754): one of "squash"/"merge"/"rebase" (GitHub is
+# uppercased to the GraphQL enum's SQUASH/MERGE/REBASE). Defaults to "squash"
+# when omitted -- preserves this function's pre-#7754 behavior for any caller
+# that has not been updated to pass a detected method (e.g. via
+# forge_detect_merge_method). Callers that need to respect a target repo's
+# actual allowed strategies MUST pass this explicitly.
 #
 # EXPECTED_HEAD_SHA (optional, #5579): same optimistic-concurrency precondition
 # as forge_merge_pr's — see that function's comment for the general rationale
@@ -548,17 +574,17 @@ forge_delete_branch() {
 forge_auto_merge() {
   local nwo="$1"
   local pr_number="$2"
-  local expected_head_sha="${3:-}"
+  local expected_head_sha="${3:-}" merge_method="${4:-squash}"
 
   if [[ "$FORGE_TYPE" == "gitea" ]]; then
     forge_split_nwo "$nwo"
     if [[ -n "$expected_head_sha" ]]; then
       gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-        -d "$(jq -nc --arg sha "$expected_head_sha" \
-          '{"Do":"squash","merge_when_checks_succeed":true,"delete_branch_after_merge":true,"head_commit_id":$sha}')"
+        -d "$(jq -nc --arg method "$merge_method" --arg sha "$expected_head_sha" \
+          '{"Do":$method,"merge_when_checks_succeed":true,"delete_branch_after_merge":true,"head_commit_id":$sha}')"
     else
       gitea_api POST "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/merge" \
-        -d '{"Do":"squash","merge_when_checks_succeed":true,"delete_branch_after_merge":true}'
+        -d "$(jq -nc --arg method "$merge_method" '{"Do":$method,"merge_when_checks_succeed":true,"delete_branch_after_merge":true}')"
     fi
   else
     # Resolve PR node_id (required by GraphQL mutation).
@@ -566,31 +592,51 @@ forge_auto_merge() {
     node_id=$(gh api "repos/$nwo/pulls/$pr_number" --jq '.node_id' 2>/dev/null) || return 1
     [[ -z "$node_id" ]] && return 1
 
+    # The mutation (a WRITE) goes through the #6074 permission ladder (#6752),
+    # like the native `loom-daemon forge auto-merge` this shell path stands in
+    # for; the node_id lookup above is a read and needs no escalation.
+    # GraphQL's PullRequestMergeMethod enum is uppercase (MERGE/SQUASH/REBASE,
+    # #7754) -- uppercased inline below rather than via a separate variable.
     if [[ -n "$expected_head_sha" ]]; then
       local mutation_with_oid='mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!, $expectedHeadOid: GitObjectID) { enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid}) { pullRequest { number autoMergeRequest { enabledAt } } } }'
 
-      gh api graphql \
+      forge_gh_perm_safe api graphql \
         -f "query=$mutation_with_oid" \
         -F "pullRequestId=$node_id" \
-        -F "mergeMethod=SQUASH" \
+        -F "mergeMethod=$(printf '%s' "$merge_method" | tr '[:lower:]' '[:upper:]')" \
         -F "expectedHeadOid=$expected_head_sha" 2>/dev/null
     else
       local mutation='mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!) { enablePullRequestAutoMerge(input: {pullRequestId: $pullRequestId, mergeMethod: $mergeMethod}) { pullRequest { number autoMergeRequest { enabledAt } } } }'
 
-      gh api graphql \
+      forge_gh_perm_safe api graphql \
         -f "query=$mutation" \
         -F "pullRequestId=$node_id" \
-        -F "mergeMethod=SQUASH" 2>/dev/null
+        -F "mergeMethod=$(printf '%s' "$merge_method" | tr '[:lower:]' '[:upper:]')" 2>/dev/null
     fi
   fi
 }
 
 # --- CI Status Helpers ---
 
+# Distinguished exit code forge_get_check_runs returns when the forge's own
+# response makes clear the failure is a genuine HTTP 404 ("no such
+# resource"), as opposed to any other failure (network blip, 5xx, auth,
+# rate-limit). Callers that poll this function (merge-pr.sh's
+# `_wait_for_checks_then_sync_merge()` and its UNSTABLE-fallback sibling) use
+# this to tell "this repo has no check-runs to wait for" (e.g. GitHub Actions
+# disabled, #6389) apart from a transient fetch failure that should keep
+# polling. Any other nonzero return remains the generic "transient failure"
+# signal (return 1) so existing bounded-poll behavior is unchanged.
+FORGE_CHECK_RUNS_RC_NOT_FOUND=44
+
 # Get CI check runs for a commit.
 # Usage: forge_get_check_runs NWO COMMIT_SHA
 # GitHub: GET /repos/{nwo}/commits/{sha}/check-runs
 # Gitea: GET /repos/{owner}/{repo}/commits/{sha}/statuses (mapped to check-run shape)
+#
+# Return codes: 0 success (JSON on stdout); $FORGE_CHECK_RUNS_RC_NOT_FOUND
+# (44) on a confirmed HTTP 404 (GitHub only — see below); 1 for any other
+# failure.
 forge_get_check_runs() {
   local nwo="$1"
   local commit="$2"
@@ -622,6 +668,13 @@ forge_get_check_runs() {
       }]
     }'
   else
+    # Capture stdout and stderr into separate temp files so a non-2xx
+    # response's HTTP status (which `gh api` reports only on stderr, as
+    # "... (HTTP <code>)") can be inspected without disturbing the JSON
+    # payload on success (#6389).
+    local out_file err_file rc=0
+    out_file=$(mktemp)
+    err_file=$(mktemp)
     gh api "repos/$nwo/commits/$commit/check-runs" \
       --header "Accept: application/vnd.github+json" \
       --jq '{
@@ -632,7 +685,18 @@ forge_get_check_runs() {
           conclusion: .conclusion,
           html_url: .html_url
         }]
-      }' 2>/dev/null
+      }' >"$out_file" 2>"$err_file" || rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+      if grep -q "HTTP 404" "$err_file" 2>/dev/null; then
+        rm -f "$out_file" "$err_file"
+        return "$FORGE_CHECK_RUNS_RC_NOT_FOUND"
+      fi
+      rm -f "$out_file" "$err_file"
+      return 1
+    fi
+    cat "$out_file"
+    rm -f "$out_file" "$err_file"
   fi
 }
 
@@ -943,6 +1007,18 @@ is_rate_limit_error() {
 # Every other failure -- including a 403 that is a genuine permission
 # misconfiguration on a personal token, or a 404, or a rate limit -- falls
 # straight through unretried, exactly as before.
+#
+# #6752 widened the ladder from "`gh` invocations" to "any command whose
+# credential comes from the environment". The merge itself was the hole: on
+# 2026-08-22 `merge-pr.sh --auto` on PR #6751 died with the exact
+# integration-403 above, because BOTH of its merge writes bypassed this ladder
+# -- the native `loom-daemon forge auto-merge` (its own Rust code path) and the
+# shell `forge_merge_pr` REST PUT. The orchestrator recovered by hand with
+# `unset GH_CONFIG_DIR`, i.e. rung 3, done manually. `forge_cmd_perm_safe`
+# below is the same ladder with the `gh` literal lifted out, so the native
+# subcommand escalates through the identical rungs (`loom-daemon forge` shells
+# out to `gh`, so it reads the same GH_TOKEN/GH_CONFIG_DIR the rungs swap);
+# `forge_gh_perm_safe` is now just its `gh`-prefixed spelling.
 
 # is_app_permission_error <text> -> 0 when the text carries GitHub's
 # App-installation permission-scope rejection. Matched on the distinctive
@@ -1095,46 +1171,62 @@ _forge_gh_app_fresh_token() {
   printf '%s' "$token"
 }
 
-# _forge_gh_attempt <mode> <token> <stdout_file> <stderr_file> <gh args...>
-# Runs one rung of the ladder. `env` (not a bash var-assignment prefix) does
-# the credential swap so the override is unambiguously in the child's
-# environment and nowhere else -- this shell's own env is never mutated.
-_forge_gh_attempt() {
+# _forge_cmd_attempt <mode> <token> <stdout_file> <stderr_file> <cmd> [args...]
+# Runs one rung of the ladder for an ARBITRARY command. `env` (not a bash
+# var-assignment prefix) does the credential swap so the override is
+# unambiguously in the child's environment and nowhere else -- this shell's own
+# env is never mutated.
+#
+# The command need not be `gh` itself (#6752): `loom-daemon forge …` shells out
+# to `gh` internally and therefore resolves its credential from exactly the same
+# `GH_TOKEN` / `GH_CONFIG_DIR` / `GITHUB_TOKEN` environment, so swapping those
+# for the child escalates the native path identically to the shell path.
+_forge_cmd_attempt() {
   local mode="$1" token="$2" out_file="$3" err_file="$4"
   shift 4
   local rc=0
   case "$mode" in
     ambient)
-      gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      "$@" >"$out_file" 2>"$err_file" || rc=$?
       ;;
     app-token)
-      env GH_TOKEN="$token" gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      env GH_TOKEN="$token" "$@" >"$out_file" 2>"$err_file" || rc=$?
       ;;
     personal-token)
-      env -u GITHUB_TOKEN -u GH_CONFIG_DIR GH_TOKEN="$token" gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      env -u GITHUB_TOKEN -u GH_CONFIG_DIR GH_TOKEN="$token" "$@" >"$out_file" 2>"$err_file" || rc=$?
       ;;
     personal-ambient)
-      env -u GH_TOKEN -u GITHUB_TOKEN -u GH_CONFIG_DIR gh "$@" >"$out_file" 2>"$err_file" || rc=$?
+      env -u GH_TOKEN -u GITHUB_TOKEN -u GH_CONFIG_DIR "$@" >"$out_file" 2>"$err_file" || rc=$?
+      ;;
+    owner-config)
+      # `token` carries a directory path here, not a token -- points `gh` at
+      # an owner-partitioned GH_CONFIG_DIR (#446) instead of swapping the
+      # credential in-process. GH_TOKEN/GITHUB_TOKEN are dropped so they
+      # cannot outrank the directory's own stored credential the same way
+      # personal-token/personal-ambient already drop them for their swaps.
+      env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$token" gh "$@" >"$out_file" 2>"$err_file" || rc=$?
       ;;
   esac
   return "$rc"
 }
 
-# Run `gh <args...>`, escalating the credential on -- and ONLY on -- an
-# App-installation permission-scope 403 (#6074). Every write call site that a
-# Builder depends on (PR create, issue comment, label edit) routes through
-# this.
+# Run `<cmd> <args...>`, escalating the credential on -- and ONLY on -- an
+# App-installation permission-scope 403 (#6074, generalized beyond `gh` by
+# #6752). The command's own exit code is preserved verbatim on every rung, so a
+# caller that assigns meaning to specific codes (`loom-daemon forge auto-merge`
+# exits 3 = forge declined, 4 = head-SHA mismatch) still sees them: neither
+# carries the integration-403 signature, so neither is ever retried.
 #
-# Usage: forge_gh_perm_safe pr create --title T --body B ...
-# Stdout: the wrapped call's stdout (e.g. the new PR's URL).
-# Returns the last attempt's exit code; stderr carries the last attempt's
-# error text so an outer rate-limit check still sees what `gh` actually said.
-forge_gh_perm_safe() {
+# Usage: forge_cmd_perm_safe loom-daemon forge auto-merge 42 --method squash
+# Stdout: the wrapped call's stdout.
+# Returns the last attempt's exit code; stderr carries the last attempt's error
+# text so an outer rate-limit/head-mismatch check still sees what it said.
+forge_cmd_perm_safe() {
   local out_file err_file rc=0
   out_file=$(mktemp)
   err_file=$(mktemp)
 
-  _forge_gh_attempt ambient "" "$out_file" "$err_file" "$@" || rc=$?
+  _forge_cmd_attempt ambient "" "$out_file" "$err_file" "$@" || rc=$?
 
   if [[ $rc -ne 0 ]] && is_app_permission_error "$(cat "$err_file" "$out_file" 2>/dev/null)"; then
     local nwo token
@@ -1144,7 +1236,7 @@ forge_gh_perm_safe() {
     if token=$(_forge_gh_app_fresh_token "$nwo"); then
       echo "forge: 403 'not accessible by integration' — retrying with a freshly minted installation token (#6074)" >&2
       rc=0
-      _forge_gh_attempt app-token "$token" "$out_file" "$err_file" "$@" || rc=$?
+      _forge_cmd_attempt app-token "$token" "$out_file" "$err_file" "$@" || rc=$?
     fi
 
     # Rung 3: a personal token. Only worth trying when it is actually a
@@ -1154,17 +1246,198 @@ forge_gh_perm_safe() {
       if [[ -n "${LOOM_PERSONAL_GH_TOKEN:-}" ]]; then
         echo "forge: still 403 after a fresh mint — falling back to LOOM_PERSONAL_GH_TOKEN (#6074)" >&2
         rc=0
-        _forge_gh_attempt personal-token "$LOOM_PERSONAL_GH_TOKEN" "$out_file" "$err_file" "$@" || rc=$?
+        _forge_cmd_attempt personal-token "$LOOM_PERSONAL_GH_TOKEN" "$out_file" "$err_file" "$@" || rc=$?
       elif [[ -n "${GH_CONFIG_DIR:-}${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
         echo "forge: still 403 after a fresh mint — falling back to the ambient personal gh credential (#6074)" >&2
         rc=0
-        _forge_gh_attempt personal-ambient "" "$out_file" "$err_file" "$@" || rc=$?
+        _forge_cmd_attempt personal-ambient "" "$out_file" "$err_file" "$@" || rc=$?
       fi
     fi
   fi
 
   local out err
   out=$(cat "$out_file" 2>/dev/null || true)
+  err=$(cat "$err_file" 2>/dev/null || true)
+  rm -f "$out_file" "$err_file"
+
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out"
+  fi
+  if [[ $rc -ne 0 && -n "$err" ]]; then
+    printf '%s\n' "$err" >&2
+  fi
+  return "$rc"
+}
+
+# Run `gh <args...>` through the same ladder (#6074). Every write call site that
+# a Builder depends on (PR create, issue comment, label edit) routes through
+# this; it is a thin `gh`-prefixed spelling of forge_cmd_perm_safe, so the two
+# stay behaviourally identical by construction.
+#
+# Usage: forge_gh_perm_safe pr create --title T --body B ...
+# Stdout: the wrapped call's stdout (e.g. the new PR's URL).
+# Returns the last attempt's exit code; stderr carries the last attempt's
+# error text so an outer rate-limit check still sees what `gh` actually said.
+forge_gh_perm_safe() {
+  forge_cmd_perm_safe gh "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Wrong-repo `GH_CONFIG_DIR` escalation (2am#446).
+#
+# Incident, 2026-08-21 (`/loom:sweep 438` on `loom-worker-2`): the dispatch
+# environment's `GH_CONFIG_DIR` pointed at a DIFFERENT owner's flat
+# `<workspace>/.loom/gh-config/` (the `loom` daemon-workspace checkout's own
+# credential, minted for `rjwalters/*`), not this repo's. Every `gh` call
+# against `2AMLogic/2am` failed with one of:
+#
+#   GraphQL: Could not resolve to a Repository with the name '2AMLogic/2am'. (repository)
+#   gh: Not Found (HTTP 404)
+#
+# This is a DIFFERENT failure from #6074's cached-permission-window 403
+# (`is_app_permission_error`, above) -- the credential here is not merely
+# missing a scope, it is scoped to the wrong repository entirely, so rung 1
+# (ambient) 404s/GraphQL-fails outright and #6074's ladder never fires (its
+# classifier doesn't match either signature above). `sweep-lease-renew.sh`'s
+# renewal loop failed on every cycle as a direct result, and
+# `resolve-tier-model.sh` (which does not source this file at all before this
+# fix) silently fell through to its tier-3 default with a misleading "likely
+# API quota" diagnosis.
+#
+# The fix borrows the SAME mechanism FLEET.md's "Private-repo clones over ssh"
+# contract already documents for a human ssh session on a locked keychain: a
+# GitHub-App daemon workspace maintains its flat `.loom/gh-config/` credential
+# AND a sibling directory partitioned per owner/org,
+# `<daemon_workspace>/.loom/gh-config-by-owner/<OWNER>/` -- so the correctly
+# scoped credential usually already exists on disk right next to the wrong one
+# that got exported. `_forge_owner_gh_config_dir` derives that sibling path
+# from the CURRENT (wrong) `GH_CONFIG_DIR` itself -- no `hosts.yml` lookup, no
+# hardcoded `loom` -- by recognizing the flat directory's own
+# `<X>/.loom/gh-config` shape and substituting `gh-config-by-owner/<owner>`
+# for its final segment.
+
+# is_repo_mismatch_error <text> -> 0 when the text carries one of the two
+# confirmed wrong-repo signatures above: GitHub's GraphQL "could not resolve
+# to a Repository" rejection (the credential's installation has no access to
+# the name/owner at all), or a REST 404 (`gh`'s own "HTTP 404" rendering,
+# reusing the same `http 404`/`not found` idiom
+# `forge_get_required_status_check_contexts`'s Gitea branch already uses
+# elsewhere in this file). Deliberately text-only and therefore loose on the
+# REST side -- a genuinely missing issue/PR on a CORRECTLY scoped repo also
+# 404s this way, so callers must treat a positive match as "worth trying a
+# different credential for," not as certain proof of a repo mismatch. That is
+# safe here because every caller of `forge_gh_repo_safe` only ever retries the
+# SAME read/write under a DIFFERENT credential and returns the last attempt's
+# real error on failure -- an over-firing match costs one extra (fast, local)
+# `gh` call, never a wrong result.
+is_repo_mismatch_error() {
+  local text
+  text=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$text" in
+    *"could not resolve to a repository"*) return 0 ;;
+    *"http 404"*) return 0 ;;
+  esac
+  return 1
+}
+
+# _forge_owner_from_remote -> echoes just the OWNER segment of
+# `git remote get-url origin`, reusing `_forge_nwo_from_remote`'s zero-API-call
+# parse (never `forge_get_repo_nwo`'s `gh repo view` -- that's GraphQL-backed,
+# so it would just fail the same way the credential this function exists to
+# route around already failed, per #4659's lesson).
+_forge_owner_from_remote() {
+  local nwo
+  nwo=$(_forge_nwo_from_remote) || return 1
+  [[ "$nwo" == */* ]] || return 1
+  printf '%s' "${nwo%%/*}"
+}
+
+# _forge_owner_gh_config_dir <owner> -> echoes the owner-partitioned
+# credential directory this host's daemon maintains for <owner>, IF one is
+# discoverable; returns 1 (nothing on stdout) otherwise so the caller falls
+# through to the `env -u GH_CONFIG_DIR` rung instead of guessing a path.
+#
+# Two sources, in order:
+#   1. LOOM_GH_CONFIG_BY_OWNER_ROOT (env override / test seam) -- the
+#      `.loom/gh-config-by-owner/` directory itself, named directly.
+#   2. The CURRENT `GH_CONFIG_DIR`, when it matches the flat
+#      `<daemon_workspace>/.loom/gh-config` shape the wrong-repo failure mode
+#      actually produces (FLEET.md's contract, and #4458's "Delivery
+#      mechanism") -- the owner-partitioned sibling is derived from it
+#      directly, so this works on ANY daemon_workspace checkout name, not
+#      just `loom`.
+# Either way, the directory must actually exist on disk -- a derived path
+# that isn't there is exactly the "doesn't exist" case the caller's further
+# `env -u GH_CONFIG_DIR` fallback exists for.
+_forge_owner_gh_config_dir() {
+  local owner="$1" root="" dir=""
+  [[ -n "$owner" ]] || return 1
+
+  if [[ -n "${LOOM_GH_CONFIG_BY_OWNER_ROOT:-}" ]]; then
+    dir="${LOOM_GH_CONFIG_BY_OWNER_ROOT%/}/$owner"
+  elif [[ -n "${GH_CONFIG_DIR:-}" ]]; then
+    local current="${GH_CONFIG_DIR%/}"
+    case "$current" in
+      */.loom/gh-config)
+        root="${current%/.loom/gh-config}"
+        dir="$root/.loom/gh-config-by-owner/$owner"
+        ;;
+    esac
+  fi
+
+  [[ -n "$dir" && -d "$dir" ]] || return 1
+  printf '%s' "$dir"
+}
+
+# Run `gh <args...>`, escalating credentials on a confirmed wrong-repo
+# `GH_CONFIG_DIR` (2am#446), ON TOP OF `forge_gh_perm_safe`'s existing #6074
+# ladder (tried first, unchanged) -- so an app-permission 403 still recovers
+# exactly as it did before this function existed.
+#
+# Only fires when `GH_CONFIG_DIR` is actually set: with no `GH_CONFIG_DIR` to
+# begin with, there is nothing this rung can route AROUND, and retrying with
+# `env -u GH_CONFIG_DIR` would be a verbatim replay of rung 1 -- the same
+# "skip an escalation that can't possibly differ" rule `forge_gh_perm_safe`'s
+# own rung 3 already applies to itself.
+#
+# Usage: forge_gh_repo_safe pr create --title T --body B ...
+# Stdout: the successful attempt's stdout. Returns the last attempt's exit
+# code; stderr carries the last attempt's error text.
+forge_gh_repo_safe() {
+  local out_file err_file rc=0
+  out_file=$(mktemp)
+  err_file=$(mktemp)
+
+  local out
+  out=$(forge_gh_perm_safe "$@" 2>"$err_file") || rc=$?
+
+  if [[ $rc -ne 0 && -n "${GH_CONFIG_DIR:-}" ]]; then
+    local first_err combined
+    first_err=$(cat "$err_file" 2>/dev/null || true)
+    combined=$(printf '%s\n%s' "$first_err" "$out")
+
+    if is_repo_mismatch_error "$combined"; then
+      local owner owner_dir escalated=false
+      owner=$(_forge_owner_from_remote 2>/dev/null || echo "")
+
+      if [[ -n "$owner" ]] && owner_dir=$(_forge_owner_gh_config_dir "$owner" 2>/dev/null); then
+        echo "forge: wrong-repo credential signature — retrying against the owner-partitioned directory $owner_dir (2am#446)" >&2
+        rc=0
+        _forge_cmd_attempt owner-config "$owner_dir" "$out_file" "$err_file" "$@" || rc=$?
+        [[ $rc -eq 0 ]] && escalated=true
+        out=$(cat "$out_file" 2>/dev/null || true)
+      fi
+
+      if [[ "$escalated" != "true" ]]; then
+        echo "forge: falling back to env -u GH_CONFIG_DIR (2am#446)" >&2
+        rc=0
+        _forge_cmd_attempt personal-ambient "" "$out_file" "$err_file" gh "$@" || rc=$?
+        out=$(cat "$out_file" 2>/dev/null || true)
+      fi
+    fi
+  fi
+
+  local err
   err=$(cat "$err_file" 2>/dev/null || true)
   rm -f "$out_file" "$err_file"
 
@@ -1311,6 +1584,28 @@ forge_gh_remove_label_rl_safe() {
 # Usage: forge_gh_create_issue_rl_safe NWO TITLE BODY [LABEL...]
 # Stdout: the new issue's URL (both paths).
 # Returns 0 on success (either path), 1 on failure (message on stderr).
+#
+# NEVER returns silently (#8289). "No URL and no error text" was a reachable
+# outcome here, reproduced with a stubbed forge on 2026-09-19 in three shapes,
+# all of which leave the caller unable to tell a refusal from a crash:
+#   1. `gh issue create` exits non-zero with EMPTY stderr (killed by a signal,
+#      OOM, a wrapper that exits without writing) -> `echo "$err" >&2` printed
+#      one BLANK LINE and returned 1.
+#   2. it exits non-zero with its error text on STDOUT instead -> that text
+#      was captured into $out and dropped on the failure path; stderr empty.
+#   3. it exits ZERO with empty stdout -> the caller was handed an empty
+#      "URL" and a success return, i.e. a filing that silently did nothing.
+# All three now land on one always-populated error line, which quotes the
+# forge's own text when there is any and synthesizes one (exit code + stray
+# stdout) when there is not. (3) returns 1 rather than a bogus success, and
+# the message says the issue MAY exist: "created but URL not reported" and
+# "not created" are indistinguishable from here, so a caller must LOOK before
+# retrying rather than blind-retry into a real duplicate.
+#
+# Implemented as two MODIFIED lines, no added ones, on purpose: this file is
+# frozen by scripts/check-file-size-budget.sh, and a "never silent" guarantee
+# belongs at the point of failure, not in a sibling module the one caller
+# would have to remember to route through.
 forge_gh_create_issue_rl_safe() {
   local nwo="$1" title="$2" body="$3"
   shift 3
@@ -1334,7 +1629,11 @@ forge_gh_create_issue_rl_safe() {
   err=$(cat "$err_file" 2>/dev/null || true)
   rm -f "$err_file"
 
-  if [[ $rc -eq 0 ]]; then
+  # The `-n "$out"` half is load-bearing (#8289): exit 0 with empty stdout is
+  # NOT a success to pass on -- it hands the caller an empty "URL" and a zero
+  # return, i.e. a filing that silently did nothing. Falling through instead
+  # lands on the final, always-populated error line below.
+  if [[ $rc -eq 0 && -n "${out//[[:space:]]/}" ]]; then
     printf '%s\n' "$out"
     return 0
   fi
@@ -1363,7 +1662,13 @@ forge_gh_create_issue_rl_safe() {
     return 1
   fi
 
-  echo "$err" >&2
+  # The forge's own words when it gave any; otherwise a message synthesized
+  # from what we DO know -- exit code, plus whatever it wrote to stdout (an
+  # error routed to the wrong stream, or the empty "URL" of the exit-0 case
+  # above). `$err` is command-substituted, so a stderr of nothing but a
+  # newline arrives here as the empty string and takes the default too. This
+  # line is never allowed to print nothing: that WAS the silent exit (#8289).
+  echo "${err:-gh issue create produced no error text (exit $rc) and no usable issue URL (stdout: ${out:-<empty>}) -- killed, or a wrapper that failed silently? The issue MAY exist; check the forge before re-filing rather than blind-retrying.}" >&2
   return 1
 }
 
@@ -1384,20 +1689,227 @@ forge_get_pr_comments() {
   fi
 }
 
-# Get PR reviews.
-# Usage: forge_get_pr_reviews NWO PR_NUMBER
+# --- Formal review / inline review-comment ingestion (#7647) ----------------
+#
+# The three helpers below are the ONLY supported way to read a PR's formal
+# review state. They exist because the pre-#7647 `forge_get_pr_reviews` made a
+# single unpaginated request, emitted `.[].body` only, and swallowed every
+# error as empty output — three separate ways to conclude "no blockers" from a
+# read that never established it. That shape is what let a Judge approve
+# kicad-tools#5369 over an unresolved same-head CHANGES_REQUESTED review it had
+# never read.
+#
+# Contract for all three:
+#   - FULL pagination. A truncated read is a failure, never a short result.
+#   - COMPLETE records (NDJSON, one compact JSON object per line) — never bare
+#     bodies: review id, state, commit/head association and timestamps are what
+#     make a finding auditable against the current tree.
+#   - FAIL CLOSED. Any read error returns non-zero with NO output. Callers must
+#     branch on the exit code; empty stdout on its own never means "clean".
+#
+# Old bodies-only behaviour is one jq away for any caller that genuinely wants
+# it: `forge_get_pr_reviews "$nwo" "$n" | jq -r 'select(.body != "") | .body'`.
+
+# jq filter shared by both forges' review reads. Emits one compact JSON record
+# per review. Gitea spells two states differently (REQUEST_CHANGES / COMMENT);
+# they are normalized to GitHub's vocabulary so callers reconcile against one
+# enum. Any other/unrecognized state is passed through verbatim so a caller can
+# fail closed on it rather than silently treating it as benign.
+_FORGE_REVIEW_RECORD_JQ='.[] | {
+  id: (.id // 0),
+  state: ((.state // "UNKNOWN") | ascii_upcase
+          | if . == "REQUEST_CHANGES" then "CHANGES_REQUESTED"
+            elif . == "COMMENT" then "COMMENTED"
+            else . end),
+  commit_id: (.commit_id // ""),
+  submitted_at: (.submitted_at // ""),
+  author: (.user.login // ""),
+  body: (.body // "")
+} | tojson'
+
+# jq filter for inline (diff-anchored) review comments. `position == null` is
+# GitHub for "this comment is anchored to a line that no longer exists in the
+# current diff" — i.e. an OUTDATED finding, which needs explicit disposition,
+# not automatic dismissal.
+_FORGE_REVIEW_COMMENT_RECORD_JQ='.[] | {
+  id: (.id // 0),
+  review_id: (.pull_request_review_id // 0),
+  in_reply_to_id: (.in_reply_to_id // 0),
+  commit_id: (.commit_id // ""),
+  original_commit_id: (.original_commit_id // ""),
+  path: (.path // ""),
+  outdated: (.position == null),
+  author: (.user.login // ""),
+  body: (.body // "")
+} | tojson'
+
+# Get a PR's formal reviews as complete, fully-paginated NDJSON records.
+#
+# Usage: forge_get_pr_reviews NWO PR_NUMBER [GH_CMD]
+# Output: one JSON object per line —
+#   {"id":…,"state":"APPROVED|CHANGES_REQUESTED|COMMENTED|DISMISSED|PENDING|…",
+#    "commit_id":"…","submitted_at":"…","author":"…","body":"…"}
+# Exit: 0 on a complete read (including a genuinely empty review list),
+#       non-zero on ANY read/pagination failure (fail closed).
+#
 # Both forges: GET /repos/{nwo}/pulls/{n}/reviews
+# Always plain `gh` (never a cache wrapper): this read gates a verdict, and the
+# review that landed 20 seconds ago is exactly the one a cache would hide.
 forge_get_pr_reviews() {
   local nwo="$1"
   local pr_number="$2"
+  local gh_cmd="${3:-gh}"
 
   if [[ "$FORGE_TYPE" == "gitea" ]]; then
     forge_split_nwo "$nwo"
-    gitea_api GET "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/reviews" 2>/dev/null | \
-      jq -r '.[].body // empty'
-  else
-    gh api "repos/$nwo/pulls/$pr_number/reviews" --jq '.[].body // empty' 2>/dev/null || echo ""
+    _forge_gitea_paginate "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/reviews" \
+      "$_FORGE_REVIEW_RECORD_JQ"
+    return $?
   fi
+
+  "$gh_cmd" api "repos/$nwo/pulls/$pr_number/reviews?per_page=100" --paginate \
+    --jq "$_FORGE_REVIEW_RECORD_JQ"
+}
+
+# Get a PR's INLINE review comments (diff-anchored), fully paginated.
+#
+# Usage: forge_get_pr_review_comments NWO PR_NUMBER [GH_CMD]
+# Output: one JSON object per line (see _FORGE_REVIEW_COMMENT_RECORD_JQ).
+# Exit: 0 on a complete read, non-zero on ANY failure (fail closed).
+#
+# GitHub: GET /repos/{nwo}/pulls/{n}/comments — a DIFFERENT endpoint from
+#   /issues/{n}/comments (general PR conversation). Both exist; reading only the
+#   issue-comments one is precisely the #7647 blind spot.
+# Gitea: has no flat per-PR inline-comment endpoint, so the comments are
+#   collected per review (GET /pulls/{n}/reviews/{id}/comments).
+forge_get_pr_review_comments() {
+  local nwo="$1"
+  local pr_number="$2"
+  local gh_cmd="${3:-gh}"
+
+  if [[ "$FORGE_TYPE" == "gitea" ]]; then
+    forge_split_nwo "$nwo"
+    local review_ids review_id
+    review_ids=$(forge_get_pr_reviews "$nwo" "$pr_number" | jq -r '.id') || return 1
+    local id
+    for id in $review_ids; do
+      [[ "$id" =~ ^[0-9]+$ ]] || return 1
+      review_id="$id"
+      _forge_gitea_paginate \
+        "repos/$FORGE_OWNER/$FORGE_REPO/pulls/$pr_number/reviews/$review_id/comments" \
+        "$_FORGE_REVIEW_COMMENT_RECORD_JQ" || return 1
+    done
+    return 0
+  fi
+
+  "$gh_cmd" api "repos/$nwo/pulls/$pr_number/comments?per_page=100" --paginate \
+    --jq "$_FORGE_REVIEW_COMMENT_RECORD_JQ"
+}
+
+# Get a PR's review THREADS with their actual resolution state.
+#
+# Usage: forge_get_pr_review_threads NWO PR_NUMBER [GH_CMD]
+# Output: one JSON object per line —
+#   {"id":"…","is_resolved":true|false,"is_outdated":true|false,
+#    "path":"…","author":"…","body":"…"}
+# Exit: 0 on a complete read, 2 when the forge has no supported
+#       thread-resolution interface (caller must fall back and fail closed on
+#       the unknown resolution state — NOT treat it as resolved), 1 on failure.
+#
+# Resolution state is GraphQL-only on GitHub (REST exposes no `isResolved`), so
+# this is the one read here that cannot use the REST pool. `gh api graphql` dies
+# under GraphQL exhaustion — hence exit 1/2 being explicitly distinguishable so
+# the caller degrades to "resolution unknown" rather than "nothing unresolved".
+forge_get_pr_review_threads() {
+  local nwo="$1"
+  local pr_number="$2"
+  local gh_cmd="${3:-gh}"
+
+  if [[ "$FORGE_TYPE" != "github" ]]; then
+    return 2
+  fi
+
+  forge_split_nwo "$nwo"
+
+  local query='query($owner:String!,$repo:String!,$pr:Int!,$cursor:String){
+    repository(owner:$owner,name:$repo){
+      pullRequest(number:$pr){
+        reviewThreads(first:100,after:$cursor){
+          pageInfo{hasNextPage endCursor}
+          nodes{
+            id isResolved isOutdated
+            comments(first:1){nodes{path author{login} body}}
+          }
+        }
+      }
+    }
+  }'
+
+  local cursor="" page=0 response threads has_next
+  while :; do
+    page=$((page + 1))
+    if [[ $page -gt 50 ]]; then
+      echo "forge_get_pr_review_threads: exceeded 50 pages — refusing to report a truncated thread list" >&2
+      return 1
+    fi
+
+    if [[ -z "$cursor" ]]; then
+      response=$("$gh_cmd" api graphql -f query="$query" \
+        -F owner="$FORGE_OWNER" -F repo="$FORGE_REPO" -F pr="$pr_number") || return 1
+    else
+      response=$("$gh_cmd" api graphql -f query="$query" \
+        -F owner="$FORGE_OWNER" -F repo="$FORGE_REPO" -F pr="$pr_number" \
+        -F cursor="$cursor") || return 1
+    fi
+
+    threads=$(printf '%s' "$response" \
+      | jq -c '.data.repository.pullRequest.reviewThreads.nodes[] | {
+          id: .id,
+          is_resolved: (.isResolved // false),
+          is_outdated: (.isOutdated // false),
+          path: (.comments.nodes[0].path // ""),
+          author: (.comments.nodes[0].author.login // ""),
+          body: (.comments.nodes[0].body // "")
+        }') || return 1
+    [[ -n "$threads" ]] && printf '%s\n' "$threads"
+
+    has_next=$(printf '%s' "$response" \
+      | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || return 1
+    [[ "$has_next" != "true" ]] && break
+    cursor=$(printf '%s' "$response" \
+      | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor') || return 1
+    [[ -z "$cursor" || "$cursor" == "null" ]] && return 1
+  done
+
+  return 0
+}
+
+# Page a Gitea list endpoint to exhaustion, applying JQ_FILTER to each page.
+# Usage: _forge_gitea_paginate PATH JQ_FILTER
+# Exit: 0 on a complete read, non-zero on any page failure or page-cap trip.
+_forge_gitea_paginate() {
+  local path="$1"
+  local jq_filter="$2"
+  local limit=50 page=0 batch count sep
+
+  while :; do
+    page=$((page + 1))
+    if [[ $page -gt 50 ]]; then
+      echo "_forge_gitea_paginate: exceeded 50 pages for $path — refusing to report a truncated list" >&2
+      return 1
+    fi
+    sep="?"
+    [[ "$path" == *"?"* ]] && sep="&"
+    batch=$(gitea_api GET "${path}${sep}limit=${limit}&page=${page}") || return 1
+    count=$(printf '%s' "$batch" | jq 'length') || return 1
+    [[ "$count" =~ ^[0-9]+$ ]] || return 1
+    if [[ "$count" -gt 0 ]]; then
+      printf '%s' "$batch" | jq -r "$jq_filter" || return 1
+    fi
+    [[ "$count" -lt "$limit" ]] && break
+  done
+
+  return 0
 }
 
 # Get branch-protection required status check contexts for a branch.
@@ -1414,13 +1926,50 @@ forge_get_pr_reviews() {
 # set, the immediate-merge path is taken; otherwise the existing UNSTABLE
 # refusal is preserved. See issue #3486.
 #
-# GitHub: GraphQL query against
-#   `repository(owner, name).ref(qualifiedName: "refs/heads/<branch>")
-#    .branchProtectionRule.requiredStatusCheckContexts`.
-#   Branches with no protection rule, or whose rule has no required contexts,
+# GitHub: TWO independent sources, unioned — GitHub has two separate backing
+#   systems for branch protection and a required check configured in one is
+#   invisible to the other's API:
+#
+#   1. **Rulesets** (the modern system): `GET /repos/{owner}/{repo}/rules/branches/{branch}`
+#      — the *effective* rules for the branch, merged across repository- and
+#      organization-level rulesets. Rulesets whose enforcement is `evaluate` or
+#      `disabled` are excluded by GitHub, which is exactly right: a rule that
+#      cannot block a merge must not make us refuse one.
+#   2. **Classic branch protection** (the legacy system): the GraphQL
+#      `ref.branchProtectionRule.requiredStatusCheckContexts` field.
+#
+#   Querying only (2) — which this helper did until #8103 — silently reports
+#   "no required checks" on any repo governed by rulesets. Verified live on
+#   rjwalters/loom (2026-09-17): its `main` is governed by an ACTIVE ruleset
+#   (id 8809610, `pull_request` + `required_linear_history` + `deletion` +
+#   `non_fast_forward` rules), and the GraphQL query still returns
+#   `branchProtectionRule: null` while `GET .../rules/branches/main` returns
+#   all four rules. Left unfixed, adding a `required_status_checks` rule to
+#   that ruleset would have changed nothing for `merge-pr.sh --auto` (every
+#   autonomous Champion merge): the empty result keeps taking the
+#   "No-required-checks fallback (#3720)" path and merging over red required
+#   checks, with no error and no signal that the new protection is being
+#   ignored. GitHub's own merge button reads the ruleset directly and would
+#   have blocked — only the API-driven merge path was exposed.
+#
+#   Branches with neither source configured, or whose rules list no contexts,
 #   yield empty output (exit 0). This is the desired behavior — "no required
 #   checks" means every failing check is informational, which is the case the
-#   UNSTABLE-fallback wants to unblock.
+#   UNSTABLE-fallback wants to unblock. An EMPTY result from a source that
+#   SUCCEEDED is therefore still "no required checks", not a failure.
+#
+#   A lookup that ERRORS is distinct from that and exits nonzero (fail-closed),
+#   matching the Gitea path and this function's documented contract — and it
+#   fails closed when EITHER source errors, not only when both do. A 403/404/
+#   network failure on the ruleset endpoint combined with an empty (but
+#   successful) classic result is indistinguishable, at the call site, from a
+#   genuinely unprotected branch: it would emit an empty list and send
+#   `merge-pr.sh --auto` down the "No-required-checks fallback (#3720)" path —
+#   reproducing exactly the blind spot this function was rewritten to close.
+#   One source erroring is not evidence that the other's rules do not exist,
+#   but neither is it evidence that the erroring source has none; the callers
+#   in merge-pr.sh already treat a nonzero lookup as "refuse to merge," which
+#   is the correct disposition for an unknown.
 #
 # Gitea: GET /api/v1/repos/{owner}/{repo}/branch_protections/{name}. Gitea's
 #   branch-protection rule carries both `enable_status_check` (boolean toggle)
@@ -1508,27 +2057,29 @@ forge_get_required_status_check_contexts() {
 
   forge_split_nwo "$nwo"
 
-  local query='query($owner: String!, $name: String!, $ref: String!) {
-    repository(owner: $owner, name: $name) {
-      ref(qualifiedName: $ref) {
-        branchProtectionRule {
-          requiredStatusCheckContexts
-        }
-      }
-    }
-  }'
-
-  # `gh api graphql --jq` with a missing path field yields `null`; pipe through
-  # jq to flatten the optional contexts array into a newline-separated list.
-  # Each step is allowed to yield empty output without failing the helper —
-  # absent protection rule or empty contexts list both mean "no required checks".
-  "$gh_cmd" api graphql \
-    -f "query=$query" \
-    -F "owner=$FORGE_OWNER" \
-    -F "name=$FORGE_REPO" \
-    -F "ref=refs/heads/$branch" \
-    --jq '.data.repository.ref.branchProtectionRule.requiredStatusCheckContexts // [] | .[]' \
-    2>/dev/null || return 0
+  # Both queries are written as single lines rather than backslash-continued
+  # blocks: `defaults/scripts/lib/` is `contract` in scripts/shell-allowlist.txt,
+  # i.e. inside the portable pool `loom-daemon shell-budget --check` ratchets,
+  # and a continuation line is a code line there. Comments are free, so the
+  # explanation lives here instead of in the invocation.
+  #
+  # `--jq` yielding nothing is not an error in either query: `.[]?` over an
+  # empty rules array and a `null` branchProtectionRule both mean "this source
+  # configures no required checks". Only a nonzero `gh` exit — network failure,
+  # 403, 404 on the repo itself — is a lookup failure, and a failure on EITHER
+  # source fails the whole lookup closed: a surviving source's answer is a
+  # partial view, and "partial view of what is required" is not a safe input to
+  # a merge decision.
+  local ruleset_rc=0 classic_rc=0 ruleset_out="" classic_out=""
+  local query='query($owner: String!, $name: String!, $ref: String!) { repository(owner: $owner, name: $name) { ref(qualifiedName: $ref) { branchProtectionRule { requiredStatusCheckContexts } } } }'
+  ruleset_out="$("$gh_cmd" api "repos/${FORGE_OWNER}/${FORGE_REPO}/rules/branches/${branch}" --jq '.[]? | select(.type == "required_status_checks") | .parameters.required_status_checks[]?.context' 2>/dev/null)" || ruleset_rc=1
+  classic_out="$("$gh_cmd" api graphql -f "query=$query" -F "owner=$FORGE_OWNER" -F "name=$FORGE_REPO" -F "ref=refs/heads/$branch" --jq '.data.repository.ref.branchProtectionRule.requiredStatusCheckContexts // [] | .[]' 2>/dev/null)" || classic_rc=1
+  if [[ "$ruleset_rc" -ne 0 || "$classic_rc" -ne 0 ]]; then return 1; fi
+  # Union, order-preserving, de-duplicated: a context can legitimately be
+  # required by BOTH a ruleset and a classic rule, and the callers' `comm`
+  # set-difference needs each name once.
+  printf '%s\n%s\n' "$ruleset_out" "$classic_out" | awk 'NF && !seen[$0]++'
+  return 0
 }
 
 # Get repo NWO (name with owner).

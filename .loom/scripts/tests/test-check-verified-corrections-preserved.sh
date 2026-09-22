@@ -41,10 +41,14 @@ assert_eq() {
     fi
 }
 
+# assert_contains/assert_not_contains use a pure-bash substring match (no
+# forked printf|grep pipeline) so a transient fork/exec failure under
+# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
+# content mismatch (#7819, #7874).
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
     TESTS_RUN=$((TESTS_RUN + 1))
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if [[ "$haystack" == *"$needle"* ]]; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "  ${GREEN}PASS${NC}: $msg"
     else
@@ -237,6 +241,62 @@ assert_eq "2" "$RC" "(6a) Missing second argument -> exit 2 (usage error)"
 
 run_cvcp "$WORK_DIR/does-not-exist.md" "$WORK_DIR/case-new-good.md"
 assert_eq "2" "$RC" "(6b) Nonexistent old-body file -> exit 2 (usage error)"
+
+# --- Scenario 7: large section, byte-identical OLD/NEW -> exit 0 (#6768) --
+# Regression test for the SIGPIPE/pipefail false-positive: under
+# `set -euo pipefail`, a `grep -qFx | tr ...` pipeline (the pre-fix
+# implementation) can report a false FAIL once the "## Verified corrections"
+# section grows large enough, because `grep -q` exits as soon as it finds its
+# match and SIGPIPEs the upstream `tr`, which then makes the *pipeline's*
+# exit status nonzero even though the match was found. A large, byte-identical
+# section is the minimal repro shape for that.
+gen_large_section() {
+    local n="$1"
+    echo "## Verified corrections"
+    echo ""
+    local i
+    for ((i = 1; i <= n; i++)); do
+        echo "- **2026-08-1${i}, verified via check #${i}**: finding number ${i} confirmed against the live host, paragraph padding text to make this entry realistically sized rather than a one-liner."
+        echo ""
+    done
+}
+
+gen_large_section 300 > "$WORK_DIR/large-section.md"
+
+run_cvcp "$WORK_DIR/large-section.md" "$WORK_DIR/large-section.md"
+assert_eq "0" "$RC" "(7a) Large (300-paragraph) section, byte-identical OLD/NEW -> exit 0 (no false-positive FAIL)"
+assert_contains "$OUT" "OK" "(7a) Success message reported for the large identical section"
+
+# --- Scenario 8: early-paragraph match in a large section (#6768) ---------
+# The specific case that triggers the SIGPIPE/pipefail bug: the very first
+# (or second) paragraph in the OLD section's search loop matches a paragraph
+# that also appears early in the NEW paragraph stream, so `grep -q` returns
+# almost immediately -- maximizing the chance the upstream `tr` is still
+# writing when it gets SIGPIPE'd. A size-only test that never checks an early
+# match specifically would not catch a regression back to the buggy pipe.
+{
+    echo "## Verified corrections"
+    echo ""
+    echo "- **2026-08-01, verified via check #1**: the very first finding, which must be located correctly even though hundreds of other paragraphs follow it in the stream."
+    echo ""
+    gen_large_section 300 | tail -n +3
+} > "$WORK_DIR/early-match-old.md"
+
+cp "$WORK_DIR/early-match-old.md" "$WORK_DIR/early-match-new.md"
+
+run_cvcp "$WORK_DIR/early-match-old.md" "$WORK_DIR/early-match-new.md"
+assert_eq "0" "$RC" "(8a) Early-paragraph (1st entry) match found correctly in a large section -> exit 0"
+assert_contains "$OUT" "OK" "(8a) Success message reported for the early-match case"
+
+# --- Scenario 9: genuine missing paragraph in a large section still FAILs -
+# The fix must not loosen detection -- a real gap in a large section must
+# still be reported, named, and exit 1.
+gen_large_section 300 > "$WORK_DIR/large-section-missing-old.md"
+gen_large_section 300 | grep -v "finding number 2 confirmed" > "$WORK_DIR/large-section-missing-new.md"
+
+run_cvcp "$WORK_DIR/large-section-missing-old.md" "$WORK_DIR/large-section-missing-new.md"
+assert_eq "1" "$RC" "(9a) Genuine missing paragraph in a large section -> exit 1 (still correctly detected)"
+assert_contains "$OUT" "finding number 2 confirmed" "(9a) Failure names the specific missing paragraph"
 
 # --- Summary ---
 echo ""

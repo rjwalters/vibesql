@@ -28,6 +28,16 @@
 #      therefore dispatches byte-identically to today.
 #
 # Prints ONLY the model id on stdout; diagnostics go to stderr.
+#
+# Side effect (#8543, load-gated on TYPESAFE_API_KEY, off by default): the
+# `resolve-model.sh --tier` call at the bottom of this script carries
+# `LOOM_JEV_SHADOW_ISSUE` (below), which lets its native backend fire a
+# shadow-mode Jev (TypeSafe) classification of the SAME issue and record it on
+# that issue's sweep checkpoint, for later comparison against the Curator's
+# `$tier`. All of it lives in `loom-daemon` (`jev_tier.rs`'s module doc, and
+# `shadow_sample_from_env` for why an env var rather than a flag): telemetry
+# only, never a routing input, and structurally unable to change this script's
+# `$tier`/`$model` resolution or exit code.
 set -uo pipefail
 
 ISSUE="${1:-}"
@@ -39,17 +49,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not a git repo" >&2; exit 2; }
 CONFIG="$ROOT/.loom/config.json"
 
+# Source forge-helpers.sh UNCONDITIONALLY (#446): both repo resolution below
+# AND the issue-body fetch further down now route through it, so a wrong-repo
+# `GH_CONFIG_DIR` recovers via `forge_gh_repo_safe`'s escalation ladder (or
+# fails with an accurate diagnosis) instead of the bare `gh` calls this script
+# used before -- which simply 404/GraphQL-failed straight through to the
+# tier-3 default with a misleading "likely API quota" message. That was
+# exactly this script's own contribution to the 2026-08-21 incident: it
+# doesn't source this file at all in the < #446 version, so it had no path to
+# recover the way `sweep-lease-renew.sh` (which already sources it) does.
+#
+# `set +e` immediately after: forge-helpers.sh's own `set -euo pipefail`
+# executes IN THIS SHELL (`source`, not a subshell), which would otherwise
+# leave `-e` turned on for the rest of THIS script -- and this script's `tier=
+# $(... | grep ... )` pipeline below relies on `grep` returning non-zero (no
+# marker found) as an ORDINARY, handled case that feeds the `case "") tier=
+# routine` fallback a few lines down, not a fatal error. This script's own
+# contract has always been `set -uo pipefail` (no `-e`); restore exactly
+# that, nothing more.
+# shellcheck source=./lib/forge-helpers.sh
+source "$SCRIPT_DIR/lib/forge-helpers.sh" 2>/dev/null || true
+set +e
+
 # Resolve the repo explicitly. A bare `gh issue view` targets the default remote,
 # which is wrong wherever `origin` is not where the issues live (a fork checkout,
 # most obviously) — it would read the same-numbered issue in another repository
 # and hand back a confident model choice for someone else's work item.
 REPO="${3:-${LOOM_REPO:-}}"
-if [[ -z "$REPO" ]]; then
-  # shellcheck source=/dev/null
-  source "$ROOT/.loom/scripts/lib/forge-helpers.sh" 2>/dev/null || true
-  if declare -F forge_get_repo_nwo >/dev/null; then
-    REPO="$(forge_get_repo_nwo gh 2>/dev/null || true)"
-  fi
+if [[ -z "$REPO" ]] && declare -F forge_get_repo_nwo >/dev/null; then
+  REPO="$(forge_get_repo_nwo gh 2>/dev/null || true)"
 fi
 [[ -n "$REPO" ]] || { echo "could not determine repo; pass it explicitly or set LOOM_REPO" >&2; exit 2; }
 
@@ -60,7 +88,38 @@ fi
 # giving up. If BOTH fail we still fall through to `routine` (a non-breaking
 # default for this non-blocking resolver — unlike require-complexity-marker.sh
 # this script never blocks curation) but say so, so the degradation shows in logs.
-if body="$(gh issue view "$ISSUE" -R "$REPO" --json body -q .body 2>/dev/null)"; then
+#
+# Each attempt is routed through `forge_gh_repo_safe` (#446) when available, so
+# a wrong-repo `GH_CONFIG_DIR` signature gets one more chance to recover (the
+# owner-partitioned credential directory, or `env -u GH_CONFIG_DIR`) before
+# this resolver gives up -- and the final diagnostic distinguishes "recovery
+# was attempted and still failed on a wrong-repo signature" from the generic
+# "likely API quota" guess, rather than conflating the two. Falls back to the
+# bare `gh` calls this script used before #446 if forge-helpers.sh could not
+# be sourced (the guarded `source ... || true` above never hard-fails this
+# script over it).
+BODY_ERR=""
+if declare -F forge_gh_repo_safe >/dev/null; then
+  ERR_FILE="$(mktemp)"
+  if body="$(forge_gh_repo_safe issue view "$ISSUE" -R "$REPO" --json body -q .body 2>"$ERR_FILE")"; then
+    :
+  else
+    BODY_ERR="$(cat "$ERR_FILE" 2>/dev/null || true)"
+    : >"$ERR_FILE"
+    if body="$(forge_gh_repo_safe api "repos/$REPO/issues/$ISSUE" --jq .body 2>"$ERR_FILE")"; then
+      :
+    else
+      BODY_ERR="$BODY_ERR"$'\n'"$(cat "$ERR_FILE" 2>/dev/null || true)"
+      if declare -F is_repo_mismatch_error >/dev/null && is_repo_mismatch_error "$BODY_ERR"; then
+        echo "$REPO#$ISSUE: could not fetch body — wrong-repo credential signature persisted through the escalation ladder (2am#446) -> routine" >&2
+      else
+        echo "$REPO#$ISSUE: could not fetch body (GraphQL+REST failed — likely API quota) -> routine" >&2
+      fi
+      body=""
+    fi
+  fi
+  rm -f "$ERR_FILE"
+elif body="$(gh issue view "$ISSUE" -R "$REPO" --json body -q .body 2>/dev/null)"; then
   :
 elif body="$(gh api "repos/$REPO/issues/$ISSUE" --jq .body 2>/dev/null)"; then
   :
@@ -99,7 +158,18 @@ case "$tier" in
 esac
 
 # --tier mode returns "" + exit 3 when the runtime/tier has no mapping.
-if model="$("$SCRIPT_DIR/resolve-model.sh" \
+#
+# `LOOM_JEV_SHADOW_ISSUE` (#8543) names the issue whose tier was just resolved
+# above, so `loom-daemon resolve-model --tier`'s native backend can take a
+# shadow-mode Jev classification of it beside the Curator's marker. It is set
+# unconditionally, scoped to this one command, and costs nothing unless
+# `TYPESAFE_API_KEY` is also set (absent by default: two env reads in the
+# daemon, no `gh` call, no network
+# call, no checkpoint write — byte-identical to before #8543). An env var, not
+# a flag, precisely so a `loom-daemon` older than #8543 ignores it instead of
+# failing on an unknown argument and taking THIS script's resolution down with
+# it; see `jev_tier::shadow_sample_from_env`.
+if model="$(LOOM_JEV_SHADOW_ISSUE="$ISSUE" "$SCRIPT_DIR/resolve-model.sh" \
               --tier "$tier" --runtime "$RUNTIME" --config "$CONFIG" 2>/dev/null)" \
    && [[ -n "$model" ]]; then
   echo "resolve-tier-model: repo=$REPO issue=$ISSUE runtime=$RUNTIME tier=$tier model=$model" >&2

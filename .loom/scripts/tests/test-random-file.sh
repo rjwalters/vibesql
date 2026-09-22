@@ -88,11 +88,21 @@ copy_script_into() {
 # Run random-file.sh (the copy under $1) N times and print the sorted,
 # de-duplicated union of selected files (relative to $1, the repo root).
 # $2.. are extra args to pass through (e.g. --include).
+#
+# n=100: setup_repo()'s fixture has 4 uniformly-likely candidates under
+# pick_random's uniform selection, so any single candidate's per-draw miss
+# probability is 3/4. At n=25 the probability that a specific candidate
+# (important/keep.dat, the negated re-inclusion) is missed across the whole
+# union is (3/4)^25 ~= 0.075% -- rare enough to pass locally but frequent
+# enough to flake intermittently in CI (#6749). n=100 drives that down to
+# (3/4)^100 ~= 3e-13, low enough to be effectively deterministic without
+# weakening what the assertion actually checks (still real
+# `random-file.sh` invocations, still a real union of observed output).
 sample_selected() {
     local repo="$1"
     shift
     local script="$repo/defaults/scripts/random-file.sh"
-    local n=25
+    local n=100
     local i out
     local -a results=()
     for ((i = 0; i < n; i++)); do

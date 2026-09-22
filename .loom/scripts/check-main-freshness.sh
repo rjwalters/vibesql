@@ -227,6 +227,19 @@ fi
 # from" — discovered only AFTER following this script's own remediation, not
 # before (#6202). Mirror resolve_defaults()'s resolution order here (read-only,
 # best-effort) so the gap can be surfaced up front instead.
+#
+# A candidate root is only usable if it has SOMETHING under defaults/ to sync
+# from — `-d "$root/defaults"` alone is not sufficient (#6780): a sidecar or
+# metadata path can point at a directory that still exists (unlike a fully
+# vanished clone) but is stale, empty, or was never a real Loom checkout, e.g.
+# a scratch clone emptied without removing the directory itself. Requiring a
+# populated `defaults/hooks` or `defaults/scripts` mirrors the dogfood rung's
+# own check and keeps this read-only mirror in lockstep with
+# resolve_defaults() in resync-installed.sh — otherwise this precondition
+# check can report "met" for a root that resync-installed.sh would actually
+# resolve to a source tree with nothing under it, silently producing a false
+# "already in sync" result instead of the loud failure an unresolvable source
+# should produce.
 resync_precondition_met() {
     local root="$1"
     [[ -n "$root" ]] || return 1
@@ -236,12 +249,12 @@ resync_precondition_met() {
     if [[ -f "$root/.loom/loom-source-path" ]]; then
         local src
         src="$(cat "$root/.loom/loom-source-path" 2>/dev/null || true)"
-        [[ -n "$src" && -d "$src/defaults" ]] && return 0
+        [[ -n "$src" && ( -d "$src/defaults/hooks" || -d "$src/defaults/scripts" ) ]] && return 0
     fi
     if [[ -f "$root/.loom/install-metadata.json" ]]; then
         local src
         src="$(sed -n 's/.*"loom_source" *: *"\(.*\)".*/\1/p' "$root/.loom/install-metadata.json" 2>/dev/null | head -1)"
-        [[ -n "$src" && -d "$src/defaults" ]] && return 0
+        [[ -n "$src" && ( -d "$src/defaults/hooks" || -d "$src/defaults/scripts" ) ]] && return 0
     fi
     return 1
 }

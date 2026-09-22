@@ -23,6 +23,11 @@
 #      target is inside ANY managed worktree, allow it -- we cannot tell
 #      which issue a given subagent owns (no ambient signal exists for
 #      that), so this deliberately does not attempt cross-issue isolation.
+#      A worktree git knows about but Loom did not create (a plain `git
+#      worktree add`, so no sentinel) is recognized too, via `git worktree
+#      list --porcelain` -- otherwise one nested under the main checkout
+#      (`<main>/.claude/worktrees/x`) is misread as the main checkout itself
+#      (#7415; see registered_worktree_roots() for the trust-boundary note).
 #      What it DOES catch -- the actual failure mode in #2802 / #3513 /
 #      #4007 -- is a write that resolves to the MAIN checkout (typically a
 #      repo-relative path evaluated after a cwd reset) while worktree
@@ -34,6 +39,17 @@
 # env override, following the resolution order used by every other guard
 # category in this repo (env > config > default; pattern documented at
 # guard-destructive-generic.sh around the guards.sqlDdl toggle).
+#
+# SECOND, INDEPENDENT CATEGORY (#7995): installed-managed-file write
+# confinement. In a repo that is not Loom's own source tree,
+# `.loom/hooks|scripts|roles|docs|bin/` and `.claude/commands/loom/` are
+# resync-refreshed copies of Loom's `defaults/`, so an in-place edit there is
+# silently reverted (or orphaned) after the PR merges — the prose rule #7883
+# shipped, made mechanical. Gated by its own toggle
+# (guards.installedFileWrites / LOOM_GUARD_INSTALLED_FILE_WRITES, default
+# true) and decided by defaults/scripts/lib/installed-file-guard.sh, which
+# owns the repo-identity discriminator and fails PERMISSIVE on anything it
+# cannot positively classify as a consumer repo.
 #
 # Input (JSON on stdin):
 #   { "tool_input": { "file_path": "/path/to/file", ... }, "cwd": "/cwd" }
@@ -95,6 +111,21 @@ fi
 if [[ -f "$SCRIPT_DIR/../scripts/lib/canonical-path.sh" ]]; then
     # shellcheck source=/dev/null
     source "$SCRIPT_DIR/../scripts/lib/canonical-path.sh" 2>/dev/null || true
+fi
+
+# Installed-managed-file write guard (#7995) — the repo-identity discriminator
+# plus the managed-prefix containment test that decide whether this Edit/Write
+# is an in-place edit of an INSTALLED Loom file in a CONSUMER repo. Kept in a
+# shared library rather than inlined here because the Bash-matcher sibling
+# (guard-loom-workflow.sh) must reach exactly the same verdict for the
+# equivalent Bash write idioms — a second, independently-drifting copy of the
+# discriminator is precisely what would make the two matchers disagree about
+# the same target path. Best-effort source, same contract as the two libs
+# above: a missing/unsourceable lib leaves loom_installed_write_denied
+# undefined and the category below is skipped entirely (fail open).
+if [[ -f "$SCRIPT_DIR/../scripts/lib/installed-file-guard.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/../scripts/lib/installed-file-guard.sh" 2>/dev/null || true
 fi
 
 log_hook_error() {
@@ -164,7 +195,45 @@ worktree_isolation_guard_enabled() {
     [[ "$enabled" == "true" ]]
 }
 
-if ! worktree_isolation_guard_enabled; then
+# =============================================================================
+# Guard category toggle — guards.installedFileWrites /
+# LOOM_GUARD_INSTALLED_FILE_WRITES (#7995)
+#
+# Default ON, same resolution order as worktree_isolation_guard_enabled()
+# above. Deliberately a LOCAL reader rather than the library's own
+# loom_installed_guard_enabled(): like the worktree toggle, this one is
+# consulted on EVERY Edit/Write before any structural pre-check, so it must
+# come off the once-per-invocation resolved_config() cache. The library's
+# version (which forks loom_config_get) is used by guard-loom-workflow.sh,
+# where the read only happens after a substring pre-check has already matched.
+# Both readers resolve the SAME key with the same precedence.
+# =============================================================================
+installed_file_writes_guard_enabled() {
+    local enabled=true
+    if command -v jq &>/dev/null; then
+        local raw
+        raw=$(resolved_config | jq -r 'if .guards.installedFileWrites == false then "false" else "true" end' 2>/dev/null) || raw=true
+        [[ -n "$raw" ]] && enabled="$raw"
+    fi
+    case "${LOOM_GUARD_INSTALLED_FILE_WRITES:-}" in
+        0|false|no)  enabled=false ;;
+        1|true|yes)  enabled=true ;;
+    esac
+    [[ "$enabled" == "true" ]]
+}
+
+# Two INDEPENDENT categories now live in this hook, so neither toggle may
+# short-circuit the other: worktree isolation (#4007) and installed-file write
+# confinement (#7995). Resolve both up front and exit only when BOTH are off.
+_WT_GUARD_ON=false
+worktree_isolation_guard_enabled && _WT_GUARD_ON=true
+_IFW_GUARD_ON=false
+if declare -F loom_installed_write_denied >/dev/null 2>&1 \
+   && installed_file_writes_guard_enabled; then
+    _IFW_GUARD_ON=true
+fi
+
+if [[ "$_WT_GUARD_ON" != true && "$_IFW_GUARD_ON" != true ]]; then
     exit 0
 fi
 
@@ -231,6 +300,106 @@ resolve_worktree_base() {
     printf '%s' "${MAIN_ROOT}/.loom/worktrees"
 }
 
+# --------------------------------------------------------------------------
+# Registered-but-unmanaged git worktrees (#7415)
+#
+# `.loom-managed` (written only by worktree.sh) is this guard's signal for
+# "this is a worktree, not the main checkout". A worktree created with a plain
+# `git worktree add` never carries one -- harmless while it sits OUTSIDE the
+# main checkout (the under_main test in path_derived_allow() already lets it
+# through), but a worktree nested UNDER the main checkout
+# (`<main>/.claude/worktrees/x`, a layout some repos document) matches the
+# main-root prefix test and is denied, even though git itself considers it a
+# separate working tree sharing nothing with the main checkout's index or
+# tracked files.
+#
+# So: consult `git worktree list --porcelain` and treat a target inside any
+# registered worktree OTHER than the main one as "not the main checkout". The
+# main worktree entry is excluded in both spellings, so this can never become
+# an allow for the checkout this guard protects.
+#
+# TRUST BOUNDARY (#4245): this widens recognition from "worktrees Loom
+# created" to "worktrees git knows about" -- a stray or deliberate `git
+# worktree add` elsewhere in the repo now gains the same treatment. Accepted
+# knowingly: the sentinel was never an authentication boundary (the deny
+# message itself says the check "cannot verify it belongs to the acting
+# session", and a `touch .loom-managed` already forges it), while the false
+# positive it caused blocks a documented, legitimate workflow. The main
+# checkout's own working tree -- what #4007/#4178 protect -- stays denied.
+#
+# Resolved lazily and cached: only reached on the deny-candidate path, so the
+# `git` call never runs for an ordinary in-worktree write, and the parse forks
+# nothing per entry (a `cd … && pwd -P` per worktree would be ~25 extra forks
+# in a normal Loom checkout, inside a PreToolUse hook).
+_REGISTERED_WT_ROOTS=""
+_REGISTERED_WT_ROOTS_DONE=""
+registered_worktree_roots() {
+    local line wt
+    if [[ -z "$_REGISTERED_WT_ROOTS_DONE" ]]; then
+        _REGISTERED_WT_ROOTS_DONE=1
+        if [[ -n "$MAIN_ROOT" && -d "$MAIN_ROOT" ]]; then
+            while IFS= read -r line; do
+                [[ "$line" == "worktree "* ]] || continue
+                wt="${line#worktree }"
+                [[ "$wt" == /* ]] || continue
+                wt="${wt%/}"
+                # Skip the MAIN worktree entry in either spelling.
+                if [[ "$wt" == "$MAIN_ROOT" || "$wt" == "$MAIN_ROOT_LOGICAL" ]]; then
+                    continue
+                fi
+                _REGISTERED_WT_ROOTS+="${wt}"$'\n'
+                # ...plus the ALTERNATE root spelling, for the same reason
+                # MAIN_ROOT_LOGICAL exists: git records exactly one spelling of
+                # a nested worktree's path, while the canonicalized target can
+                # degrade to a lexical form that keeps a symlinked ancestor
+                # intact. Only a worktree nested under the main root is
+                # reachable here (path_derived_allow's under_main test already
+                # let everything else through), so swapping just the root
+                # prefix covers both spellings without a fork per entry.
+                if [[ -n "$MAIN_ROOT_LOGICAL" && "$MAIN_ROOT_LOGICAL" != "$MAIN_ROOT" ]]; then
+                    case "$wt" in
+                        "$MAIN_ROOT"/*)
+                            _REGISTERED_WT_ROOTS+="${MAIN_ROOT_LOGICAL}/${wt#"$MAIN_ROOT"/}"$'\n' ;;
+                        "$MAIN_ROOT_LOGICAL"/*)
+                            _REGISTERED_WT_ROOTS+="${MAIN_ROOT}/${wt#"$MAIN_ROOT_LOGICAL"/}"$'\n' ;;
+                    esac
+                fi
+            done < <(git -C "$MAIN_ROOT" worktree list --porcelain 2>/dev/null || true)
+        fi
+    fi
+    printf '%s' "$_REGISTERED_WT_ROOTS"
+}
+
+# True if $1 (an absolute, canonicalized path) sits inside a registered
+# worktree that is not the main checkout.
+in_registered_worktree() {
+    local target="$1" root roots
+    [[ -n "$target" ]] || return 1
+    roots=$(registered_worktree_roots)
+    [[ -n "$roots" ]] || return 1
+    while IFS= read -r root; do
+        [[ -n "$root" ]] || continue
+        if [[ "$target" == "$root" || "$target" == "$root"/* ]]; then
+            return 0
+        fi
+    done <<< "$roots"
+    return 1
+}
+
+# The worktree location to point a denied write at. Names the ACTUALLY
+# configured worktree root (LOOM_WORKTREE_ROOT env > worktree.root config >
+# in-repo default) rather than hardcoding `.loom/worktrees/issue-<N>`, which is
+# wrong for any repo that relocates its worktree root (#7415).
+worktree_hint() {
+    local base
+    base="$(resolve_worktree_base 2>/dev/null)" || base=""
+    if [[ -n "$base" ]]; then
+        printf '%s/issue-<N>' "$base"
+    else
+        printf '.loom/worktrees/issue-<N>'
+    fi
+}
+
 # True if at least one managed worktree currently exists under $1
 # (`<base>/<name>/.loom-managed`, depth 2 -- matches worktree.sh's layout).
 any_managed_worktree_exists() {
@@ -266,6 +435,15 @@ path_derived_allow() {
         under_main=true
     fi
     if [[ "$under_main" != true ]]; then
+        return 0
+    fi
+
+    # (c) Inside a git-registered worktree nested under the main checkout
+    # (created by a plain `git worktree add`, so carrying no `.loom-managed`
+    # sentinel) -> allow. git treats that directory as a separate working
+    # tree; it is not the main checkout. See registered_worktree_roots()'s
+    # doc comment for the trust-boundary trade-off this accepts (#7415).
+    if in_registered_worktree "$target"; then
         return 0
     fi
 
@@ -344,6 +522,30 @@ else
     NORM_PATH=$(printf '%s' "$FILE_PATH" | python3 -c "import os,sys; print(os.path.normpath(sys.stdin.read()))" 2>/dev/null) || NORM_PATH="$FILE_PATH"
 fi
 
+# --------------------------------------------------------------------------
+# Installed-managed-file write confinement (#7995)
+#
+# Runs BEFORE either worktree mechanism below, because both of them ALLOW the
+# case this category exists to catch: in a consumer repo a Builder's own issue
+# worktree contains its own `.loom/hooks|scripts|roles|docs|bin/` and
+# `.claude/commands/loom/` copies (they are tracked files), so a write there is
+# "inside a managed worktree" and exits 0 at the first allow. The verdict is
+# derived entirely from the TARGET path (see the library's header), so it is
+# correct from the main checkout and from any worktree alike.
+#
+# Fails permissive by construction: a denial requires an affirmative `consumer`
+# verdict for the checkout root implied by the target path, and an unpinned
+# target. Loom's own tree and "cannot determine" both fall through untouched.
+# --------------------------------------------------------------------------
+if [[ "$_IFW_GUARD_ON" == true ]] && loom_installed_prefix_mentioned "$NORM_PATH" \
+   && loom_installed_write_denied "$NORM_PATH"; then
+    emit_deny "$(loom_installed_deny_reason "$NORM_PATH" "Edit/Write")"
+fi
+
+if [[ "$_WT_GUARD_ON" != true ]]; then
+    exit 0
+fi
+
 if [[ -n "$WORKTREE_PATH" ]]; then
     # Normalize worktree path (resolve symlinks, remove trailing slash)
     WORKTREE_REAL=$(cd "$WORKTREE_PATH" 2>/dev/null && pwd -P 2>/dev/null) || WORKTREE_REAL="$WORKTREE_PATH"
@@ -365,4 +567,4 @@ if path_derived_allow "$NORM_PATH"; then
     exit 0
 fi
 
-emit_deny "BLOCKED: Edit/Write path '${NORM_PATH}' resolves to the main repository checkout ('${MAIN_ROOT}'), but a Loom-managed worktree exists elsewhere in this repository (this check cannot verify it belongs to the acting session — see #4245). Builders must write inside their issue worktree (.loom/worktrees/issue-<N>), never the main checkout. Do NOT retry this write via Bash redirection/tee/sed -i/cp/mv -- that is also confined (guard-destructive-generic.sh, #4178) and denied for the same reason. cd into your issue worktree and write there instead. Not a Builder and need to write here directly? Set guards.worktreeIsolation:false in .loom/config.json for the session -- an inline 'LOOM_GUARD_WORKTREE_ISOLATION=0 <command>' prefix does NOT work (this hook runs as a separate process). (#4007)"
+emit_deny "BLOCKED: Edit/Write path '${NORM_PATH}' resolves to the main repository checkout ('${MAIN_ROOT}'), but a Loom-managed worktree exists elsewhere in this repository (this check cannot verify it belongs to the acting session — see #4245). Builders must write inside their issue worktree ($(worktree_hint)), never the main checkout. Do NOT retry this write via Bash redirection/tee/sed -i/cp/mv -- that is also confined (guard-destructive-generic.sh, #4178) and denied for the same reason. cd into your issue worktree and write there instead. Not a Builder and need to write here directly? Set guards.worktreeIsolation:false in .loom/config.json for the session -- an inline 'LOOM_GUARD_WORKTREE_ISOLATION=0 <command>' prefix does NOT work (this hook runs as a separate process). (#4007)"

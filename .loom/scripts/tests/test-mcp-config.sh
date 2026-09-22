@@ -406,12 +406,30 @@ command -v node >/dev/null 2>&1 && HAVE_NODE=true
 HAVE_GIT=false
 command -v git >/dev/null 2>&1 && HAVE_GIT=true
 
-# Healthy mcp-loom stub: writes the exact startup line check_mcp_server greps for.
+# Healthy mcp-loom stub: prints the historical startup banner (kept, so a
+# banner-printing server is still exercised) AND responds to the
+# protocol-level `initialize` handshake _mcp_smoke_test now performs (#143 /
+# 2am#307) — the health check no longer greps for the banner string, it
+# validates a JSON-RPC response on stdout.
 _write_healthy_mcp_stub() {
     local dir="$1" # e.g. .../mcp-loom
     mkdir -p "$dir/dist"
     cat >"$dir/dist/index.js" <<'JS'
 process.stderr.write("Loom MCP server running on stdio\n");
+let buf = "";
+process.stdin.on("data", (chunk) => {
+    buf += chunk;
+    if (buf.includes("\n")) {
+        process.stdout.write(
+            JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "stub", version: "0.0.0" } },
+            }) + "\n"
+        );
+        process.exit(0);
+    }
+});
 JS
 }
 
@@ -543,7 +561,23 @@ case "${1:-}" in
             exit 1
         fi
         mkdir -p dist
-        printf 'process.stderr.write("Loom MCP server running on stdio\\n");\n' >dist/index.js
+        cat >dist/index.js <<'JSEOF'
+process.stderr.write("Loom MCP server running on stdio\n");
+let buf = "";
+process.stdin.on("data", (chunk) => {
+    buf += chunk;
+    if (buf.includes("\n")) {
+        process.stdout.write(
+            JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "stub", version: "0.0.0" } },
+            }) + "\n"
+        );
+        process.exit(0);
+    }
+});
+JSEOF
         exit 0
         ;;
 esac

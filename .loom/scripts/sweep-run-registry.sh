@@ -64,9 +64,18 @@
 # from a genuine live peer sharing that PID. `heartbeat` starts equal to
 # `timestamp` at registration and must be refreshed periodically by the running
 # sweep (`heartbeat <RUN_ID>`, e.g. at each wave boundary); `peers` uses PID
-# liveness to prune the genuinely dead, and — for anything alive that shares the
-# CALLER's own PID — heartbeat staleness to label a same-process zombie
-# distinctly from a same-process entry that is still actually driving work.
+# liveness to prune the genuinely dead, and heartbeat staleness to label an
+# entry that is still PID-alive but has stopped driving work distinctly from one
+# that is genuinely still sweeping.
+#
+# Heartbeat staleness applies to EVERY entry, not just same-PID ones (#6595).
+# The same "PID outlives the sweep" problem shows up under a DIFFERENT pid too:
+# an interactive session that ran a sweep which was interrupted (or ended
+# without `cleanup`) stays alive for hours or days, so its abandoned entry warned
+# a later sweep as an ordinary `live` peer for the session's whole lifetime.
+# Whether the stale entry shares the caller's PID only changes WHICH label it
+# gets (`stale-same-pid` vs `stale-heartbeat`), never whether staleness is
+# checked at all.
 #
 # Usage:
 #   sweep-run-registry.sh new [--pid P]     # print a fresh RUN_ID, register it
@@ -78,12 +87,19 @@
 # `peers` output format (one non-dead entry per line):
 #   <run_id> <pid> <timestamp> <heartbeat> <status>
 # where <status> is one of:
-#   live             - a different PID than the caller's; an ordinary live peer.
+#   live             - a different PID than the caller's, heartbeat still fresh;
+#                       an ordinary live peer.
 #   live-same-pid    - the SAME PID as the caller, heartbeat still fresh
 #                       (genuinely still driving work in this process).
 #   stale-same-pid:Nm - the SAME PID as the caller, heartbeat stale for N minutes
 #                       (>= SWEEP_RUN_HEARTBEAT_STALE_SECS, default 900) — almost
 #                       certainly a pre-`/clear` zombie, not a live peer.
+#   stale-heartbeat:Nm - a different PID than the caller's, PID still alive, but
+#                       heartbeat stale for N minutes (#6595) — most likely an
+#                       interrupted sweep inside a session process that is still
+#                       running, not a genuine concurrent sweep.
+# A stale entry is only ever RELABELED, never deleted: per #4691 only confirmed
+# PID death (ESRCH) authorizes removing another run's state.
 # Empty output means "no live peer sweeps" — the single-sweep (no-peer) case.
 # The caller's OWN entry (matched by RUN_ID, not PID) is always excluded,
 # regardless of status.
@@ -135,8 +151,21 @@ remove_run_artifacts() {
 }
 
 # ---------------------------------------------------------------------------
-# Liveness (#4691)
+# Liveness (#4691, hardened by #7825)
 # ---------------------------------------------------------------------------
+
+# --- BEGIN shared pid-liveness block (#4691, #7825) ------------------------
+#
+# This block is DUPLICATED VERBATIM in `defaults/scripts/sweep-lease-renew.sh`
+# and `defaults/scripts/sweep-run-registry.sh` and MUST stay byte-identical in
+# both: `defaults/scripts/tests/test-sweep-lease-renew.sh` case (q) diffs the
+# two copies and fails the suite on any drift. It is deliberately NOT extracted
+# into `defaults/scripts/lib/`: ADR-0018 / `scripts/shell-allowlist.txt` admits
+# no category for a NEW shared shell library (`contract` is BASELINE-ONLY, and
+# a library is not bootstrap/hook-entry/vendored/stub/test), so a new lib file
+# would fail `scripts/check-shell-allowlist.sh`. The machine-checked
+# byte-identity is the substitute for `source`. Edit one copy, then run
+# `diff` — or just let case (q) tell you.
 #
 # Is `$1` a one-shot `<shell> -c …` wrapper process?
 #
@@ -163,11 +192,57 @@ is_oneshot_shell() {
     [[ "${a1:-}" == -*c* ]]
 }
 
+# Is `$1` a session/service supervisor that must NEVER serve as a liveness
+# handle for WORK (#7825, defect (c))?
+#
+# Before #7825, `resolve_liveness_pid` walked UP the process tree and returned
+# whatever it landed on with no validation whatsoever. When a sweep's own
+# intermediate ancestors have already been reaped, that walk lands on the
+# session supervisor — `systemd --user`, `launchd`, a `tmux` server, `sshd`,
+# `init` — every one of which outlives the machine's entire work queue. A
+# renewal loop pinned to one of those is immortal BY CONSTRUCTION: it keeps a
+# long-dead sweep's `loom:building` lease looking fresh forever, so no peer
+# host will ever reclaim the claim. Six such loops (oldest 18 days, mostly
+# with no worktree left behind them) were found on one worker in #7825.
+#
+# This is a DENYLIST, not an allowlist, on purpose. An allowlist of "real"
+# sweep processes would have to enumerate every runtime adapter, wrapper, and
+# future harness (`claude`, `codex`, `spawn-claude.sh`, `claude-wrapper.sh`,
+# `node`, …) and would silently start refusing legitimate handles the moment
+# one was missed. The denylist only has to name the handful of processes known
+# to outlive ALL work; anything unrecognised keeps the pre-#7825 behavior.
+is_supervisor_process() {
+    local pid="${1:-}" comm base
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    if ((pid <= 1)); then
+        return 0 # pid 1 is init/launchd by definition
+    fi
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null) || return 1
+    [[ -n "$comm" ]] || return 1
+    base="${comm##*/}"
+    base="${base#-}"
+    case "$base" in
+        init | systemd | launchd | upstart) return 0 ;;
+        tmux*) return 0 ;; # `ps -o comm=` reports the server as `tmux: server`
+        screen | sshd | login | getty) return 0 ;;
+        supervisord | s6-svscan | runsvdir | runsv | tini | docker-init | dumb-init) return 0 ;;
+        cron | crond | atd) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Resolve the PID to record as this run's liveness handle: walk up from $PPID
 # past every one-shot shell wrapper to the first ancestor that outlives a single
 # tool call (in practice the `claude -p /loom:sweep …` orchestrator). Falls back
 # to $PPID whenever `ps` is unavailable or the walk cannot proceed, which is
 # exactly the pre-#4691 behavior — never worse.
+#
+# #7825 (c): the walk now refuses to ascend INTO a supervisor, and refuses to
+# RETURN one even if $PPID already is one (a unit-file or cron invocation). When
+# no valid work-liveness handle exists, the honest answer is this script's OWN
+# short-lived PID: a caller that watches it stops within one tick and lets the
+# lease age out, which is the correct outcome. Silently substituting a process
+# that will still be running next month is not.
 resolve_liveness_pid() {
     local pid="${PPID:-$$}" parent depth=0
     while ((depth < 8)); do
@@ -177,13 +252,59 @@ resolve_liveness_pid() {
         if ! [[ "$parent" =~ ^[0-9]+$ ]] || ((parent <= 1)); then
             break
         fi
+        if is_supervisor_process "$parent"; then
+            break
+        fi
         pid="$parent"
         depth=$((depth + 1))
     done
+    if is_supervisor_process "$pid"; then
+        echo "$$"
+        return 0
+    fi
     echo "$pid"
 }
 
-# Is `$1` a live process, biased to fail SAFE (#4691)?
+# Start-time identity token for `$1` — the second half of a durable process
+# handle (#7825, defect (a)). Prints nothing and exits non-zero when it cannot
+# be determined.
+#
+# A bare PID is NOT a durable handle on a process: the kernel recycles PID
+# numbers, and on a busy worker polled over a multi-day horizon wraparound is a
+# certainty, not an edge case. Once an unrelated process inherits the watched
+# PID number, a PID-only liveness test flips back to "alive" PERMANENTLY — the
+# mechanism behind #7825's 18-day-old orphan renewal loops. Pairing the PID
+# with the process's START TIME makes the handle identifying: the pair
+# (pid, starttime) is not reused within any horizon that matters here.
+#
+# Linux: `/proc/<pid>/stat` field 22 (`starttime`, in clock ticks since boot)
+# is monotonic, cheap, and world-readable. Field 2 (`comm`) can itself contain
+# BOTH spaces and parentheses, so everything through the LAST ") " is stripped
+# first; in the remainder, field 20 is the overall field 22.
+# Elsewhere (macOS and any host without /proc): `ps -o lstart=`, whose
+# one-second granularity combined with the PID space is still overwhelmingly
+# identifying.
+pid_start_identity() {
+    local pid="${1:-}" stat_line rest ident
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    if [[ -r "/proc/$pid/stat" ]]; then
+        stat_line=$(cat "/proc/$pid/stat" 2>/dev/null) || return 1
+        [[ -n "$stat_line" ]] || return 1
+        rest="${stat_line##*') '}"
+        ident=$(printf '%s\n' "$rest" | awk '{print $20}')
+        [[ -n "$ident" ]] || return 1
+        printf 'starttime:%s' "$ident"
+        return 0
+    fi
+    ident=$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s '[:space:]' ' ')
+    ident="${ident# }"
+    ident="${ident% }"
+    [[ -n "$ident" ]] || return 1
+    printf 'lstart:%s' "$ident"
+}
+
+# Is `$1` a live process, biased to fail SAFE (#4691) — and, when a start-time
+# identity token is supplied as `$2`, is it still the SAME process (#7825)?
 #
 # POSIX `kill(2)` has two distinct failure modes and a bare `kill -0` conflates
 # them:
@@ -191,20 +312,43 @@ resolve_liveness_pid() {
 #   EPERM — the process EXISTS but this caller may not signal it (different UID,
 #           sandbox, namespace)    → NOT dead; pruning it destroys live state.
 # `ps -p` answers "does this PID exist?" without needing signal permission, so it
-# separates the two without parsing locale-dependent errno strings. A zombie
-# (state `Z`) has exited and is only awaiting reaping, so it counts as dead.
+# separates the two without parsing locale-dependent errno strings.
+#
+# #7825 (b): `ps` is consulted FIRST rather than behind a `kill -0` fast path.
+# A zombie (state `Z`) has exited and is only awaiting reaping, so it counts as
+# dead — but `kill -0` SUCCEEDS for a zombie, so under the pre-#7825 ordering
+# the fast path returned "alive" and the `Z` branch was UNREACHABLE. The
+# documented intent and the code now agree. `kill -0` survives only as the
+# fallback for a host with no usable `ps`, never as the whole decision.
+#
+# #7825 (a): `$2`, when non-empty, is a token previously obtained from
+# `pid_start_identity` for this same PID. It is re-probed on every call; a
+# mismatch — or an identity that can no longer be read at all — reports DEAD
+# even though the PID number is live, which is precisely the PID-reuse case.
+# Callers that pass no token keep the pre-#7825 contract unchanged.
 pid_is_live() {
-    local pid="${1:-}" state
+    local pid="${1:-}" want_ident="${2:-}" state have_ident
     if ! [[ "$pid" =~ ^[0-9]+$ ]] || ((pid <= 0)); then
         return 1
     fi
-    # Fast path: the signal would be deliverable ⇒ definitely alive.
-    kill -0 "$pid" 2>/dev/null && return 0
     state=$(ps -o state= -p "$pid" 2>/dev/null | tr -d '[:space:]')
-    [[ -n "$state" ]] || return 1        # ESRCH (or no usable `ps`): treat as dead.
-    [[ "${state:0:1}" == "Z" ]] && return 1
-    return 0 # EPERM and friends: the process exists — fail safe, treat as alive.
+    if [[ -n "$state" ]]; then
+        if [[ "${state:0:1}" == "Z" ]]; then
+            return 1 # exited, awaiting reaping — dead for every purpose here
+        fi
+        # Any other state: the process exists. EPERM and friends land here too,
+        # which is the #4691 fail-safe.
+    elif ! kill -0 "$pid" 2>/dev/null; then
+        return 1 # ESRCH, or no usable `ps` and no signal permission: dead.
+    fi
+    if [[ -n "$want_ident" ]]; then
+        have_ident="$(pid_start_identity "$pid" 2>/dev/null || true)"
+        [[ -n "$have_ident" ]] || return 1
+        [[ "$have_ident" == "$want_ident" ]] || return 1
+    fi
+    return 0
 }
+# --- END shared pid-liveness block (#4691, #7825) --------------------------
 
 iso_now() {
     date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -214,8 +358,8 @@ iso_now() {
 # Heartbeat staleness (#5896)
 # ---------------------------------------------------------------------------
 #
-# How many seconds without a heartbeat refresh before a same-PID entry is
-# labeled `stale-same-pid` in `peers` output. Overridable for tests/tuning;
+# How many seconds without a heartbeat refresh before an entry is labeled stale
+# (`stale-same-pid` / `stale-heartbeat`) in `peers` output. Overridable for tests/tuning;
 # default 15 minutes aligns with the documented "refresh at each wave
 # boundary" cadence in the sweep skill — a wave can legitimately take a few
 # minutes, so the threshold must clear ordinary inter-wave gaps.
@@ -235,7 +379,7 @@ iso_to_epoch() {
 # Age, in seconds, of a heartbeat timestamp relative to now. Non-zero exit
 # (and no stdout) if the timestamp cannot be parsed — the caller must treat
 # that as "unknown", never as "stale" (fail-safe: an unparseable heartbeat
-# must never manufacture a false stale-same-pid label).
+# must never manufacture a false stale label).
 heartbeat_age_secs() {
     local hb="${1:-}" hb_epoch now_epoch
     hb_epoch=$(iso_to_epoch "$hb") || return 1
@@ -366,7 +510,7 @@ cmd_peers() {
         echo "ERROR: peers requires a RUN_ID argument" >&2
         exit 1
     fi
-    local dir file rid pid ts hb self_pid self_file
+    local dir file rid pid ts hb hb_present self_pid self_file
     dir="$(registry_dir)"
     [[ -d "$dir" ]] || return 0
 
@@ -401,10 +545,14 @@ cmd_peers() {
         # Backward compat: an entry written by a pre-#5896 registry has no
         # "heartbeat" field — treat its registration time as the last known
         # activity rather than failing the age computation.
-        [[ -n "$hb" ]] || hb="$ts"
+        hb_present=1
+        if [[ -z "$hb" ]]; then
+            hb_present=0
+            hb="$ts"
+        fi
 
+        local age_secs age_min
         if [[ "$pid" == "$self_pid" ]]; then
-            local age_secs age_min
             if age_secs=$(heartbeat_age_secs "$hb") && ((age_secs >= HEARTBEAT_STALE_SECS)); then
                 age_min=$((age_secs / 60))
                 echo "$rid $pid $ts $hb stale-same-pid:${age_min}m"
@@ -413,7 +561,22 @@ cmd_peers() {
                 # stale on an unknown age) — a genuinely live same-process run.
                 echo "$rid $pid $ts $hb live-same-pid"
             fi
+        elif ((hb_present)) &&
+            age_secs=$(heartbeat_age_secs "$hb") &&
+            ((age_secs >= HEARTBEAT_STALE_SECS)); then
+            # Different PID, PID alive, but nothing has refreshed this entry in
+            # a long time (#6595): an interrupted sweep whose session process is
+            # still around. Label it distinctly so a consumer can present it as
+            # "probably not a real peer" instead of an alarming live-peer
+            # warning — but never prune it here; only PID death (ESRCH) may
+            # delete another run's state (#4691's keep-when-ambiguous bias).
+            age_min=$((age_secs / 60))
+            echo "$rid $pid $ts $hb stale-heartbeat:${age_min}m"
         else
+            # Fresh heartbeat, unparseable age, or a pre-#5896 entry with no
+            # heartbeat field at all (such a run never refreshes, so its
+            # registration age says nothing about whether it is still sweeping):
+            # report an ordinary live peer, the fail-safe answer.
             echo "$rid $pid $ts $hb live"
         fi
     done

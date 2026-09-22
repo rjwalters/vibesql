@@ -176,6 +176,19 @@ assert_eq "TOKEN_EXPIRED" "$result" "'Failed to authenticate ... socket connecti
 result=$(classify_error "socket connection was closed unexpectedly" 1)
 assert_eq "RECOVERABLE" "$result" "bare 'socket connection was closed unexpectedly' (no auth wording) stays RECOVERABLE (#6424 negative case)"
 
+# Vector #9g (issue #6614): a token REVOKED mid-flight. The verbatim death-tail
+# wraps the auth error in a JSON envelope, which the `401[^a-z]*
+# authentication_error` pattern cannot bridge (`[^a-z]*` excludes the letters in
+# `{"type":"`), and nothing matched "revoked" — so this fell through to
+# RECOVERABLE and the wrapper retried the SAME revoked credential 5 times.
+result=$(classify_error 'Failed to authenticate. API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}' 1)
+assert_eq "TOKEN_EXPIRED" "$result" "revoked-token JSON 401 -> TOKEN_EXPIRED (#6614)"
+
+# Vector #9h (issue #6614, negative case): "revoked" alone, with no "token"
+# before the verb, must NOT mark an account permanently bad.
+result=$(classify_error "The reviewer revoked their approval" 1)
+assert_eq "RECOVERABLE" "$result" "a non-token 'revoked' stays RECOVERABLE (#6614 negative case)"
+
 # Vector #10: hit your limit → TOKEN_EXHAUSTED
 result=$(classify_error "You've hit your limit" 1)
 assert_eq "TOKEN_EXHAUSTED" "$result" "hit your limit -> TOKEN_EXHAUSTED"
@@ -492,6 +505,7 @@ cat > "$STUB_DIR/claude" <<'STUB'
 echo "stub-claude got token=${CLAUDE_CODE_OAUTH_TOKEN}"
 echo "stub-claude args=$*"
 echo "stub-claude ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
+echo "stub-claude headless=${LOOM_HEADLESS_SESSION:-unset}"
 exit 0
 STUB
 chmod +x "$STUB_DIR/claude"
@@ -569,6 +583,36 @@ assert_contains "stub-claude args=-p /loom:sweep 4111 --claim-owned 4111 --dange
     "spawn-claude forwards the -p prompt (with embedded --claim-owned) verbatim to claude (#4111/#4120)"
 assert_contains "spawn-claude: LOOM_SWEEP_CLAIM_OWNED=4111" "$output" \
     "spawn-claude still logs the env var when the --claim-owned flag is also present (#4111 backward compat)"
+
+# ------------------------------------------------------------------
+# Headless-session marker for the Stop guard (issue #6645)
+#
+# `guard-background-subagents.sh` must block a stop that would orphan a
+# background child in headless `-p` mode, and must NOT block it in an
+# interactive session (where children survive the turn boundary). This marker
+# is the Loom-owned signal it reads. It is set ONLY for print mode: marking an
+# interactive session headless would reintroduce exactly the friction #6645
+# removes, and is therefore asserted as its own negative case.
+#
+# Every case below strips an ambient LOOM_HEADLESS_SESSION with `env -u`: this
+# suite may itself be running inside a headless sweep whose own wrapper already
+# exported the marker, which would otherwise leak in and make the negative case
+# pass for the wrong reason (same hazard as LOOM_SWEEP_CLAIM_OWNED above).
+# ------------------------------------------------------------------
+output=$(env -u LOOM_HEADLESS_SESSION LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    PATH="$STUB_DIR:$PATH" "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude headless=1" "$output" \
+    "spawn-claude exports LOOM_HEADLESS_SESSION=1 for a -p spawn (#6645)"
+
+output=$(env -u LOOM_HEADLESS_SESSION LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    PATH="$STUB_DIR:$PATH" "$SCRIPTS_DIR/spawn-claude.sh" --print "ping" 2>&1 || true)
+assert_contains "stub-claude headless=1" "$output" \
+    "spawn-claude exports LOOM_HEADLESS_SESSION=1 for a --print spawn (#6645)"
+
+output=$(env -u LOOM_HEADLESS_SESSION LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    PATH="$STUB_DIR:$PATH" "$SCRIPTS_DIR/spawn-claude.sh" --dangerously-skip-permissions 2>&1 || true)
+assert_contains "stub-claude headless=unset" "$output" \
+    "spawn-claude leaves an interactive (no -p/--print) spawn UNMARKED (#6645)"
 
 # Test: explicit CLAUDE_CODE_OAUTH_TOKEN bypasses selection
 output=$(LOOM_WORKSPACE="$TEST_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$STUB_DIR:$PATH" \
@@ -1826,6 +1870,262 @@ rm -f "$TEST_WS/.loom/config.json"
 rm -rf "$SLEEP_DIR"
 
 # ============================================================
+# Section 7e: containerized dispatch mode (issue #7429, epic #6896 Phase 3)
+#
+# `runtimes.containment.enabled` (env override `LOOM_SWEEP_CONTAINERIZED`)
+# re-execs spawn-claude.sh itself inside `docker run <image>
+# <workspace>/.loom/scripts/spawn-claude.sh <args>`. The docker stub below
+# mimics real `docker run`'s behavior for `-e VAR` (no `=value`): it just
+# `exec`s the trailing command in THIS shell's own environment, which is
+# enough to prove BOTH the constructed command shape (path-parity mount,
+# image, recursion target) and that the recursed invocation still reaches a
+# real `claude` stub with token selection and args intact — mirroring the
+# host's own `.loom/scripts -> ../defaults/scripts` symlink convention so
+# `$CONTAIN_WS/.loom/scripts/spawn-claude.sh` resolves to the SAME script
+# under test.
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh containerized dispatch mode (#7429)..."
+
+CONTAIN_WS="$(mktemp -d)"
+mkdir -p "$CONTAIN_WS/.loom/tokens"
+chmod 700 "$CONTAIN_WS/.loom/tokens"
+echo -n "fake-token-contain" > "$CONTAIN_WS/.loom/tokens/contain.token"
+chmod 600 "$CONTAIN_WS/.loom/tokens/contain.token"
+ln -s "$SCRIPTS_DIR" "$CONTAIN_WS/.loom/scripts"
+
+CONTAIN_STUB_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_WS" "$STUB_DIR" "$CONTAIN_WS" "$CONTAIN_STUB_DIR"' EXIT
+cat > "$CONTAIN_STUB_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+echo "stub-claude ran, args=$*"
+STUB
+chmod +x "$CONTAIN_STUB_DIR/claude"
+
+DOCKER_LOG="$CONTAIN_STUB_DIR/docker.log"
+cat > "$CONTAIN_STUB_DIR/docker" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "$DOCKER_LOG"
+args=("\$@")
+i=0
+[[ "\${args[i]:-}" == "run" ]] && i=\$((i + 1))
+[[ "\${args[i]:-}" == "--rm" ]] && i=\$((i + 1))
+while true; do
+    case "\${args[i]:-}" in
+        -v | --label | --cpus | --memory) i=\$((i + 2)) ;;
+        -w) i=\$((i + 2)) ;;
+        -e)
+            # Real \`docker run -e KEY=VALUE\` seeds the container's initial
+            # env with that literal value; \`-e KEY\` (bare, no \`=\`) instead
+            # forwards whatever value the docker CLIENT's own env already
+            # has. This stub does not really isolate a container -- it just
+            # execs the trailing command in THIS shell -- so it must actually
+            # \`export\` a KEY=VALUE pair to reproduce that seeding; a bare
+            # KEY needs no action since it is already inherited. Without
+            # this, \`-e LOOM_SPAWN_CONTAINERIZED=1\` (the recursion guard)
+            # would never actually take effect and the recursed
+            # spawn-claude.sh would re-enter containment mode forever.
+            _val="\${args[i+1]:-}"
+            case "\$_val" in
+                *=*) export "\$_val" ;;
+            esac
+            i=\$((i + 2))
+            ;;
+        *) break ;;
+    esac
+done
+i=\$((i + 1)) # skip the image name
+exec "\${args[@]:i}"
+STUB
+chmod +x "$CONTAIN_STUB_DIR/docker"
+
+# Test: default (no config, no env override) -> containment stays disabled,
+# docker is never invoked (byte-for-byte pre-#7429 default behavior). This is
+# also the regression case for issue #7431's "bare installs and macOS keep
+# bare-metal dispatch as their default" acceptance criterion: the containment
+# resolution in spawn-claude.sh has no OS/fleet branch at all (grep for
+# `CONTAINMENT_ENABLED=` — it is a single unconditional default, unbranched
+# by platform), so this same assertion covers macOS and every non-fleet Linux
+# install identically to Linux fleet hosts, not just the pre-#7429 baseline.
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    env -u LOOM_SWEEP_CONTAINERIZED LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "stub-claude ran" "$output" "containment disabled by default: the spawn still runs directly (#7429)"
+assert_eq "" "$(cat "$DOCKER_LOG" 2>/dev/null)" \
+    "containment disabled by default: docker is never invoked (#7429)"
+assert_contains "# LOOM_DISPATCH_MODE mode=bare-metal" "$output" "containment disabled by default: the bare-metal marker confirms the default is unaffected by platform/fleet-membership (#7431)"
+
+# Test: runtimes.containment.enabled=true wraps the spawn in `docker run`,
+# under the path-parity mount contract, defaulting to the loom-worker image,
+# and re-execs spawn-claude.sh itself as the containerized command — the
+# recursed invocation (simulated by the stub's exec-through) still reaches
+# the claude stub with its args intact.
+echo '{"runtimes": {"containment": {"enabled": true}}}' > "$CONTAIN_WS/.loom/config.json"
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "containerized dispatch ENABLED" "$output" \
+    "runtimes.containment.enabled=true: spawn-claude logs the containment decision (#7429)"
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "-v $CONTAIN_WS:$CONTAIN_WS" "$docker_log" \
+    "containerized dispatch: workspace mounted at path parity (MOUNT-CONTRACT.md §1, #7429)"
+assert_contains "ghcr.io/rjwalters/loom-worker:latest" "$docker_log" \
+    "containerized dispatch: defaults to the ghcr.io/rjwalters/loom-worker image (#7429)"
+assert_contains "$CONTAIN_WS/.loom/scripts/spawn-claude.sh" "$docker_log" \
+    "containerized dispatch: re-execs spawn-claude.sh itself as the containerized command (#7429)"
+assert_contains "stub-claude ran, args=-p ping" "$output" \
+    "containerized dispatch: the recursed invocation still reaches the claude stub with args intact (#7429)"
+# Issue #7430: with no explicit cpus/memory config, `--cpus` is omitted
+# (LOOM_SWEEP_CPU_QUOTA=0 above means no host CPU budget was computed) but
+# `--memory` is ALWAYS applied by default, computed from host memory.
+assert_contains "--memory" "$docker_log" "containerized dispatch: --memory is applied by default even with no config (#7430)"
+# Issue #8456: the worker env carries CARGO_INCREMENTAL=0 across the docker
+# boundary (exported alongside the build-cache CARGO_TARGET_DIR -e above):
+# sccache cannot cache an incrementally-compiled crate, and cargo keys
+# incremental session state by absolute source path, so on a
+# shared-target-dir host it is orphaned disk (213 GB / 6,402 session dirs on
+# one fleet host). The --memory assert above and this one are single-line so
+# the frozen-at-1822-code-lines file stays within the file-size ratchet.
+assert_contains "-e CARGO_INCREMENTAL=0" "$docker_log" "containerized dispatch: the worker env carries CARGO_INCREMENTAL=0 (#8456)"
+assert_contains "# LOOM_DISPATCH_MODE mode=container" "$output" \
+    "containerized dispatch: the canonical LOOM_DISPATCH_MODE marker names mode=container (#7430)"
+assert_contains "cpus=none" "$output" \
+    "containerized dispatch: the marker reports cpus=none when no CPU budget was computed (#7430)"
+
+# Test: LOOM_SWEEP_CONTAINERIZED=0 env override wins over config true.
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CONTAINERIZED=0 LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_eq "" "$(cat "$DOCKER_LOG" 2>/dev/null)" \
+    "LOOM_SWEEP_CONTAINERIZED=0 env override wins over runtimes.containment.enabled=true config (#7429)"
+
+# Test: LOOM_SWEEP_CONTAINER_IMAGE overrides the image.
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CONTAINER_IMAGE="ghcr.io/example/custom-worker:1.2.3" LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "ghcr.io/example/custom-worker:1.2.3" "$docker_log" \
+    "LOOM_SWEEP_CONTAINER_IMAGE overrides the containerized image (#7429)"
+
+# ============================================================
+# Section 7f: per-sweep container resource limits + observability markers
+# (issue #7430, epic #6896 Phase 3 — the resource-limits/observability
+# follow-up to #7429's dispatch mode)
+# ============================================================
+
+echo ""
+echo "Testing spawn-claude.sh containerized resource limits (#7430)..."
+
+# Test: LOOM_SWEEP_CONTAINER_CPUS / LOOM_SWEEP_CONTAINER_MEMORY env
+# overrides apply exact `--cpus`/`--memory` docker flags and are reflected
+# in both the observability labels and the LOOM_DISPATCH_MODE marker.
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CONTAINER_CPUS="3" LOOM_SWEEP_CONTAINER_MEMORY="2g" LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "--cpus 3" "$docker_log" \
+    "LOOM_SWEEP_CONTAINER_CPUS applies an explicit --cpus docker flag (#7430)"
+assert_contains "--memory 2g" "$docker_log" \
+    "LOOM_SWEEP_CONTAINER_MEMORY applies an explicit --memory docker flag (#7430)"
+assert_contains "--label loom.dispatch.cpus=3" "$docker_log" \
+    "the applied CPU limit is surfaced as a docker label for observability (#7430)"
+assert_contains "--label loom.dispatch.memory=2g" "$docker_log" \
+    "the applied memory limit is surfaced as a docker label for observability (#7430)"
+assert_contains "# LOOM_DISPATCH_MODE mode=container image=ghcr.io/rjwalters/loom-worker:latest cpus=3 memory=2g" "$output" \
+    "the LOOM_DISPATCH_MODE marker names the exact applied cpus/memory values (#7430)"
+assert_contains "stub-claude ran, args=-p ping" "$output" \
+    "the recursed invocation still reaches the claude stub with explicit resource limits applied (#7430)"
+
+# Test: runtimes.containment.cpus / runtimes.containment.memory config
+# knobs are honored when no env override is set.
+echo '{"runtimes": {"containment": {"enabled": true, "cpus": "1.5", "memory": "512m"}}}' \
+    > "$CONTAIN_WS/.loom/config.json"
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "--cpus 1.5" "$docker_log" \
+    "runtimes.containment.cpus config knob applies --cpus (#7430)"
+assert_contains "--memory 512m" "$docker_log" \
+    "runtimes.containment.memory config knob applies --memory (#7430)"
+
+# Test: LOOM_SWEEP_CONTAINER_CPUS env override wins over the config value.
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_CONTAINER_CPUS="4" LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "--cpus 4" "$docker_log" \
+    "LOOM_SWEEP_CONTAINER_CPUS env wins over runtimes.containment.cpus config (#7430)"
+assert_contains "--memory 512m" "$docker_log" \
+    "the memory config knob is unaffected by the cpus env override (#7430)"
+
+rm -f "$CONTAIN_WS/.loom/config.json"
+
+# Test: with the CPU-quota mechanism actually enabled (not disabled via
+# LOOM_SWEEP_CPU_QUOTA=0), a containerized dispatch's --cpus defaults to the
+# SAME host-wide CPU budget bare-metal dispatch would have computed
+# (LOOM_SWEEP_CPU_BUDGET_CORES, issues #5111/#5979) — a containerized sweep
+# never gets an independent, unbounded CPU claim by default.
+echo '{"runtimes": {"containment": {"enabled": true}}}' > "$CONTAIN_WS/.loom/config.json"
+cat > "$CONTAIN_STUB_DIR/nproc" <<'STUB'
+#!/usr/bin/env bash
+echo 8
+STUB
+chmod +x "$CONTAIN_STUB_DIR/nproc"
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_RESERVED_CORES=2 LOOM_SWEEP_SHARED_CPU_BUDGET=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "--cpus 6" "$docker_log" \
+    "containerized --cpus defaults to the same host-wide CPU budget as bare-metal dispatch: 8 - 2 reserved = 6 (#7430)"
+assert_contains "cpus=6" "$output" \
+    "the LOOM_DISPATCH_MODE marker reports the computed default cpus budget, not 'none' (#7430)"
+rm -f "$CONTAIN_STUB_DIR/nproc"
+rm -f "$CONTAIN_WS/.loom/config.json"
+
+# Test: bare-metal dispatch (containment disabled) logs the symmetric
+# LOOM_DISPATCH_MODE mode=bare-metal marker, so a status/health reader can
+# positively distinguish "ran bare-metal" from "predates this marker".
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    env -u LOOM_SWEEP_CONTAINERIZED LOOM_SWEEP_CPU_QUOTA=0 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+assert_contains "# LOOM_DISPATCH_MODE mode=bare-metal" "$output" \
+    "bare-metal dispatch logs the symmetric LOOM_DISPATCH_MODE mode=bare-metal marker (#7430)"
+
+# Saturated-host regression (#7430's own acceptance criterion, mirroring the
+# #5979 CPU-sharing regression check in Section 7c): N concurrent
+# containerized sweeps' declared --cpus caps are DIVIDED across the in-flight
+# count, exactly like bare-metal dispatch already divides
+# LOOM_SWEEP_CPU_BUDGET_CORES — never each independently claiming the whole
+# host (the #5979 load-133.87 incident class, extended to containment).
+echo '{"runtimes": {"containment": {"enabled": true}}}' > "$CONTAIN_WS/.loom/config.json"
+cat > "$CONTAIN_STUB_DIR/nproc" <<'STUB'
+#!/usr/bin/env bash
+echo 8
+STUB
+chmod +x "$CONTAIN_STUB_DIR/nproc"
+: > "$DOCKER_LOG"
+output=$(LOOM_WORKSPACE="$CONTAIN_WS" LOOM_DAEMON_BIN="$DAEMON_BIN" PATH="$CONTAIN_STUB_DIR:$PATH" \
+    LOOM_SWEEP_RESERVED_CORES=2 LOOM_SWEEP_INFLIGHT_SWEEPS=4 \
+    "$SCRIPTS_DIR/spawn-claude.sh" -p "ping" 2>&1 || true)
+docker_log="$(cat "$DOCKER_LOG" 2>/dev/null)"
+assert_contains "--cpus 1" "$docker_log" \
+    "saturated-host regression: 4 concurrent containerized sweeps on an 8-core host (6 usable) each get 1 core, summing to 4 <= 6, never 4x the unbounded 6 (#7430/#5979)"
+rm -f "$CONTAIN_STUB_DIR/nproc"
+
+rm -f "$CONTAIN_WS/.loom/config.json"
+rm -rf "$CONTAIN_WS" "$CONTAIN_STUB_DIR"
+
+# ============================================================
 # Section 8: claude-wrapper.sh `Execution error` retry + permanent-death
 #            diagnostics (issue #4255)
 #
@@ -1903,6 +2203,43 @@ line two
 Execution error" "max retries (2) exceeded" 2>&1
 DRIVER
 ee_death=$(WRAPPER="$WRAPPER" bash "$EE_DIR/death-driver.sh" 2>&1)
+# --- Unit: export_headless_session_marker() (issue #6645) -------------------
+#
+# The daemon spawns claude-wrapper.sh DIRECTLY (verified live: the process
+# chain is loom-daemon -> claude-wrapper.sh -p ... -> claude -p ...), never via
+# spawn-claude.sh, so the wrapper needs its own copy of the print-mode marker
+# the Stop guard reads. Driven through the SOURCE_ONLY seam because `main`
+# itself runs the full pre-flight.
+cat > "$EE_DIR/headless-driver.sh" <<'DRIVER'
+#!/usr/bin/env bash
+CLAUDE_WRAPPER_SOURCE_ONLY=1 source "$WRAPPER"
+set +e
+run_case() {
+    local label="$1"; shift
+    (
+        unset LOOM_HEADLESS_SESSION
+        export_headless_session_marker "$@" >/dev/null 2>&1
+        echo "${label}=${LOOM_HEADLESS_SESSION:-unset}"
+    )
+}
+run_case PRINT_SHORT -p "/loom:sweep 1"
+run_case PRINT_LONG --print "/loom:sweep 1"
+run_case PRINT_EQ --print=text "/loom:sweep 1"
+run_case INTERACTIVE --dangerously-skip-permissions "/loom:judge 1"
+run_case NOARGS
+DRIVER
+ee_headless=$(WRAPPER="$WRAPPER" bash "$EE_DIR/headless-driver.sh" 2>&1)
+assert_contains "PRINT_SHORT=1" "$ee_headless" \
+    "claude-wrapper exports LOOM_HEADLESS_SESSION=1 for -p (#6645)"
+assert_contains "PRINT_LONG=1" "$ee_headless" \
+    "claude-wrapper exports LOOM_HEADLESS_SESSION=1 for --print (#6645)"
+assert_contains "PRINT_EQ=1" "$ee_headless" \
+    "claude-wrapper exports LOOM_HEADLESS_SESSION=1 for --print=<fmt> (#6645)"
+assert_contains "INTERACTIVE=unset" "$ee_headless" \
+    "claude-wrapper leaves a slash-command (script -q, interactive) run UNMARKED (#6645)"
+assert_contains "NOARGS=unset" "$ee_headless" \
+    "claude-wrapper leaves an argument-less run UNMARKED (#6645)"
+
 assert_contains "permanent death (max retries (2) exceeded)" "$ee_death" \
     "log_permanent_death labels the reason (#4255)"
 assert_contains "exit_code=42" "$ee_death" \
@@ -2280,7 +2617,77 @@ STUB
       echo -e "  ${RED}FAIL${NC}: auth-dead whole-pool exhaustion exits non-zero (#6030)"
   fi
 
-  rm -rf "$AD_WS" "$AD_STUB" "$AD_WS2" "$AD_STUB2"
+  # --- #6614: a REVOKED token (JSON 401 envelope) is token-fatal on the FIRST
+  # occurrence — ZERO additional CLI invocations against the same credential.
+  #
+  # This is the end-to-end half of the classify-error fix: the incident had the
+  # wrapper burn all 5 retries against one revoked token because the JSON
+  # envelope defeated the TOKEN_EXPIRED regex. The stub counts invocations per
+  # token, so "retried the same dead token" is asserted as a COUNT (exactly 1),
+  # not merely inferred from the exit code.
+  AD_WS3="$(mktemp -d)"
+  mkdir -p "$AD_WS3/.loom/tokens"
+  chmod 700 "$AD_WS3/.loom/tokens"
+  printf '%s' "tok-alpha" > "$AD_WS3/.loom/tokens/alpha.token"
+  printf '%s' "tok-beta"  > "$AD_WS3/.loom/tokens/beta.token"
+  chmod 600 "$AD_WS3/.loom/tokens/"*.token
+
+  AD_CALLS3="$(mktemp)"
+  AD_STUB3="$(mktemp -d)"
+  cat > "$AD_STUB3/claude" <<STUB
+#!/usr/bin/env bash
+case " \$* " in
+  *" -p "*) ;;
+  *) exit 0 ;;
+esac
+printf '%s\n' "\${CLAUDE_CODE_OAUTH_TOKEN}" >> "$AD_CALLS3"
+if [[ "\${CLAUDE_CODE_OAUTH_TOKEN}" == "tok-alpha" ]]; then
+    echo 'Failed to authenticate. API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}'
+    exit 1
+fi
+echo "stub-claude success on token=\${CLAUDE_CODE_OAUTH_TOKEN}"
+exit 0
+STUB
+  chmod +x "$AD_STUB3/claude"
+
+  # MAX_RETRIES=5 (the production default) on purpose: the pre-fix behavior
+  # burned all five against tok-alpha. Post-fix it must be used exactly once.
+  set +e
+  ad3_out=$(
+    LOOM_WORKSPACE="$AD_WS3" \
+    LOOM_TOKEN_NAME="alpha" \
+    CLAUDE_CODE_OAUTH_TOKEN="tok-alpha" \
+    LOOM_DAEMON_BIN="$DAEMON_BIN" \
+    LOOM_MAX_RETRIES=5 \
+    LOOM_INITIAL_WAIT=1 \
+    LOOM_SHEPHERD_TASK_ID="test-revoked-token" \
+    LOOM_STARTUP_MONITOR_WINDOW=1 \
+    PATH="$AD_STUB3:$PATH" \
+    bash "$WRAPPER" -p "ping" 2>&1
+  )
+  ad3_rc=$?
+  set -e
+
+  ad3_alpha_calls=$(grep -c '^tok-alpha$' "$AD_CALLS3" 2>/dev/null || echo 0)
+  assert_eq "1" "$ad3_alpha_calls" \
+      "a revoked-token 401 is fatal on FIRST occurrence: exactly 1 CLI call on the revoked token, zero retries (#6614)"
+  assert_contains "stub-claude success on token=tok-beta" "$ad3_out" \
+      "wrapper rotates off the revoked token and succeeds on the next account (#6614)"
+  assert_eq "0" "$ad3_rc" \
+      "wrapper exits 0 after revoked-token rotation (#6614)"
+
+  ad3_bad_file="$AD_WS3/.loom/tokens/.bad_tokens"
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -f "$ad3_bad_file" ]] && grep "alpha" "$ad3_bad_file" | grep -q "auth-dead:"; then
+      TESTS_PASSED=$((TESTS_PASSED + 1))
+      echo -e "  ${GREEN}PASS${NC}: revoked token is marked bad with an 'auth-dead:' reason (#6614)"
+  else
+      TESTS_FAILED=$((TESTS_FAILED + 1))
+      echo -e "  ${RED}FAIL${NC}: revoked token is marked bad with an 'auth-dead:' reason (#6614)"
+      echo "    .bad_tokens: $(cat "$ad3_bad_file" 2>/dev/null || echo '<missing>')"
+  fi
+
+  rm -rf "$AD_WS" "$AD_STUB" "$AD_WS2" "$AD_STUB2" "$AD_WS3" "$AD_STUB3" "$AD_CALLS3"
 fi
 
 # ============================================================

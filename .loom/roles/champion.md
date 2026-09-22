@@ -71,6 +71,21 @@ for it, #4966):
 > opportunistic per-occurrence judgment call, not a scheduled scan like Pass 0
 > above.
 
+> **`loom:evaluating` is excluded here too, but not unexamined (#6828).**
+> `champion-issue-promo.md` → "Pass 0b: Stale `loom:evaluating` Claim Re-Scan"
+> runs immediately after Pass 0, before this discovery query, and removes the
+> label from any issue whose claim has gone stale (the labeled event's age
+> exceeds `LOOM_STALE_EVALUATING_MINUTES`, default 15 — a prior Champion pass
+> that died mid-evaluation without writing a verdict). Those issues then match
+> the query below in the same pass. Without that scan, a stale claim would be
+> permanent: the only actor that could notice the claim was abandoned is the
+> one this exclusion tells to ignore it, and `champion-issue-promo.md`'s own
+> "Claim (staleness-aware...)" reconciliation for this exact case never runs,
+> because it only fires on an issue *after* discovery has already selected it.
+> A `loom:evaluating` claim that keeps going stale on the SAME issue routes to
+> `loom:operator-only,loom:operator-mechanical` after repeated reclaims rather
+> than looping forever — see Pass 0b for the bound.
+
 ```bash
 gh issue list \
   --label="loom:curated" \
@@ -181,7 +196,7 @@ gh pr list \
   --jq '.[] | "#\(.number) \(.title)"'
 ```
 
-Ignore any that also carry `loom:operator-only` (already routed to a human). If found, **read and follow instructions in `.claude/commands/loom/champion-pr-merge.md` → "Capped-PR Recovery Pass"**: read the full rejection history, apply the forward-progress test, and either grant one more Doctor→Judge cycle (remove `loom:blocked` only), keep the PR parked, or recommend closure to the operator — always with a rationale comment. This pass never merges and never closes.
+Ignore any that also carry `loom:operator-only` (already routed to a human). If found, **read and follow instructions in `.claude/commands/loom/champion-pr-merge.md` → "Capped-PR Recovery Pass"**: read the full rejection history, apply the forward-progress test, and either grant one more Doctor→Judge cycle (remove `loom:blocked` only), keep the PR parked, or recommend closure to the operator — always with a rationale comment. This pass never merges and never closes (Champion's only close authority anywhere is the unrelated Priority 2/3 proposal-evaluation "premise-false close gate", `champion-issue-promo.md` Step 4, #7657 — a proposal issue, never a PR).
 
 ### No Work Available
 
@@ -255,9 +270,14 @@ After completing work, generate a completion report. See `.claude/commands/loom/
 ```
 Role Assumed: Champion
 Work Completed: [Summary of PRs merged and issues promoted]
+Merge-risk holds: [N open PR(s) — C conflicting, D out at Doctor, oldest Ad]
 Rejected: [Items that didn't pass criteria]
 Next Steps: [What awaits human review]
 ```
+
+The `Merge-risk holds:` line is **mandatory on every pass, including zero**
+(#6720) — see `champion-common.md` → "Completion Report" and
+`champion-pr-merge.md` → "Held-PR Census".
 
 ---
 

@@ -181,6 +181,31 @@ if [[ -z "$HEAD_BRANCH" || "$HEAD_BRANCH" == "HEAD" ]]; then
   exit 2
 fi
 
+# --- Version-bearing-file sync check (#6730, #7168) -------------------------
+#
+# Recurring failure mode: a Builder's version-bump commit hand-edits (or
+# mirrors via a partial script) the VERSION_FILES set in scripts/version.sh
+# but leaves a separate version-bearing file -- in practice always
+# .loom/install-metadata.json -- stale, which only surfaces later as a CI-only
+# "Installer Integration Tests" failure that a Judge/Doctor has to patch by
+# hand (observed twice in one day on #6497 and #6212). `scripts/version.sh
+# check` already catches this correctly; the gap was that nothing forced it
+# to run before a PR was opened -- builder-pr.md's "defaults/ VERSION-Bump
+# Gate" documented running it by hand, but a checklist step a Builder can
+# forget is not enforcement.
+#
+# The actual gate logic (resolution order, LOOM_VERSION_CHECK_SCRIPT test
+# seam, BLOCKER:/Fix: message style) lives in version-check-gate.sh, shared
+# with Doctor's merge-conflict rebase recipes (defaults/roles/doctor.md),
+# which push directly with `git push --force-with-lease` and never route
+# through this script -- see version-check-gate.sh's own header for why that
+# second call site exists (#7168).
+if [[ -x "$SCRIPT_DIR/version-check-gate.sh" ]]; then
+  if ! "$SCRIPT_DIR/version-check-gate.sh" --fix-hint "then re-run create-pr.sh."; then
+    exit 1
+  fi
+fi
+
 # --- Adopt-first ------------------------------------------------------------
 #
 # An existing open PR for this head branch means the work is already in

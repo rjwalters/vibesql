@@ -407,7 +407,16 @@ assert_eq "2" "$rc" "create-pr.sh: --body and --body-file together exit 2"
 echo ""
 echo "Testing Builder role-prompt wiring (#6074)..."
 
-PROMPT_DIR="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)"
+# Two `..` reaches repo-root/.claude/commands/loom for an INSTALLED copy
+# (HELPERS_DIR is .loom/scripts there); one `..` reaches defaults/.claude/
+# commands/loom when running inside this source repo (HELPERS_DIR is
+# defaults/scripts) -- the two layouts differ in depth, so probe both rather
+# than hard-coding one (#447).
+if [[ -d "$HELPERS_DIR/../../.claude/commands/loom" ]]; then
+    PROMPT_DIR="$(cd "$HELPERS_DIR/../../.claude/commands/loom" && pwd)"
+else
+    PROMPT_DIR="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)"
+fi
 
 for prompt in builder.md builder-pr.md builder-worktree.md; do
     if grep -q 'create-pr\.sh' "$PROMPT_DIR/$prompt"; then

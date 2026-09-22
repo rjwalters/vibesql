@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # test-champion-critical-file-check.sh - Regression tests for the Critical File
-# Exclusion Check false negative on PR #4611 (#4613), and for the version-only
-# diff carve-out that fixes the permanent auto-merge block on
-# `scripts/version.sh bump`'s mechanical commit (#6147).
+# Exclusion Check false negative on PR #4611 (#4613), the version-only diff
+# carve-out that fixes the permanent auto-merge block on `scripts/version.sh
+# bump`'s mechanical commit (#6147), and the durable critical-file hold that
+# replaces the endless-retry rejection on a genuine critical-file match
+# (#6879).
 #
 # Champion's criterion #3 (`champion-pr-merge.md` "Critical File Exclusion
 # Check") is prose an LLM instance reads and executes, not a standalone
 # script (same situation as test-dependency-parse.sh) — so this file mirrors
 # the documented check-loop (and, since #6147, the `version_only_diff()`
-# carve-out) in local functions and pins the shipped markdown's exact
-# commands with `assert_doc_contains`, catching drift between the two.
+# carve-out, and since #6879, the durable-hold labeling) in local functions
+# and pins the shipped markdown's exact commands with `assert_doc_contains`,
+# catching drift between the two.
 #
 # Incident recap: on PR #4611 (117 changed files), a concurrent Champion
 # evaluation posted "no critical-file changes" despite the PR removing
@@ -26,6 +29,17 @@
 #      modified" must never be asserted in a comment without the check-loop
 #      having actually just run over the full file list.
 #
+# Second incident recap (#6879): a critical-file FAIL routed through the same
+# generic "Transient failures — keep loom:pr, retry next tick" template as
+# label-check/size-check/ci-status, even though nothing about a diff's
+# critical-file-ness clears on its own. A fleet PR was re-evaluated and
+# re-rejected ~59 times over 36 hours this way (200-300s/tick), invisible to
+# the operator queue the whole time (no loom:operator* label). The fix routes
+# criterion #3's FAIL through its own durable hold instead — `loom:operator`
+# + a `<!-- champion:critical-file-hold -->` marker, mirroring criterion #2's
+# merge-risk hold — released only when a later push narrows the diff so it no
+# longer matches any critical-file pattern.
+#
 # This file asserts:
 #   1. The mirrored critical-file check-loop correctly FAILS when a critical
 #      file is present anywhere in a 100+-file list, including past index 100
@@ -35,6 +49,11 @@
 #      `gh pr view <number> --json files` invocation for either the
 #      criterion #3 FILES command or the criterion #2 evidence-gathering
 #      command, and does contain the paginated replacement.
+#   4. (#6879) A fresh critical-file FAIL applies the loom:operator label and
+#      posts the champion:critical-file-hold marker comment exactly once; a
+#      repeated FAIL against an unchanged file set is idempotent (no
+#      duplicate label/comment); and a later PASS (diff no longer touches a
+#      critical file) clears the label and posts a one-time cleared notice.
 #
 # Usage:
 #   ./.loom/scripts/tests/test-champion-critical-file-check.sh
@@ -43,8 +62,18 @@ set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
-DEFAULTS_DIR="$(cd "$SCRIPTS_DIR/.." && pwd)"
-CHAMPION_MD="$DEFAULTS_DIR/.claude/commands/loom/champion-pr-merge.md"
+
+# Two `..` reaches repo-root/.claude/commands/loom for an INSTALLED copy
+# (SCRIPTS_DIR is .loom/scripts there); one `..` reaches defaults/.claude/
+# commands/loom when running inside this source repo (SCRIPTS_DIR is
+# defaults/scripts) -- the two layouts differ in depth, so probe both rather
+# than hard-coding one (#6725).
+if [[ -d "$SCRIPTS_DIR/../../.claude/commands/loom" ]]; then
+    PROMPT_DIR="$(cd "$SCRIPTS_DIR/../../.claude/commands/loom" && pwd)"
+else
+    PROMPT_DIR="$(cd "$SCRIPTS_DIR/../.claude/commands/loom" && pwd)"
+fi
+CHAMPION_MD="$PROMPT_DIR/champion-pr-merge.md"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -487,6 +516,197 @@ assert_doc_contains "$CHAMPION_MD" \
 assert_doc_contains "$CHAMPION_MD" \
     "Verified against PR #6118 (#6147)" \
     "champion-pr-merge.md records verification against the real PR #6118 diff shape"
+
+# =====================================================================
+# Durable critical-file hold (#6879): a critical-file FAIL is a one-way
+# terminal state (nothing about a diff's critical-file-ness changes without a
+# human decision or a later push that narrows the diff), so criterion #3 now
+# applies its own durable hold (`loom:operator` + `<!-- champion:critical-
+# file-hold -->`) instead of routing through the shared "Transient failures"
+# template. Mirrored here (same rationale as the mirrors above: the criterion
+# is prose an LLM instance executes, not a standalone script) from
+# `champion-pr-merge.md`'s "Safety Criteria → 3. Critical File Exclusion
+# Check → Durable hold on FAIL" subsection.
+#
+# Unlike criterion #2's merge-risk hold, this one needs no sticky-hold
+# precheck machinery: the check-loop above is a deterministic file-pattern
+# match, not a judgment call, so the FAIL/PASS verdict recomputed fresh every
+# tick IS the release signal — "last marker wins" is enough state to track.
+# =====================================================================
+
+assert_contains() {
+    local haystack="$1" needle="$2" msg="$3"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if grep -qF -- "$needle" <<<"$haystack"; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: $msg"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: $msg"
+        echo "    Missing '$needle' in:"
+        sed 's/^/      /' <<<"$haystack"
+    fi
+}
+
+assert_lacks() {
+    local haystack="$1" needle="$2" msg="$3"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if grep -qF -- "$needle" <<<"$haystack"; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: $msg"
+        echo "    Unexpectedly found '$needle' in:"
+        sed 's/^/      /' <<<"$haystack"
+    else
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: $msg"
+    fi
+}
+
+# STATE_FILE holds exactly one line: "none" | "held" | "cleared" — the state
+# implied by whichever of the two markers was posted LAST, mirroring the
+# doc's "last comment matching either marker prefix" lookup without needing
+# real timestamps (a deterministic check-loop makes this sufficient — see the
+# doc's own rationale for skipping criterion #2's sticky-hold machinery).
+hold_state_get() {
+    local f="$1"
+    [[ -f "$f" ]] && cat "$f" || echo "none"
+}
+hold_state_set() {
+    printf '%s' "$2" >"$1"
+}
+
+# LABEL_FILE tracks whether loom:operator is currently applied ("1"/"0").
+label_get() {
+    local f="$1"
+    [[ -f "$f" ]] && cat "$f" || echo "0"
+}
+label_set() {
+    printf '%s' "$2" >"$1"
+}
+
+# Simulates one Champion tick of criterion #3's durable-hold logic, mirroring
+# the doc's FAIL / CURRENTLY_HELD branches verbatim. Reads a newline-separated
+# file list on stdin (same input shape as champion_critical_file_check).
+# Emits one ACTION line per observable forge effect (comment posted, label
+# added/removed) so a test can assert on them without a live PR.
+champion_critical_file_hold_tick() {
+    local hold_state_file="$1" label_file="$2"
+    local result currently_held
+
+    result="$(champion_critical_file_check)"
+
+    case "$(hold_state_get "$hold_state_file")" in
+        held) currently_held=true ;;
+        *) currently_held=false ;;
+    esac
+
+    if [[ "$result" == FAIL:* ]]; then
+        if [[ "$currently_held" == true ]]; then
+            echo "HOLD:stands"
+        else
+            echo "COMMENT:champion:critical-file-hold"
+            hold_state_set "$hold_state_file" "held"
+        fi
+        echo "LABEL_ADD:loom:operator"
+        label_set "$label_file" "1"
+    elif [[ "$currently_held" == true ]]; then
+        echo "COMMENT:champion:critical-file-hold-cleared"
+        echo "LABEL_REMOVE:loom:operator"
+        hold_state_set "$hold_state_file" "cleared"
+        label_set "$label_file" "0"
+    else
+        echo "PASS:no-hold"
+    fi
+}
+
+echo
+echo "--- critical-file hold: label + marker applied on first rejection (#6879) ---"
+
+HS="$(mktemp)"
+LF="$(mktemp)"
+rm -f "$HS" "$LF"
+
+critical_fixture=$'src/lib.rs\n.github/workflows/new-ci-job.yml'
+out="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF")"
+assert_contains "$out" "COMMENT:champion:critical-file-hold" \
+    "a fresh critical-file FAIL posts the champion:critical-file-hold marker comment"
+assert_contains "$out" "LABEL_ADD:loom:operator" \
+    "a fresh critical-file FAIL adds the loom:operator label"
+assert_eq "held" "$(hold_state_get "$HS")" \
+    "hold state is recorded as held after the first rejection"
+assert_eq "1" "$(label_get "$LF")" \
+    "loom:operator is applied after the first rejection"
+
+echo
+echo "--- critical-file hold: no duplicate label/comment on a repeated rejection with an unchanged file set (idempotency, #6879) ---"
+
+out2="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF")"
+assert_contains "$out2" "HOLD:stands" \
+    "a repeated FAIL with an existing hold is recognized as still-held"
+comment_count="$(grep -c '^COMMENT:' <<<"$out2" || true)"
+assert_eq "0" "$comment_count" \
+    "a repeated FAIL with an existing hold posts NO new comment (idempotency guard)"
+assert_eq "held" "$(hold_state_get "$HS")" \
+    "hold state remains held (unchanged) across the repeated rejection"
+assert_eq "1" "$(label_get "$LF")" \
+    "loom:operator remains applied (label add is idempotent) across the repeated rejection"
+
+echo
+echo "--- critical-file hold: label/marker cleared when a later push no longer touches a critical file (#6879) ---"
+
+clean_fixture=$'src/lib.rs\nsrc/other.rs'
+out3="$(printf '%s\n' "$clean_fixture" | champion_critical_file_hold_tick "$HS" "$LF")"
+assert_contains "$out3" "COMMENT:champion:critical-file-hold-cleared" \
+    "a PASS after a prior hold posts the champion:critical-file-hold-cleared marker comment"
+assert_contains "$out3" "LABEL_REMOVE:loom:operator" \
+    "a PASS after a prior hold removes the loom:operator label"
+assert_eq "cleared" "$(hold_state_get "$HS")" \
+    "hold state is recorded as cleared once the diff no longer matches a critical pattern"
+assert_eq "0" "$(label_get "$LF")" \
+    "loom:operator is removed once the diff no longer matches a critical pattern"
+
+out4="$(printf '%s\n' "$clean_fixture" | champion_critical_file_hold_tick "$HS" "$LF")"
+assert_eq "PASS:no-hold" "$out4" \
+    "an ordinary PASS with no prior hold produces no forge side effects (no re-clearing an already-cleared hold)"
+
+out5="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF")"
+assert_contains "$out5" "COMMENT:champion:critical-file-hold" \
+    "a fresh critical-file touch after a cleared hold starts a NEW hold episode (fresh comment)"
+assert_eq "held" "$(hold_state_get "$HS")" \
+    "hold state re-enters held for the new episode"
+
+rm -f "$HS" "$LF"
+
+echo
+echo "--- Doc pins: shipped markdown ships the durable critical-file hold (#6879) ---"
+
+assert_doc_contains "$CHAMPION_MD" \
+    'HOLD_MARKER="<!-- champion:critical-file-hold -->"' \
+    "criterion #3 defines its own durable-hold marker, distinct from criterion #2's champion:merge-risk-hold"
+
+assert_doc_contains "$CHAMPION_MD" \
+    'CLEARED_MARKER="<!-- champion:critical-file-hold-cleared -->"' \
+    "criterion #3 defines a distinct cleared-marker for the release path"
+
+assert_doc_contains "$CHAMPION_MD" \
+    'gh pr edit "$PR_NUMBER" --add-label "loom:operator"' \
+    "criterion #3's durable-hold path applies loom:operator (#5502) on FAIL"
+
+assert_doc_contains "$CHAMPION_MD" \
+    'gh pr edit "$PR_NUMBER" --remove-label "loom:operator"' \
+    "criterion #3's release path removes loom:operator once the diff no longer touches a critical file"
+
+assert_doc_contains "$CHAMPION_MD" \
+    "#6879" \
+    "champion-pr-merge.md documents the #6879 durable critical-file-hold fix"
+
+assert_doc_lacks "$CHAMPION_MD" \
+    '- **critical-file**: the sorted, comma-joined list of touched critical file paths.' \
+    "critical-file is no longer keyed through the shared transient-failure REASON_KEY table — it has its own durable-hold path (#6879)"
+
+assert_doc_lacks "$CHAMPION_MD" \
+    'label-check | size-check | critical-file |' \
+    "the shared CRITERION_KEY slug comment no longer lists critical-file among the transient-failure criteria (#6879)"
 
 echo
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"

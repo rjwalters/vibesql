@@ -105,12 +105,17 @@ while IFS= read -r -d $'\x1e' para; do
   # Exact-match a normalized old paragraph against the set of normalized new
   # paragraphs. grep -F/-x avoids both regex-metacharacter surprises in
   # issue text and accidental substring matches across paragraph boundaries.
-  # NOTE: the delimiter passed to `tr` must be bash's ANSI-C-quoted $'\x1e'
-  # (an actual 0x1E byte), not the single-quoted string '\x1e' -- BSD tr
-  # (macOS) does not support \xHH escapes and would instead treat '\x1e' as
-  # the three literal characters x/1/e, silently mangling every "e" in the
-  # text.
-  if ! printf '%s' "$NEW_PARAS" | tr $'\x1e' '\n' | grep -qFx -- "$para"; then
+  # NOTE: do the 0x1e -> newline conversion via bash parameter expansion
+  # (${var//pat/repl}) into a here-string, not a `tr | grep -q` pipe. Under
+  # `set -o pipefail`, `grep -qFx` exits as soon as it finds its first match
+  # (that's what -q means), which sends the upstream `tr` a SIGPIPE; tr's
+  # resulting non-zero exit then becomes the *pipeline's* exit status even
+  # though grep genuinely found the match. That produced false-positive FAILs
+  # on large "## Verified corrections" sections, especially when the match
+  # landed early in the paragraph stream (#6768). The parameter expansion
+  # below is pure bash string substitution -- no pipe, no subprocess, so
+  # there is nothing for pipefail to trip over.
+  if ! grep -qFx -- "$para" <<< "${NEW_PARAS//$'\x1e'/$'\n'}"; then
     MISSING=$((MISSING + 1))
     echo "check-verified-corrections-preserved: missing verified-corrections paragraph:" >&2
     echo "  $para" >&2

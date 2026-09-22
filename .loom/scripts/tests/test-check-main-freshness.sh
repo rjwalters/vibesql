@@ -415,6 +415,46 @@ else
     fail "behind-with-resolvable-source unexpectedly warned about a missing precondition. Got: $stderr_out"
 fi
 
+# -------- Test 15: behind, .loom/loom-source-path points at a NONEXISTENT
+# directory -> treated as unresolvable, same as no sidecar at all (#6780) ----
+echo "Test 15: behind + .loom/loom-source-path pointing at a nonexistent directory still warns about the missing precondition (#6780)"
+make_fixture
+advance_origin
+clone="$WORKDIR/clone"
+rm -rf "$clone/defaults"
+mkdir -p "$clone/.loom"
+printf '%s/does-not-exist\n' "$WORKDIR" > "$clone/.loom/loom-source-path"
+stderr_out="$(cd "$clone" && "$SCRIPT" 2>&1 >/dev/null)"
+if printf '%s' "$stderr_out" | grep -q "6202"; then
+    pass "(#6780) nonexistent loom-source-path target still warns about the missing precondition"
+else
+    fail "(#6780) nonexistent loom-source-path target lost the missing-precondition warning. Got: $stderr_out"
+fi
+
+# -------- Test 16: behind, .loom/loom-source-path points at a directory that
+# EXISTS (even with a `defaults/` subdir) but is not a real Loom checkout --
+# e.g. a scratch clone whose contents were emptied without removing the
+# directory itself. This is the precise #6780 gap: a bare `-d "$src/defaults"`
+# check treats this as resolvable, which would let resync-installed.sh
+# silently report a false "already in sync" against an empty source tree.
+# The precondition check must require the SAME populated defaults/hooks or
+# defaults/scripts resolve_defaults() itself requires. --------
+echo "Test 16: behind + .loom/loom-source-path pointing at a stale/empty source tree still warns about the missing precondition (#6780)"
+make_fixture
+advance_origin
+clone="$WORKDIR/clone"
+rm -rf "$clone/defaults"
+stale_src="$WORKDIR/stale-loom-source"
+rm -rf "$stale_src"
+mkdir -p "$stale_src/defaults" "$clone/.loom"   # defaults/ exists, but empty
+printf '%s\n' "$stale_src" > "$clone/.loom/loom-source-path"
+stderr_out="$(cd "$clone" && "$SCRIPT" 2>&1 >/dev/null)"
+if printf '%s' "$stderr_out" | grep -q "6202"; then
+    pass "(#6780) stale/empty source tree still warns about the missing precondition"
+else
+    fail "(#6780) stale/empty source tree lost the missing-precondition warning. Got: $stderr_out"
+fi
+
 # -------- Summary --------
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"

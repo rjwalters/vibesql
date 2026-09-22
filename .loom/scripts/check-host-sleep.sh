@@ -215,6 +215,23 @@ case "$PLATFORM" in
     Linux)
         check_linux() {
             # Prefer systemd-inhibit if systemd is available.
+            #
+            # #6661 design decision: this early return means the #6311
+            # `PREVENT_SLEEP_ENABLED` note below (in the "systemd present, no
+            # active lock" branch) is unreachable on a non-systemd Linux host.
+            # That is deliberate, not an oversight: the note's entire
+            # remediation ("wrap in systemd-inhibit …") only makes sense on a
+            # systemd host, and the self-wrap mechanism it describes
+            # (spawn-claude.sh / loom-daemon-start.sh --foreground) is itself
+            # systemd-only — so printing it here would recommend a tool that
+            # does not exist on this host. The alternative (also printing a
+            # `host.preventSleep` note here) was considered and rejected: it
+            # would change this script's stdout/stderr on every non-systemd
+            # Linux host, for a knob whose entire implementation is
+            # systemd-specific. See `tests/test-check-host-sleep.sh` Test 8
+            # for how this decision keeps its regression test hermetic
+            # (systemctl is stubbed there rather than relying on the live
+            # test host's own systemd presence).
             if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --version >/dev/null 2>&1; then
                 info_oneliner "${YELLOW}[sleep-check] Linux without systemd detected; cannot auto-verify sleep settings.${NC}"
                 info_oneliner "${YELLOW}[sleep-check] If this host can suspend, consider disabling suspend for this session.${NC}"

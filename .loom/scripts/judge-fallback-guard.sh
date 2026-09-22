@@ -163,6 +163,7 @@ PR_JSON="$(gh pr view "$PR" --json author,headRefOid 2>"$GH_STDERR")" || {
 }
 
 IS_BOT="$(jq -r '.author.is_bot // false' <<<"$PR_JSON" 2>/dev/null || echo "false")"
+AUTHOR_LOGIN="$(jq -r '.author.login // empty' <<<"$PR_JSON" 2>/dev/null || true)"
 HEAD_SHA="$(jq -r '.headRefOid // empty' <<<"$PR_JSON" 2>/dev/null || true)"
 
 if [[ -z "$HEAD_SHA" ]]; then
@@ -170,7 +171,15 @@ if [[ -z "$HEAD_SHA" ]]; then
   exit 1
 fi
 
-if [[ "$IS_BOT" == "true" ]]; then
+# Loom's own GitHub App dispatch identity is reported by GitHub as
+# `is_bot: true` (same as Dependabot/Renovate/github-actions[bot]), but it is
+# NOT an external bot outside the Loom label workflow — it's Loom's own PR
+# creation path. Allowlist it by exact `.author.login` match so it proceeds
+# to the cap/dedup checks below like any other Loom-authored PR, instead of
+# being permanently invisible to both the primary and fallback Judge queues
+# (#6982). This narrows the bot-author check; it does not weaken it for
+# genuinely external bots.
+if [[ "$IS_BOT" == "true" && "$AUTHOR_LOGIN" != "app/loom-fleet-dispatch" ]]; then
   emit "SKIP" "bot-author (outside Loom label workflow; fallback queue cannot advance it)" "$HEAD_SHA" 0 0 0
   exit 10
 fi

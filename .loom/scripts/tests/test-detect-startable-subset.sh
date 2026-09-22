@@ -19,12 +19,25 @@ set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
-DEFAULTS_DIR="$(cd "$SCRIPTS_DIR/.." && pwd)"
 DSS="$SCRIPTS_DIR/detect-startable-subset.sh"
-CHAMPION_PROMO_MD="$DEFAULTS_DIR/.claude/commands/loom/champion-issue-promo.md"
 
-# shellcheck source=/dev/null
-source "$DSS"
+# Two `..` reaches repo-root/.claude/commands/loom for an INSTALLED copy
+# (SCRIPTS_DIR is .loom/scripts there); one `..` reaches defaults/.claude/
+# commands/loom when running inside this source repo (SCRIPTS_DIR is
+# defaults/scripts) -- the two layouts differ in depth, so probe both rather
+# than hard-coding one (#6725).
+if [[ -d "$SCRIPTS_DIR/../../.claude/commands/loom" ]]; then
+    PROMPT_DIR="$(cd "$SCRIPTS_DIR/../../.claude/commands/loom" && pwd)"
+else
+    PROMPT_DIR="$(cd "$SCRIPTS_DIR/../.claude/commands/loom" && pwd)"
+fi
+CHAMPION_PROMO_MD="$PROMPT_DIR/champion-issue-promo.md"
+
+# Pin the loom-daemon this suite tests against — the subject is a thin stub over
+# `loom-daemon detect-startable-subset` now (epic #7810 PR 3). FATAL, not SKIP: see the helper.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$TEST_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin "$SCRIPTS_DIR" "detect-startable-subset"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -72,11 +85,25 @@ assert_doc_contains() {
 }
 
 # =====================================================================
-# Unit tests: extract_startable_subset / has_startable_subset
+# Where the pure-helper unit tests went (epic #7810, PR 3)
 # =====================================================================
+#
+# This suite used to `source "$DSS"` and call extract_startable_subset /
+# has_startable_subset directly. Those functions are now
+# `loom-daemon/src/dep_classify/subset.rs`, with their own unit tests covering
+# the same cases — heading depth 2 through 6, prefix and case-insensitive
+# matching, deeper subsections staying inside the section, and a
+# whitespace-only section not counting as a declaration.
+#
+# #7943 landed that port beside a differential test that ran the Rust function
+# and this shell function over the same fixtures and asserted they agreed. That
+# test is deleted with the shell it compared against; the evidence is the merged
+# CI run, not a fixture pinning a deleted file.
+#
+# What remains below is what can still be proven both ways: the black-box
+# assertions, written against the shell, run unchanged against the Rust CLI.
 
-echo "--- extract_startable_subset: the declared section, verbatim ---"
-
+# The fixture the black-box assertions below still use.
 # shellcheck disable=SC2016  # literal text, not an expansion
 BODY_WITH_SUBSET='## Summary
 A proposal that hard-depends on #1 for most of its scope.
@@ -88,56 +115,6 @@ already published upstream -- independent of the blocked RTL deliverable.
 
 ## Dependencies
 - [ ] #1'
-
-out="$(extract_startable_subset "$BODY_WITH_SUBSET")"
-assert_contains "$out" "comparator and mutation tests" "the subset section body is captured"
-assert_contains "$out" 'warmup/01_netlist.v' "the named file is captured"
-assert_eq "0" "$(printf '%s\n' "$out" | grep -c '## Dependencies' || true)" \
-    "the next heading (## Dependencies) is NOT captured"
-
-out="$(extract_startable_subset '## Startable Subset (independent of #3)
-Do X and Y.
-
-### Files
-- warmup/01_netlist.v
-
-## Dependencies
-- [ ] #3')"
-assert_contains "$out" "Do X and Y." "a heading with trailing parenthetical text still matches"
-assert_contains "$out" "### Files" "a DEEPER subsection (###) stays inside the captured section"
-assert_contains "$out" "warmup/01_netlist.v" "content under the deeper subsection is captured"
-
-out="$(extract_startable_subset '## Summary
-No startable subset section here at all.')"
-assert_eq "" "$out" "a body with no Startable Subset heading yields nothing"
-
-out="$(extract_startable_subset '## Startable Subset
-
-## Dependencies
-- [ ] #3')"
-assert_eq "" "$out" "an EMPTY Startable Subset section (heading with no body) yields nothing"
-
-out="$(extract_startable_subset '### Startable Subset
-Deeper heading depth still matches (### as well as ##).
-## Next section
-unrelated')"
-assert_contains "$out" "Deeper heading depth" "### (not just ##) is recognized as a heading depth"
-assert_eq "0" "$(printf '%s\n' "$out" | grep -c 'unrelated' || true)" \
-    "capture still stops at the next heading of equal-or-shallower depth"
-
-out="$(extract_startable_subset '## STARTABLE SUBSET
-Case-insensitive heading match.')"
-assert_contains "$out" "Case-insensitive" "the heading match is case-insensitive"
-
-echo
-echo "--- has_startable_subset ---"
-
-assert_true has_startable_subset "$BODY_WITH_SUBSET" "a body with a non-empty section reports true"
-assert_false has_startable_subset "## Summary
-Nothing here." "a body with no section reports false"
-assert_false has_startable_subset "## Startable Subset
-
-## Dependencies" "a body with an EMPTY section reports false (whitespace-only is not a declaration)"
 
 # =====================================================================
 # Black-box: --body-file (no forge stub needed for this path)

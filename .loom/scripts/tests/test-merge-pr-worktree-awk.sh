@@ -8,7 +8,7 @@
 # printed the match and called `exit`, but control transferred to the `END`
 # block whose condition was still true, printing the same value a second time.
 # The result was a doubled `/path\n/path` string in the post-merge
-# worktree-cleanup warning (observed on botho PRs #1113 / #1116).
+# worktree-cleanup warning (observed on a consumer repo's PRs, #3671).
 #
 # The fix adds a `found`-flag guard so `exit` reliably means "already emitted"
 # and `END` becomes a no-op once the main body has printed — mirroring the

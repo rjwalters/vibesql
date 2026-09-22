@@ -11,6 +11,9 @@
 #   2. LOOM: Block 'pip install -e' inside worktrees (issue #2495, #4079)
 #   3. LOOM: Ask before real-registry-mutating `loom-daemon workspace
 #      add|remove|set-priority` (issue #4326)
+#   4. LOOM: Deny Bash writes that edit an INSTALLED Loom file in place in a
+#      CONSUMER repo (issue #7995) — the Bash-idiom counterpart of the
+#      Edit/Write denial in guard-worktree-paths.sh
 #
 # The generic repository-hygiene guards (catastrophic denies, SQL/cloud toggles,
 # ASK patterns) live in guard-destructive.sh and are being migrated toward Repo
@@ -37,17 +40,34 @@
 
 # Determine log directory relative to this script's location
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo ".")"
-HOOK_ERROR_LOG="${SCRIPT_DIR}/../logs/hook-errors.log"
+
+# Runtime log directory (#7882) — identical resolution to
+# guard-destructive-generic.sh, deliberately kept in lockstep so both guards
+# always write to the same place. At runtime SCRIPT_DIR is the INSTALLED hook's
+# own dir (.loom/hooks/) and ../logs is .loom/logs; when the guard is invoked
+# directly from its SOURCE location (defaults/hooks/) the same expression would
+# resolve to defaults/logs, depositing runtime telemetry inside the VENDORED
+# tree that ships to every consumer repo and that
+# scripts/check-vendored-private-refs.sh scans. Redirect that case to the repo's
+# own .loom/logs. Pure parameter expansion (no subshells) — this runs on every
+# hook invocation.
+_LOOM_HOOK_PARENT="${SCRIPT_DIR%/*}"
+if [[ "${_LOOM_HOOK_PARENT##*/}" == "defaults" ]]; then
+    HOOK_LOG_DIR="${_LOOM_HOOK_PARENT%/*}/.loom/logs"
+else
+    HOOK_LOG_DIR="${SCRIPT_DIR}/../logs"
+fi
+
+HOOK_ERROR_LOG="${HOOK_LOG_DIR}/hook-errors.log"
 
 # Decision telemetry log (issue #3771 / #3898) — a SEPARATE JSONL file from
 # HOOK_ERROR_LOG, sharing the SAME schema + stable rule tags as
 # guard-destructive.sh so a single reader (#3772 / the standing per-trigger
-# review policy) aggregates BOTH guards' fires. At runtime SCRIPT_DIR is the
-# installed hook's own dir (.loom/hooks/), so this resolves to
+# review policy) aggregates BOTH guards' fires. Resolves to
 # .loom/logs/guard-decisions.log. LOOM_GUARD_DECISION_LOG_FILE overrides the
 # path (test seam / operator override). Off by default — see
 # decision_log_enabled() below.
-DECISION_LOG="${LOOM_GUARD_DECISION_LOG_FILE:-${SCRIPT_DIR}/../logs/guard-decisions.log}"
+DECISION_LOG="${LOOM_GUARD_DECISION_LOG_FILE:-${HOOK_LOG_DIR}/guard-decisions.log}"
 
 # Shared config-tier resolver (#4063). Source defaults/scripts/lib/config-resolver.sh
 # so decision_log_enabled() below reads the full config tier chain through the
@@ -59,6 +79,18 @@ DECISION_LOG="${LOOM_GUARD_DECISION_LOG_FILE:-${SCRIPT_DIR}/../logs/guard-decisi
 if [[ -f "$SCRIPT_DIR/../scripts/lib/config-resolver.sh" ]]; then
     # shellcheck source=/dev/null
     source "$SCRIPT_DIR/../scripts/lib/config-resolver.sh" 2>/dev/null || true
+fi
+
+# Installed-managed-file write guard (#7995). Shared with the Edit/Write
+# matcher (guard-worktree-paths.sh) so both surfaces reach the SAME verdict for
+# the same target path — the whole point of the category is that an agent
+# denied on Edit/Write cannot land the identical edit through a Bash write
+# idiom instead (the #4178 threat model). Best-effort source: a missing lib
+# leaves loom_installed_write_denied undefined and the category below is
+# skipped entirely (fail open).
+if [[ -f "$SCRIPT_DIR/../scripts/lib/installed-file-guard.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/../scripts/lib/installed-file-guard.sh" 2>/dev/null || true
 fi
 
 # Log a diagnostic error message (best-effort, never fails the script)
@@ -76,6 +108,27 @@ log_hook_error() {
 # first (#3898). Best-effort: any failure falls back to the raw command.
 strip_literal_text() {
     printf '%s' "$1" | awk '
+    # Same live-vs-escaped substitution scan as mask_data_flag_values() below
+    # (issue #7495) -- an escaped backtick or `\$(` is a literal character, not
+    # a command substitution, so a `\`code span\`` in a --body value must not
+    # veto redaction and leave a raw secret in the decision log. Duplicated
+    # rather than shared because each function is its own awk program.
+    function has_live_subst(str,    i, c, bs) {
+        bs = 0
+        for (i = 1; i <= length(str); i++) {
+            c = substr(str, i, 1)
+            if (c == "\\") {
+                bs++
+                continue
+            }
+            if (bs % 2 == 0) {
+                if (c == "`") return 1
+                if (c == "$" && substr(str, i + 1, 1) == "(") return 1
+            }
+            bs = 0
+        }
+        return 0
+    }
     BEGIN {
         SQ = sprintf("%c", 39)   # single quote
         DQ = sprintf("%c", 34)   # double quote
@@ -99,7 +152,7 @@ strip_literal_text() {
             head  = substr(matched, 1, qpos)
             qchar = substr(matched, qpos, 1)
             inner = substr(matched, qpos + 1, length(matched) - qpos - 1)
-            if (index(inner, "$(") == 0 && index(inner, "`") == 0) {
+            if (!has_live_subst(inner)) {
                 gsub(/./, "X", inner)
             }
             out = out pre head inner qchar
@@ -630,10 +683,10 @@ mask_var_assigned_heredoc_bodies() {
 # --search. A near-duplicate of strip_literal_text() above (which is used
 # only for decision-log redaction) with --search added, kept as a SEPARATE
 # function so this decision-time masking can never change what
-# strip_literal_text() logs. Same conservative floor as strip_literal_text():
-# a span that still contains an unmasked `$(`/backtick (e.g. real command
-# substitution, not yet neutralized by the heredoc pass above) is left
-# completely untouched.
+# strip_literal_text() logs. Same conservative floor as strip_literal_text()
+# (both share an identical copy of has_live_subst(), #7495): a span that still
+# contains a LIVE, unescaped `$(`/backtick (e.g. real command substitution,
+# not yet neutralized by the heredoc pass above) is left completely untouched.
 #
 # Also recognizes `gh api ... -f <field>=<value>` for known text-bearing
 # fields (issue #5172): `gh api`'s field syntax is `-f key=value`, a
@@ -641,6 +694,30 @@ mask_var_assigned_heredoc_bodies() {
 # so it needs its own alternative in the same regex.
 mask_data_flag_values() {
     printf '%s' "$1" | awk '
+    # Return 1 iff `inner` contains a LIVE (unescaped) backtick or `$(`
+    # command-substitution opener. A backtick or `$(` immediately preceded
+    # by an ODD number of backslashes is escaped -- a literal character with
+    # zero execution risk inside a double-quoted string (e.g. the `\`foo()\``
+    # markdown code-span idiom every automated PR/issue comment uses) -- and
+    # must NOT trip this check (issue #7495, third recurrence of the
+    # #5109/#6464/#6866 false-positive class). An EVEN number of preceding
+    # backslashes (including zero) leaves the character live.
+    function has_live_subst(str,    i, c, bs) {
+        bs = 0
+        for (i = 1; i <= length(str); i++) {
+            c = substr(str, i, 1)
+            if (c == "\\") {
+                bs++
+                continue
+            }
+            if (bs % 2 == 0) {
+                if (c == "`") return 1
+                if (c == "$" && substr(str, i + 1, 1) == "(") return 1
+            }
+            bs = 0
+        }
+        return 0
+    }
     BEGIN {
         SQ = sprintf("%c", 39)
         DQ = sprintf("%c", 34)
@@ -664,7 +741,7 @@ mask_data_flag_values() {
             head  = substr(matched, 1, qpos)
             qchar = substr(matched, qpos, 1)
             inner = substr(matched, qpos + 1, length(matched) - qpos - 1)
-            if (index(inner, "$(") == 0 && index(inner, "`") == 0) {
+            if (!has_live_subst(inner)) {
                 gsub(/./, "X", inner)
             }
             out = out pre head inner qchar
@@ -676,34 +753,44 @@ mask_data_flag_values() {
 
 # Mask quoted POSITIONAL arguments (no preceding flag name) to a small
 # allowlist of known non-executing commands/scripts (issue #5155, extending
-# the #5115 fix above; extended again for echo/printf narration by #6400).
-# mask_data_flag_values only recognizes text following a named flag; it has
-# no effect on a script whose free-text arguments are purely positional, e.g.
+# the #5115 fix above; extended again for echo/printf narration by #6400;
+# extended again for jq filter programs by #6464). mask_data_flag_values only
+# recognizes text following a named flag; it has no effect on a script whose
+# free-text arguments are purely positional, e.g.
 # `./.loom/scripts/check-duplicate.sh "TITLE" "DESCRIPTION"`, `grep -n
-# "pattern" file`, or `echo "some narration text"`. `grep`/`egrep`/`fgrep`/
-# `rg` and check-duplicate.sh never EXECUTE a positional argument -- they
-# only read it as search/dedup text -- so masking a quoted argument
-# immediately following one of these command names (optionally after short
-# flags, e.g. `grep -n "..."`) can never blind this catastrophic-tier guard
-# to a real invocation. A command that WRAPS the phrase and then executes it
-# -- `sh -c "gh pr merge 123"`, `bash -c '...'`, `eval "..."` -- is NOT in
-# this allowlist and stays fully visible to the merge-redirect grep below,
-# exactly as before.
+# "pattern" file`, `echo "some narration text"`, or
+# `jq -s '[.[] | select(.command | test("^\\s*gh pr merge\\s"))] | length' file`.
+# `grep`/`egrep`/`fgrep`/`rg` and check-duplicate.sh never EXECUTE a
+# positional argument -- they only read it as search/dedup text -- so masking
+# a quoted argument immediately following one of these command names
+# (optionally after short flags, e.g. `grep -n "..."`) can never blind this
+# catastrophic-tier guard to a real invocation. A command that WRAPS the
+# phrase and then executes it -- `sh -c "gh pr merge 123"`, `bash -c '...'`,
+# `eval "..."` -- is NOT in this allowlist and stays fully visible to the
+# merge-redirect grep below, exactly as before.
 #
-# `echo`/`printf` are different from the other allowlisted commands: their
-# own quoted text CAN become a real execution vector, when piped into an
-# interpreter (`echo "gh pr merge 123" | bash`) or produced by a command
-# substitution consumed by one (`eval "$(echo ...)"`). So, unlike the other
-# allowlisted commands, an echo/printf match is masked ONLY when BOTH hold:
-#   1. The echo/printf invocation is not itself nested inside a `$(...)`/
+# `echo`/`printf`/`jq` are different from the other allowlisted commands:
+# their own quoted text CAN become a real execution vector, when piped into
+# an interpreter (`echo "gh pr merge 123" | bash`,
+# `jq -n -r '"gh pr merge 123"' | bash`) or produced by a command
+# substitution consumed by one (`eval "$(echo ...)"`,
+# `eval "$(jq -n -r '"gh pr merge 123"')"`). jq's positional argument is a jq
+# FILTER PROGRAM, not literal output text -- its output only equals the
+# argument text in the narrow, deliberately-crafted case of a `-n`/`--null-input`
+# invocation whose filter is itself a string literal -- but that narrow case is
+# exactly as real a bypass vector as echo/printf's, so jq gets the identical
+# restriction rather than the unrestricted grep/rg treatment. So, unlike the
+# unrestricted allowlisted commands, an echo/printf/jq match is masked ONLY
+# when BOTH hold:
+#   1. The echo/printf/jq invocation is not itself nested inside a `$(...)`/
 #      backtick command substitution (a strong signal its output is about to
 #      be consumed by something else, e.g. `eval`) -- decided from a
 #      precomputed per-position nesting-depth map over the whole buffer, NOT
 #      from the single character adjacent to the token, so `eval "$( echo
 #      ... )"` and its newline-separated form cannot slip through (#6400).
 #   2. The full run of quoted arguments is not immediately followed by a
-#      pipe (`|`) into another command -- `echo "..." | bash` must stay
-#      fully visible.
+#      pipe (`|`) into another command -- `echo "..." | bash` /
+#      `jq ... | bash` must stay fully visible.
 # grep/rg/check-duplicate.sh are unaffected by either restriction: they never
 # execute a positional argument regardless of context, so they keep the
 # original, simpler masking behavior.
@@ -717,6 +804,33 @@ mask_data_flag_values() {
 # onto the same line -- fully visible.
 mask_command_positional_args() {
     printf '%s' "$1" | awk '
+    # Return 1 iff str contains a LIVE (unescaped) dollar-paren
+    # command-substitution opener or backtick. Either one, immediately
+    # preceded by an ODD number of backslashes, is escaped -- a literal,
+    # inert character inside a double-quoted positional argument (e.g. a
+    # backslash-escaped dollar-paren ahead of an inert, quoted mention of the
+    # disallowed CLI phrase later in the same argument) with zero execution
+    # risk -- and must NOT block masking of the rest of the argument (issue
+    # #7558, mirroring the #7495 fix to mask_data_flag_values() below). An
+    # EVEN number of preceding backslashes (including zero) leaves the
+    # character genuinely live, which must still block masking so a real
+    # substitution stays visible to the phrase check.
+    function has_live_subst(str,    i, c, bs) {
+        bs = 0
+        for (i = 1; i <= length(str); i++) {
+            c = substr(str, i, 1)
+            if (c == "\\") {
+                bs++
+                continue
+            }
+            if (bs % 2 == 0) {
+                if (c == "`") return 1
+                if (c == "$" && substr(str, i + 1, 1) == "(") return 1
+            }
+            bs = 0
+        }
+        return 0
+    }
     # Per-position command-substitution nesting depth, computed with an
     # explicit OPENER-TYPE-AWARE STACK rather than a scalar counter: `$(`
     # pushes a SUB level, a bare `(` pushes a GROUP level, and a `)` pops
@@ -1011,11 +1125,11 @@ mask_command_positional_args() {
         SQ = sprintf("%c", 39)
         DQ = sprintf("%c", 34)
         # Command-name allowlist: known non-executing commands/scripts whose
-        # positional string arguments are search/dedup/narration text, never
-        # live shell syntax on their own. Extend only when another
+        # positional string arguments are search/dedup/narration/filter text,
+        # never live shell syntax on their own. Extend only when another
         # positional-arg consumer causes a real false positive (see #5155,
-        # #6400).
-        cmdre = "(grep|egrep|fgrep|rg|echo|printf|\\./\\.loom/scripts/check-duplicate\\.sh)"
+        # #6400, #6464).
+        cmdre = "(grep|egrep|fgrep|rg|echo|printf|jq|\\./\\.loom/scripts/check-duplicate\\.sh)"
         # Zero or more short/long flags between the command name and the
         # first quoted positional argument (e.g. `grep -n`, `rg -i`,
         # `check-duplicate.sh --include-merged-prs --issue 5155`).
@@ -1077,14 +1191,14 @@ mask_command_positional_args() {
             gsub(/^[ \t]+/, "", cmdpart)
             gsub(/[ \t]+$/, "", cmdpart)
             split(cmdpart, cparts, /[ \t]+/)
-            is_echoish = (cparts[1] == "echo" || cparts[1] == "printf")
+            is_echoish = (cparts[1] == "echo" || cparts[1] == "printf" || cparts[1] == "jq")
 
-            # echo/printf only: look ahead across the WHOLE run of quoted
+            # echo/printf/jq only: look ahead across the WHOLE run of quoted
             # positional arguments (without masking anything yet) to see
             # whether it is immediately followed by a pipe -- a real
             # execution vector this check must keep visible. Combined with
             # nested_in_subst above, this decides ONCE, for the whole run,
-            # whether this echo/printf invocation is safe to mask.
+            # whether this echo/printf/jq invocation is safe to mask.
             block_mask = 0
             if (is_echoish) {
                 if (nested_in_subst) {
@@ -1123,7 +1237,7 @@ mask_command_positional_args() {
                 }
                 if (endpos == 0) break
                 inner = substr(rest, 2, endpos - 2)
-                if (!block_mask && index(inner, "$(") == 0 && index(inner, "`") == 0) {
+                if (!block_mask && !has_live_subst(inner)) {
                     gsub(/./, "X", inner)
                 }
                 out = out qc inner qc
@@ -1138,6 +1252,283 @@ mask_command_positional_args() {
         out = out s
         printf "%s", out
     }'
+}
+
+# =============================================================================
+# FOR-LOOP ITEM-LIST MASKING (issue #6866, #6464 Instance 1)
+#
+# The three masking functions above all neutralize a literal that appears
+# DIRECTLY adjacent to its own safe usage -- a flag value, a positional
+# argument, a heredoc body captured by a text-data flag/field, or (via
+# mask_var_assigned_heredoc_bodies) a heredoc assigned to a variable and
+# dereferenced later. None of them recognize this shape, reported in #6464:
+#
+#   for q in "aws s3 rb" "some-search-term" "gh pr merge redirect"; do
+#     echo "=== $q ==="
+#     gh issue list --state open --search "$q" --limit 10 ...
+#   done
+#
+# Here the disallowed phrase is a literal ITEM in a `for VAR in "..." "...";
+# do` word list; it is only reachable later via `$VAR`/`${VAR}` inside the
+# loop body. No `gh`, `pr`, or `merge` subcommand is ever invoked. The literal
+# and its (safe) use live in two different places connected only by a shell
+# variable name -- structurally analogous to the heredoc-variable problem
+# above, but with a different capture syntax (a bare, quoted word list
+# instead of a heredoc body) and a different safe-usage shape (the reference
+# can be embedded inside a larger quoted string, e.g. `"=== $q ==="`, not
+# just as the entirety of a flag's value).
+#
+# mask_for_loop_list_items() masks a `for`-loop's item list at its point of
+# DEFINITION, but ONLY when every `$VAR`/`${VAR}` reference to that loop
+# variable anywhere else in the command is proven safe. Rather than
+# re-implementing the safe-context allowlist (flags, positional-arg commands,
+# the echo/printf nested-substitution and trailing-pipe restrictions, ...) a
+# third time, confinement is decided by literally asking the two
+# reference-site masking functions above: a scratch copy of the command (with
+# this candidate's own item-list span blanked out, so its own literal text
+# can never be mistaken for a live reference to its own variable name) is run
+# through `mask_command_positional_args` then `mask_data_flag_values` --
+# EXACTLY the two functions, in the same relative order, that the real
+# `GH_PR_MERGE_SCAN_TEXT` pipeline below applies to reference sites. Both
+# functions mask character-for-character (gsub(/./,"X",...) on each masked
+# span), which preserves the LENGTH and POSITION of every character, so
+# whether a given `$VAR` reference was masked can be read directly off the
+# masked output at the same character offset it had in the scratch input --
+# no separate anchor/flag/pipe regex needs to be duplicated here, and this
+# stays automatically in sync with any future extension to either function's
+# allowlist (e.g. adding `jq`, #6867).
+#
+# A reference is counted only via the exact "$VAR" / closed "${VAR}" (or any
+# longer parameter-expansion prefix "${VAR...") forms, mirroring
+# mask_var_assigned_heredoc_bodies's own reference scan -- including its
+# "$VARX"/"${VARX" false-extension guard. The item list is masked ONLY when
+# at least one reference was found AND every reference found was masked by
+# the two reference-site functions. Zero detected references is NOT proof of
+# safety (the variable may be reached through indirection this literal scan
+# cannot see -- `${!REF}`, `eval` of a computed name, a shadowed name in an
+# unrelated scope, ...), so a `for`-loop item list with no detected reference,
+# or with even ONE unconfined reference, is left COMPLETELY UNMASKED --
+# masking only ever narrows what this ONE check misses, it never widens it,
+# same invariant as every other masking function in this file. Because the
+# confinement scan runs over the WHOLE command buffer (not just the loop
+# body), it is deliberately over-inclusive rather than under-inclusive: a
+# same-named variable used unsafely anywhere else in the command (a shadowed
+# outer scope, a sibling loop reusing the name, ...) also blocks masking --
+# the fail-safe direction, never the reverse.
+#
+# Only two shapes are recognized, per the recommended approach in #6866:
+# `for VAR in "item1" "item2" ...; do` on one line, and the same list ending
+# the line (optionally with a trailing `;`) with `do` alone on the next line.
+# Anything else (a C-style `for ((...))`, an unquoted/glob word list, a `do`
+# on neither the same nor the very next line, an unterminated quote) is not
+# recognized as a candidate at all and is left fully visible -- fail-safe by
+# construction, not a masking decision.
+mask_for_loop_list_items() {
+    local input="$1"
+    local parsed
+    # Pass 1: locate every `for VAR in "..." "...";do` / newline-`do` shaped
+    # loop header in the buffer and emit one line per candidate:
+    # "VARNAME<TAB>qstart1:qend1,qstart2:qend2,..." where each qstart:qend is
+    # the absolute 1-indexed position of that item's OPENING and CLOSING
+    # quote character in the buffer (so downstream span-blanking/masking can
+    # operate on precise character offsets rather than re-parsing).
+    parsed=$(printf '%s' "$input" | awk '
+    BEGIN {
+        SQ = sprintf("%c", 39)
+        DQ = sprintf("%c", 34)
+    }
+    { buf = buf (NR > 1 ? "\n" : "") $0 }
+    END {
+        n = length(buf)
+        i = 1
+        while (i <= n) {
+            if (substr(buf, i, 3) == "for") {
+                pc = (i == 1) ? "" : substr(buf, i - 1, 1)
+                nc = substr(buf, i + 3, 1)
+                boundary_before = (pc == "" || pc == "\n" || pc == " " || pc == "\t" || pc == ";" || pc == "&" || pc == "|" || pc == "(")
+                boundary_after = (nc == " " || nc == "\t")
+                if (boundary_before && boundary_after) {
+                    j = i + 3
+                    while (substr(buf, j, 1) == " " || substr(buf, j, 1) == "\t") j++
+                    vstart = j
+                    if (substr(buf, j, 1) ~ /^[A-Za-z_]$/) {
+                        j++
+                        while (substr(buf, j, 1) ~ /^[A-Za-z0-9_]$/) j++
+                    }
+                    if (j > vstart) {
+                        vn = substr(buf, vstart, j - vstart)
+                        k = j
+                        while (substr(buf, k, 1) == " " || substr(buf, k, 1) == "\t") k++
+                        if (substr(buf, k, 2) == "in") {
+                            ic = substr(buf, k + 2, 1)
+                            if (ic == " " || ic == "\t") {
+                                k = k + 2
+                                while (substr(buf, k, 1) == " " || substr(buf, k, 1) == "\t") k++
+                                ntok = 0
+                                p = k
+                                bad = 0
+                                lastpos = 0
+                                toks = ""
+                                # Parse consecutive whitespace-separated
+                                # quoted words (no escape handling, matching
+                                # the rest of this files style); stops at
+                                # the first non-quote token or a quote left
+                                # unterminated on its own source line.
+                                while (1) {
+                                    while (substr(buf, p, 1) == " " || substr(buf, p, 1) == "\t") p++
+                                    qc = substr(buf, p, 1)
+                                    if (qc != SQ && qc != DQ) break
+                                    qstart = p
+                                    e = p + 1
+                                    found = 0
+                                    while (e <= n) {
+                                        cc = substr(buf, e, 1)
+                                        if (cc == "\n") break
+                                        if (cc == qc) { found = 1; break }
+                                        e++
+                                    }
+                                    if (!found) { bad = 1; break }
+                                    ntok++
+                                    toks = toks (toks == "" ? "" : ",") qstart ":" e
+                                    lastpos = e
+                                    p = e + 1
+                                }
+                                if (!bad && ntok > 0) {
+                                    r = lastpos + 1
+                                    while (substr(buf, r, 1) == " " || substr(buf, r, 1) == "\t") r++
+                                    if (substr(buf, r, 1) == ";") r++
+                                    while (substr(buf, r, 1) == " " || substr(buf, r, 1) == "\t") r++
+                                    valid = 0
+                                    if (substr(buf, r, 2) == "do") {
+                                        ac = substr(buf, r + 2, 1)
+                                        if (ac !~ /^[A-Za-z0-9_]$/) valid = 1
+                                    } else if (substr(buf, r, 1) == "\n") {
+                                        rr = r + 1
+                                        while (substr(buf, rr, 1) == " " || substr(buf, rr, 1) == "\t") rr++
+                                        if (substr(buf, rr, 2) == "do") {
+                                            ac = substr(buf, rr + 2, 1)
+                                            if (ac !~ /^[A-Za-z0-9_]$/) valid = 1
+                                        }
+                                    }
+                                    if (valid) {
+                                        print vn "\t" toks
+                                        # Resume scanning right after this
+                                        # loops own item list (not its body)
+                                        # so a later sibling/nested `for` is
+                                        # still found as its own candidate.
+                                        i = lastpos
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i++
+        }
+    }')
+
+    if [[ -z "$parsed" ]]; then
+        printf '%s' "$input"
+        return
+    fi
+
+    local out="$input"
+    local vn toks
+    while IFS=$'\t' read -r vn toks; do
+        [[ -z "$vn" ]] && continue
+
+        # Scratch buffer for THIS candidate's confinement scan: blank its own
+        # item-list span (quote characters included) with spaces so its own
+        # literal item text can never masquerade as a reference to its own
+        # variable name.
+        local scratch
+        scratch=$(BUF_ENV="$out" SPANS_ENV="$toks" FILL_ENV=" " awk '
+        BEGIN {
+            buf = ENVIRON["BUF_ENV"]
+            fill = ENVIRON["FILL_ENV"]
+            n = split(ENVIRON["SPANS_ENV"], parts, ",")
+            for (p = 1; p <= n; p++) {
+                split(parts[p], se, ":")
+                s = se[1]; e = se[2]
+                w = e - s + 1
+                rep = ""
+                for (c = 1; c <= w; c++) rep = rep fill
+                buf = substr(buf, 1, s - 1) rep substr(buf, e + 1)
+            }
+            printf "%s", buf
+        }')
+
+        # Ask the two reference-site masking functions -- in the same
+        # relative order the real pipeline below applies them -- whether
+        # every later reference to this variable falls in a context they
+        # already recognize as safe.
+        local masked
+        masked=$(mask_data_flag_values "$(mask_command_positional_args "$scratch")")
+
+        # Position-compare: both functions mask character-for-character, so
+        # a reference at buffer offset N is confined iff masked[N] == "X".
+        local result
+        result=$(SCAN_ENV="$scratch" MASK_ENV="$masked" VN_ENV="$vn" awk '
+        BEGIN {
+            buf = ENVIRON["SCAN_ENV"]
+            masked = ENVIRON["MASK_ENV"]
+            vn = ENVIRON["VN_ENV"]
+            vlen = length(vn)
+            buflen = length(buf)
+            nref = 0
+            confined = 1
+            pos = 1
+            while (pos <= buflen) {
+                rem = substr(buf, pos)
+                ib = index(rem, "${" vn)
+                is = index(rem, "$" vn)
+                if (ib == 0 && is == 0) break
+                useb = (ib > 0 && (is == 0 || ib <= is))
+                if (useb) {
+                    abspos = pos + ib - 1
+                    mlen = 2 + vlen
+                    aftch = substr(buf, abspos + mlen, 1)
+                    if (aftch ~ /^[A-Za-z0-9_]$/) { pos = abspos + 2; continue }
+                } else {
+                    abspos = pos + is - 1
+                    mlen = 1 + vlen
+                    aftch = substr(buf, abspos + mlen, 1)
+                    if (aftch ~ /^[A-Za-z0-9_]$/) { pos = abspos + 1; continue }
+                }
+                nref++
+                mch = substr(masked, abspos, 1)
+                if (mch != "X") confined = 0
+                pos = abspos + mlen
+            }
+            printf "%d", (confined == 1 && nref > 0) ? 1 : 0
+        }')
+
+        if [[ "$result" == "1" ]]; then
+            # Confirmed confined: mask the INNER content of each item
+            # (quote characters and inter-item whitespace left intact, same
+            # style as every other masking function here) to X's in the
+            # running output buffer. Character-preserving, so span offsets
+            # for any remaining/later candidates stay valid.
+            out=$(BUF_ENV="$out" SPANS_ENV="$toks" awk '
+            BEGIN {
+                buf = ENVIRON["BUF_ENV"]
+                n = split(ENVIRON["SPANS_ENV"], parts, ",")
+                for (p = 1; p <= n; p++) {
+                    split(parts[p], se, ":")
+                    s = se[1]; e = se[2]
+                    w = e - s - 1
+                    if (w <= 0) continue
+                    rep = ""
+                    for (c = 1; c <= w; c++) rep = rep "X"
+                    buf = substr(buf, 1, s) rep substr(buf, e)
+                }
+                printf "%s", buf
+            }')
+        fi
+    done <<<"$parsed"
+
+    printf '%s' "$out"
 }
 
 # =============================================================================
@@ -1321,15 +1712,25 @@ ask() {
 # LOOM: Prefer merge-pr.sh over gh pr merge
 # =============================================================================
 
-# Match against a MASKED copy of $COMMAND (issue #5109, extended by #5155 and
-# #5172) so a mention of the phrase inside a cat-heredoc commit-message body,
-# a --search/--body/-m/etc quoted value (including the `gh api -f
-# field=value` shape), a quoted POSITIONAL argument to a known non-executing
-# command (grep/rg/check-duplicate.sh), or a heredoc assigned to a shell
-# variable and only referenced later via that variable, doesn't
-# false-positive as a real invocation. See the masking functions' doc
-# comments above for exactly what is (and is NOT) neutralized.
-GH_PR_MERGE_SCAN_TEXT=$(mask_data_flag_values "$(mask_command_positional_args "$(mask_var_assigned_heredoc_bodies "$(mask_cat_heredoc_bodies "$COMMAND")")")")
+# Match against a MASKED copy of $COMMAND (issue #5109, extended by #5155,
+# #5172, #6464, and #6866) so a mention of the phrase inside a cat-heredoc
+# commit-message body, a --search/--body/-m/etc quoted value (including the
+# `gh api -f field=value` shape), a quoted POSITIONAL argument to a known
+# non-executing command (grep/rg/check-duplicate.sh/jq), a heredoc assigned
+# to a shell variable and only referenced later via that variable, or a `for
+# VAR in "..." "...";  do` item list only referenced later via that loop
+# variable, doesn't false-positive as a real invocation. See the masking
+# functions' doc comments above for exactly what is (and is NOT) neutralized.
+#
+# mask_for_loop_list_items runs BEFORE mask_command_positional_args and
+# mask_data_flag_values here (mirroring mask_var_assigned_heredoc_bodies's
+# position) even though it internally calls those same two functions on a
+# scratch buffer to decide confinement -- that internal use is independent of
+# this outer composition order, and running it here (right after the other
+# DEFINITION-site masks, before the REFERENCE-site masks) keeps this pipeline
+# consistent: definition-site literals are neutralized first, so a later
+# reference-site pass can never be confused by a still-live definition.
+GH_PR_MERGE_SCAN_TEXT=$(mask_data_flag_values "$(mask_command_positional_args "$(mask_for_loop_list_items "$(mask_var_assigned_heredoc_bodies "$(mask_cat_heredoc_bodies "$COMMAND")")")")")
 if echo "$GH_PR_MERGE_SCAN_TEXT" | grep -qE 'gh\s+pr\s+merge'; then
     # Resolve the merge-pr.sh path for the current repo context. Prefer an
     # in-repo installed copy (./.loom/scripts/merge-pr.sh); fall back to the
@@ -1343,7 +1744,25 @@ if echo "$GH_PR_MERGE_SCAN_TEXT" | grep -qE 'gh\s+pr\s+merge'; then
             MERGE_SCRIPT="$REPO_ROOT/defaults/scripts/merge-pr.sh"
         fi
     fi
-    deny "Use $MERGE_SCRIPT <PR_NUMBER> instead of 'gh pr merge'. The script merges via the GitHub API without local checkout, which avoids worktree errors." "loom:gh-pr-merge-redirect"
+
+    # Issue #7773: mask_cat_heredoc_bodies() only neutralizes a cat-heredoc
+    # CAPTURED by a text-data-consuming command (the `-m "$(cat <<EOF ...)"`
+    # idiom) -- a heredoc redirected straight to a FILE (`cat > FILE
+    # <<'DELIM'`) is deliberately left unmasked, because #5122 showed a later
+    # command on the same line can execute that file. That is still the right
+    # call ("masking only ever narrows what this ONE check can see; it never
+    # widens what it misses" -- see the block comment above
+    # mask_cat_heredoc_bodies()), but it means writing prose that merely
+    # quotes the phrase to a file this way denies with no hint that the
+    # trigger was inert documentation, not a live invocation. When that shape
+    # is present, name it explicitly so the false-positive case (an agent
+    # documenting this very rule) isn't left guessing why an apparently-inert
+    # command was denied.
+    HEREDOC_TO_FILE_NOTE=""
+    if echo "$COMMAND" | grep -qE 'cat[[:space:]]*>>?[[:space:]]*[^<[:space:]]+[[:space:]]*<<'; then
+        HEREDOC_TO_FILE_NOTE=" If this matched inside a heredoc body being written to a file rather than executed (e.g. documenting this rule), write the file with a non-Bash tool (Write/Edit) instead -- a file-bound heredoc is deliberately left visible to this check (#7773)."
+    fi
+    deny "Use $MERGE_SCRIPT <PR_NUMBER> instead of 'gh pr merge'. The script merges via the GitHub API without local checkout, which avoids worktree errors.${HEREDOC_TO_FILE_NOTE}" "loom:gh-pr-merge-redirect"
 fi
 
 # =============================================================================
@@ -1409,6 +1828,60 @@ if echo "$COMMAND" | grep -qE '(^|[/[:space:];&|])loom-daemon[[:space:]]+workspa
         if [[ -z "${LOOM_WORKSPACES_PATH:-}" ]] && ! echo "$COMMAND" | grep -qE 'LOOM_WORKSPACES_PATH='; then
             ask "This mutates the machine-level workspace registry ('loom-daemon workspace add/remove/set-priority') — by default that is the operator's REAL ~/.loom/workspaces.json, shared across every repo/session (Issue #4326: a leaked test entry once sat at top dispatch priority for most of a day). If this is a test/verification step, prefix the command with LOOM_WORKSPACES_PATH=<scratch-file> to isolate it from the real registry. If this IS an intentional real-registry change, confirm to proceed."
         fi
+    fi
+fi
+
+# =============================================================================
+# LOOM: Deny in-place Bash writes to INSTALLED Loom files in a consumer repo
+# (issue #7995 — the Bash-idiom half of the prose rule #7883 shipped)
+#
+# `guard-worktree-paths.sh` denies the same target through the Edit/Write
+# matcher. Without this block an agent denied there could land the identical
+# edit via `>`/`>>`, `tee`, `sed -i`, or `cp`/`mv` — the exact
+# denied-on-one-tool-retry-on-the-other escape #4178 documents, and the reason
+# guard-destructive-generic.sh's write-confinement category exists at all.
+#
+# Cost control: the substring pre-check is a handful of bash pattern matches on
+# a string already in memory, and it is the FIRST thing evaluated — the
+# tokenizer, the config read, and every filesystem stat are behind it, so a
+# Bash call that never mentions a managed prefix pays nothing measurable.
+#
+# Both the repo-identity discriminator and the write-target extraction live in
+# defaults/scripts/lib/installed-file-guard.sh; see its header for the
+# discriminator rationale and the tokenizer's (deliberately permissive)
+# limitations.
+# =============================================================================
+
+if declare -F loom_installed_write_denied >/dev/null 2>&1 \
+   && loom_installed_prefix_mentioned "$COMMAND"; then
+
+    # Neutralize cat-heredoc bodies before tokenizing, for the same reason the
+    # gh-pr-merge scan above does: prose that merely QUOTES a write idiom
+    # inside a heredoc is not an invocation of it. Only the definition-site
+    # heredoc masks are applied — quoted flag values and quoted positional
+    # arguments need no masking here because loom_bash_write_targets() is
+    # itself quote-aware, and every extra mask is one more chance to mangle a
+    # real target.
+    IFW_SCAN_TEXT=$(mask_var_assigned_heredoc_bodies "$(mask_cat_heredoc_bodies "$COMMAND")")
+
+    # #7773, same shape as the gh-pr-merge redirect above: a heredoc written
+    # straight to a FILE is deliberately left unmasked, so documenting this
+    # very rule into a file can trip the scan. Name that case in the message
+    # rather than leaving the reader to guess.
+    IFW_HEREDOC_NOTE=""
+    if echo "$COMMAND" | grep -qE 'cat[[:space:]]*>>?[[:space:]]*[^<[:space:]]+[[:space:]]*<<'; then
+        IFW_HEREDOC_NOTE=" If this matched inside a heredoc BODY being written to a file rather than an actual write to the named path (e.g. documenting this rule), write that file with the Write tool instead -- a file-bound heredoc is deliberately left visible to this check (#7773)."
+    fi
+
+    if loom_installed_guard_enabled "$REPO_ROOT"; then
+        while IFS= read -r IFW_TARGET; do
+            [[ -n "$IFW_TARGET" ]] || continue
+            IFW_ABS=$(loom_ifw_normalize_abs "$IFW_TARGET" "$CWD") || continue
+            [[ -n "$IFW_ABS" ]] || continue
+            if loom_installed_write_denied "$IFW_ABS"; then
+                deny "$(loom_installed_deny_reason "$IFW_ABS" "Bash-tool write")${IFW_HEREDOC_NOTE}" "loom:installed-file-write"
+            fi
+        done < <(loom_bash_write_targets "$IFW_SCAN_TEXT")
     fi
 fi
 

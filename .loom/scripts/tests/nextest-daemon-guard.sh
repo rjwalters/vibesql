@@ -18,6 +18,18 @@
 # is present, the same class of hazard #6386 already fixed for the
 # daemon-lifecycle shell suites.
 #
+# A THIRD binary, `integration_basic.rs`, is a related but DIFFERENT hazard
+# (#6607) and is deliberately NOT added to the exclusion above: its `setup()`
+# uses the TEST_PREFIX-scoped `cleanup_test_sessions()`, not the host-wide
+# `cleanup_all_loom_sessions()`, so it never destroys the live daemon's own
+# sessions. It still drives the SAME shared `-L loom` tmux socket the live
+# daemon uses (`new-session`, `list-sessions`, `capture-pane`, …), so it can
+# CONTEND with the daemon's own tmux activity and flake with `Timeout reading
+# response` / `deadline has elapsed` under that contention — a host-artifact,
+# not a real regression (confirmed by CI, which has no live daemon and passes
+# cleanly on the same commit). Because it is non-destructive this guard warns
+# rather than excludes it — see the banner below.
+#
 # Reuses the SAME pid-file detection helpers run-ci-suites.sh uses
 # (defaults/scripts/lib/live-daemon-guard.sh), so both guards agree about
 # what "a live daemon on this host" means.
@@ -66,6 +78,13 @@ source "$REPO_ROOT/defaults/scripts/lib/live-daemon-guard.sh"
 GUARDED_BINARIES="integration_security integration_factory_reset"
 EXCLUDE_FILTER="not binary(integration_security) and not binary(integration_factory_reset)"
 
+# A third `daemon-integration` binary that is CONTENTION-flaky rather than
+# destructive on a live-daemon host (#6607) — see this file's header comment.
+# Deliberately NOT part of GUARDED_BINARIES/EXCLUDE_FILTER: it is non-
+# destructive (uses cleanup_test_sessions(), not cleanup_all_loom_sessions()),
+# so it keeps running; the guard only warns about it.
+CONTENTION_BINARY="integration_basic"
+
 usage() {
     echo "Usage: $(basename "$0") [--resolve|--plan] \"<nextest command>\"" >&2
     exit 64
@@ -97,6 +116,18 @@ if [[ -n "$LIVE_DAEMON_EVIDENCE" ]]; then
         echo "    binaries' (#6528, the same blast-radius class as #6386's 11h outage)."
         echo "    Run them on a host with no daemon (e.g. CI, where this guard is a no-op), or"
         echo "    run the excluded binaries explicitly as a deliberate, informed choice."
+        echo "############################################################"
+        echo
+        echo "############################################################"
+        echo "!!! LIVE DAEMON DETECTED ON THIS HOST — $CONTENTION_BINARY NOT excluded but may FLAKE (#6607)"
+        echo "    $CONTENTION_BINARY is non-destructive (cleanup_test_sessions(), not"
+        echo "    cleanup_all_loom_sessions()) so it is still included in this run. It drives"
+        echo "    the SAME shared -L loom tmux socket the live daemon uses, though, so it can"
+        echo "    CONTEND with the daemon's own tmux activity and fail with 'Timeout reading"
+        echo "    response' / 'deadline has elapsed' under that contention — a host artifact,"
+        echo "    not a real regression (CI has no live daemon and is unaffected)."
+        echo "    A $CONTENTION_BINARY failure on THIS host is not necessarily a real bug —"
+        echo "    re-run on a host with no daemon (e.g. CI) before treating it as one."
         echo "############################################################"
         echo
     } >&2

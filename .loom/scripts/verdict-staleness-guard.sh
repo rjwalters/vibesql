@@ -24,9 +24,15 @@
 # clear+re-queue transition itself.
 #
 # Decision, in priority order (first match wins):
-#   1. NO_VERDICT   — the PR carries neither `loom:pr` nor
+#   1. NOT_OPEN     — the PR is no longer open (merged, or closed unmerged).
+#                     A verdict is a statement about a tree someone might still
+#                     act on; once the PR is finished there is nothing left to
+#                     invalidate or re-queue. The guard reports and does
+#                     NOTHING — no labels, no comment — whatever the marker
+#                     says (#6781).
+#   2. NO_VERDICT   — the PR carries neither `loom:pr` nor
 #                     `loom:changes-requested`. Nothing to invalidate.
-#   2. UNVERIFIABLE — a verdict label is present, but no marker comment exists
+#   3. UNVERIFIABLE — a verdict label is present, but no marker comment exists
 #                     for THAT verdict kind. Fail safe: the verdict is kept.
 #                     This is the pre-migration/rollout case (verdicts written
 #                     before this guard shipped carry no marker), the
@@ -34,15 +40,25 @@
 #                     and — most commonly in practice — the case where the
 #                     model simply dropped the marker (#6319: observed on
 #                     roughly one verdict in four). Never force-clear on
-#                     missing evidence; with --anchor, remediate instead (#2b).
-#  2b. ANCHORED      — --anchor was passed and the UNVERIFIABLE verdict was
+#                     missing evidence; with --anchor, remediate instead (#3b).
+#  3b. ANCHORED      — --anchor was passed and the UNVERIFIABLE verdict was
 #                     given a marker recording the CURRENT head, so it becomes
 #                     invalidatable from here on (#6319).
-#   3. FRESH        — the newest matching marker's SHA equals the current head
+#   4. FRESH        — the newest matching marker's SHA equals the current head
 #                     SHA. The verdict still describes the tree in front of it.
-#   4. STALE        — the newest matching marker's SHA differs from the current
+#   5. STALE        — the newest matching marker's SHA differs from the current
 #                     head SHA. The verdict describes a tree that no longer
 #                     exists; it must not be trusted.
+#
+# NOT_OPEN is first for a reason (#6781). A merge that lands between a caller's
+# read and this check is the ordinary "completed externally (daemon/champion)"
+# race (#4884), and a merged PR's head SHA routinely differs from the SHA its
+# approval was rendered against (a last commit, a rebase, or the merge itself).
+# Without the state check the guard reads that difference as STALE and, with
+# --clear, strips `loom:pr` and re-adds `loom:review-requested` on a PR that is
+# already merged — observed live on PR #6772 (2026-08-23). Every consumer of
+# `loom:review-requested` filters on state==OPEN today, so nothing acted on it,
+# but the guard was writing verdict labels onto finished work.
 #
 # Marker selection deliberately filters on `verdict=` (not just "the newest
 # marker of any kind"): a PR that was rejected at SHA A and later approved at
@@ -62,7 +78,12 @@
 #   verdict-staleness-guard.sh <pr-number> --anchor    # report + act on UNVERIFIABLE
 #
 # With --clear, a STALE verdict is cleared in one transition:
-#   - remove the stale verdict label (`loom:pr` / `loom:changes-requested`)
+#   - remove BOTH terminal verdict labels (`loom:pr` AND `loom:changes-requested`),
+#     not just the one detected as stale — a stray copy of the other, left
+#     behind by an earlier contradictory state or a manual label edit, must
+#     not survive this transition either (#7018). `gh ... --remove-label` on a
+#     label that isn't present is a no-op, so requesting removal of both is
+#     always safe.
 #   - remove its per-tree companions (`loom:ci-failure`, `loom:merge-conflict`)
 #     when present — those are findings about the OLD tree too
 #   - add `loom:review-requested` so a Judge picks the PR up again
@@ -101,7 +122,7 @@
 # as untrustworthy: STALE is STALE whether or not it was cleared.
 #
 # Output (stdout — one KEY=VALUE per line, machine-parseable):
-#   DECISION=NO_VERDICT|UNVERIFIABLE|ANCHORED|FRESH|STALE
+#   DECISION=NOT_OPEN|NO_VERDICT|UNVERIFIABLE|ANCHORED|FRESH|STALE
 #   REASON=<short human-readable reason>
 #   HEAD_SHA=<current head sha>
 #   VERDICT_LABEL=<loom:pr|loom:changes-requested|"">
@@ -116,6 +137,12 @@
 #   12 = STALE (verdict invalidated by a head-SHA move)
 #   13 = ANCHORED (was UNVERIFIABLE; --anchor stamped a marker at the current
 #        head, so it is invalidatable from here on. Labels untouched.)
+#   14 = NOT_OPEN (PR is merged or closed — nothing was read past the PR's own
+#        state and nothing was written. NOT an error: it means "this PR is
+#        finished, there is no verdict left to act on". Callers that already
+#        route every non-{0,11} code away from merging need no change; a caller
+#        that reports unexpected codes should classify 14 as a skip, not a
+#        `gh` failure.) (#6781)
 #   1  = usage or environment error (bad args, `gh` call failed). Callers must
 #        treat this like any other `gh` failure — NOT as "the verdict is fine".
 #
@@ -203,9 +230,18 @@ emit() {
 GH_STDERR="$(mktemp)"
 trap 'rm -f "$GH_STDERR" 2>/dev/null || true' EXIT
 
-# --- Step 1: current head SHA + current labels ------------------------------
-PR_JSON="$(gh pr view "$PR" --json headRefOid,labels 2>"$GH_STDERR")" || {
-  echo "ERROR: 'gh pr view $PR --json headRefOid,labels' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
+# --- Step 1: current head SHA + current labels + open/closed state ----------
+# `state` is fetched in the SAME call as the head SHA, not a second round
+# trip: the whole point is that the PR may finish between any two reads, so
+# the state must come from the same snapshot the SHA came from. `merged` is
+# deliberately NOT requested here — real `gh pr view --json` rejects it as an
+# unknown field (it only exposes `mergedAt`/`closed`, not a `merged` boolean;
+# confirmed against gh 2.97.0/2.98.0). `state` alone already reports MERGED,
+# so nothing is lost. Any `.merged` read below is defensive only, for a
+# hypothetical forge shim that emits REST-shaped JSON with a literal `merged`
+# key; on real `gh` output it is simply absent.
+PR_JSON="$(gh pr view "$PR" --json headRefOid,labels,state 2>"$GH_STDERR")" || {
+  echo "ERROR: 'gh pr view $PR --json headRefOid,labels,state' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   exit 1
 }
 
@@ -230,16 +266,57 @@ hold_label() {
   echo ""
 }
 
-# --- Step 2: which terminal verdict (if any) does this PR carry? ------------
-# `loom:pr` is checked first: when both are somehow present (the contradictory
-# state champion-pr-merge.md's Verdict-State Janitor exists to resolve, #4570),
-# the approving label is the dangerous one and is what we must reason about.
-VERDICT_LABEL=""
-if has_label "loom:pr"; then
-  VERDICT_LABEL="loom:pr"
-elif has_label "loom:changes-requested"; then
-  VERDICT_LABEL="loom:changes-requested"
+# Which terminal verdict (if any) does this PR carry? `loom:pr` is checked
+# first: when both are somehow present (the contradictory state
+# champion-pr-merge.md's Verdict-State Janitor exists to resolve, #4570), the
+# approving label is the dangerous one and is what we must reason about.
+current_verdict_label() {
+  if has_label "loom:pr"; then
+    echo "loom:pr"
+  elif has_label "loom:changes-requested"; then
+    echo "loom:changes-requested"
+  else
+    echo ""
+  fi
+}
+
+# --- Step 1b: is the PR still open? (#6781) ---------------------------------
+# Short-circuits BEFORE the comment fetch, the FRESH/STALE comparison, and both
+# write paths (--clear, --anchor), so a merged/closed PR can never reach a
+# label or comment write no matter what the marker says.
+#
+# `gh pr view --json state` reports OPEN | CLOSED | MERGED; the REST shape a
+# forge shim may return instead is state=closed with merged=true. Both are
+# handled: anything that is not OPEN, or that is merged, is not open.
+#
+# A MISSING state field is deliberately treated as open (pre-#6781 behavior).
+# Failing closed on an absent field would mean a forge shim that does not
+# report `state` silently loses stale-verdict clearing altogether — which
+# reinstates the #5686 hazard (a stale approval standing on a live PR) to guard
+# against mislabeling PRs that are already finished. The former is far worse.
+PR_STATE="$(jq -r '.state // empty' <<<"$PR_JSON" 2>/dev/null || true)"
+PR_STATE_UC="$(printf '%s' "$PR_STATE" | tr '[:lower:]' '[:upper:]')"
+# `.merged // false` (not `// empty`): jq's `//` also swallows a literal
+# `false`, so the alternative supplies the default for BOTH null and false.
+PR_MERGED="$(jq -r 'if (.merged // false) then "true" else "false" end' <<<"$PR_JSON" 2>/dev/null || true)"
+
+if [[ "$PR_MERGED" == "true" || ( -n "$PR_STATE_UC" && "$PR_STATE_UC" != "OPEN" ) ]]; then
+  # Real `gh pr view --json state` reports MERGED directly, so prefer it over
+  # PR_MERGED for the human-readable distinction — PR_MERGED is permanently
+  # "false" on real gh output now that `merged` is no longer a requested
+  # field (see the Step 1 comment above), so keying off it alone would
+  # mislabel every real merge as "closed without merging".
+  NOT_OPEN_WHAT="closed without merging"
+  if [[ "$PR_MERGED" == "true" || "$PR_STATE_UC" == "MERGED" ]]; then
+    NOT_OPEN_WHAT="merged"
+  fi
+  emit "NOT_OPEN" "PR is $NOT_OPEN_WHAT (state=${PR_STATE:-unknown}, merged=$PR_MERGED) — verdict labels are never rewritten on a finished PR" \
+    "$HEAD_SHA" "$(current_verdict_label)" "" 0 0
+  exit 14
 fi
+
+# --- Step 2: which terminal verdict (if any) does this PR carry? ------------
+VERDICT_LABEL="$(current_verdict_label)"
 
 if [[ -z "$VERDICT_LABEL" ]]; then
   emit "NO_VERDICT" "PR carries no terminal verdict label (loom:pr / loom:changes-requested)" \
@@ -374,7 +451,23 @@ Judge will re-evaluate the tree that is actually here now. No judgment about the
     # Comment first, then labels — the same ordering the roles use for their
     # own verdict writes, so the audit trail can never show a label flip with
     # no explanation attached.
-    EDIT_ARGS=(--remove-label "$VERDICT_LABEL" --add-label "loom:review-requested")
+    #
+    # Strip BOTH terminal verdict labels here, not just the one this pass
+    # detected as stale ($VERDICT_LABEL) — issue #7018. current_verdict_label()
+    # only ever picks ONE label to reason about (loom:pr first, since it is
+    # the dangerous direction), so if the OTHER verdict label is also present
+    # — leftover debris from an earlier contradictory state, a manual label
+    # edit, or a bug elsewhere — a single-label removal here leaves it behind
+    # and re-adds loom:review-requested on top of it, producing exactly the
+    # mutual-exclusion violation this guard exists to prevent. Removing a
+    # label that isn't present is a documented no-op for `gh ... --remove-label`
+    # (see champion-issue-promo.md's Pass 0b race-safety note), so it is safe
+    # to always request removal of both regardless of which one is actually
+    # on the PR.
+    EDIT_ARGS=(--add-label "loom:review-requested")
+    for verdict in "loom:pr" "loom:changes-requested"; do
+      EDIT_ARGS+=(--remove-label "$verdict")
+    done
     for companion in "loom:ci-failure" "loom:merge-conflict"; do
       if has_label "$companion"; then
         EDIT_ARGS+=(--remove-label "$companion")

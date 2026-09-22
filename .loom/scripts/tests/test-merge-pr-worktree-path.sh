@@ -126,6 +126,18 @@ assert_grep "Found co-existing Judge/Doctor review worktree" "$MERGE_PR" \
 assert_grep "Preserving Judge/Doctor review worktree at" "$MERGE_PR" \
     "co-existing pr-<N> preserved-worktree case logs a clear reason (#6264)"
 
+# --- Test 2d: never-closing-issue worktree/branch cleanup (#6694) source surface ---
+assert_grep 'source "\$SCRIPT_DIR/lib/branch-landed.sh"' "$MERGE_PR" \
+    "merge-pr.sh sources the shared branch-landed primitive (#7812)"
+assert_grep 'branch_landed "\$branch" "\${DEFAULT_BRANCH_NAME:-}" "\$expected_head_sha"' "$MERGE_PR" \
+    "_maybe_delete_local_branch delegates its safety check to the shared primitive (#6694/#7812)"
+assert_grep 'branch_has_landed "\$PR_BRANCH" "\$DEFAULT_BRANCH_NAME" "\$PR_HEAD_SHA"' "$MERGE_PR" \
+    "the worktree-preserve decision reuses the shared primitive at every call site (#6694/#7812)"
+assert_grep "holds nothing unmerged; removing it \\(#6694\\)" "$MERGE_PR" \
+    "a fully-captured branch is cleaned up even when the issue-close gate says preserve (#6694)"
+assert_grep "designed never to close \\(#6694\\), that retry never fires: remove manually" "$MERGE_PR" \
+    "the reworded preserve message names a remedy that does not depend on the issue closing (#6694)"
+
 # --- Test 3: Precedence — --no-cleanup-worktree warns when combined ---
 echo ""
 echo "Test 3: --no-cleanup-worktree wins over --worktree-path"
@@ -177,9 +189,16 @@ simulate_cleanup() {
     #      issue_num among forge_pr_close_targets for the just-merged PR?
     #   $10 issue_state        ("OPEN" / "CLOSED" / "", default "") # live
     #      forge_get_issue_state result; "" models a lookup failure
+    #   $11 branch_fully_captured ("true" / "false", default "false") # #6694:
+    #      has the local branch landed on the default branch (i.e.
+    #      `branch_has_landed`, #7812)? Only consulted when the issue
+    #      gate itself says "preserve" — a never-closing programme issue
+    #      never satisfies _gate_allows_removal, so without this the
+    #      worktree/branch would preserve forever.
     local preserve="$1" cleanup="$2" override="$3" default_exists="$4" \
           override_has_sentinel="$5" discovered="$6" discovered_has_sentinel="$7" \
-          issue_num="${8:-}" is_close_target="${9:-false}" issue_state="${10:-}"
+          issue_num="${8:-}" is_close_target="${9:-false}" issue_state="${10:-}" \
+          branch_fully_captured="${11:-false}"
 
     if [[ "$cleanup" != "true" ]]; then
         echo "skip:no-cleanup"; return 0
@@ -217,6 +236,11 @@ simulate_cleanup() {
     if [[ "$default_exists" == "true" ]]; then
         if _gate_allows_removal; then
             echo "remove:default"
+        elif [[ "$branch_fully_captured" == "true" ]]; then
+            # #6694: the issue gate says preserve, but the branch's content is
+            # already fully on the default branch — nothing is lost by
+            # removing it now, regardless of whether the issue ever closes.
+            echo "remove:default-fully-captured"
         else
             echo "preserve:default-open-issue"
         fi
@@ -227,6 +251,8 @@ simulate_cleanup() {
         if [[ "$discovered_has_sentinel" == "true" ]]; then
             if _gate_allows_removal; then
                 echo "remove:discovered-managed"
+            elif [[ "$branch_fully_captured" == "true" ]]; then
+                echo "remove:discovered-fully-captured"
             else
                 echo "preserve:discovered-open-issue"
             fi
@@ -363,6 +389,57 @@ else
     fail "case N: expected 'preserve:discovered-open-issue', got '$result'"
 fi
 
+# --- Test 5b: never-closing programme issue (#6694) — distinct from the
+# eventually-closes-later reaping path (case J/K/N above, and
+# test-merge-pr-closed-issue-cleanup.sh's separate reaping coverage). These
+# cases model an issue that is OPEN, not a close target of this PR, and never
+# will close (every merge to it is `Part of #N` by design) — the exact shape
+# where the pre-#6694 behavior preserved the worktree/branch indefinitely,
+# because _issue_is_closed_for_cleanup can never flip true for it.
+echo ""
+echo "Test 5b: never-closing programme issue (#6694)"
+
+# Case T: default path, issue open + not a close target (never will close),
+# but the branch's tip IS the merged PR's head SHA — nothing is unmerged, so
+# clean up now instead of waiting for a close that will never happen.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "OPEN" true)
+if [[ "$result" == "remove:default-fully-captured" ]]; then
+    pass "case T: never-closing issue + branch fully captured -> removed at merge time, not preserved forever"
+else
+    fail "case T: expected 'remove:default-fully-captured', got '$result'"
+fi
+
+# Case U: same never-closing shape, but the branch carries LOCAL commits
+# beyond the merged PR's head (e.g. an in-flight follow-up not yet pushed) —
+# still genuinely preserve; the fully-captured check must not be a blanket
+# bypass of the issue gate.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "OPEN" false)
+if [[ "$result" == "preserve:default-open-issue" ]]; then
+    pass "case U: never-closing issue + branch NOT fully captured -> still genuinely preserved"
+else
+    fail "case U: expected 'preserve:default-open-issue', got '$result'"
+fi
+
+# Case V: same fully-captured shape, but at the discovered (non-standard-path)
+# call site — the #6694 fix applies there too, not just the default path.
+result=$(simulate_cleanup 0 true "" false false "/found" true 42 false "OPEN" true)
+if [[ "$result" == "remove:discovered-fully-captured" ]]; then
+    pass "case V: discovered-path never-closing issue + branch fully captured -> removed too"
+else
+    fail "case V: expected 'remove:discovered-fully-captured', got '$result'"
+fi
+
+# Case W: an issue-state LOOKUP FAILURE (fail-unsafe-to-preserve, issue_state=
+# "") combined with a fully-captured branch still cleans up — the #6694 check
+# is independent of *why* the issue gate said preserve (never-closing design
+# vs. a transient lookup failure), only whether the branch's content is safe.
+result=$(simulate_cleanup 0 true "" true false "" false 42 false "" true)
+if [[ "$result" == "remove:default-fully-captured" ]]; then
+    pass "case W: issue-state lookup failure + branch fully captured -> still removed (not just the never-closing case)"
+else
+    fail "case W: expected 'remove:default-fully-captured', got '$result'"
+fi
+
 # --- Test 6: co-existing Judge review worktree (pr-<N> alongside issue-<N>, #6264) ---
 echo ""
 echo "Test 6: co-existing pr-<N> Judge review worktree cleanup (#6264)"
@@ -383,7 +460,9 @@ simulate_judge_pr_cleanup() {
     #   $2 pr_wt_exists     ("true"/"false")     # does pr-$PR_NUMBER exist?
     #   $3 is_close_target  ("true"/"false", default "false")
     #   $4 issue_state      ("OPEN"/"CLOSED"/"", default "")
-    local issue_num="$1" pr_wt_exists="$2" is_close_target="${3:-false}" issue_state="${4:-}"
+    #   $5 branch_fully_captured ("true"/"false", default "false") # #6694
+    local issue_num="$1" pr_wt_exists="$2" is_close_target="${3:-false}" issue_state="${4:-}" \
+          branch_fully_captured="${5:-false}"
 
     if [[ -z "$issue_num" ]]; then
         echo "skip:not-applicable"
@@ -395,6 +474,9 @@ simulate_judge_pr_cleanup() {
     fi
     if [[ "$is_close_target" == "true" ]] || [[ "$issue_state" == "CLOSED" ]]; then
         echo "remove:judge-pr-worktree"
+    elif [[ "$branch_fully_captured" == "true" ]]; then
+        # #6694: same fully-captured escape hatch as the issue-<N> worktree.
+        echo "remove:judge-pr-worktree-fully-captured"
     else
         echo "preserve:judge-pr-worktree-open-issue"
     fi
@@ -426,6 +508,17 @@ if [[ "$result" == "preserve:judge-pr-worktree-open-issue" ]]; then
     pass "case Q: non-target open issue preserves the co-existing pr-<N> worktree too"
 else
     fail "case Q: expected 'preserve:judge-pr-worktree-open-issue', got '$result'"
+fi
+
+# Case Q2: never-closing programme issue (#6694) — open, not a close target,
+# but the branch's tip IS the merged PR's head SHA — the co-existing
+# Judge/Doctor review worktree is cleaned up now instead of preserved
+# indefinitely for a close that will never arrive.
+result=$(simulate_judge_pr_cleanup 42 true false "OPEN" true)
+if [[ "$result" == "remove:judge-pr-worktree-fully-captured" ]]; then
+    pass "case Q2: never-closing issue + branch fully captured removes the co-existing pr-<N> worktree too (#6694)"
+else
+    fail "case Q2: expected 'remove:judge-pr-worktree-fully-captured', got '$result'"
 fi
 
 # Case R: external-fork / ad-hoc branch (#3358) — JUDGE_PR_WT_PATH is never

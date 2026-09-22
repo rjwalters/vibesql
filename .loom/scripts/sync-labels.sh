@@ -19,10 +19,24 @@
 #   .loom/scripts/sync-labels.sh [--] [WORKTREE_PATH]
 #   .loom/scripts/sync-labels.sh --repo OWNER/NAME [--dry-run] [--] [WORKTREE_PATH]
 #   .loom/scripts/sync-labels.sh --prune-defaults [--force] [--dry-run] [--] [WORKTREE_PATH]
+#   .loom/scripts/sync-labels.sh --check [--repo OWNER/NAME] [--] [WORKTREE_PATH]
 #
 #   WORKTREE_PATH  Directory containing .github/labels.yml and a git remote.
 #                  Defaults to the current directory. `--` ends option parsing,
 #                  so a path that begins with `-` can still be passed.
+#
+# --check (#6716) is a REPORT-ONLY drift check: it fetches the target's live
+# label set once and compares it against .github/labels.yml, reporting any
+# declared label that is MISSING (absent live) or STALE (present, but its
+# color/description differs), plus any UNKNOWN EXTRA — a live label whose
+# name starts with "loom:" but is not declared in labels.yml at all. It never
+# creates, updates, or deletes anything (mutation is left to a normal,
+# non-`--check` run, which is exactly the additive/idempotent sync already
+# described above — safe to run unconditionally after a `--check` reports
+# drift). Exits 0 when the live set fully matches, 3 when any drift was
+# found, 1 on a forge/lookup error. Composes with --repo (still GitHub-only)
+# but is independent of --prune-defaults/--force/--dry-run, all of which are
+# about the mutating path this flag deliberately skips.
 #
 # --repo OWNER/NAME (#4498) retargets the sync at an arbitrary GitHub repo
 # while still reading labels.yml from WORKTREE_PATH. Because every GitHub label
@@ -65,6 +79,7 @@ usage() {
 Usage: sync-labels.sh [--] [WORKTREE_PATH]
        sync-labels.sh --repo OWNER/NAME [--dry-run] [--] [WORKTREE_PATH]
        sync-labels.sh --prune-defaults [--force] [--dry-run] [--] [WORKTREE_PATH]
+       sync-labels.sh --check [--repo OWNER/NAME] [--] [WORKTREE_PATH]
 
 Sync Loom workflow labels from .github/labels.yml onto the forge (GitHub or
 Gitea). Creates missing labels and updates existing ones to match
@@ -82,6 +97,14 @@ Options:
                     WORKTREE_PATH's git remote. labels.yml is still read from
                     WORKTREE_PATH, so no checkout of the target is needed.
                     GitHub-only (uses the gh CLI).
+      --check       Report-only drift check: compare the target's live label
+                    set against labels.yml and report missing/stale declared
+                    labels plus unknown loom:-prefixed extras. Never creates,
+                    updates, or deletes anything. Exits 0 (in sync), 3 (drift
+                    found), 4 (could not reach the forge -- benign, the check
+                    did not run), or 1 (unexpected failure, i.e. a defect in
+                    this script). Independent of
+                    --prune-defaults/--force/--dry-run.
       --prune-defaults
                     Opt in to deleting GitHub's default labels (the pre-#5066
                     behavior). A default label still attached to any issue/PR
@@ -103,6 +126,7 @@ REPO_OVERRIDE=""
 DRY_RUN=0
 PRUNE_DEFAULTS=0
 FORCE_PRUNE=0
+CHECK_MODE=0
 POSITIONAL_SEEN=0
 # Set by `--`: from that point on every remaining argument is positional, even
 # one that starts with `-`. Without this the `--)` case below was a no-op shift
@@ -162,6 +186,10 @@ while [[ $# -gt 0 ]]; do
       FORCE_PRUNE=1
       shift
       ;;
+    --check)
+      CHECK_MODE=1
+      shift
+      ;;
     --)
       POSITIONAL_ONLY=1
       shift
@@ -210,6 +238,24 @@ NC='\033[0m'
 error() {
   echo -e "${RED}✗ Error: $*${NC}" >&2
   exit 1
+}
+
+# check_unavailable: --check could not REACH the forge, as distinct from
+# --check having run and found something (#7745).
+#
+# Exit 4 is the "I could not perform the check" signal. It exists because
+# callers previously could not tell an unreachable forge (benign: no `gh`
+# auth, no remote, a misconfigured Gitea) apart from this script being
+# BROKEN -- a bash incompatibility or a typo also exits non-zero, and
+# resync-installed.sh's catch-all treated both as "skip, carry on, exit 0".
+# A checker that cannot distinguish "checked, fine" from "could not check"
+# reports the second as the first.
+#
+# 1 therefore keeps its narrower meaning here: an unexpected failure that
+# should be treated as a defect, not absorbed.
+check_unavailable() {
+  echo -e "${RED}✗ Error: $*${NC}" >&2
+  exit 4
 }
 
 info() {
@@ -269,7 +315,10 @@ if [[ -n "$REPO_OVERRIDE" ]]; then
   # flag supplies the target, and no checkout of the target is required.
   FORGE_TYPE="github"
   REPO="$REPO_OVERRIDE"
-  if [[ "$DRY_RUN" -eq 0 ]] && ! command -v gh >/dev/null 2>&1; then
+  # --check always contacts the forge (it IS the read), even under --dry-run,
+  # so it needs gh regardless of DRY_RUN — unlike the mutating path below,
+  # where a bare --dry-run stays forge-free and so doesn't need gh at all.
+  if [[ ( "$DRY_RUN" -eq 0 || "$CHECK_MODE" -eq 1 ) ]] && ! command -v gh >/dev/null 2>&1; then
     error "--repo requires the gh CLI, which was not found on PATH"
   fi
 else
@@ -393,6 +442,199 @@ github_sync_label() {
 }
 
 # ============================================================================
+# --check (#6716) shared parsing + report helpers
+#
+# read_declared_labels() populates three parallel global arrays from
+# $LABELS_FILE using the exact same line-triplet parser the main sync loop
+# below uses (so --check and the mutating sync can never see a different
+# label set from the same file). print_label_check_report() then renders the
+# missing/stale/extras verdict both forge backends share; only the LIVE
+# label fetch itself (gh vs the Gitea API) differs between the two.
+# ============================================================================
+
+DECL_NAMES=()
+DECL_COLORS=()
+DECL_DESCS=()
+
+read_declared_labels() {
+  DECL_NAMES=()
+  DECL_COLORS=()
+  DECL_DESCS=()
+  local line name desc_line color_line description color
+  while IFS= read -u 3 -r line; do
+    if [[ "$line" =~ ^-\ name:\ (.+)$ ]]; then
+      name="${BASH_REMATCH[1]}"
+      read -u 3 -r desc_line
+      read -u 3 -r color_line
+
+      description=""
+      color=""
+
+      if [[ "$desc_line" =~ description:\ (.+)$ ]]; then
+        description="${BASH_REMATCH[1]}"
+        description="${description//\"/}"
+      fi
+
+      if [[ "$color_line" =~ color:\ \"?([0-9A-Fa-f]{6})\"?.*$ ]]; then
+        color="${BASH_REMATCH[1]}"
+      fi
+
+      DECL_NAMES+=("$name")
+      DECL_COLORS+=("$color")
+      DECL_DESCS+=("$description")
+    fi
+  done 3< "$LABELS_FILE"
+}
+
+# is_declared_label <name> -> 0 if $name is in DECL_NAMES, else 1.
+is_declared_label() {
+  local target="$1" n
+  for n in "${DECL_NAMES[@]}"; do
+    [[ "$n" == "$target" ]] && return 0
+  done
+  return 1
+}
+
+# Populated by diff_declared_against_live_tsv, read by print_label_check_report.
+# Plain globals rather than local-by-reference (bash namerefs, `local -n`,
+# need bash 4.3+ and aren't used anywhere else in this codebase -- this repo
+# targets bash 3.2+ for macOS compatibility per .shellcheckrc) — every
+# --check run only ever needs one live verdict at a time, so a shared pair of
+# globals is simpler than passing arrays around.
+MISSING_LABELS=()
+STALE_LABELS=()
+EXTRA_LABELS=()
+
+# print_label_check_report
+#
+# Prints the human-readable verdict from MISSING_LABELS/STALE_LABELS/
+# EXTRA_LABELS (set by diff_declared_against_live_tsv) and returns the
+# --check exit code: 0 (no drift), 3 (drift found). Never called on a
+# forge/lookup failure — those are reported directly by the caller via
+# error() (exit 1) before this runs.
+# Every array expansion below uses the `${arr[@]+"${arr[@]}"}` guard: under
+# `set -u`, bash 3.2 (stock macOS /bin/bash) treats an EMPTY indexed array's
+# "${arr[@]}" as an unbound variable and aborts. Bash fixed this in 4.4, so
+# the bare form works everywhere except the interpreter a large share of
+# operators actually run. `${#arr[@]}` is safe on 3.2 and stays as-is. Only
+# reachable at all since #7717 -- this function previously crashed before
+# these lines ran.
+print_label_check_report() {
+  local n s
+
+  if [[ "${#MISSING_LABELS[@]}" -eq 0 && "${#STALE_LABELS[@]}" -eq 0 && "${#EXTRA_LABELS[@]}" -eq 0 ]]; then
+    success "Label check: ${#DECL_NAMES[@]} declared label(s), all in sync with $REPO. No unknown loom:-prefixed extras."
+    return 0
+  fi
+
+  warning "Label drift detected on $REPO (${#DECL_NAMES[@]} declared, ${#MISSING_LABELS[@]} missing, ${#STALE_LABELS[@]} stale, ${#EXTRA_LABELS[@]} unknown extra):"
+  for n in ${MISSING_LABELS[@]+"${MISSING_LABELS[@]}"}; do
+    echo "  MISSING       $n (declared in labels.yml, absent on $REPO)" >&2
+  done
+  for s in ${STALE_LABELS[@]+"${STALE_LABELS[@]}"}; do
+    echo "  STALE         $s" >&2
+  done
+  for n in ${EXTRA_LABELS[@]+"${EXTRA_LABELS[@]}"}; do
+    echo "  UNKNOWN EXTRA $n (present on $REPO, not declared in labels.yml — never deleted automatically)" >&2
+  done
+  if [[ "${#MISSING_LABELS[@]}" -gt 0 || "${#STALE_LABELS[@]}" -gt 0 ]]; then
+    warning "Run without --check (still additive-only, never deletes/renames) to create the missing labels and refresh the stale ones."
+  fi
+  # 3 (not 1) so callers can distinguish "drift found" from a forge/lookup
+  # error, which error() reports separately via exit 1 before this ever runs.
+  return 3
+}
+
+# diff_declared_against_live_tsv <tsv>
+#
+# Shared by both forge backends: $1 is the live label set as one
+# name<TAB>color<TAB>description line per label (color WITHOUT a leading
+# '#', already lowercased by the caller is NOT required — this normalizes
+# case itself). Diffs it against the already-populated DECL_NAMES/
+# DECL_COLORS/DECL_DESCS (call read_declared_labels first), populates
+# MISSING_LABELS/STALE_LABELS/EXTRA_LABELS, and hands the result to
+# print_label_check_report. Returns that function's exit code (0 no drift, 3
+# drift found).
+# Lowercase helper. `${x,,}` is bash 4.0+ and this repo targets bash 3.2+
+# (.shellcheckrc: "Target bash for macOS compatibility (bash 3.2+)"), because
+# stock macOS ships /bin/bash 3.2 and `#!/usr/bin/env bash` resolves to it.
+_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+diff_declared_against_live_tsv() {
+  local live_tsv="$1"
+
+  # Parallel indexed arrays + linear search rather than associative arrays:
+  # `local -A` is bash 4.0+, same 3.2 constraint as _lower() above (#7717).
+  # This mirrors the DECL_NAMES/DECL_COLORS/DECL_DESCS + is_declared_label()
+  # pattern already used in this file. A live label set is dozens of entries,
+  # so the O(n*m) scan costs nothing next to the forge call that produced it.
+  local LIVE_NAMES=() LIVE_COLORS=() LIVE_DESCS=()
+  local name color desc
+  while IFS=$'\t' read -r name color desc; do
+    [[ -z "$name" ]] && continue
+    LIVE_NAMES+=("$name")
+    LIVE_COLORS+=("$(_lower "$color")")
+    LIVE_DESCS+=("$desc")
+  done <<<"$live_tsv"
+
+  MISSING_LABELS=()
+  STALE_LABELS=()
+  EXTRA_LABELS=()
+  local i j decl_name decl_color decl_desc found live_color live_desc
+  for ((i = 0; i < ${#DECL_NAMES[@]}; i++)); do
+    decl_name="${DECL_NAMES[$i]}"
+    decl_color="$(_lower "${DECL_COLORS[$i]}")"
+    decl_desc="${DECL_DESCS[$i]}"
+    found=""
+    live_color=""
+    live_desc=""
+    for ((j = 0; j < ${#LIVE_NAMES[@]}; j++)); do
+      if [[ "${LIVE_NAMES[$j]}" == "$decl_name" ]]; then
+        found=1
+        live_color="${LIVE_COLORS[$j]}"
+        live_desc="${LIVE_DESCS[$j]}"
+        break
+      fi
+    done
+    if [[ -z "$found" ]]; then
+      MISSING_LABELS+=("$decl_name")
+    elif [[ "$live_color" != "$decl_color" || "$live_desc" != "$decl_desc" ]]; then
+      STALE_LABELS+=("$decl_name (color: live=$live_color vs declared=$decl_color; description: live=\"$live_desc\" vs declared=\"$decl_desc\")")
+    fi
+  done
+
+  # Iterates the live set in forge order. The associative-array version this
+  # replaced iterated "${!LIVE_SEEN[@]}", i.e. bash hash order, so unknown
+  # extras are now reported deterministically instead of arbitrarily.
+  for ((j = 0; j < ${#LIVE_NAMES[@]}; j++)); do
+    name="${LIVE_NAMES[$j]}"
+    if [[ "$name" == loom:* ]] && ! is_declared_label "$name"; then
+      EXTRA_LABELS+=("$name")
+    fi
+  done
+
+  print_label_check_report
+}
+
+# github_check_labels: fetch $REPO's live label set ONCE, then diff it
+# against labels.yml. Read-only — makes exactly one gh call (a `gh label
+# list --json ... --jq` list of name/color/description tab-triples), never a
+# `gh label create/edit/delete`.
+github_check_labels() {
+  read_declared_labels
+
+  local live_tsv
+  if ! live_tsv=$(gh label list -R "$REPO" --json name,color,description \
+        --jq '.[] | [.name, .color, .description] | @tsv' --limit 300 2>&1); then
+    check_unavailable "Could not list labels for $REPO: $live_tsv"
+  fi
+
+  diff_declared_against_live_tsv "$live_tsv"
+}
+
+# ============================================================================
 # Gitea label operations
 #
 # forge-helpers.sh's gitea_api emits the response BODY on stdout and signals
@@ -503,9 +745,57 @@ gitea_sync_label() {
   fi
 }
 
+# gitea_check_labels: Gitea counterpart of github_check_labels. Read-only —
+# a single GET of the repo's label list, parsed with python3 (matching every
+# other Gitea JSON handling in this script) and normalized into the same
+# name<TAB>color<TAB>description shape diff_declared_against_live_tsv
+# expects (color's leading '#', which gitea_sync_label's payload adds on
+# create/update, is stripped here so it compares equal to the bare hex in
+# labels.yml).
+gitea_check_labels() {
+  read_declared_labels
+
+  local body
+  body=$(gitea_api GET "repos/${FORGE_OWNER}/${FORGE_REPO}/labels" 2>&1) \
+    || check_unavailable "Could not list labels for $REPO: $body"
+
+  local live_tsv
+  live_tsv=$(echo "$body" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception as e:
+    sys.exit(1)
+for l in data:
+    name = l.get('name', '')
+    color = (l.get('color') or '').lstrip('#')
+    desc = (l.get('description') or '').replace('\t', ' ').replace('\n', ' ')
+    print(f'{name}\t{color}\t{desc}')
+" 2>/dev/null) || error "Could not parse label list for $REPO"
+
+  diff_declared_against_live_tsv "$live_tsv"
+}
+
 # ============================================================================
 # Main sync logic
 # ============================================================================
+
+# --check (#6716) short-circuits everything below: it never touches default
+# labels, never prunes, never creates/updates a Loom label. Dispatched here
+# (rather than immediately after the LABELS_FILE existence check above) so
+# every github_/gitea_check_labels() helper it calls is already defined.
+if [[ "$CHECK_MODE" -eq 1 ]]; then
+  # `|| check_rc=$?` (not a bare call) so a drift/error return (3 or 1) does
+  # not itself trip `set -e` before this script can report it and exit with
+  # that same code deliberately.
+  check_rc=0
+  if [[ "$FORGE_TYPE" == "github" ]]; then
+    github_check_labels || check_rc=$?
+  else
+    gitea_check_labels || check_rc=$?
+  fi
+  exit "$check_rc"
+fi
 
 # Remove default labels that clutter issue tracking
 DEFAULT_LABELS=(

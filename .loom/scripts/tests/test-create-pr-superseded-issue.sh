@@ -127,6 +127,20 @@ export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
 export LOOM_FORGE_TYPE=github
 
+# This suite tests the supersede check in isolation -- it must stay hermetic
+# regardless of this repo's own ambient version-file sync state (#6730's own
+# create-pr.sh version check, tested separately in
+# test-create-pr-version-check.sh, would otherwise run for real here since
+# these tests execute from this checkout's real worktree root). Point it at
+# an always-clean stub so it never fires.
+cat > "$STUB_DIR/version-check-ok.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "OK        (stub): all versions in sync"
+exit 0
+STUB
+chmod +x "$STUB_DIR/version-check-ok.sh"
+export LOOM_VERSION_CHECK_SCRIPT="$STUB_DIR/version-check-ok.sh"
+
 reset_fixtures() {
   : > "$STUB_DIR/gh-calls.log"
   : > "$STUB_DIR/created.log"

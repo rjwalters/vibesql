@@ -11,8 +11,11 @@
 #
 # Covers:
 #   (a) fresh lease owned by this sweep's own host -> PASS (exit 0)
-#   (b) expired lease (age > ttl) -> ABORT EXPIRED (exit 3)
+#   (b) expired lease, owned by THIS sweep's own host -> ABORT EXPIRED (exit 3)
 #   (c) fresh lease owned by a DIFFERENT host -> ABORT SUPERSEDED (exit 4)
+#   (r) expired lease owned by a DIFFERENT host (an abandoned, never-yielded
+#       peer lease, #6783) -> PASS, not ABORT (exit 0) -- distinguishes this
+#       from (b): only an EXPIRED lease that is also THIS sweep's OWN aborts
 #   (d) no lease comment at all -> PASS, fail-open (exit 0)
 #   (e) a lease comment whose marker fails to parse -> PASS, fail-open
 #   (f) a `gh api` fetch failure -> PASS, fail-open
@@ -37,6 +40,14 @@
 #   (q) a yield record for a DIFFERENT sweep on the SAME host does not
 #       exclude a later, legitimately-reclaimed lease from that host --
 #       matched by exact (host, sweep), not by host alone (#6485)
+#   (s) LOOM_REPO unset (the common case -- this script has no --repo CLI
+#       flag) leaves `repo_args` a genuinely empty array; expanding
+#       `"${repo_args[@]}"` unguarded there is an "unbound variable" under
+#       `set -u` on bash < 4.4 (macOS system bash 3.2), which silently
+#       corrupts the comments fetch into the unrelated fail-open path
+#       instead of actually evaluating the real lease (#7957). Asserted on
+#       the ambient bash always, and again under a real 3.x /bin/bash when
+#       one is present on the host (skipped, not failed, elsewhere).
 #
 # Usage:
 #   ./.loom/scripts/tests/test-sweep-lease-fence.sh
@@ -69,10 +80,14 @@ assert_eq() {
     fi
 }
 
+# assert_contains/assert_not_contains use a pure-bash substring match (no
+# forked printf|grep pipeline) so a transient fork/exec failure under
+# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
+# content mismatch (#7819, #7874).
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
     TESTS_RUN=$((TESTS_RUN + 1))
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if [[ "$haystack" == *"$needle"* ]]; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "  ${GREEN}PASS${NC}: $msg"
     else
@@ -151,7 +166,7 @@ export PATH="$STUB_DIR:$PATH"
 reset_state() {
     rm -f "$STUB_DIR"/comments.json "$STUB_DIR"/comments-fail
     unset LOOM_LEASE_FENCE_NOW LOOM_HOST_ID LOOM_LEASE_TTL_MINUTES HOSTNAME \
-        LOOM_LEASE_PUBLISH_HOSTNAME 2> /dev/null || true
+        LOOM_LEASE_PUBLISH_HOSTNAME LOOM_REPO 2> /dev/null || true
 }
 
 run_script() {
@@ -187,9 +202,27 @@ cat > "$STUB_DIR/comments.json" <<'JSON'
 ]
 JSON
 LOOM_LEASE_FENCE_NOW="$NOW_EPOCH" run_script check 6309 --host studio-host
-assert_eq "3" "$RC" "(b) expired lease -> exit 3 (ABORT EXPIRED)"
+assert_eq "3" "$RC" "(b) expired lease, owned by THIS sweep's own host -> exit 3 (ABORT EXPIRED)"
 assert_contains "$ERR" "ABORT: EXPIRED" "(b) stderr distinguishes EXPIRED from SUPERSEDED"
 assert_contains "$ERR" "2026-08-15T15:30:00Z" "(b) stderr includes the observed lease timestamp"
+
+# --- (r) expired lease owned by a DIFFERENT, now-abandoned host -> PASS,
+# NOT ABORT (#6783). Reproduces the #6694/PR #6773 incident shape: the
+# freshest (and only) lease record belongs to a different, dead host and is
+# well past the TTL -- with no live competitor, this must no longer
+# permanently fence out this (successor) sweep's push/PR-open.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 1, "updated_at": "2026-08-15T15:30:00Z", "body": "<!-- loom:lease host=dead-host sweep=sweep-issue-6694-1787458405 -->\nprose"}
+]
+JSON
+LOOM_LEASE_FENCE_NOW="$NOW_EPOCH" run_script check 6309 --host studio-host
+assert_eq "0" "$RC" "(r) expired lease owned by a DIFFERENT host -> exit 0 (PASS, not ABORT -- #6783)"
+assert_contains "$ERR" "PASS" "(r) stderr reports a PASS, not an ABORT"
+assert_contains "$ERR" "EXPIRED" "(r) stderr still names the EXPIRED condition it is passing through"
+assert_contains "$ERR" "dead-host" "(r) stderr names the abandoned lease's owning host"
+assert_contains "$ERR" "DIFFERENT host" "(r) stderr explains why this expired lease is not fenced against"
 
 # --- (c) fresh lease owned by a DIFFERENT host -> ABORT SUPERSEDED --------
 reset_state
@@ -325,6 +358,68 @@ JSON
 LOOM_LEASE_FENCE_NOW="$NOW_EPOCH" run_script check 6309 --host studio-host
 assert_eq "0" "$RC" "(q) a stale yield for a DIFFERENT (older) sweep on the same host does not block this host's brand new lease"
 assert_contains "$ERR" "sweep=sweep-new" "(q) stderr confirms the match is the new sweep's lease, not the old yielded one"
+
+# --- (s) LOOM_REPO unset -> empty `repo_args[@]` must never surface as
+# "unbound variable" and must not be mistaken for a genuine fetch failure
+# (#7957). First on the ambient (test-runner) bash -- always runs, though it
+# cannot by itself reproduce the bash-3.2-only crash since the empty-array
+# `set -u` hazard was fixed upstream in bash 4.4 -- then again under a real
+# 3.x /bin/bash when one is present (macOS system bash), which is the one
+# environment that actually exhibits the pre-fix bug; skipped, not failed,
+# on every other host (mirrors test-loom-daemon-quiesce.sh's own
+# detect-and-skip convention for the identical empty-array hazard).
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[{"id": 1, "updated_at": "2026-08-15T15:50:00Z", "body": "<!-- loom:lease host=studio-host sweep=sweep-a -->\nprose"}]
+JSON
+unset LOOM_REPO
+LOOM_LEASE_FENCE_NOW="$NOW_EPOCH" run_script check 6309 --host studio-host
+assert_eq "0" "$RC" "(s) ambient bash: LOOM_REPO unset -> exit 0 (real PASS, not a crash)"
+assert_contains "$ERR" "lease fence OK" "(s) ambient bash: the comments fetch actually ran and produced the real PASS reason"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$ERR" != *"unbound variable"* ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: (s) ambient bash: no 'unbound variable' on stderr"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: (s) ambient bash: no 'unbound variable' on stderr"
+    echo "    stderr: $ERR"
+fi
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$ERR" != *"could not fetch comments"* ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: (s) ambient bash: did not take the unrelated fail-open 'could not fetch comments' path"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: (s) ambient bash: did not take the unrelated fail-open 'could not fetch comments' path"
+    echo "    stderr: $ERR"
+fi
+
+LEGACY_BASH=""
+if [[ -x /bin/bash ]]; then
+    bash_version_output="$(/bin/bash --version 2>/dev/null)"
+    if [[ "$bash_version_output" == *"version 3."* ]]; then
+        LEGACY_BASH=/bin/bash
+    fi
+fi
+if [[ -n "$LEGACY_BASH" ]]; then
+    OUT="$("$LEGACY_BASH" "$SCRIPT" check 6309 --host studio-host 2>"$STUB_DIR/stderr-legacy.log")"
+    RC=$?
+    ERR="$(cat "$STUB_DIR/stderr-legacy.log" 2> /dev/null || true)"
+    assert_eq "0" "$RC" "(s) bash 3.2: LOOM_REPO unset -> exit 0 (real PASS, not a crash)"
+    assert_contains "$ERR" "lease fence OK" "(s) bash 3.2: the comments fetch actually ran and produced the real PASS reason"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if [[ "$ERR" != *"unbound variable"* ]]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: (s) bash 3.2: no 'unbound variable' on stderr"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: (s) bash 3.2: no 'unbound variable' on stderr"
+        echo "    stderr: $ERR"
+    fi
+else
+    echo "· skipped: (s) bash 3.2 unbound-variable regression check (no 3.x /bin/bash on this host)"
+fi
 
 # --- (j) --ttl-minutes overrides the default TTL ---------------------------
 reset_state

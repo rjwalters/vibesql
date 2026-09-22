@@ -105,7 +105,7 @@ Some self-hosted Gitea deployments (cleanroom mirrors, air-gapped environments, 
 Set `GITEA_USERNAME` to switch into Basic Auth mode. The password is taken from the existing `GITEA_TOKEN` (or `FORGE_TOKEN`) variable -- the field is reused so existing config schemas keep working.
 
 ```bash
-export GITEA_USERNAME=sphere
+export GITEA_USERNAME=example-user
 export GITEA_TOKEN='<your-gitea-password>'    # password goes here in Basic mode
 ```
 
@@ -117,7 +117,7 @@ Or in `.loom/config.json`:
     "type": "gitea",
     "gitea": {
       "url": "https://cleanroom-gitea.example.com",
-      "username": "sphere",
+      "username": "example-user",
       "token": "<password>"
     }
   }

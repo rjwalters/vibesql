@@ -38,16 +38,28 @@
 # `issue-<N>` builder worktree — git refuses the same branch in two
 # worktrees at once), step 2's `gh pr checkout --force` fails loudly
 # (non-zero exit, git's "already used by worktree" error) and this script
-# exits 1 — but the worktree directory it already created is left behind on
-# a detached HEAD (pinned at the base branch, not the PR). Callers MUST
-# check this script's exit code rather than assuming the printed path is
-# ready to evaluate; merge-pr.sh's cleanup no longer depends on the branch
-# actually having switched (#6264 — it checks by path, not by branch state).
+# exits 1. Callers MUST check this script's exit code rather than assuming
+# the printed path is ready to evaluate; merge-pr.sh's cleanup no longer
+# depends on the branch actually having switched (#6264 — it checks by
+# path, not by branch state).
+#
+# #6594: the collision above is now detected up front (before this script
+# ever creates a directory) by resolving the PR's head branch via `gh pr
+# view` and checking `git worktree list` for an existing checkout of it —
+# in that case the script fails fast and points the caller at the existing
+# worktree instead of creating a `pr-<N>` one. If that up-front check can't
+# resolve the head branch (e.g. a transient API hiccup) and the collision is
+# only discovered later via the `gh pr checkout --force` failure, the
+# partially-created worktree is removed via `git worktree remove` before
+# this script exits — it is no longer left behind on disk.
 #
 # Exit codes:
 #   0 = success (worktree exists at the expected path, PR branch checked out)
-#   1 = failure (error printed; the worktree directory may still exist,
-#       possibly on a detached HEAD if the PR-branch checkout itself failed)
+#   1 = failure (error printed; a `pr-<N>` worktree this run created for a
+#       failed checkout is removed before exiting — see #6594 — so it should
+#       NOT still exist afterward, though a best-effort `git worktree remove`
+#       can itself fail, in which case a warning names the manual cleanup
+#       command)
 #   2 = invalid arguments
 
 set -e
@@ -140,6 +152,30 @@ if [[ -d "$WORKTREE_PATH" ]]; then
     fi
 fi
 
+# --- Up-front branch-collision detection (#6594) ---------------------------
+# git structurally refuses to check out a branch that is already checked out
+# in another worktree — most commonly this same PR's own issue-<N> builder
+# worktree still holding `feature/issue-<N>`. Detecting this BEFORE creating
+# .loom/worktrees/pr-<PR_NUMBER>/ avoids ever creating the directory in the
+# collision case, rather than creating it and cleaning it up after the fact.
+# Best-effort: if `gh pr view` can't resolve the head branch, fall through to
+# the create-then-checkout path below, which still catches the collision
+# (via the checkout failure) and cleans up after itself (see below).
+HEAD_BRANCH="$(gh pr view "$PR_NUMBER" --json headRefName --jq .headRefName 2>/dev/null || true)"
+if [[ -n "$HEAD_BRANCH" ]]; then
+    EXISTING_WT="$(git -C "$REPO_ROOT" worktree list --porcelain | awk -v branch="refs/heads/$HEAD_BRANCH" '
+        /^worktree / { wt = substr($0, 10) }
+        /^branch /   { if ($2 == branch) print wt }
+    ' | head -1)"
+    if [[ -n "$EXISTING_WT" ]]; then
+        print_error "The PR's branch ($HEAD_BRANCH) is already checked out in another worktree ($EXISTING_WT) — this is the #6264 detached-HEAD collision, caught up front (#6594) before creating $WORKTREE_PATH."
+        print_info "Reuse the existing worktree directly instead: cd '$EXISTING_WT'"
+        exit 1
+    fi
+else
+    print_warning "Could not resolve PR #$PR_NUMBER's head branch via 'gh pr view' — skipping the up-front collision check (a collision, if any, will still be caught and cleaned up below)"
+fi
+
 print_info "Creating PR worktree for PR #$PR_NUMBER..."
 print_info "  Path: $WORKTREE_PATH"
 
@@ -193,7 +229,15 @@ if ! CHECKOUT_OUTPUT="$(cd "$WORKTREE_PATH" && gh pr checkout "$PR_NUMBER" --for
         fi
     else
         print_info "The worktree was created but the PR branch is not checked out."
-        print_info "You can retry: cd '$WORKTREE_PATH' && gh pr checkout $PR_NUMBER"
+    fi
+    # #6594: remove the partially-created worktree via `git worktree remove`
+    # (not a bare `rm -rf`, which would leave a dangling entry in git's
+    # internal worktree registry) instead of leaving it behind on disk for
+    # the caller to notice and clean up by hand.
+    if git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1; then
+        print_info "Removed the partially-created worktree at $WORKTREE_PATH"
+    else
+        print_warning "Could not automatically remove $WORKTREE_PATH; run: git -C '$REPO_ROOT' worktree remove '$WORKTREE_PATH' --force"
     fi
     exit 1
 fi

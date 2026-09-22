@@ -51,8 +51,45 @@ ROOT=""
 DAEMON_LOG="${LOOM_DAEMON_LOG:-$HOME/.loom/daemon.log}"
 JSON_OUTPUT=false
 
+# A concise operator usage block, held in the script rather than recovered by
+# reading "$0" at runtime (#7794). The header comment above keeps the rationale
+# -- what the configured-vs-dormant gap is, which role_runner.rs log line this
+# cross-checks, why each exit code exists -- and is never printed: that text is
+# for someone reading the source, not for someone who typed `--help` and wants
+# the flags. Printing it was also the reason this script read its own file,
+# which a same-path truncate+rewrite landing mid-read can tear into a torn,
+# incomplete banner with no I/O error to catch (#7201, PR #7768). Nothing here
+# touches the filesystem.
+#
+# Keep in sync with the argument parser below: every flag it accepts must
+# appear here.
 show_help() {
-    sed -n '2,/^$/p' "$0" | sed 's/^# //' | sed 's/^#//'
+    cat <<'EOF'
+Usage: check-onidle-status.sh [--root PATH] [--daemon-log PATH] [--json]
+
+Verify that autonomous.roleRunner.onIdle roles are actually FIRING for a
+workspace, not merely configured -- cross-checks .loom/config.json against the
+daemon log's "firing idle-triggered <role> run" lines. Read-only: never mutates
+config or logs.
+
+Options:
+  --root PATH        workspace root to check   [default: this script's repo root]
+  --daemon-log PATH  daemon log to scan        [LOOM_DAEMON_LOG,
+                                                else ~/.loom/daemon.log]
+  --json             machine-readable JSON instead of prose
+  -h, --help         show this help
+
+Exit codes:
+  0  nothing to verify (no onIdle roles configured), or every configured role
+     has at least one confirmed fire in the log
+  1  bad usage / missing dependency (jq)
+  2  onIdle roles configured but the daemon log is missing or unreadable
+     (cannot verify either way)
+  3  onIdle roles configured but at least one has never fired -- the
+     configured-but-dormant failure this script exists to catch
+
+Requires jq. Rationale and the matched log line: see this script's header.
+EOF
     exit 0
 }
 
@@ -125,21 +162,31 @@ fi
 #   "role_runner: idle edge for <root> — firing idle-triggered <role> run (#4364)"
 VERIFIED=()
 DORMANT=()
-declare -A LAST_FIRED
-declare -A FIRE_COUNT
+# LAST_FIRED / FIRE_COUNT are INDEXED arrays parallel to ON_IDLE_ROLES, not
+# `declare -A` (bash 4+; macOS ships 3.2 -- #7751). Both the producer loop below
+# and the reporting loop further down iterate `"${ON_IDLE_ROLES[@]}"` literally,
+# in the same order, so position is an exact stand-in for the role key.
+#
+# That parallel-index invariant is the one thing to preserve if either loop is
+# ever changed: they must iterate the same array the same way. Both increment
+# `idx` as their last statement to keep that obvious.
+LAST_FIRED=()
+FIRE_COUNT=()
 
+idx=0
 for role in "${ON_IDLE_ROLES[@]}"; do
     pattern="idle edge for ${ROOT} — firing idle-triggered ${role} run"
     matches="$(grep -F "$pattern" "$DAEMON_LOG" 2>/dev/null || true)"
     count="$(printf '%s\n' "$matches" | grep -cF "$pattern" 2>/dev/null || echo 0)"
     if [[ -n "$matches" && "$count" -gt 0 ]]; then
         VERIFIED+=("$role")
-        FIRE_COUNT["$role"]="$count"
-        LAST_FIRED["$role"]="$(printf '%s\n' "$matches" | tail -1 | grep -oE '^\[[0-9T:.+-]+\]' | tr -d '[]')"
+        FIRE_COUNT[$idx]="$count"
+        LAST_FIRED[$idx]="$(printf '%s\n' "$matches" | tail -1 | grep -oE '^\[[0-9T:.+-]+\]' | tr -d '[]')"
     else
         DORMANT+=("$role")
-        FIRE_COUNT["$role"]=0
+        FIRE_COUNT[$idx]=0
     fi
+    idx=$((idx + 1))
 done
 
 STATUS="verified"
@@ -156,12 +203,14 @@ if [[ "$JSON_OUTPUT" == "true" ]]; then
 else
     echo -e "${BLUE}onIdle status for $ROOT${NC}"
     echo "─────────────────────────────────"
+    idx=0
     for role in "${ON_IDLE_ROLES[@]}"; do
-        if [[ "${FIRE_COUNT[$role]}" -gt 0 ]]; then
-            echo -e "  ${GREEN}$role${NC}: fired ${FIRE_COUNT[$role]}x (last: ${LAST_FIRED[$role]:-unknown})"
+        if [[ "${FIRE_COUNT[$idx]}" -gt 0 ]]; then
+            echo -e "  ${GREEN}$role${NC}: fired ${FIRE_COUNT[$idx]}x (last: ${LAST_FIRED[$idx]:-unknown})"
         else
             echo -e "  ${RED}$role${NC}: configured but never observed firing in $DAEMON_LOG"
         fi
+        idx=$((idx + 1))
     done
     echo ""
 fi

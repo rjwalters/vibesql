@@ -68,7 +68,10 @@
 # yield from a past claim episode on that same host. A genuinely abandoned
 # lease that was never yielded (no `loom:lease-yield` record at all) is
 # NEVER excluded by this rule -- it still ages out purely via the ordinary
-# EXPIRED path below, so this does not weaken TTL-based reclamation.
+# TTL-based path below (EXPIRED aborts only when it is THIS sweep's own
+# host's lease; an expired lease owned by a different host now PASSes as
+# stale, no-longer-live evidence instead, Issue #6783), so this does not
+# weaken TTL-based reclamation.
 #
 # On success (or when there is simply no evidence to fence against -- see
 # "Fail-open cases" below), `check` exits 0 and the caller proceeds exactly
@@ -78,11 +81,13 @@
 #
 # `defaults/.claude/commands/loom/sweep.md`'s Builder phase, immediately
 # before `git push` + `./.loom/scripts/create-pr.sh` (see "Creating the PR"
-# in `defaults/roles/builder-pr.md`). Only meaningful for a daemon-dispatched
-# sweep that has a lease at all (Step 1a's self-claim signal, the same gate
-# that starts `sweep-lease-renew.sh`) -- a manual `/loom:sweep`, GH Actions
-# cron, or `--no-daemon` run has no lease comment to fence against and this
-# check fails open for it (see "Fail-open cases").
+# in `defaults/roles/builder-pr.md`). Meaningful for BOTH dispatch paths
+# since #6320: a daemon-dispatched sweep's lease is written at dispatch
+# (Step 1a's self-claim signal, #6179), and an in-session sweep (manual
+# `/loom:sweep`, GH Actions cron, `--no-daemon`) publishes its own at
+# pre-flight Step 1b (`sweep-lease-publish.sh`). Only a run that predates
+# those writers -- or one whose lease write failed -- has nothing to fence
+# against, and this check fails open for it (see "Fail-open cases").
 #
 # ## Fail-open cases (never block on unverifiable evidence)
 #
@@ -95,12 +100,43 @@
 #   - No lease comment found at all on the issue -> PASS (exit 0).
 #   - The freshest lease comment fails to parse (malformed marker) -> PASS.
 #   - The `gh api` call itself fails (network, rate limit, auth) -> PASS.
+#   - The freshest lease comment is EXPIRED (older than ttl-minutes) AND
+#     belongs to a host OTHER THAN this sweep's own -> PASS (Issue #6783,
+#     see below).
 #
-# Only a lease that was ACTUALLY FOUND and is either expired or held by a
-# different host causes an abort. This is deliberate: a false abort (blocking
-# a legitimately-owned sweep on a transient `gh` hiccup) is a strictly worse
-# failure mode here than an occasional missed fence -- the fence is a
+# Only a lease that is either (a) expired AND owned by THIS sweep's own host,
+# or (b) fresh but held by a DIFFERENT host, causes an abort. This is
+# deliberate: a false abort (blocking a legitimately-owned sweep on a
+# transient `gh` hiccup, or on a dead peer's abandoned record) is a strictly
+# worse failure mode here than an occasional missed fence -- the fence is a
 # cost-bounding backstop for a rare race, not a correctness-critical lock.
+#
+# ### Expired lease, different host (Issue #6783)
+#
+# Prior to #6783, ANY expired freshest lease -- regardless of which host
+# wrote it -- aborted with exit `3` (EXPIRED). But EXPIRED is an abort, not a
+# pass: if the lease's own sweep died without ever renewing OR yielding it,
+# the record never stops being the freshest lease comment on the issue (it is
+# never superseded unless a successor sweep writes a lease of its own), so it
+# permanently fenced out every future dispatch -- observed on issue #6694 /
+# PR #6773, where a dead sweep's lease from a different, dead host blocked a
+# legitimate successor with zero live competitors.
+#
+# An expired lease is, by definition, not evidence of a LIVE peer -- it is
+# exactly the state `loom-daemon`'s own `claim_reconciliation.rs` treats as
+# reclaimable, and closer to "no evidence" (per this doc's own reader
+# contract, `defaults/docs/lease-record.md`) than to "a peer owns this". So:
+#
+#   - Expired AND owned by THIS sweep's own host -> still ABORT (exit `3`).
+#     A sweep whose own renewal loop died should not trust its own claim --
+#     it may have been legitimately reclaimed out from under it.
+#   - Expired AND owned by a DIFFERENT host -> now PASS (exit `0`). Nobody
+#     live holds the claim; the abandoned record is no longer treated as
+#     fencing evidence.
+#
+# Exit `4` (SUPERSEDED -- a different, FRESH lease from a live peer) is
+# unaffected by this change: that case still means a live peer genuinely
+# holds the claim, and aborting there remains unambiguously correct.
 #
 # ## Commands
 #
@@ -121,13 +157,16 @@
 #     Exit codes:
 #       0  PASS -- proceed with push / PR-open. Covers: fresh lease owned by
 #          this host; no lease comment found; a lease comment that failed to
-#          parse; or a `gh` fetch failure (all fail-open, see above).
+#          parse; a `gh` fetch failure; or an EXPIRED lease owned by a
+#          DIFFERENT host (all fail-open, see above and Issue #6783).
 #       1  Usage error (bad issue number, unknown flag, non-numeric
 #          --ttl-minutes).
 #       3  ABORT: EXPIRED -- the freshest lease comment is older than
-#          ttl-minutes.
-#       4  ABORT: SUPERSEDED -- the freshest lease comment's host= differs
-#          from this sweep's own host.
+#          ttl-minutes AND belongs to THIS sweep's own host (Issue #6783: an
+#          expired lease owned by a different host now PASSes instead, see
+#          above).
+#       4  ABORT: SUPERSEDED -- the freshest lease comment is still FRESH but
+#          its host= differs from this sweep's own host.
 #
 # Usage:
 #   .loom/scripts/sweep-lease-fence.sh check 6309
@@ -347,7 +386,7 @@ cmd_check() {
     # fetched together in ONE round trip so the yield-exclusion filter below
     # never needs a second `gh api` call.
     local comments_ndjson
-    if ! comments_ndjson="$(gh api "${repo_args[@]}" "repos/{owner}/{repo}/issues/${issue}/comments" \
+    if ! comments_ndjson="$(gh api "${repo_args[@]+"${repo_args[@]}"}" "repos/{owner}/{repo}/issues/${issue}/comments" \
         --paginate --jq \
         ".[] | select(.body != null and ((.body | startswith(\"${LEASE_MARKER_PREFIX}\")) or (.body | startswith(\"${YIELD_MARKER_PREFIX}\")))) | {updated_at: .updated_at, body: .body}" \
         2>&1)"; then
@@ -388,7 +427,7 @@ cmd_check() {
         local lbody lfirst lparsed lhost lsweep lyielded="0"
         lbody="$(jq -r '.body // empty' <<< "$lease_line" 2> /dev/null || true)"
         [[ -z "$lbody" ]] && continue
-        lfirst="$(printf '%s\n' "$lbody" | head -n1)"
+        lfirst="${lbody%%$'\n'*}"
         lparsed="$(parse_lease_marker_line "$lfirst" || true)"
         if [[ -n "$lparsed" && -n "$yield_first_lines" ]]; then
             lhost="${lparsed%%$'\t'*}"
@@ -429,7 +468,7 @@ cmd_check() {
         echo "PASS: freshest lease comment on issue #${issue} is missing updated_at/body -- no evidence to fence against; proceeding with push/PR-open" >&2
         exit 0
     fi
-    first_line="$(printf '%s\n' "$body" | head -n1)"
+    first_line="${body%%$'\n'*}"
 
     local parsed lease_host lease_sweep
     if ! parsed="$(parse_lease_marker_line "$first_line")"; then
@@ -453,8 +492,23 @@ cmd_check() {
     ttl_seconds="$(awk -v m="$ttl_minutes" 'BEGIN { printf "%d", m * 60 }')"
 
     if ((age_seconds > ttl_seconds)); then
-        echo "ABORT: EXPIRED -- lease fence failed for issue #${issue}. Freshest lease comment (host=${lease_host} sweep=${lease_sweep}) was last renewed at ${updated_at}, age ${age_minutes} min > ttl ${ttl_minutes} min. This sweep (host=${host}) is aborting BEFORE push/PR-open (Epic #6165 Phase 3, #6309) rather than proceed on a stale claim. Not contesting or cleaning up the peer/lease -- the loom:building label and claim are left alone." >&2
-        exit 3
+        if [[ "$lease_host" == "$host" ]]; then
+            echo "ABORT: EXPIRED -- lease fence failed for issue #${issue}. Freshest lease comment (host=${lease_host} sweep=${lease_sweep}) was last renewed at ${updated_at}, age ${age_minutes} min > ttl ${ttl_minutes} min. This sweep (host=${host}) is aborting BEFORE push/PR-open (Epic #6165 Phase 3, #6309) rather than proceed on a stale claim it can no longer trust as its own. Not contesting or cleaning up the peer/lease -- the loom:building label and claim are left alone." >&2
+            exit 3
+        fi
+        # Issue #6783: an expired lease owned by a DIFFERENT host is an
+        # abandoned record, not a live peer -- it is exactly the state
+        # `loom-daemon`'s own claim_reconciliation.rs treats as reclaimable,
+        # and closer to "no evidence" than to "a peer owns this" (see this
+        # script's header doc, "Fail-open cases"). Treating it as a fencing
+        # ABORT would permanently fence out every future dispatch on this
+        # issue that does not itself write a lease record, since a dead
+        # sweep's never-renewed, never-yielded record can never stop being
+        # the freshest lease comment on its own (the #6694/PR #6773
+        # incident). PASS instead -- this is fail-open, not fail-safe: it
+        # does not contest or clean up the abandoned record.
+        echo "PASS: freshest lease comment on issue #${issue} (host=${lease_host} sweep=${lease_sweep}) is EXPIRED (last renewed at ${updated_at}, age ${age_minutes} min > ttl ${ttl_minutes} min) and belongs to a DIFFERENT host than this sweep (${host}) -- an abandoned peer lease is no longer live evidence of a peer's claim; proceeding with push/PR-open" >&2
+        exit 0
     fi
 
     if [[ "$lease_host" != "$host" ]]; then

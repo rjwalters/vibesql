@@ -150,6 +150,19 @@ git add <resolved-files>
 # 3. Continue the rebase
 git rebase --continue
 
+# Version-bearing-file sync gate (#7168, #7341; moot after #7743): if you push
+# here directly (updating an already-open PR) rather than through create-pr.sh
+# again, gate first. Under #7743 no PR carries a version-bearing edit, so a
+# clean rebase lands exactly origin/main's values; if the gate still fires,
+# your branch carries one (e.g. a pre-#7743 bump commit).
+# Never hand-patch VERSION/CLAUDE.md/etc. and never run `version.sh bump` (the
+# printed Fix: predates #7743) -- restore them to origin/main's values
+# (`git checkout origin/main -- <files>`), commit, re-run the gate, then push.
+if [ -x ./.loom/scripts/version-check-gate.sh ] && ! ./.loom/scripts/version-check-gate.sh --fix-hint "then push."; then
+  echo "Version-bearing files out of sync after rebase (see BLOCKER:/Fix: above) - revert, never bump"
+  exit 1
+fi
+
 # 4. Force push (rebase rewrites history)
 git push --force-with-lease
 ```
@@ -219,6 +232,23 @@ cd .loom/worktrees/issue-XX
   captures WIP as a patch file under
   `<worktree-root>/.snapshots/issue-<N>-<timestamp>.patch`, scoped to your own
   worktree, with no risk of collision with other builders' stashes.
+- For a "clean baseline vs. my diff" comparison — temporarily clearing your
+  fix to re-run a lint/test baseline, then restoring it — `snapshot` is *not*
+  enough (it captures a patch but does not reset the working tree). Use
+  `./.loom/scripts/worktree.sh stash-push <issue-number>`, run the baseline
+  check, then `./.loom/scripts/worktree.sh stash-pop <issue-number>` (#5217).
+  It anchors your WIP to a **per-issue** ref
+  (`refs/loom/stash-baseline/issue-<N>`), never `refs/stash`, so no concurrent
+  builder's stash can land between your push and pop.
+
+**Don't leave a detached process running after your session ends**
+- It outlives the sweep, holds files open in a worktree that is auto-removed on
+  merge, and loads the host with work no owner can be found for.
+- **Never `launchctl submit`**: its jobs are **KeepAlive**, so launchd re-runs a
+  one-shot script every time it exits, forever (#8478: 25 orphaned `ngspice`,
+  load 58, 12h of suppressed dispatch).
+- Long compute → the repo's batch backend, or scoped to fit the session, or
+  `loom:blocked` naming the compute gap: `.loom/docs/long-running-compute.md`.
 
 **Don't use `git push --force` without `--force-with-lease`**
 - `--force-with-lease` is safer - it fails if someone else pushed
@@ -238,12 +268,10 @@ To minimize conflicts in the first place:
 
 3. **Communicate**: If working on shared areas, coordinate with other builders
 
-4. **Rebase before PR**: Always rebase onto latest main before creating PR
-   ```bash
-   git fetch origin main
-   git rebase origin/main
-   git push --force-with-lease
-   ```
+4. **Rebase before PR**: this is a required gate, not just an ounce-of-prevention
+   habit — see `builder-pr.md` § "Pre-Push Rebase: Sync with `origin/main`" for
+   the mandatory step (with conflict-handling instructions) that runs
+   immediately before `git push` / opening the PR (#7668).
 
 ## Claiming Workflow (Parallel Mode)
 

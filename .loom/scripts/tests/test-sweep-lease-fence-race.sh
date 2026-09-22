@@ -75,6 +75,13 @@
 #       yielded must still correctly SUPERSEDE the earlier host. This is
 #       the negative check that (5)'s fix has not weakened ordinary
 #       fencing for a lease that simply never yielded.
+#   (7) Issue #6783's own incident shape (issue #6694 / PR #6773): the
+#       ONLY lease record on the issue was written by a host that has since
+#       died -- never renewed again, never yielded -- and is now well past
+#       the TTL, with zero live competitors. A successor sweep on a
+#       DIFFERENT host, dispatched later with no lease of its own yet, must
+#       PASS its fencing check (not be permanently fenced out by the
+#       abandoned record) and go on to push/PR-open.
 #
 # Usage:
 #   ./.loom/scripts/tests/test-sweep-lease-fence-race.sh
@@ -107,10 +114,14 @@ assert_eq() {
     fi
 }
 
+# assert_contains/assert_not_contains use a pure-bash substring match (no
+# forked printf|grep pipeline) so a transient fork/exec failure under
+# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
+# content mismatch (#7819, #7874).
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
     TESTS_RUN=$((TESTS_RUN + 1))
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if [[ "$haystack" == *"$needle"* ]]; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "  ${GREEN}PASS${NC}: $msg"
     else
@@ -371,6 +382,26 @@ assert_eq "4" "$ATTEMPT_RC" "(6) without a yield record, the earlier host correc
 assert_contains "$ATTEMPT_ERR" "ABORT: SUPERSEDED" "(6) stderr names the SUPERSEDED reason"
 assert_contains "$ATTEMPT_ERR" "host-loser" "(6) stderr names the superseding (never-yielded) host"
 assert_eq "0" "$(pushed_log_count)" "(6) no push/PR-open happens for the correctly-superseded host"
+
+# ============================================================================
+# Scenario 7 (Issue #6783): a dead sweep's abandoned lease from a DIFFERENT
+# host must not permanently fence out a successor sweep with zero live
+# competitors -- the exact shape observed on issue #6694 / PR #6773.
+# ============================================================================
+echo ""
+echo "--- Scenario 7: abandoned lease from a dead host does not permanently fence out a successor sweep (#6783) ---"
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 1, "updated_at": "2026-08-15T04:13:27Z", "body": "<!-- loom:lease host=host-e1d4c843 sweep=sweep-issue-6694-1787458405 -->\nprose"}
+]
+JSON
+
+simulate_sweep_attempt 6694 host-successor successor
+assert_eq "0" "$ATTEMPT_RC" "(7) successor host's fencing check PASSes despite the sole lease record being expired and owned by a different, dead host"
+assert_contains "$ATTEMPT_ERR" "PASS" "(7) stderr reports a PASS, not an ABORT"
+assert_contains "$ATTEMPT_ERR" "host-e1d4c843" "(7) stderr names the abandoned lease's owning (dead) host"
+assert_eq "1" "$(pushed_log_count)" "(7) the successor's push/PR-open proceeds -- no longer permanently fenced out"
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"

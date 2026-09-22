@@ -15,6 +15,12 @@
 #   (e) --dry-run + in sync -> exit 0
 #   (f) repo-specific file   -> file present only in .loom/ left untouched
 #   (g) .loom/resync-ignore  -> pinned file reported "skipped", not overwritten
+#   (g2) .loom/resync-ignore honors the repo-relative pin spelling, e.g.
+#        ".loom/hooks/foo.sh" or "./.loom/hooks/foo.sh" pinning the same file
+#        as the ".loom/"-relative "hooks/foo.sh" form (#6515)
+#   (g3) a .loom/resync-ignore pin matching nothing this run (typo, or a
+#        retired file) is reported as "pin had no effect", with a "did you
+#        mean" hint when a walked file shares its basename (#6515)
 #   (h) idempotent rerun     -> second run reports all unchanged
 # Widened surfaces (#4239):
 #   (i) drift in each new surface (roles/docs/bin/commands) -> updated + exit 2 on dry-run
@@ -50,14 +56,20 @@
 #       "removed" verb; --dry-run previews it (exit 2, "would remove") without
 #       deleting; .loom/resync-ignore can pin it against removal exactly like
 #       an update; a retired entry with no installed counterpart is a no-op
-# Untracked-.loom/-path remedy classification (#5983):
+# Untracked-.loom/-path remedy classification (#5983, #6613):
 #   (y) an untracked-and-unignored path under a pure-copy surface
-#       (.loom/hooks|scripts|roles|docs|runtimes|bin/) is shipped payload ->
-#       audit_untracked_loom_paths() recommends committing it directly, not
-#       adding it to EPHEMERAL_PATTERNS
+#       (.loom/hooks|scripts|roles|docs|runtimes|bin/) that still exists under
+#       defaults/ today is shipped payload -> audit_untracked_loom_paths()
+#       recommends committing it directly, not adding it to EPHEMERAL_PATTERNS
+#       and not the #6613 retired-file remedy either
 #   (z) an untracked-and-unignored path outside any pure-copy surface is
 #       genuine runtime state -> the existing EPHEMERAL_PATTERNS remedy is
 #       unchanged
+#   a path matching the pure-copy-surface PATTERN but with no defaults/
+#       counterpart today (removed from defaults/ without a
+#       defaults/.loom-retired.list entry) gets a third, distinct remedy
+#       naming defaults/.loom-retired.list -- neither "commit them" nor
+#       EPHEMERAL_PATTERNS
 # Crash-detection marker (#5980):
 #   a successful apply leaves no .loom/.resync-in-progress marker behind;
 #   --dry-run never writes one; a leftover marker (simulating a crashed prior
@@ -206,9 +218,18 @@ make_fixture() {
     printf '{\n  "loom_version": "0.0.0",\n  "loom_commit": "old",\n  "install_date": "2020-01-01",\n  "loom_source": "%s",\n  "installed_files": []\n}\n' \
         "$repo" > "$repo/.loom/install-metadata.json"
 
-    # A real commit so loom_commit re-stamps to an actual short sha.
+    # A real commit so loom_commit re-stamps to an actual short sha. #7864:
+    # the message deliberately matches the local-divergence protection's
+    # "safe lineage" pattern (RESYNC_COMMIT_SUBJECT_RE) -- every file this
+    # fixture drifts is meant to model ordinary, never-individually-patched
+    # installed content (the ubiquitous common case throughout this suite),
+    # not a local fix. Tests that specifically want the OTHER shape (a direct
+    # fix landed on the installed copy) layer an additional commit with a
+    # non-matching message on top -- those live in the sibling suite
+    # test-resync-installed-local-fix-guard.sh, NOT below in this file
+    # (#8165: this pointer said "below" from the start and was never right).
     git -C "$repo" add -A >/dev/null 2>&1
-    git -C "$repo" commit -qm "fixture" >/dev/null 2>&1
+    git -C "$repo" commit -qm "chore: install Loom v0.0.0" >/dev/null 2>&1
 
     echo "$repo"
 }
@@ -299,6 +320,90 @@ if [[ "$(cat "$REPO/.loom/hooks/guard.sh")" == "PINNED-LOCAL" ]]; then
     pass "(g) pinned file NOT overwritten"
 else
     fail "(g) pinned file was overwritten despite resync-ignore"
+fi
+
+# --- (g2) resync-ignore pin written in the natural repo-relative form -------
+# (#6515) — a pin spelled ".loom/hooks/guard.sh" (or "./.loom/hooks/guard.sh")
+# instead of the ".loom/"-relative "hooks/guard.sh" this script compares
+# against must ALSO be honored, not silently ignored.
+echo "Test group 5b: .loom/resync-ignore honors the repo-relative pin spelling (#6515)"
+REPO="$(make_fixture)"
+printf 'PINNED-LOCAL\n' > "$REPO/.loom/hooks/guard.sh"
+printf '.loom/hooks/guard.sh  # keep my local tweak (repo-relative form)\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -q "skipped" <<<"$OUT"; then
+    pass "(g2) repo-relative-form pin reported as skipped"
+else
+    fail "(g2) repo-relative-form pin not reported skipped (rc=$RC)"
+fi
+if [[ "$(cat "$REPO/.loom/hooks/guard.sh")" == "PINNED-LOCAL" ]]; then
+    pass "(g2) repo-relative-form pin NOT overwritten"
+else
+    fail "(g2) repo-relative-form pin was overwritten despite resync-ignore"
+fi
+if ! grep -q "pin had no effect" <<<"$OUT"; then
+    pass "(g2) a pin that matched is not also reported dead"
+else
+    fail "(g2) a pin that matched was incorrectly reported as having no effect"
+fi
+
+# same again with a leading "./" on top of the repo-relative form.
+REPO="$(make_fixture)"
+printf 'PINNED-LOCAL\n' > "$REPO/.loom/hooks/guard.sh"
+printf './.loom/hooks/guard.sh  # keep my local tweak (./ + repo-relative form)\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -q "skipped" <<<"$OUT" && [[ "$(cat "$REPO/.loom/hooks/guard.sh")" == "PINNED-LOCAL" ]]; then
+    pass "(g2) './' + repo-relative-form pin also honored"
+else
+    fail "(g2) './' + repo-relative-form pin was not honored (rc=$RC)"
+fi
+
+# --- (g3) dead-pin reporting (#6515) -----------------------------------------
+# A pin that matches nothing this run (typo, or a retired file) must be
+# reported loudly instead of silently doing nothing forever.
+echo "Test group 5c: dead .loom/resync-ignore pins are reported (#6515)"
+REPO="$(make_fixture)"
+printf 'hooks/gaurd.sh  # typo, does not exist\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if grep -q "pin had no effect: 'hooks/gaurd.sh'" <<<"$OUT"; then
+    pass "(g3) a pin matching nothing is reported as having no effect"
+else
+    fail "(g3) a dead pin was not reported (rc=$RC)"
+fi
+# unrelated to whether hooks/guard.sh itself drifted -- the dead pin did not
+# protect it, so it must still be resynced normally.
+if [[ "$(cat "$REPO/.loom/hooks/guard.sh")" == "A" ]]; then
+    pass "(g3) the (unrelated) file the dead pin was NOT protecting still resynced"
+else
+    fail "(g3) hooks/guard.sh did not resync despite the pin not matching it"
+fi
+
+# a pin whose basename matches a walked file, but in the wrong directory,
+# gets a "did you mean" suggestion naming the actual walked path.
+REPO="$(make_fixture)"
+printf 'scripts/guard.sh  # wrong directory, guard.sh actually lives under hooks/\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if grep -q "pin had no effect: 'scripts/guard.sh' (did you mean 'hooks/guard.sh'?)" <<<"$OUT"; then
+    pass "(g3) dead pin gets a 'did you mean' suggestion when a basename match exists"
+else
+    fail "(g3) dead pin did not get the expected 'did you mean' suggestion (rc=$RC)"
+fi
+
+# a pin that DOES match is never reported as dead in the same run as one that
+# doesn't -- (g) fixture pin ("hooks/guard.sh") lives alongside a dead one.
+REPO="$(make_fixture)"
+printf 'PINNED-LOCAL\n' > "$REPO/.loom/hooks/guard.sh"
+printf 'hooks/guard.sh   # this one matches\nscripts/nonexistent.sh   # this one does not\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if grep -q "pin had no effect: 'scripts/nonexistent.sh'" <<<"$OUT" && ! grep -q "pin had no effect: 'hooks/guard.sh'" <<<"$OUT"; then
+    pass "(g3) only the dead pin is reported; the live pin in the same file is not"
+else
+    fail "(g3) live/dead pin discrimination within one file failed (rc=$RC)"
 fi
 
 # --- (i) widened surfaces: drift detected + fixed ----------------------------
@@ -526,6 +631,63 @@ else
     fail "(m) missing source tree error message unclear"
 fi
 
+# --- (m2) .loom/loom-source-path points at a path that does not exist at all
+# -> same clear error, exit 1 (#6780 AC1: "missing directory" case) ----------
+echo "Test group 11b: .loom/loom-source-path pointing at a nonexistent directory errors clearly (#6780)"
+REPO="$(make_fixture)"
+rm -rf "$REPO/defaults"
+printf '%s/does-not-exist\n' "$REPO" > "$REPO/.loom/loom-source-path"
+rm -f "$REPO/.loom/install-metadata.json"
+RC=0; OUT="$(cd "$REPO" && bash "$SCRIPT" --dry-run 2>&1)" || RC=$?
+if [[ $RC -eq 1 ]]; then
+    pass "(m2) nonexistent loom-source-path target exits 1"
+else
+    fail "(m2) nonexistent loom-source-path target did not exit 1 (got $RC)"
+fi
+if grep -qi "could not locate" <<<"$OUT"; then
+    pass "(m2) nonexistent loom-source-path target prints a clear error"
+else
+    fail "(m2) nonexistent loom-source-path target error message unclear"
+fi
+if ! grep -qi "already in sync" <<<"$OUT"; then
+    pass "(m2) nonexistent loom-source-path target never reports a false 'already in sync'"
+else
+    fail "(m2) nonexistent loom-source-path target falsely reported 'already in sync'. Got: $OUT"
+fi
+
+# --- (m3) .loom/loom-source-path points at a directory that EXISTS (and even
+# has a `defaults/` subdirectory) but is not a real Loom checkout -- e.g. a
+# scratch clone whose contents were emptied without removing the directory
+# itself. Before #6780 this passed resolve_defaults()'s `-d "$src/defaults"`
+# check, so the sync walk below found zero files under the (empty)
+# defaults/hooks|scripts and reported a false "already in sync (0 unchanged)"
+# -- the exact "reports the install as current" bug from #6780. Must now be
+# treated exactly like a fully-missing directory: loud error, never success. -
+echo "Test group 11c: .loom/loom-source-path pointing at a stale/empty source tree errors, not a false 'in sync' (#6780)"
+REPO="$(make_fixture)"
+rm -rf "$REPO/defaults"
+STALE_SRC="$WORKDIR/stale-loom-source"
+rm -rf "$STALE_SRC"
+mkdir -p "$STALE_SRC/defaults"   # exists, but no hooks/ or scripts/ under it
+printf '%s\n' "$STALE_SRC" > "$REPO/.loom/loom-source-path"
+rm -f "$REPO/.loom/install-metadata.json"
+RC=0; OUT="$(cd "$REPO" && bash "$SCRIPT" --dry-run 2>&1)" || RC=$?
+if [[ $RC -eq 1 ]]; then
+    pass "(m3) stale/empty source tree exits 1"
+else
+    fail "(m3) stale/empty source tree did not exit 1 (got $RC)"
+fi
+if grep -qi "could not locate" <<<"$OUT"; then
+    pass "(m3) stale/empty source tree prints a clear error"
+else
+    fail "(m3) stale/empty source tree error message unclear. Got: $OUT"
+fi
+if ! grep -qi "already in sync" <<<"$OUT"; then
+    pass "(m3) stale/empty source tree never reports a false 'already in sync'"
+else
+    fail "(m3) stale/empty source tree falsely reported 'already in sync'. Got: $OUT"
+fi
+
 # --- (n) metadata re-stamp ---------------------------------------------------
 echo "Test group 12: successful apply re-stamps install-metadata.json"
 REPO="$(make_fixture)"
@@ -551,6 +713,15 @@ if grep -q '"install_date": *"2020-01-01"' "$META"; then
     pass "(n) install_date preserved (installer-owned, out of scope)"
 else
     fail "(n) install_date was altered"
+fi
+# #6780 AC3: re-stamp writes a loom_source_remote key (empty string here,
+# since the fixture's SOURCE_ROOT has no `origin` remote configured -- but
+# the key itself must always be present, never omitted, so downstream
+# tooling can distinguish "no remote" from "field never written").
+if grep -q '"loom_source_remote"' "$META"; then
+    pass "(#6780) re-stamp writes a loom_source_remote key"
+else
+    fail "(#6780) re-stamp did not write a loom_source_remote key. Got: $(cat "$META")"
 fi
 # --dry-run must NOT re-stamp
 REPO="$(make_fixture)"
@@ -820,17 +991,21 @@ else
     fail "(#4280) missing binary did not produce the expected warning"
 fi
 
-# --- (#5983) audit classifies untracked .loom/ paths before choosing remedy text --
-echo "Test group 12n: audit classifies untracked .loom/ paths before choosing remedy text (#5983)"
+# --- (#5983, #6613) audit classifies untracked .loom/ paths before choosing remedy text --
+echo "Test group 12n: audit classifies untracked .loom/ paths before choosing remedy text (#5983, #6613)"
 
-# (a) An untracked path under a pure-copy surface (.loom/scripts/) is shipped
-# payload -- the remedy should say to commit it, not point at EPHEMERAL_PATTERNS.
-# The new file is placed directly inside the already-tracked .loom/scripts/
-# directory (a sibling of the fixture's tracked foo.sh) rather than a brand-new
-# subdirectory, so `git status --porcelain` reports it as its own path rather
-# than folding it into a single untracked-directory line.
+# (a) An untracked path under a pure-copy surface (.loom/scripts/) that STILL
+# exists under defaults/scripts/ today is shipped payload -- the remedy should
+# say to commit it, not point at EPHEMERAL_PATTERNS and not the #6613 retired
+# remedy either. The new file is placed directly inside the already-tracked
+# .loom/scripts/ directory (a sibling of the fixture's tracked foo.sh) rather
+# than a brand-new subdirectory, so `git status --porcelain` reports it as its
+# own path rather than folding it into a single untracked-directory line. Its
+# defaults/scripts/ counterpart is created with matching content so #6613's
+# "does this still exist under defaults/?" check finds it.
 REPO="$(make_fixture)"
 printf 'NEW-TEST\n' > "$REPO/.loom/scripts/check-defaults-version-bump.sh"   # untracked, unignored, pure-copy surface
+printf 'NEW-TEST\n' > "$REPO/defaults/scripts/check-defaults-version-bump.sh"   # still shipped today (#6613)
 OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
 if grep -qi "commit them" <<<"$OUT" && grep -q '.loom/scripts/check-defaults-version-bump.sh' <<<"$OUT"; then
     pass "(#5983) untracked payload path under .loom/scripts/ gets 'commit it' guidance"
@@ -841,6 +1016,11 @@ if grep -qi "add them to EPHEMERAL_PATTERNS" <<<"$OUT"; then
     fail "(#5983) untracked payload-only path incorrectly suggested the EPHEMERAL_PATTERNS remedy"
 else
     pass "(#5983) untracked payload-only path does not suggest the EPHEMERAL_PATTERNS remedy"
+fi
+if grep -qi "likely retired" <<<"$OUT"; then
+    fail "(#6613) still-shipped payload path incorrectly suggested the retired-file remedy"
+else
+    pass "(#6613) still-shipped payload path does not suggest the retired-file remedy"
 fi
 
 # (b) An untracked path OUTSIDE any pure-copy surface (genuine runtime state)
@@ -863,6 +1043,110 @@ if grep -q '.loom/some-new-runtime-dir-marker' <<<"$payload_block"; then
     fail "(#5983) untracked runtime-only path incorrectly suggested the shipped-payload remedy"
 else
     pass "(#5983) untracked runtime-only path does not suggest the shipped-payload remedy"
+fi
+
+# (c) An untracked path matching a pure-copy-surface PATTERN (.loom/scripts/)
+# but with NO defaults/scripts/ counterpart and NO defaults/.loom-retired.list
+# entry is neither "commit them" (it's dead code, not current payload) nor the
+# EPHEMERAL_PATTERNS remedy (it's not runtime state) -- it gets the #6613
+# "likely retired" remedy that points at defaults/.loom-retired.list.
+REPO="$(make_fixture)"
+printf 'ORPHAN\n' > "$REPO/.loom/scripts/some-retired-tool.sh"   # untracked, unignored, no defaults/ counterpart
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+retired_block="$(sed -n '/likely retired, not committed payload/,/Do NOT commit them/p' <<<"$OUT")"
+if grep -q '.loom/scripts/some-retired-tool.sh' <<<"$retired_block"; then
+    pass "(#6613) untracked retired-but-unlisted path gets the retired-file remedy"
+else
+    fail "(#6613) untracked retired-but-unlisted path did not get the retired-file remedy"
+fi
+if grep -q 'defaults/\.loom-retired\.list' <<<"$OUT"; then
+    pass "(#6613) retired-file remedy points at defaults/.loom-retired.list"
+else
+    fail "(#6613) retired-file remedy did not mention defaults/.loom-retired.list"
+fi
+payload_block="$(sed -n '/commit them):/,/likely retired, not committed payload/p' <<<"$OUT")"
+if grep -q '.loom/scripts/some-retired-tool.sh' <<<"$payload_block"; then
+    fail "(#6613) retired-but-unlisted path incorrectly got the 'commit them' payload remedy"
+else
+    pass "(#6613) retired-but-unlisted path does not get the 'commit them' payload remedy"
+fi
+if grep -qi "add them to EPHEMERAL_PATTERNS" <<<"$OUT" && grep -q '.loom/scripts/some-retired-tool.sh' \
+    <<<"$(sed -n '/not covered by the managed \.gitignore block/,/If these are Loom runtime state/p' <<<"$OUT")"; then
+    fail "(#6613) retired-but-unlisted path incorrectly got the EPHEMERAL_PATTERNS remedy"
+else
+    pass "(#6613) retired-but-unlisted path does not get the EPHEMERAL_PATTERNS remedy"
+fi
+
+# --- (#7336) suggest_commit_if_resync_only_dirt() applies the same #6613 ----
+#     retired-vs-shipped classification as audit_untracked_loom_paths(),
+#     instead of folding every pure-copy-surface-matching path straight into
+#     its "git add ... && git commit" suggestion.
+#
+# Both an untracked retired-but-unlisted path (no defaults/ counterpart) and
+# an untracked still-shipped path (has one) are placed directly in the
+# fixture's already-tracked .loom/scripts/ directory, mirroring test group
+# 12n's fixture layout above -- this exercises suggest_commit_if_resync_only_dirt
+# (which scans the WHOLE tree, not just .loom/) at the same time as
+# audit_untracked_loom_paths() (which only scans .loom/), since a real apply
+# run below always executes both.
+#
+# make_fixture()'s initial commit never includes a .gitignore (it is only
+# generated by refresh_gitignore_block() on the first apply), and an untracked
+# .gitignore is not one of this function's hardcoded single-file cases -- so a
+# first-ever apply on a fresh fixture always trips its catch-all "non-resync
+# dirt present" bail before this test's own assertions get a chance to run.
+# Prime the fixture with one full apply + commit first (a realistic
+# already-installed, already-committed steady state) so the ONLY dirt left
+# for the second, real apply below is the deliberately introduced fixture
+# below.
+REPO="$(make_fixture)"
+(cd "$REPO" && bash "$SCRIPT" >/dev/null 2>&1) || true
+git -C "$REPO" add -A >/dev/null 2>&1
+git -C "$REPO" commit -qm "prime: first resync + generated .gitignore/.gitattributes" >/dev/null 2>&1
+echo "Test group 12y: suggest_commit_if_resync_only_dirt() excludes retired-but-unlisted pure-copy-surface paths (#7336)"
+printf 'ORPHAN\n' > "$REPO/.loom/scripts/some-retired-tool.sh"   # untracked, unignored, no defaults/ counterpart
+printf 'NEW-TEST\n' > "$REPO/.loom/scripts/check-defaults-version-bump.sh"   # untracked, unignored, pure-copy surface
+printf 'NEW-TEST\n' > "$REPO/defaults/scripts/check-defaults-version-bump.sh"   # still shipped today (#6613)
+git -C "$REPO" add defaults/scripts/check-defaults-version-bump.sh >/dev/null 2>&1
+git -C "$REPO" commit -qm "add new shipped defaults/ file" >/dev/null 2>&1
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+# #6646: the actionable recommendation is now land-resync-commit.sh (which
+# commits AND lands, never rebasing/bypass-pushing on its own) rather than a
+# raw 'git add && git commit' -- but the note line still embeds the resolved
+# resync_paths list ("would be: git add <paths>") so this test can keep
+# verifying suggest_commit_if_resync_only_dirt()'s CLASSIFICATION logic
+# (retired-vs-shipped, #7336) independently of how the commit is landed. The
+# precondition below asserts both halves (this file is frozen by the
+# file-size ratchet, #7711, so the #6646 check shares the existing assertion).
+commit_line="$(grep -m1 'would be: git add ' <<<"$OUT")"
+if [[ -n "$commit_line" ]] && grep -q './.loom/scripts/land-resync-commit\.sh' <<<"$OUT"; then
+    pass "(#7336/#6646) fixture precondition: the dirty-tree commit hint fired and recommends land-resync-commit.sh"
+else
+    fail "(#7336/#6646) fixture precondition: the dirty-tree commit hint did not fire / does not recommend land-resync-commit.sh, cannot test its content"
+fi
+if grep -q 'some-retired-tool\.sh' <<<"$commit_line"; then
+    fail "(#7336) retired-but-unlisted path was incorrectly included in the 'git add' commit suggestion"
+else
+    pass "(#7336) retired-but-unlisted path is excluded from the 'git add' commit suggestion"
+fi
+if grep -q 'check-defaults-version-bump\.sh' <<<"$commit_line"; then
+    pass "(#7336) still-shipped pure-copy-surface path remains in the 'git add' commit suggestion"
+else
+    fail "(#7336) still-shipped pure-copy-surface path was unexpectedly dropped from the 'git add' commit suggestion"
+fi
+# Every real apply re-stamps .loom/install-metadata.json (one of the
+# function's OTHER hardcoded single-file case-block paths, unrelated to the
+# pure-copy-surface pattern this fix touches) -- confirming it is still
+# present guards against the fix accidentally narrowing that unrelated case.
+if grep -q 'install-metadata\.json' <<<"$commit_line"; then
+    pass "(#7336) other hardcoded single-file case (install-metadata.json) remains in the commit suggestion"
+else
+    fail "(#7336) other hardcoded single-file case (install-metadata.json) unexpectedly dropped from the commit suggestion"
+fi
+if grep -qi "excluded from the commit suggestion" <<<"$OUT" && grep -q 'defaults/\.loom-retired\.list' <<<"$OUT"; then
+    pass "(#7336) retired-but-unlisted path gets its own remedy pointing at defaults/.loom-retired.list"
+else
+    fail "(#7336) retired-but-unlisted path did not get a remedy pointing at defaults/.loom-retired.list"
 fi
 
 # --- (#5294) stale-binary regression: a loom-daemon binary compiled before a
@@ -1096,23 +1380,55 @@ else
     fail "(#4285) pinned package.json not reported skipped"
 fi
 
-# --- (#5559) targeted field edit: .loom/CLAUDE.md version-header restamp ----
-echo "Test group 12j: .loom/CLAUDE.md version header restamp (#5559)"
+# --- (#6532 review) a ".loom/"-prefixed pin must NOT collapse onto an
+# unrelated bare top-level rel via the #6515 normalization -------------------
+# ".loom/package.json" is a nonsensical pin (there is no file at that path --
+# the root package.json's is_ignored() rel is the bare "package.json"), but
+# the #6515 repo-relative normalization would otherwise strip its ".loom/"
+# prefix down to "package.json" and silently match the unrelated root file
+# anyway. That is exactly the class of silent-pin-misfire bug this PR exists
+# to eliminate, just reintroduced by the fix's own normalization (flagged in
+# Judge review: a sibling PR adds an analogous bare "CLAUDE.md" rel for the
+# root guide, which would collide with a ".loom/CLAUDE.md" pin the same way).
+echo "Test group 12s: a '.loom/'-prefixed pin does not collapse onto an unrelated bare top-level rel"
+REPO="$(make_fixture)"
+printf '{\n  "name": "loom-workspace",\n  "version": "1.0.0"\n}\n' > "$REPO/package.json"
+printf '.loom/package.json  # meant to protect something under .loom/, NOT the root package.json\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+if ! grep -q '"version"' "$REPO/package.json"; then
+    pass "(#6532) '.loom/package.json' pin does NOT suppress the root package.json stub edit"
+else
+    fail "(#6532) '.loom/package.json' pin incorrectly collided with and suppressed the root package.json stub edit"
+fi
+if grep -q "pin had no effect: '\.loom/package\.json'" <<<"$OUT"; then
+    pass "(#6532) the non-colliding '.loom/package.json' pin is correctly reported dead"
+else
+    fail "(#6532) the non-colliding '.loom/package.json' pin was not reported dead (rc check: $?)"
+fi
+
+# --- (#5559 -> #8147) targeted field REMOVAL: .loom/CLAUDE.md version header ----
+#
+# #5559 re-stamped this header to the source version on every resync. #8147
+# deleted the stamp from the template instead (the guide is injected into
+# every agent session's prompt prefix, so a per-release token in it dropped
+# every warm prefix in the fleet on each bump) and turned this step into a
+# one-time migration for repos installed before that change.
+echo "Test group 12j: .loom/CLAUDE.md legacy version header is removed (#8147)"
 REPO="$(make_fixture)"
 printf '# Loom Orchestration - Repository Guide\n\n**Loom Version**: 0.16.0\n**Installation Date**: 2020-01-01\n\nBody text unaffected.\n\n**Generated by Loom Installation Process**\nLast updated: 2026-07-29\n' \
     > "$REPO/.loom/CLAUDE.md"
 OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
 RC=$?
-if [[ $RC -eq 0 ]]; then pass "(#5559) apply with a stale .loom/CLAUDE.md header exits 0"; else fail "(#5559) apply exits 0 (got $RC)"; fi
-if grep -q '\*\*Loom Version\*\*: 9.9.9' "$REPO/.loom/CLAUDE.md"; then
-    pass "(#5559) .loom/CLAUDE.md Loom Version header restamped to source version"
+if [[ $RC -eq 0 ]]; then pass "(#8147) apply with a legacy .loom/CLAUDE.md header exits 0"; else fail "(#8147) apply exits 0 (got $RC)"; fi
+if grep -q '^\*\*Loom Version\*\*:' "$REPO/.loom/CLAUDE.md"; then
+    fail "(#8147) .loom/CLAUDE.md still carries a **Loom Version** header"
 else
-    fail "(#5559) .loom/CLAUDE.md Loom Version header NOT restamped"
+    pass "(#8147) .loom/CLAUDE.md legacy **Loom Version** header removed"
 fi
-if grep -q "^Last updated: $(date +%Y-%m-%d)\$" "$REPO/.loom/CLAUDE.md"; then
-    pass "(#5559) .loom/CLAUDE.md Last updated footer restamped to today"
+if grep -q "^Last updated: 2026-07-29\$" "$REPO/.loom/CLAUDE.md"; then
+    pass "(#8147) .loom/CLAUDE.md Last updated footer left alone (restamping it would be another per-resync token)"
 else
-    fail "(#5559) .loom/CLAUDE.md Last updated footer NOT restamped"
+    fail "(#8147) .loom/CLAUDE.md Last updated footer was rewritten"
 fi
 if grep -q '\*\*Installation Date\*\*: 2020-01-01' "$REPO/.loom/CLAUDE.md"; then
     pass "(#5559) .loom/CLAUDE.md Installation Date header left untouched (original install date, not a resync stamp)"
@@ -1124,17 +1440,19 @@ if grep -q "Body text unaffected." "$REPO/.loom/CLAUDE.md"; then
 else
     fail "(#5559) .loom/CLAUDE.md body content was altered"
 fi
-if grep -q "CLAUDE.md.*restamped version header" <<<"$OUT"; then
-    pass "(#5559) apply reports the .loom/CLAUDE.md version-header restamp"
+if grep -q "CLAUDE.md.*removed stale version header" <<<"$OUT"; then
+    pass "(#8147) apply reports the .loom/CLAUDE.md version-header removal"
 else
-    fail "(#5559) apply did not report the .loom/CLAUDE.md restamp"
+    fail "(#8147) apply did not report the .loom/CLAUDE.md removal"
 fi
-# Idempotent rerun: second apply is a clean no-op for the header.
+# Idempotent rerun: the migration is one-time -- a second apply leaves the
+# already-migrated file byte-identical and reports nothing about it.
+BEFORE_SUM="$(shasum "$REPO/.loom/CLAUDE.md")"
 OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
-if grep -q "CLAUDE.md (version header already" <<<"$OUT"; then
-    pass "(#5559) second run reports .loom/CLAUDE.md version header unchanged (idempotent)"
+if [[ "$BEFORE_SUM" == "$(shasum "$REPO/.loom/CLAUDE.md")" ]] && ! grep -q "CLAUDE.md.*version header" <<<"$OUT"; then
+    pass "(#8147) second run leaves the migrated .loom/CLAUDE.md byte-identical and silent"
 else
-    fail "(#5559) second run did not report .loom/CLAUDE.md as unchanged"
+    fail "(#8147) second run rewrote or re-reported the migrated .loom/CLAUDE.md"
 fi
 
 echo "Test group 12k: .loom/CLAUDE.md missing (pre-#4239 layout) is not created by resync"
@@ -1177,6 +1495,121 @@ if grep -q "skipped.*CLAUDE.md" <<<"$OUT"; then
     pass "(#5559) pinned .loom/CLAUDE.md reported as skipped"
 else
     fail "(#5559) pinned .loom/CLAUDE.md not reported skipped"
+fi
+
+# --- (#6612 -> #8147) targeted field REMOVAL: root CLAUDE.md version header ----
+echo "Test group 12s: root CLAUDE.md legacy version header is removed (#8147)"
+REPO="$(make_fixture)"
+printf '# Loom Orchestration - Repository Guide\n\n**Loom Version**: 0.16.0\n**Installation Date**: 2020-01-01\n\nBody text unaffected.\n\n**Generated by Loom Installation Process**\nLast updated: 2026-07-29\n' \
+    > "$REPO/CLAUDE.md"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]]; then pass "(#8147) apply with a legacy root CLAUDE.md header exits 0"; else fail "(#8147) apply exits 0 (got $RC)"; fi
+if grep -q '^\*\*Loom Version\*\*:' "$REPO/CLAUDE.md"; then
+    fail "(#8147) root CLAUDE.md still carries a **Loom Version** header"
+else
+    pass "(#8147) root CLAUDE.md legacy **Loom Version** header removed"
+fi
+if grep -q "^Last updated: 2026-07-29\$" "$REPO/CLAUDE.md"; then
+    pass "(#8147) root CLAUDE.md Last updated footer left alone (no per-resync token reintroduced)"
+else
+    fail "(#8147) root CLAUDE.md Last updated footer was rewritten"
+fi
+# (The "**Installation Date** left untouched" assertion is not repeated here:
+# since #8147 both paths share one strip_claude_md_version_header() helper, so
+# group 12j's copy covers it.)
+if grep -q "Body text unaffected." "$REPO/CLAUDE.md"; then
+    pass "(#6612) root CLAUDE.md body content untouched (targeted field edit, not a regenerate)"
+else
+    fail "(#6612) root CLAUDE.md body content was altered"
+fi
+if grep -q "CLAUDE.md.*removed stale version header.*#6612" <<<"$OUT"; then
+    pass "(#8147) apply reports the root CLAUDE.md version-header removal"
+else
+    fail "(#8147) apply did not report the root CLAUDE.md removal"
+fi
+# Idempotent rerun: the migration is one-time (see group 12j).
+BEFORE_SUM="$(shasum "$REPO/CLAUDE.md")"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+if [[ "$BEFORE_SUM" == "$(shasum "$REPO/CLAUDE.md")" ]] && ! grep -q "CLAUDE.md.*version header" <<<"$OUT"; then
+    pass "(#8147) second run leaves the migrated root CLAUDE.md byte-identical and silent"
+else
+    fail "(#8147) second run rewrote or re-reported the migrated root CLAUDE.md"
+fi
+
+echo "Test group 12t: root CLAUDE.md missing is not created by resync"
+REPO="$(make_fixture)"
+rm -f "$REPO/CLAUDE.md"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && [[ ! -f "$REPO/CLAUDE.md" ]]; then
+    pass "(#6612) apply with no installed root CLAUDE.md exits 0 and does not create it"
+else
+    fail "(#6612) apply with no installed root CLAUDE.md misbehaved (rc=$RC)"
+fi
+
+echo "Test group 12u: --dry-run previews the root CLAUDE.md restamp without writing"
+REPO="$(make_fixture)"
+printf '**Loom Version**: 0.16.0\nLast updated: 2026-07-29\n' > "$REPO/CLAUDE.md"
+OUT="$(cd "$REPO" && bash "$SCRIPT" --dry-run 2>&1)"
+if grep -q '\*\*Loom Version\*\*: 0.16.0' "$REPO/CLAUDE.md"; then
+    pass "(#6612) --dry-run leaves root CLAUDE.md unstamped"
+else
+    fail "(#6612) --dry-run wrote to root CLAUDE.md"
+fi
+if grep -q "would update.*CLAUDE.md" <<<"$OUT"; then
+    pass "(#6612) --dry-run previews the root CLAUDE.md restamp"
+else
+    fail "(#6612) --dry-run did not preview the root CLAUDE.md restamp"
+fi
+
+echo "Test group 12v: .loom/resync-ignore pins root CLAUDE.md against the version-header restamp"
+REPO="$(make_fixture)"
+printf '**Loom Version**: 0.16.0\nLast updated: 2026-07-29\n' > "$REPO/CLAUDE.md"
+printf 'CLAUDE.md  # keep my pinned header\n' > "$REPO/.loom/resync-ignore"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+if grep -q '\*\*Loom Version\*\*: 0.16.0' "$REPO/CLAUDE.md"; then
+    pass "(#6612) pinned root CLAUDE.md header NOT restamped"
+else
+    fail "(#6612) pinned root CLAUDE.md header was restamped despite resync-ignore"
+fi
+if grep -q "skipped.*CLAUDE.md" <<<"$OUT"; then
+    pass "(#6612) pinned root CLAUDE.md reported as skipped"
+else
+    fail "(#6612) pinned root CLAUDE.md not reported skipped"
+fi
+
+echo "Test group 12w: root CLAUDE.md with no Loom Version header is left byte-unchanged (#6621)"
+REPO="$(make_fixture)"
+BEFORE_CONTENT='# Some Repo Guide
+
+No Loom version header anywhere in this file.
+'
+printf '%s' "$BEFORE_CONTENT" > "$REPO/CLAUDE.md"
+BEFORE_SUM="$(shasum "$REPO/CLAUDE.md")"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+AFTER_SUM="$(shasum "$REPO/CLAUDE.md")"
+if [[ $RC -eq 0 ]]; then pass "(#6621) apply on a headerless root CLAUDE.md exits 0"; else fail "(#6621) apply exits 0 (got $RC)"; fi
+if [[ "$BEFORE_SUM" == "$AFTER_SUM" ]]; then
+    pass "(#6621) headerless root CLAUDE.md left byte-unchanged"
+else
+    fail "(#6621) headerless root CLAUDE.md was rewritten despite having no Loom Version header"
+fi
+if grep -q "CLAUDE.md.*restamped version header" <<<"$OUT"; then
+    fail "(#6621) apply falsely reported a restamp for a headerless root CLAUDE.md"
+else
+    pass "(#6621) apply does NOT report a phantom restamp for a headerless root CLAUDE.md"
+fi
+
+echo "Test group 12x: root CLAUDE.md with an unrelated 'Last updated:' line but no Loom Version header is untouched (#6621)"
+REPO="$(make_fixture)"
+printf 'Last updated: 2020-01-01 by a human, unrelated to Loom.\n' > "$REPO/CLAUDE.md"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+if grep -q '^Last updated: 2020-01-01 by a human, unrelated to Loom\.$' "$REPO/CLAUDE.md"; then
+    pass "(#6621) unrelated 'Last updated:' line survives when no Loom Version header is present"
+else
+    fail "(#6621) unrelated 'Last updated:' line was clobbered despite no Loom Version header"
 fi
 
 # --- (#4403) canonical-guard-defer: git-tracked target must NOT be removed --
@@ -2246,6 +2679,148 @@ if [[ $RC -eq 0 ]] && ! grep -qi "conflict markers" <<<"$OUT"; then
 else
     fail "(#6499) the conflict-marker gate introduced friction on a clean tree (rc=$RC); out=$OUT"
 fi
+
+# --- forge label drift check + safe auto-create (#6716) ---------------------
+#
+# resync-installed.sh's new labels step is a thin dispatcher onto whatever
+# sync-labels.sh ends up installed at .loom/scripts/sync-labels.sh (via the
+# widened "walk scripts" resync exercised by earlier groups) -- it does not
+# re-derive drift/report semantics itself. So rather than re-proving
+# sync-labels.sh's own --check behavior (already covered end-to-end by
+# test-sync-labels-check.sh), these groups install a scriptable STUB as
+# defaults/scripts/sync-labels.sh and assert only on the WIRING: when the
+# stub is called, with/without --check, and how its exit code changes the
+# resync's own reporting and control flow.
+add_labels_stub() {
+    local repo="$1"
+    mkdir -p "$repo/.github"
+    cat > "$repo/.github/labels.yml" <<'EOF'
+- name: loom:issue
+  description: "Approved and ready for a Builder"
+  color: "3B82F6"
+EOF
+    cat > "$repo/defaults/scripts/sync-labels.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_LOG:?STUB_LOG not set}"
+if printf '%s\n' "$*" | grep -q -- '--check'; then
+    exit "${LOOM_TEST_LABELS_CHECK_RC:-0}"
+fi
+exit "${LOOM_TEST_LABELS_SYNC_RC:-0}"
+STUB
+    chmod +x "$repo/defaults/scripts/sync-labels.sh"
+}
+
+echo "Test group 28: forge label check -- already in sync (#6716)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28.log"; : > "$STUB_LOG"
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=0 bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -qi "unchanged.*forge labels" <<<"$OUT"; then
+    pass "(#6716) an in-sync live label set is reported unchanged"
+else
+    fail "(#6716) in-sync case not reported as unchanged (rc=$RC); out=$OUT"
+fi
+if [[ "$(grep -c -- '--check' "$STUB_LOG" || true)" -eq 1 && "$(wc -l < "$STUB_LOG")" -eq 1 ]]; then
+    pass "(#6716) in-sync case calls sync-labels.sh exactly once, with --check"
+else
+    fail "(#6716) unexpected sync-labels.sh invocation count/shape: $(cat "$STUB_LOG")"
+fi
+
+echo "Test group 28b: forge label check -- drift found, real run fixes it (#6716)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28b.log"; : > "$STUB_LOG"
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=3 LOOM_TEST_LABELS_SYNC_RC=0 bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -qi "drift detected" <<<"$OUT" && grep -qi "updated.*forge labels" <<<"$OUT"; then
+    pass "(#6716) drift is reported and then fixed on a real run"
+else
+    fail "(#6716) drift-then-fix not reported as expected (rc=$RC); out=$OUT"
+fi
+if [[ "$(wc -l < "$STUB_LOG")" -eq 2 ]] && grep -q -- '--check' "$STUB_LOG" && grep -qv -- '--check' "$STUB_LOG"; then
+    pass "(#6716) a real run with drift calls sync-labels.sh twice: once with --check, once without"
+else
+    fail "(#6716) unexpected sync-labels.sh invocation shape for drift-then-fix: $(cat "$STUB_LOG")"
+fi
+
+echo "Test group 28c: forge label check -- drift found, --dry-run previews without fixing (#6716)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28c.log"; : > "$STUB_LOG"
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=3 bash "$SCRIPT" --dry-run 2>&1)"
+if grep -qi "drift detected" <<<"$OUT" && grep -qi "would run.*sync-labels.sh" <<<"$OUT"; then
+    pass "(#6716) --dry-run previews the label fix instead of applying it"
+else
+    fail "(#6716) --dry-run did not preview the label fix as expected; out=$OUT"
+fi
+if [[ "$(wc -l < "$STUB_LOG")" -eq 1 ]] && grep -q -- '--check' "$STUB_LOG"; then
+    pass "(#6716) --dry-run calls sync-labels.sh only once (--check), never the mutating path"
+else
+    fail "(#6716) --dry-run made an unexpected sync-labels.sh call: $(cat "$STUB_LOG")"
+fi
+
+echo "Test group 28d: forge label check -- the fix itself fails -> loud warning, not a resync failure (#6716)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28d.log"; : > "$STUB_LOG"
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=3 LOOM_TEST_LABELS_SYNC_RC=1 bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -qi "could not fully apply" <<<"$OUT"; then
+    pass "(#6716) a failed label fix is a loud warning, not a resync-wide failure"
+else
+    fail "(#6716) a failed label fix was not reported as a soft warning (rc=$RC); out=$OUT"
+fi
+
+echo "Test group 28e: forge label check -- unreachable forge (rc=4) -> soft warning, exit 0 (#6716, #7745)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28e.log"; : > "$STUB_LOG"
+# rc=4 is "could not reach the forge" since #7745 -- benign, because resync
+# must keep working offline. Exit stays 0.
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=4 bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && grep -qi "could not reach the forge" <<<"$OUT"; then
+    pass "(#7745) an unreachable forge is a soft warning, not a resync-wide failure"
+else
+    fail "(#7745) an unreachable forge was not reported as a soft warning (rc=$RC); out=$OUT"
+fi
+
+echo "Test group 28e2: forge label check -- the checker itself is BROKEN -> loud, and carried into the exit code (#7745)"
+REPO="$(make_fixture)"
+add_labels_stub "$REPO"
+STUB_LOG="$WORKDIR/stub28e2.log"; : > "$STUB_LOG"
+# Any rc that is not 0/3/4 means sync-labels.sh failed to run -- a crash, a
+# bash incompatibility, a typo. Before #7745 this was absorbed into exit 0,
+# indistinguishable from a clean check, which is how a checker broken by
+# #7717 went unnoticed on every macOS resync for weeks.
+OUT="$(cd "$REPO" && STUB_LOG="$STUB_LOG" LOOM_TEST_LABELS_CHECK_RC=127 bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 75 ]] && grep -qi "FAILED to run" <<<"$OUT"; then
+    pass "(#7745) a broken checker exits 75 and says the labels were NOT verified"
+else
+    fail "(#7745) a broken checker did not surface as a defect (rc=$RC, want 75); out=$OUT"
+fi
+
+if grep -qi "label check FAILED TO RUN" <<<"$OUT"; then
+    pass "(#7745) the end-of-run summary states that the check did not run"
+else
+    fail "(#7745) the summary line did not mention the unverified check; out=$OUT"
+fi
+
+echo "Test group 28f: forge label check -- no .github/labels.yml -> silently skipped (#6716)"
+REPO="$(make_fixture)"
+OUT="$(cd "$REPO" && bash "$SCRIPT" 2>&1)"
+RC=$?
+if [[ $RC -eq 0 ]] && ! grep -qi "forge label" <<<"$OUT"; then
+    pass "(#6716) a repo with no .github/labels.yml is unaffected by the new step"
+else
+    fail "(#6716) a repo with no labels.yml unexpectedly mentioned forge labels (rc=$RC); out=$OUT"
+fi
+
+# The guard-hook install check's wiring (#7761) is covered by the sibling
+# test-resync-installed-guard-check.sh, split out to respect this file's
+# file-size ratchet (.loom/docs/file-size-policy.md).
 
 # --- summary -----------------------------------------------------------------
 echo ""

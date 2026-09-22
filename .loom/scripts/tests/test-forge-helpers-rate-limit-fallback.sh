@@ -437,7 +437,7 @@ else
 fi
 
 comment_call_count="$(grep -c 'forge_gh_comment_rl_safe "\$REPO_NWO"' "$MERGE_PR_SRC" || true)"
-assert_eq "3" "$comment_call_count" "merge-pr.sh routes all 3 comment call sites (2x issue, 1x PR) through forge_gh_comment_rl_safe"
+assert_eq "4" "$comment_call_count" "merge-pr.sh routes all 4 comment call sites (2x issue, 2x PR) through forge_gh_comment_rl_safe"
 
 # The raw, un-wrapped mutating calls this issue is about must no longer
 # appear standalone (they are now routed through the wrapper functions
@@ -465,7 +465,16 @@ fi
 echo ""
 echo "Testing role-prompt wiring (#5047)..."
 
-PROMPT_DIR="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)"
+# Two `..` reaches repo-root/.claude/commands/loom for an INSTALLED copy
+# (HELPERS_DIR is .loom/scripts there); one `..` reaches defaults/.claude/
+# commands/loom when running inside this source repo (HELPERS_DIR is
+# defaults/scripts) -- the two layouts differ in depth, so probe both rather
+# than hard-coding one (#447).
+if [[ -d "$HELPERS_DIR/../../.claude/commands/loom" ]]; then
+    PROMPT_DIR="$(cd "$HELPERS_DIR/../../.claude/commands/loom" && pwd)"
+else
+    PROMPT_DIR="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)"
+fi
 
 TESTS_RUN=$((TESTS_RUN + 1))
 # Matches both a line-start invocation (`gh issue create ...`) and the
@@ -523,14 +532,24 @@ fi
 
 # `loom-daemon forge issue` must not silently look like an escape hatch: the
 # passthrough either gains the fallback or says out loud that it has none.
-TESTS_RUN=$((TESTS_RUN + 1))
-FORGE_CMD_SRC="$(cd "$HELPERS_DIR/../../loom-daemon/src" 2>/dev/null && pwd || true)/forge_cmd.rs"
-if [[ -f "$FORGE_CMD_SRC" ]] && grep -q 'create-issue.sh' "$FORGE_CMD_SRC"; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "  ${GREEN}PASS${NC}: loom-daemon forge issue create documents its lack of a REST fallback"
+# The `loom-daemon/` Rust crate is vendored only in the source repo
+# (rjwalters/loom itself) -- an installed consumer repo never has a
+# `loom-daemon/src/` directory at all, so its absence is a legitimate,
+# SKIPpable state, not a failure (#6736). Only fail when the directory *is*
+# present but forge_cmd.rs lacks the documentation string.
+LOOM_DAEMON_SRC_DIR="$(cd "$HELPERS_DIR/../../loom-daemon/src" 2>/dev/null && pwd || true)"
+if [[ -z "$LOOM_DAEMON_SRC_DIR" ]]; then
+    echo -e "  ${GREEN}SKIP${NC}: no vendored loom-daemon/src/ in this checkout (installed consumer repo, #6736)"
 else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "  ${RED}FAIL${NC}: forge_cmd.rs must state that 'forge issue create' has no REST fallback (#5047)"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    FORGE_CMD_SRC="$LOOM_DAEMON_SRC_DIR/forge_cmd.rs"
+    if [[ -f "$FORGE_CMD_SRC" ]] && grep -q 'create-issue.sh' "$FORGE_CMD_SRC"; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: loom-daemon forge issue create documents its lack of a REST fallback"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: forge_cmd.rs must state that 'forge issue create' has no REST fallback (#5047)"
+    fi
 fi
 
 # --- Summary ---

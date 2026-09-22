@@ -223,8 +223,44 @@ fi
 echo ""
 echo "Testing sweep.md documents the forge write failure diagnosis policy (#6425)..."
 
-SWEEP_MD="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)/sweep.md"
-if [[ -r "$SWEEP_MD" ]]; then
+# Two `..` reaches repo-root/.claude/commands/loom for an INSTALLED copy
+# (HELPERS_DIR is .loom/scripts there); one `..` reaches defaults/.claude/
+# commands/loom when running inside this source repo (HELPERS_DIR is
+# defaults/scripts) -- the two layouts differ in depth, so probe both rather
+# than hard-coding one (#447).
+if [[ -d "$HELPERS_DIR/../../.claude/commands/loom" ]]; then
+    SWEEP_SKILL_DIR="$(cd "$HELPERS_DIR/../../.claude/commands/loom" && pwd)"
+else
+    SWEEP_SKILL_DIR="$(cd "$HELPERS_DIR/../.claude/commands/loom" && pwd)"
+fi
+
+# The /loom:sweep skill in document order (#7726 split the monolithic
+# sweep.md into a dispatcher + 11 sibling reference files). Concatenate them
+# into one file (in $STUB_DIR, already cleaned up by the trap above) so both
+# checks below find their content wherever it now lives — mirrors
+# SWEEP_SKILL_FILES in loom-daemon/tests/sweep_md_doc_lint.rs.
+SWEEP_SKILL_FILES=(
+    sweep.md
+    sweep-arguments.md
+    sweep-examples.md
+    sweep-execution-model.md
+    sweep-backend-detection.md
+    sweep-scheduling-signals.md
+    sweep-dry-run.md
+    sweep-mode-c-lifecycle.md
+    sweep-wave-lifecycle.md
+    sweep-summary-output.md
+    sweep-run-hygiene.md
+    sweep-reference.md
+)
+SWEEP_MD="$STUB_DIR/sweep-skill-concat.md"
+: > "$SWEEP_MD"
+for f in "${SWEEP_SKILL_FILES[@]}"; do
+    path="$SWEEP_SKILL_DIR/$f"
+    [[ -r "$path" ]] && cat "$path" >> "$SWEEP_MD"
+done
+
+if [[ -s "$SWEEP_MD" ]]; then
     if grep -q "forge-transient" "$SWEEP_MD"; then
         pass "sweep.md references the forge-transient classification"
     else
@@ -236,7 +272,7 @@ if [[ -r "$SWEEP_MD" ]]; then
         fail "sweep.md must point callers at forge_write_permission_confirmed (#6425)"
     fi
 else
-    fail "sweep.md not found at $SWEEP_MD"
+    fail "sweep.md / sibling skill files not found under $SWEEP_SKILL_DIR"
 fi
 
 # --- Summary ---

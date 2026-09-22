@@ -195,8 +195,9 @@ fi
 # ---------------------------------------------------------------------------
 
 # Recording stub for the daemon binary: appends its own argv to a file so the
-# test can assert the exact `dispatch-backoff record --issue N` call shape
-# without a running daemon or a socket.
+# test can assert the exact `dispatch-backoff record <N>` call shape (a
+# positional issue argument, NOT an `--issue` flag) without a running daemon
+# or a socket.
 BACKOFF_LOG="$STUB_DIR/backoff-calls.log"
 cat > "$STUB_DIR/loom-daemon" <<EOF
 #!/usr/bin/env bash
@@ -224,10 +225,20 @@ else
     fail "expected a dispatch-backoff record call, log was: $(cat "$BACKOFF_LOG" 2>/dev/null)"
 fi
 
-if grep -q -- "--issue 6192" "$BACKOFF_LOG" 2>/dev/null; then
-    pass "the backoff is armed for the sweep's own claimed issue"
+if grep -Eq '(^|[[:space:]])6192([[:space:]]|$)' "$BACKOFF_LOG" 2>/dev/null; then
+    pass "the backoff is armed for the sweep's own claimed issue (positional issue arg)"
 else
-    fail "expected --issue 6192 in the recorded call, log was: $(cat "$BACKOFF_LOG" 2>/dev/null)"
+    fail "expected a bare positional '6192' in the recorded call, log was: $(cat "$BACKOFF_LOG" 2>/dev/null)"
+fi
+
+# The issue number must be POSITIONAL — the real `dispatch-backoff record` CLI
+# (DispatchBackoffAction::Record in loom-daemon/src/main.rs) takes ISSUE as a
+# bare positional arg, not a `--issue` flag. A `--issue` flag is a clap
+# "unexpected argument" parse error against the real binary (#6815).
+if grep -q -- "--issue" "$BACKOFF_LOG" 2>/dev/null; then
+    fail "recorded call used a non-existent '--issue' flag: $(cat "$BACKOFF_LOG" 2>/dev/null)"
+else
+    pass "recorded call does not use the non-existent '--issue' flag"
 fi
 
 if grep -q "build-gate timeout" "$BACKOFF_LOG" 2>/dev/null; then

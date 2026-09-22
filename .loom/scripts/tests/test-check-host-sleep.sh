@@ -140,14 +140,39 @@ case "$platform" in
 esac
 
 # -------- Test 8: host.preventSleep config awareness (#6311) --------
-# Builds a scratch `.loom/` repo root + a stubbed `systemd-inhibit` on PATH
-# so these assertions are deterministic regardless of the live host's own
-# sleep-inhibitor state (unlike Test 7 above, which reads the real host).
+# Builds a scratch `.loom/` repo root + a stubbed `systemctl`/`systemd-inhibit`
+# on PATH so these assertions are deterministic regardless of the live host's
+# own sleep-inhibitor state (unlike Test 7 above, which reads the real host).
+#
+# #6661 design decision: `check_linux()` in check-host-sleep.sh takes an
+# early "no systemd" return (see the comment there) before it ever reaches
+# the #6311 `PREVENT_SLEEP_ENABLED` note this test exercises below — so on a
+# real Linux host/container without systemd, that branch would be skipped
+# entirely and this test would silently pass or fail depending on host
+# environment rather than on the code path we actually mean to test. We
+# stub `systemctl` (not just `systemd-inhibit`) here so this test forces the
+# "systemd present" branch deterministically on ANY Linux host, systemd or
+# not — a test-only fix; check-host-sleep.sh's real-world behavior on a
+# genuinely non-systemd host is intentionally left unchanged (see its
+# comment for the rationale).
 echo "Test 8: host.preventSleep config awareness (#6311)"
 
 SCRATCH_DIR="$(mktemp -d)"
 mkdir -p "$SCRATCH_DIR/.loom" "$SCRATCH_DIR/stub"
 trap 'rm -rf "$SCRATCH_DIR"' EXIT
+
+# A stub `systemctl` that always reports a usable version, so `check_linux()`
+# takes the "systemd present" branch regardless of whether this test host
+# actually has systemd.
+cat > "$SCRATCH_DIR/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+    echo "systemd 255 (stub)"
+    exit 0
+fi
+exit 0
+STUB
+chmod +x "$SCRATCH_DIR/stub/systemctl"
 
 # A stub `systemd-inhibit` that reports NO active lock via --list (the
 # "warn" branch) but still execs through when invoked as a real wrapper.
