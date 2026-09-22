@@ -173,10 +173,11 @@ regenerable build output, kept unless `--caches`); a **never-delete denylist**
 overrides both; everything else gitignored falls through to ASK.
 
 Apply these tests in order — **denylist first, then the SAFE and CACHE
-allowlists, then fall through to ASK**. For empty directories specifically, a
-**reference scan runs after the allowlist match, as an additional net, not a
-replacement for it** — see the SAFE empty-directory bullet below; the
-denylist/allowlist check still runs first and still wins:
+allowlists, then fall through to ASK**. For empty directories and for
+CACHE-tier build-output directories, a **reference scan runs after the
+allowlist match, as an additional net, not a replacement for it** — see the
+SAFE empty-directory bullet and the CACHE bullet below; the denylist/allowlist
+check still runs first and still wins:
 
 **Never-delete denylist (always ASK, never SAFE or CACHE — checked first,
 overrides everything below, regardless of gitignore status):**
@@ -273,6 +274,37 @@ reserved for tracked files.
   - Build output: stale `dist/`, `.turbo/`, `.astro/`, `htmlcov/`, `.coverage`,
     coverage output, `site/dist`
 
+  **Reference scan (additional net, after the allowlist match, not instead of
+  it) — the same mechanism as the empty-directory reference scan above,
+  applied to a different question.** "Regenerable" and "harmless to delete
+  right now" are different properties: a `dist/` can be truly rebuildable by
+  re-running the tool and still be the exact bytes a live, registered process
+  is reading from disk this second — clearing it would not lose source, but it
+  would break that process until the next build. For any path that clears the
+  CACHE allowlist match, before finalizing it as CACHE, cross-reference its
+  path against registered MCP server configs:
+
+  1. `.mcp.json` in the repo root, if present —
+     `jq -r '.mcpServers[]?.args[]?' .mcp.json`
+  2. `~/.claude.json` `.mcpServers[]?.args[]?` (top-level, user-scope servers)
+  3. `~/.claude.json` `.projects["<repo-root-abs-path>"].mcpServers[]?.args[]?`
+     (project-scoped servers) — resolve `<repo-root-abs-path>` the same way
+     this command already resolves the repo root elsewhere (step 1's `git
+     rev-parse --show-toplevel`), never hardcoded
+  4. Best-effort: any installed tool's tracked `install-metadata.json` whose
+     `installed_files` (or equivalent) names a path under the candidate
+     directory
+
+  This is a **path-prefix** match, not an exact one — a candidate directory
+  demotes when any scanned path starts with it (`mcp-loom/dist/` demotes on a
+  hit for `mcp-loom/dist/index.js`). A hit on any source demotes the path from
+  CACHE to **ASK**, reported with the reason, mirroring the empty-directory
+  wording: `← live MCP bundle (referenced by <config-path>)`. Like the
+  empty-directory scan, this is purely a **demotion** — it never promotes
+  anything the denylist already routed to ASK, and a CACHE entry with no
+  reference hit stays CACHE exactly as before, so `--caches` still clears
+  every regenerable dir that nothing is currently loading from.
+
   Like SAFE, nothing here may be tracked by git or match a source-code extension.
   (`node_modules/` and virtualenvs are **not** CACHE — they are denylisted
   environments and stay in ASK even with `--caches`.)
@@ -288,6 +320,13 @@ reserved for tracked files.
     empty-directory bullet above) — a tracked file references its path even
     though it matched no denylist entry. Report it with the reason, e.g.
     "referenced by N files", rather than silently skipping it.
+  - **Any CACHE-tier directory demoted by the MCP-config reference scan**
+    (see the CACHE bullet above) — its path is referenced by `.mcp.json`,
+    `~/.claude.json` `mcpServers`, or an installed tool's
+    `install-metadata.json`, so a registered MCP server loads from it right
+    now. Report it with the reason, e.g. "referenced by ~/.claude.json"; it is
+    regenerable but not currently harmless to delete, so `--caches` must not
+    reach it.
   - **Any git worktree root** detected in step 1 — surfaced on its own
     `worktree:` inventory line (see Report), never auto-deleted, whether or not
     it is gitignored and whether or not it sits under a recognized tool
@@ -471,6 +510,7 @@ ASK:
   .venv/                   gitignored, 240 MB  ← virtualenv, expensive to rebuild
   node_modules/            gitignored, 310 MB  ← environment, reinstall via npm; not a --caches target
   prune node_modules       pnpm-lock.yaml detected  ← run `pnpm prune` to drop lockfile-unreferenced packages
+  mcp-loom/dist/           gitignored, 796K  ← live MCP bundle (referenced by ~/.claude.json); --caches will not clear it
   .loom/locks/             gitignored, empty  ← coordination root, empty is normal state
   .wrangler/tmp/           gitignored, empty  ← tool runtime dir, empty between builds
   notes-scratch.md         untracked, 3 KB, modified today  ← might be real work

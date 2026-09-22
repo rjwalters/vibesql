@@ -95,6 +95,23 @@ reset actually did — any earlier and it is speculative.
    resume — the full body inlined when the note is small, a header outline plus
    an oversize warning when it is large.
 
+**Both halves are repo-scoped, and that is the point** — a note belongs to the
+repo it was written in, and is invisible from any other one. The cost is that
+"no note in this repo" and "no note anywhere" look identical at session start,
+which has already lost a real handoff (a note in a sibling checkout, found only
+after minutes of searching). The optional remedy is an environment variable read
+by the same hook:
+
+```bash
+export REPO_HANDOFF_SIBLING_ROOT="$HOME/GitHub"   # where your checkouts live
+```
+
+Unset (the default) nothing changes. Set, and **only when the current repo has
+no note of its own**, the hook additionally lists which repos directly under
+that root do have one — **path and age only, never the body**, because a note is
+one-shot for the repo it belongs to. Absorb it by starting a session there; the
+scan is read-only, single-level, and capped at 64 directories.
+
 **What goes in — only what is not recoverable from the repo:**
 
 - **In-flight state** — open PRs and what they await, running background work,

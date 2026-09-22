@@ -34,7 +34,8 @@ costs.
 | [[remote]] | Launch a cloud dev session (GCP or AWS) with this repo ready to go, then open SSH. Its provisioning contract is implemented once in `scripts/repo/repo-remote.sh` (installed to `.claude/skills/repo/scripts/`); the interactive flow delegates to that script, which also serves as a headless `repo-remote up --yes --json` entry point for non-interactive callers (e.g. loom's `fleet add-worker`) |
 | [[sudo]] | Opt-in passwordless-sudo setup for a dev machine — install a `visudo`-validated `/etc/sudoers.d` drop-in (blanket `ALL` or a scoped command list) so an agent over SSH isn't blocked on password prompts; always confirmed first, validated with rollback on failure |
 | [[update-tools]] | Check installed tool packages (Loom, Anvil, …) against their sources and offer updates |
-| [[deps]] | Third-party dependency currency — verify/scaffold Dependabot (config *and* the repo-level security flag as distinct items) and triage open Dependabot PRs, always confirmed first |
+| [[deps]] | Third-party dependency currency — reconcile organization policy, Renovate or Dependabot setup, and bot PRs; report-only under `--check` |
+| [[org-policy]] | Preview or deploy canonical rjwalters/repo preferences to the client's GitHub owner/.github repository through a policy PR |
 | [[followups]] | Capture follow-on work from this session and file it as issues — here or in upstream tool repos, always confirmed first |
 | [[branches]] | Branch & worktree hygiene — merged PRs, orphaned branches, stale worktrees |
 | [[gitignore]] | Gitignore hygiene — over-ignored files, under-ignored build artifacts |
@@ -53,7 +54,8 @@ costs.
 - Before turning a Mac into a heavy Loom/agent build host (`host-optimize`)
 - To unblock an agent driving a dev box over SSH from `sudo` password prompts (`sudo`)
 - Periodically, to keep installed tool packages current (`update-tools`) and
-  third-party dependencies current — Dependabot setup and bot-PR triage (`deps`)
+  third-party dependencies current — organization policy, updater setup, and bot-PR triage (`deps`)
+- To preview or install organization preferences from a client repo (`org-policy`)
 - Periodically (monthly) as general hygiene (`audit`)
 - Before making a repo public, and periodically after — to check what the
   public surface actually exposes (`scrub`)
@@ -272,8 +274,18 @@ Behavioral contract:
 - **Skips `/clear`.** `clear` is not a process relaunch, so re-emitting the
   banner there would be noise.
 
-There are no configuration toggles — the hook's behavior is fixed. To disable
-it, remove its `SessionStart` entries from `.claude/settings.json` (or run
+**Sibling visibility (opt-in, off by default).** A note is repo-scoped, so "no
+note in this repo" and "no note anywhere" are indistinguishable at session
+start. Export `REPO_HANDOFF_SIBLING_ROOT=<dir of checkouts>` and — *only* when
+the current repo has no note of its own — the hook also lists which repos
+directly under that root do have one, **path and age only, never the body**.
+The scan is single-level (`"$ROOT"/*/.claude/handoff.md`), capped at
+`MAX_SIBLING_DIRS` (64) directories examined, never `cd`s into a sibling or
+writes anything, and fails open to silence on a missing or unreadable root.
+Unset, the hook behaves exactly as it did before the variable existed.
+
+That variable is the hook's only configuration toggle. To disable the hook
+entirely, remove its `SessionStart` entries from `.claude/settings.json` (or run
 `uninstall.sh`, which removes only the entries it owns).
 
 ## Refreshing this install (`resync-installed.sh`)

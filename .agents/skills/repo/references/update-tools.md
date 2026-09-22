@@ -92,6 +92,13 @@ the tracked file.
   "source unknown" above and skip straight to the GitHub check in step 2. Never
   report it as a missing/broken source repo.
 
+**Loom's sidecar is named differently, but still conforms to C6's ladder.**
+Where C6 step 1 names the sidecar `<tool-root>/.install-local.json`, Loom's
+actual sidecar is the plain-text `.loom/loom-source-path` (a single path, not
+JSON) — check that file, not `.install-local.json`, when resolving Loom's
+source in step 2, and treat its presence as a resolved sidecar for step 3's
+`sidecar missing` status below.
+
 Known family members: Loom (`.loom/`), Anvil (`.anvil/`), Repo Skills
 (`.claude/skills/repo/`), kicad-tools, and anything else that follows the same
 metadata pattern. Report any metadata file found even if the tool is
@@ -190,9 +197,40 @@ Never report an uncomputable distance as `0 commits behind`, and never drop the
 caveat silently: a bare `current` that was never actually checked against the
 source HEAD is the exact failure this comparison exists to remove.
 
-If the source clone no longer exists, fall back to GitHub:
-`gh api repos/<owner>/<repo>/tags --jq '.[0].name'` or the latest release.
-If neither works, mark the tool UNKNOWN rather than guessing.
+If the source clone no longer exists, fall back to the GitHub API — **read the
+version file on the default branch first, tags/releases only as a last
+resort.** Tags routinely lag the version file by a wide margin (observed on
+`rjwalters/loom`: latest tag `v0.18.0` against `VERSION` `0.18.121` at
+`origin/HEAD` — 121 patch versions of drift) because installers read
+`VERSION` / `package.json` / `pyproject.toml`, never tags, so a tags-first
+comparison would confidently report a version dozens of releases stale as
+"latest."
+
+1. **Preferred: the version file at `origin/HEAD` via the Contents API** — try
+   the same file list step 2's local-clone path already checks, in order,
+   stopping at the first that resolves:
+
+   ```bash
+   gh api repos/<owner>/<repo>/contents/VERSION --jq .content 2>/dev/null | base64 -d
+   # or, if VERSION doesn't exist in that repo:
+   gh api repos/<owner>/<repo>/contents/package.json --jq .content 2>/dev/null | base64 -d
+   gh api repos/<owner>/<repo>/contents/pyproject.toml --jq .content 2>/dev/null | base64 -d
+   ```
+
+2. **Last resort, only if none of those files exist: tags or the latest
+   release** — `gh api repos/<owner>/<repo>/tags --jq '.[0].name'` or the
+   latest release. Tags are **not authoritative** on this path: if the tag is
+   *older* than the tool's installed version, that means the tag lags, not
+   that the install is ahead. Report that case as `UNKNOWN` — never `STALE` —
+   since a naive string/semver comparison against a lagging tag would falsely
+   flag an up-to-date install as behind.
+3. **If neither works**, mark the tool UNKNOWN rather than guessing.
+
+**Commit drift stays unknown on this path.** There is no local source clone to
+diff against `<installed-commit>`, so this fallback only ever produces the
+version-drift number — never attempt to compute or report a commit-drift
+count here (see the "Commit drift is only computable" rule above, which
+already lists "the source clone is missing" as one of the unknown cases).
 
 ### 3. Report
 
@@ -240,7 +278,10 @@ The last two rows are **different** failure modes, so report them distinctly:
 `source repo missing` means the recorded source clone path no longer exists on
 disk, while `sidecar missing` is the signature check above (installed here once,
 but the machine-local pointer is gone — typically deleted by pulling an
-untracking commit, repo#96).
+untracking commit, repo#96). For Loom, that pointer is `.loom/loom-source-path`
+(step 1's C6 exception), not `.install-local.json` — report `sidecar missing`
+for Loom only when `.loom/loom-source-path` is also absent, never on the
+absence of `.install-local.json` alone (Loom never writes that file).
 
 **A dev-mode tool (step 1) always gets its own `dev (symlinked to <source>)`
 status row — never `current`, never `STALE`, and never the commit-drift status
@@ -351,8 +392,159 @@ they will silently resync whichever repo cwd happens to be.
   (the C5/C6 split), and resolves its source clone with the same sidecar → legacy
   inline order documented in step 1.
 
-Reinstall is the **destructive fallback**, used only when resync cannot resolve
-the drift:
+#### A `layout_version` bump needs the installer re-run, not resync
+
+**Resync only refreshes file contents at their existing destinations — it
+cannot move a file to a new destination or rewire a new hook.** C5's tracked
+metadata carries `layout_version` alongside `version`/`commit` for exactly
+this reason: content and placement/wiring drift independently, and only the
+former is resync's job. `resync-installed.sh` says so itself when it hits
+this case: "only refreshes file contents. Re-run install.sh to pick up moved
+destinations or changed wiring." So before trusting a `0`/`2` resync exit
+code as sufficient, compare the installed `layout_version` against the
+source's: if the source has bumped it, resync alone is not enough — the
+installer has to run so it can move files, add new surfaces, and rewire
+hooks. This is a separate trigger from "resync cannot resolve the drift"
+below; check `layout_version` first.
+
+**That installer re-run is not automatically the destructive path — its
+safety differs per tool, and "fallback" should not be read as "destructive"
+across the board:**
+
+- **Repo Skills**: safe/idempotent. Verified going 0.10.0 → 0.11.2 across a
+  `layout_version` bump (1 → 2) — the re-run added the new
+  `.agents/skills/repo/` surface and respected existing hook wiring, with no
+  uninstall step and no confirmation flag needed.
+- **Anvil** and **kicad-tools**: already verified safe/idempotent (issue
+  #135, below), independent of `layout_version` — a second installer run
+  succeeds cleanly with no duplication.
+- **Loom**: the one tool here where the installer re-run is *not* the plain
+  path — its installer refuses a non-interactive reinstall over an existing
+  `.loom/` and exits with an error instead, so a Loom `layout_version` bump
+  falls back to resync (which will warn it cannot fully resolve the drift)
+  rather than to a bare installer re-run. `--confirm-reinstall` (below) is
+  Loom's genuinely destructive path — it is a different action from "the
+  installer re-run" that Repo Skills, Anvil, and kicad-tools all perform
+  safely, and the two must not be conflated under one "fallback" label.
+
+#### Between the dry-run and the apply: flag repo-local modifications
+
+**A `would update` path that upstream never touched is a repo-local
+modification about to be destroyed — diff the dry-run against upstream before
+applying.** A resync rewrites managed files wholesale, so any repo-local patch
+to one of them is silently reverted. That has already eaten the same
+`.loom/roles/guide.md` patch three times in this repo, and the third time the
+only thing that caught it was a session memory note — nothing in this flow
+(repo#405). The signal was in the dry-run output every time, and reading it
+costs one `git diff --name-only` per candidate file:
+
+1. **Capture the dry-run's `would update` set.** Exit `2` means drift was
+   found; the preview lines have the shape `  would update <rel>` (alongside
+   `would create` and `would remove`). Only `would update` can destroy local
+   content — a `would create` has nothing to overwrite yet.
+
+   ```bash
+   <this-repo>/.loom/scripts/resync-installed.sh --dry-run \
+     | sed -n 's/^[[:space:]]*would update[[:space:]]*//p' \
+     > /tmp/update-tools-would-update.txt
+   ```
+
+   Redirecting to a file already disables the script's ANSI colors, so the
+   captured lines are plain paths; strip escapes yourself if you teed the run
+   through a TTY.
+
+2. **Map each `<rel>` back to a path in the source clone.** The two trees
+   mirror each other, but the prefix is per tool and is documented in that
+   tool's own resync script header — do not guess it:
+   - **Loom** — `<rel>` is relative to `defaults/`: installed `roles/guide.md`
+     <- `defaults/roles/guide.md`, installed `scripts/x.sh` <-
+     `defaults/scripts/x.sh`.
+   - **Repo Skills** — the header comment table in
+     `scripts/repo/resync-installed.sh` gives the mapping, e.g. installed
+     `.claude/commands/repo/<cmd>.md` <- `commands/repo/<cmd>.md`.
+
+3. **Ask whether upstream actually changed that file** across the
+   installed→HEAD range. `<installed-commit>` is the metadata `commit` field
+   from step 1 (`loom_commit` for Loom's legacy inline shape), and the source
+   clone was already brought to `origin/HEAD` by the `git -C <source> pull
+   --ff-only` at the top of this step:
+
+   ```bash
+   git -C <source> diff --name-only <installed-commit>..origin/HEAD -- <source-path>
+   ```
+
+4. **Empty output means LOCAL MODIFICATION.** Upstream has not touched that
+   file since the installed commit, yet the resync still wants to rewrite it —
+   the only way both can be true is that the *installed* copy diverged
+   locally. **Non-empty output is an ordinary upstream update**: leave it in
+   the normal `would update` list and do not flag it. This is the distinction
+   the whole check turns on; a genuine upstream change must never be reported
+   as a local modification, or the flag becomes noise the operator learns to
+   click through.
+
+Report the flagged set as its own block **before** the confirmation prompt,
+naming what would be lost:
+
+```
+LOCAL MODIFICATIONS — will be overwritten by resync
+===================================================
+  roles/guide.md   (upstream unchanged since <installed-commit>)
+```
+
+```bash
+# Per flagged file, show exactly what the resync would destroy — the source
+# copy that would be written vs the installed copy that would go away. The
+# installed path is the resync's own destination for that <rel> (for Loom,
+# <this-repo>/.loom/<rel>; for Repo Skills, the header table's destination):
+git diff --no-index -- <source>/<source-path> <this-repo>/<installed-path>
+```
+
+**The confirmation prompt must list these files by name and offer three
+choices for the affected tool**, not a bare yes/no:
+
+- **apply and re-patch** — run the resync, then re-apply the local
+  modification immediately (recipe below) and confirm in step 5 that it
+  survived;
+- **skip this tool** — leave it stale for this run and keep the local patch;
+- **abort** — stop the whole update run.
+
+Never fold a flagged tool into a blanket "update all?" confirmation: the
+operator cannot consent to losing a patch they were never shown.
+
+**Former recurring case in this repo — `.loom/roles/guide.md` (resolved).**
+Through Loom 0.18.121 this file carried a repo-local
+`preflight_refresh_docs_pr_exclude()` block (repo#280, restored by repo#391 and
+again at the 0.18.121 resync) that upstream's `defaults/roles/guide.md` lacked,
+and every resync stripped it. loom#6627 landed in Loom 0.18.130: upstream now
+ships the equivalent `refresh_docs_pr_exclude_from_origin()` (same behavior,
+different contract — it reads and rewrites `GUIDE_DOCS_PR_EXCLUDE` in place
+instead of taking a positional argument), and
+`commands/repo/tests/test-work-log-docs-pr-self-loop.sh` targets that name.
+**Do not re-apply the old patch from history** — it would duplicate upstream's
+logic. A flagged `roles/guide.md` from this point on means a *new* local
+divergence and should be investigated, not re-patched. The recipe it replaces
+is kept here only as the shape to use for any future genuine local patch:
+
+```bash
+git log --oneline -- .loom/roles/guide.md          # find <last-restoring-commit>
+git show <last-restoring-commit> -- .loom/roles/guide.md | git apply
+bash commands/repo/tests/test-work-log-docs-pr-self-loop.sh   # must pass again
+```
+
+**Two blind spots, so an empty flagged set is not proof nothing will be lost:**
+
+- A file that upstream changed **and** carries a repo-local patch has a
+  non-empty diff, so it is reported as an ordinary update. Step 5's
+  net-negative-lines cross-check is the backstop for that case.
+- `would remove` lines (a payload file retired upstream) delete the installed
+  copy outright rather than rewriting it. If such a file holds repo-local
+  content, save it before applying — the diff check above says nothing about
+  it.
+
+For **Loom specifically**, `--confirm-reinstall` is the **destructive
+fallback**, used only when resync cannot resolve the drift (including a
+`layout_version` bump — see above, since Loom's plain installer re-run is not
+available as a middle option the way it is for the other three tools):
 
 ```bash
 # Destructive — uninstalls the existing Loom payload before writing the new version.
@@ -361,7 +553,12 @@ the drift:
 ```
 
 Confirm that separately with the user; do not escalate to it just because a
-resync pass exited non-zero — see the re-run caveat first.
+resync pass exited non-zero — see the re-run caveat first. This flag, and the
+uninstall-then-reinstall it performs, is what "destructive" refers to
+throughout this doc — it is **not** a description of the plain installer
+re-run that Repo Skills, Anvil, and kicad-tools perform for a `layout_version`
+bump (above), which is a normal, non-destructive, idempotent update for those
+three.
 
 **Anvil and kicad-tools rows verified correct as written (issue #135) — do not
 re-investigate.** Unlike Loom, neither installer refuses a non-interactive
@@ -432,7 +629,41 @@ Land each tool's bump as its own commit:
    `git add -A`. If `/tmp/update-tools-changed.txt` is empty the installer was
    a no-op — report "already current" and skip the commit for that tool.
 
-2. **Commit + land on the default branch, without committing straight to it:**
+   **This recipe is unchanged whether step 4 ran a resync or a full installer
+   re-run for a `layout_version` bump** — `post − pre` captures whatever the
+   installer actually touched either way, moved/new/rewired files included; a
+   real Repo Skills `layout_version` re-run staged 39 files this way with no
+   change to the recipe itself.
+
+2. **Cross-check the flagged set before committing.** Staging is the last point
+   at which a dropped repo-local patch is still cheap to recover, so show the
+   per-file diffstat and the net line delta of everything the installer
+   touched:
+
+   ```bash
+   git -C <this-repo> diff --stat --cached -- $(cat /tmp/update-tools-changed.txt)
+   # Net line delta per changed file (added - removed), most-negative first —
+   # a resync that dropped a local patch shows up as a large negative number:
+   git -C <this-repo> diff --numstat --cached -- $(cat /tmp/update-tools-changed.txt) \
+     | awk '{printf "%+d\t%s\n", $1 - $2, $3}' | sort -n
+   ```
+
+   **Any file from step 4's `LOCAL MODIFICATIONS` set whose net delta is
+   negative must be called out by name in the landing summary** — e.g.
+   `roles/guide.md: -81 lines — flagged local modification was overwritten;
+   re-apply before committing`. Never let it land silently. If the operator
+   chose *apply and re-patch*, re-apply the patch **now**, before the commit,
+   and re-run the two commands above until that file is no longer
+   net-negative; if the patch will not re-apply cleanly, stop and report
+   rather than committing the loss.
+
+   A net-negative file that was **not** in the flagged set is normally a
+   genuine upstream trim — mention it in the summary, but it needs no action.
+   If step 4 flagged nothing, say so explicitly ("no repo-local modifications
+   flagged") so the absence is a reported result rather than an unasked
+   question.
+
+3. **Commit + land on the default branch, without committing straight to it:**
 
    ```bash
    DEFAULT=$(git -C <this-repo> symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's#^origin/##')
@@ -460,22 +691,28 @@ Land each tool's bump as its own commit:
    fi
    ```
 
-3. **Report** the resulting commit (`git -C <this-repo> log --oneline -1`) and
-   remind the user it has **not** been pushed (run `git push` explicitly to
-   share it).
+4. **Report** the resulting commit (`git -C <this-repo> log --oneline -1`), the
+   flagged-set outcome from item 2, and a reminder that it has **not** been
+   pushed (run `git push` explicitly to share it).
 
 ## Safety Rules
 
 1. **Never update without confirmation** — show installed → latest per tool
    first, including commit-drift tools, whose prompt shows installed commit →
-   source `origin/HEAD` rather than a version bump
+   source `origin/HEAD` rather than a version bump. The same prompt must name
+   every repo-local modification the resync would overwrite (step 4's
+   `LOCAL MODIFICATIONS` block) — an operator cannot consent to losing a patch
+   they were never shown
 2. **Always use the tool's own installer or update mechanism** — where a tool
    ships a dedicated non-destructive updater (e.g. Loom's
    `.loom/scripts/resync-installed.sh`), prefer it over re-running the
-   installer; installer reinstall is the destructive fallback, not the default
-   update path. Either way, never hand-copy files — the installer/updater owns
-   the write footprint and marker blocks, and hand-copying breaks reinstall
-   idempotency
+   installer for ordinary content drift. A `layout_version` bump needs the
+   installer re-run regardless (step 4) — that re-run is a safe, idempotent
+   update for Repo Skills, Anvil, and kicad-tools; only Loom's
+   `--confirm-reinstall` flag is the genuinely destructive fallback, so
+   "installer re-run" and "destructive" are not synonyms across tools. Either
+   way, never hand-copy files — the installer/updater owns the write
+   footprint and marker blocks, and hand-copying breaks reinstall idempotency
 3. **Never resolve source-repo git problems silently** (diverged clone, dirty
    tree) — report and skip
 4. **Land the update, don't just stage it** — by default commit the installer's

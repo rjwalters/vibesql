@@ -172,13 +172,23 @@ and the first one is vacuous. Use one of:
 
 - `git grep -P` — PCRE mode honors `\b`, where the local `git` was built with
   PCRE support (not guaranteed; check `git grep -P` doesn't error before
-  relying on it).
+  relying on it). On a host whose system `grep` is BSD grep, note that the
+  same failure mode can bite a second time: BSD grep has no `-P` at all (it
+  exits `2`, "invalid option"), so a caller that falls back from `git grep -P`
+  to a piped `grep -P` fails again — and if stderr is suppressed, that second
+  failure also reads as a clean zero.
 - `git ls-files -z | xargs -0 grep -nE` — keeps the tracked-files-at-HEAD scope
   while using a grep that honors `\b` unconditionally.
 
-Verify the tool actually matches before trusting a "0 findings" result from
-this scope — a silent `\b` failure produces a confident, clean-looking exit
-`0` while having checked nothing.
+Don't trust a "0 findings" result from this scope on status alone. `git grep`'s
+own exit status is `1` on a silent `\b` failure — identical to the exit status
+of a genuine no-match, so the failure cannot be detected from `git grep`'s
+exit code by itself; only the *scrub run's* own reported exit is `0` here
+("0 findings"), and that clean-looking `0` is the confident-but-wrong signal
+this section warns about. The reliable check is a **positive control**: run
+the same pattern against a line you already know matches (e.g. a scratch file
+containing `10.0.1.5`) and confirm it is found before trusting an absence of
+findings on real input.
 
 ## Severity gates verbosity, not just ordering
 

@@ -1169,15 +1169,34 @@ resolve_default_branch() {
 #     inside `$( )`), and recording it would end the span at a position the
 #     legacy walk pairs differently — the one direction that can lose a segment
 #     boundary. Returning 0 reproduces the pre-#113 walk for that span exactly.
+#   - for a DOUBLE-quoted span (`qc == dqc`), also SKIPS a same-kind quote that
+#     sits at a DEEPER `$( )`/backtick substitution nesting depth than the
+#     opening quote itself (#453). A `"` nested one substitution level below the
+#     opener belongs to the INNER shell's own quoting, not to this span — it is
+#     unescaped, so the pre-#453 walk accepted it as this span's close anyway
+#     (a "phantom close"), which handed everything from there to the REAL close
+#     — genuinely live code the outer `$( )` is still running — to the inert
+#     verbatim-copy branch instead of to the active, separator-tracking one. See
+#     subst_depth() below for how the per-byte depth is computed, and the #453
+#     block in the ml_segment() copy of this guard for the worked repro. Scoped
+#     to DOUBLE quotes only: a single-quoted span's close is *always* the very
+#     next single-quote byte in real bash — single quotes cannot nest and admit
+#     no expansion of any kind, so a `$(` appearing between them is inert LITERAL
+#     text with no bearing on where the span ends, and depth-filtering it would
+#     wrongly skip the correct (and only) close.
 # Every use of THESE HELPERS is narrowing: treating something as
-# escaped/ambiguous only falls back to (or stays in) separator-ACTIVE
-# segmentation. That is a property of the helpers, not an unconditional property
-# of the lexers — see the KNOWN LIMIT note on the inert-span branch (#130) for
-# the one shape where correcting the active-span pairing lets a STRAY unmatched
-# quote pair differently than it did before #113.
+# escaped/ambiguous/depth-mismatched only falls back to (or stays in)
+# separator-ACTIVE segmentation. That is a property of the helpers, not an
+# unconditional property of the lexers — see the KNOWN LIMIT note on the
+# inert-span branch (#130) for the one shape where correcting the active-span
+# pairing lets a STRAY unmatched quote pair differently than it did before #113.
 #
 # Lives in its own awk source string, prepended to BOTH lexer sources, so
 # qsplit() and ml_segment() share ONE definition and cannot drift (#113).
+# subst_depth() (the `$( )`/backtick nesting-depth precompute trusted_close()
+# needs for the DOUBLE-quote check above) lives here too, for the same reason —
+# #453 needed it available to ml_segment(), which qsplit()-only placement
+# (its pre-#453 home) did not provide.
 # =============================================================================
 _ESCAPE_AWK='
 function bs_escaped(s, i,   bs, p) {
@@ -1185,11 +1204,78 @@ function bs_escaped(s, i,   bs, p) {
     for (p = i - 1; p >= 1 && substr(s, p, 1) == "\\"; p--) bs++
     return (bs % 2)
 }
-function trusted_close(s, n, ci, qc,   j) {
-    while (ci > 0 && bs_escaped(s, ci)) {
+# subst_depth(s, d) — fill d[i] with the number of `$( … )`/backtick command
+# substitutions enclosing byte i of s (#436).
+#
+# The opening `$(` / opening backtick bytes carry the INNER depth and the
+# closing `)` / closing backtick byte carries the OUTER depth, so a byte is
+# "inside a substitution" exactly when d[i] > 0 — boundary bytes included on the
+# side they belong to, which is what makes the inner-segment capture in
+# subst_inner() terminate on the close.
+#
+# A plain `(` only nests when a substitution is already open: a genuine TOP-LEVEL
+# subshell `( a ; b )` runs its own commands in the calling shell-s pipeline, so
+# its separators must stay live. `$((` arithmetic therefore reads as `$(` plus a
+# plain `(`, which nests and unnests symmetrically. A `)` never closes a backtick
+# span. Escaped openers/closers (`\$(`, `` \` ``) are literal text, matching the
+# escape convention the rest of this lexer uses (#113).
+#
+# Deliberately quote-BLIND, exactly like the `index(inner, "$(")` probe the
+# active-span branch already uses: a `$( … )` inside single quotes is not
+# expanded by the real shell, but both are treated as a substitution here so the
+# conservative direction (separators inside stay capturable as inner segments) is
+# the one taken. trusted_close() above compensates for this at its one call site
+# that matters (the DOUBLE-quote depth check): a single-quoted span never uses
+# this depth at all, so its quote-blindness there is moot.
+function subst_depth(s, d,   n, i, c, dep, kind, BQ) {
+    BQ = sprintf("%c", 96)   # backtick
+    n = length(s)
+    split("", d)
+    split("", kind)
+    dep = 0
+    i = 1
+    while (i <= n) {
+        c = substr(s, i, 1)
+        if (!bs_escaped(s, i)) {
+            if (c == "$" && i < n && substr(s, i + 1, 1) == "(") {
+                dep++
+                kind[dep] = "P"
+                d[i] = dep
+                d[i + 1] = dep
+                i += 2
+                continue
+            }
+            if (c == BQ) {
+                if (dep > 0 && kind[dep] == "B") { dep--; d[i] = dep }
+                else { dep++; kind[dep] = "B"; d[i] = dep }
+                i++
+                continue
+            }
+            if (c == "(" && dep > 0) {
+                dep++
+                kind[dep] = "p"
+                d[i] = dep
+                i++
+                continue
+            }
+            if (c == ")" && dep > 0 && kind[dep] != "B") {
+                dep--
+                d[i] = dep
+                i++
+                continue
+            }
+        }
+        d[i] = dep
+        i++
+    }
+}
+function trusted_close(s, n, ci, qc, dqc, d, dep0,   j) {
+    while (ci > 0 && (bs_escaped(s, ci) || (qc == dqc && d[ci] != dep0))) {
         j = ci + 1
         ci = 0
-        for (; j <= n; j++) if (substr(s, j, 1) == qc) { ci = j; break }
+        for (; j <= n; j++) {
+            if (substr(s, j, 1) == qc && (qc != dqc || d[j] == dep0)) { ci = j; break }
+        }
     }
     if (ci > 1 && substr(s, ci - 1, 1) == "\\") return 0
     return ci
@@ -1236,16 +1322,109 @@ function trusted_close(s, n, ci, qc,   j) {
 # that did. For input with an UNBALANCED quote count the guarantee is weaker —
 # see the KNOWN LIMIT note on the inert-span branch (#130).
 #
+# SEPARATORS INSIDE A COMMAND SUBSTITUTION (#436)
+# -----------------------------------------------
+# "Keep separators ACTIVE inside a substitution-bearing span" used to mean
+# "split the OUTER stream at every `;`/`&`/`|` byte in the span", including one
+# that sits INSIDE the substitution's own `$( … )`/backtick boundaries. Such a
+# byte is inert to the OUTER shell — it is a pipeline separator of the SUBSHELL,
+# never a top-level one — so splitting there tore the enclosing token in half.
+# The reported harm: a quoted redirect target
+# `> "/tmp/out-$(echo $F|tr -d x).json"` reached extract_write_targets() as the
+# fragment `"/tmp/out-$(echo $F`, which no longer looks absolute, so the main
+# checkout was prepended and an ordinary /tmp scratch write hard-denied with the
+# `worktree-write-confinement` (worktree-isolation-bypass) tag.
+#
+# qsplit() now models both facts at once instead of trading one for the other:
+#   1. subst_depth() precomputes, for every byte, how many `$( … )`/backtick
+#      substitutions enclose it (plain `( … )` nests only INSIDE one, so a
+#      genuine top-level subshell keeps its separators live). A separator only
+#      splits the outer stream when that depth is 0, so the enclosing token —
+#      a redirect target, an rm target, a `cd` argument — stays intact.
+#   2. subst_inner() re-emits the commands those inner separators really do
+#      start as their OWN segments, appended after the outer stream. That is
+#      exactly the set of post-separator segments the legacy inline split
+#      produced (minus the text that trailed the substitution's close, which
+#      belongs to the outer segment), so a smuggled `"$(cat f|sh -c …)"` still
+#      exposes `sh` to command_has_shell_segment() and a `"$(x|tee <in-repo>)"`
+#      still exposes the write target — the #3679/#3755 safety floor is kept,
+#      not relaxed. Text BEFORE a substitution's first inner separator is not
+#      re-emitted, matching the legacy behaviour exactly (it stayed part of the
+#      enclosing segment there too), so this adds no segment the old lexer did
+#      not already produce.
+# Unbalanced input stays fail-closed by the same mechanism: an UNCLOSED `$(`
+# leaves every later byte at depth > 0, but each separator after it still starts
+# an inner segment, so a trailing `; <destructive command>` is still segmented
+# and still denied.
+# This is deliberately scoped to qsplit() (command_has_shell_segment(),
+# resolve_stash_cwd(), extract_write_targets()) — ml_segment() below keeps the
+# legacy inline split; its consumers are the three command-word parsers, where
+# the split costs no token integrity this change needs to restore.
+#
 # Shared as a single awk source string so the three parsers cannot drift.
 # =============================================================================
 _QSPLIT_AWK='
-function qsplit(s,   out, n, i, c, j, qc, ci, tc, inner, SQ, DQ, acs, acn) {
+# subst_depth() (the `$( )`/backtick nesting-depth precompute used below and by
+# trusted_close()) now lives in the shared _ESCAPE_AWK source string above,
+# prepended ahead of this one at every call site (#453) — it moved there so
+# ml_segment() could use it too; see that block for the full doc comment.
+#
+# subst_inner(s, d) — the inner commands that separators INSIDE a substitution
+# really do start, as "\n"-prefixed segments to append after the outer stream
+# (#436). d[] comes from subst_depth().
+#
+# One segment per separator at depth > 0, running from just after that separator
+# to whichever comes first: the next separator at or below its depth, or the
+# close of the substitution that contains it. Text before a substitution-s FIRST
+# inner separator is NOT emitted — it stayed part of the enclosing segment under
+# the legacy inline split too, so this function only ever reproduces boundaries
+# the old lexer already produced.
+function subst_inner(s, d,   n, i, c, res, seg, cap, capd, act) {
+    n = length(s)
+    res = ""
+    seg = ""
+    cap = 0
+    capd = 0
+    split("", act)           # act[k] — a capture is open at depth k
+    for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        # Leaving the depth the current capture belongs to ENDS it. Unwind to the
+        # nearest still-open enclosing capture, if any, so an inner substitution
+        # with its own separators does not silently swallow the rest of the outer
+        # one.
+        if (cap && d[i] < capd) {
+            res = res "\n" seg
+            seg = ""
+            while (capd > d[i]) { act[capd] = 0; capd-- }
+            cap = (capd > 0 && act[capd]) ? 1 : 0
+            # This byte is the substitution-s own closing `)`/backtick — a
+            # boundary, never the first byte of the enclosing capture resumed
+            # above.
+            continue
+        }
+        if (d[i] > 0 && (c == ";" || c == "&" || c == "|") && !bs_escaped(s, i)) {
+            if (cap) { res = res "\n" seg }
+            seg = ""
+            cap = 1
+            capd = d[i]
+            act[capd] = 1
+            # `&&` / `||` are one separator, not two.
+            if ((c == "&" || c == "|") && i < n && substr(s, i + 1, 1) == c) i++
+            continue
+        }
+        if (cap) seg = seg c
+    }
+    if (cap) res = res "\n" seg
+    return res
+}
+function qsplit(s,   out, n, i, c, j, qc, ci, tc, inner, SQ, DQ, acs, acn, sdep) {
     SQ = sprintf("%c", 39)   # single quote
     DQ = sprintf("%c", 34)   # double quote
     out = ""
     n = length(s)
     split("", acs)           # stack of pending active-span CLOSING quote indexes
     acn = 0
+    subst_depth(s, sdep)     # byte -> enclosing `$( … )`/backtick depth (#436)
     i = 1
     while (i <= n) {
         c = substr(s, i, 1)
@@ -1296,17 +1475,31 @@ function qsplit(s,   out, n, i, c, j, qc, ci, tc, inner, SQ, DQ, acs, acn) {
                 continue
             }
             # Span carries command substitution: keep separators ACTIVE (copy the
-            # opening quote and keep walking char-by-char so a `|` inside splits).
+            # opening quote and keep walking char-by-char so a `|` at the span-s
+            # OWN level still splits; one nested inside the substitution-s
+            # parens/backticks does not — see the #436 note in this block-s
+            # header, and subst_inner() for where those inner commands resurface).
             # REMEMBER where the span really ENDS (#113) so the char-walk does not
             # re-read that quote as a NEW opener — which used to swallow
             # everything after the span. `trusted_close()` resolves the real close
-            # (skipping backslash-escaped quotes, refusing an ambiguous one); see
-            # the ml_segment() copy of this guard for the full rationale — both
-            # lexers share the defect and therefore share the fix so they cannot
-            # drift.
+            # (skipping backslash-escaped quotes, refusing an ambiguous one, and —
+            # for a double-quoted span — refusing a same-kind quote nested at a
+            # DEEPER substitution depth, #453); see the ml_segment() copy of this
+            # guard for the full rationale — both lexers share the defect and
+            # therefore share the fix so they cannot drift.
             out = out c
-            tc = trusted_close(s, n, ci, qc)
+            tc = trusted_close(s, n, ci, qc, DQ, sdep, sdep[i])
             if (tc > 0) acs[++acn] = tc
+            i++
+            continue
+        }
+        # A separator INSIDE a `$( … )`/backtick substitution is inert to the
+        # OUTER shell (#436): copy it literally so the enclosing token — e.g. a
+        # quoted redirect target `"/tmp/out-$(echo $F|tr -d x).json"` — is not
+        # torn in half. The command it really does start is re-emitted as its own
+        # segment by subst_inner() below, so nothing stops being segmented.
+        if ((c == ";" || c == "&" || c == "|") && sdep[i] > 0) {
+            out = out c
             i++
             continue
         }
@@ -1322,7 +1515,7 @@ function qsplit(s,   out, n, i, c, j, qc, ci, tc, inner, SQ, DQ, acs, acn) {
         out = out c
         i++
     }
-    return out
+    return out subst_inner(s, sdep)
 }
 '
 
@@ -1359,12 +1552,18 @@ function qsplit(s,   out, n, i, c, j, qc, ci, tc, inner, SQ, DQ, acs, acn) {
 #     command still yields a real later-line segment and still denies (safety
 #     floor preserved; matches the old per-record behaviour where each input line
 #     was its own record).
-#   - An INERT quoted span (no `$(` and no backtick) is copied VERBATIM, so its
-#     embedded newlines/separators stay literal and never manufacture a phantom
-#     segment out of quoted documentation prose (the false positive).
-#   - A quoted span carrying command substitution (`$(` or a backtick) keeps its
-#     separators ACTIVE (walked char-by-char, exactly like qsplit()), so a
-#     smuggled payload is never hidden behind an opening quote. Its
+#   - An INERT quoted span is copied VERBATIM, so its embedded
+#     newlines/separators stay literal and never manufacture a phantom segment
+#     out of quoted documentation prose (the false positive). A span is inert
+#     when it carries no `$(` and no backtick — and a TOP-LEVEL single-quoted
+#     span is inert regardless of its content (#443), because bash never expands
+#     or substitutes anything between `'...'`. "Top-level" is load-bearing
+#     (#450): an apostrophe met while an ACTIVE span is still open is literal
+#     text to the shell, not an opener, so its span may hold live code and is
+#     NOT treated as inert.
+#   - A DOUBLE-quoted span carrying command substitution (`$(` or a backtick)
+#     keeps its separators ACTIVE (walked char-by-char, exactly like qsplit()),
+#     so a smuggled payload is never hidden behind an opening quote. Its
 #     already-computed CLOSING quote index is remembered (#113) so the walk that
 #     reaches it recognises the span TERMINATOR instead of re-opening a phantom
 #     span there — the mis-read that used to swallow the whole rest of the
@@ -1491,7 +1690,7 @@ function hd_opener(s, n, i, out,   j, c, q, w, SQ, DQ) {
 # BOTH this lexer and qsplit() so the two cannot drift (#113).
 function ml_segment(buf, segs,   SQ, DQ, s, n, seg, segc, i, c, qc, ci, tc, j, inner,
                     hdc, hddelim, hdstrip, hdquoted, hdo, hdnext, h, k, unsafe,
-                    arO, arC, eol, nexti, line, t, incmt, pc, acs, acn) {
+                    arO, arC, eol, nexti, line, t, incmt, pc, acs, acn, sdep) {
     SQ = sprintf("%c", 39)   # single quote
     DQ = sprintf("%c", 34)   # double quote
     split("", segs)          # clear the caller-supplied out-array
@@ -1499,6 +1698,7 @@ function ml_segment(buf, segs,   SQ, DQ, s, n, seg, segc, i, c, qc, ci, tc, j, i
     acn = 0
     s = buf
     n = length(s)
+    subst_depth(s, sdep)     # byte -> enclosing `$( … )`/backtick depth (#436, #453)
     seg = ""
     segc = 0
     hdc = 0                  # heredoc openers pending a body on the next line
@@ -1588,7 +1788,73 @@ function ml_segment(buf, segs,   SQ, DQ, s, n, seg, segc, i, c, qc, ci, tc, j, i
                 continue
             }
             inner = substr(s, i + 1, ci - i - 1)
-            if (index(inner, "$(") == 0 && index(inner, "`") == 0) {
+            # A TOP-LEVEL SINGLE-quoted span is inert, `$(`/backtick or not
+            # (#443, scoped to the top level of the walk by #450).
+            # (No apostrophes in this block: it lives inside a single-quoted awk
+            # source string, where one would terminate the string. S below stands
+            # for the single quote character.)
+            #
+            # Bash never expands or substitutes ANYTHING between S...S, so a
+            # $(mktemp -d) written there is literal text, not live code — the
+            # substitution probe below must therefore not apply to it. Marking an
+            # SQ span ACTIVE because its text merely CONTAINS the characters `$(`
+            # kept separators live inside quoted DATA, and a LITERAL `;` in that
+            # data then leaked out as a phantom top-level command boundary: the
+            # tail after it was re-segmented and classified as a real command, so
+            #   ssh <host> S TMPDIR=$(mktemp -d); rm -rf "$TMPDIR" S
+            # false-denied as a local rm with an unresolvable target, and
+            #   echo S X=$(true); rm -rf <some-path-outside-the-repo> S
+            # false-denied as a local out-of-repo rm. The SAME command WITHOUT a
+            # `$( )` in the quoted string was already allowed, so this was a
+            # quote-classification defect, not a missing remote-exec concept:
+            # nothing about `ssh` is load-bearing here and the identical false
+            # positive reproduced with a plain `echo`.
+            #
+            # The #3679/#3755 "keep separators ACTIVE inside a substitution-bearing
+            # span" floor is UNCHANGED for DOUBLE-quoted and unquoted spans, where
+            # `$( )` really does execute and a smuggled `; <destructive>` really
+            # does run — that is the #113 protection and it must not be weakened.
+            # There is no single-quoted equivalent to preserve: the shell cannot
+            # execute anything inside S...S, so nothing is being masked here.
+            # The catastrophic ALWAYS_BLOCK scan is unaffected either way — it
+            # reads the raw command string and never goes through this lexer, so a
+            # root-obliterating payload inside a single-quoted span still denies.
+            #
+            # The SQ branch is scoped to the TOP LEVEL of the walk (`acn == 0`)
+            # — #450, a regression the unscoped form shipped with. `acn == 0` is
+            # NECESSARY for an unescaped S to be a real OPENER whose span the
+            # shell genuinely treats as inert (the only shape #443 was ever
+            # about — every #443 payload is a top-level single-quoted argument)
+            # — but it is not SUFFICIENT on its own (#453): `acn` is decremented
+            # from the recorded active-span CLOSE index below, and that index
+            # can itself be a PHANTOM close when a quote of the same kind sits
+            # nested one `$( )`/backtick level deeper than the span-s real
+            # opener (see the #453 block right below trusted_close()-s call at
+            # the bottom of this branch). `acn == 0` still correctly rejects
+            # every non-top-level S; it is the trusted_close() depth check that
+            # keeps `acn` itself accurate. Do not read `acn == 0` in isolation
+            # as "guaranteed top level" — it is "top level, GIVEN an accurate
+            # acn" — the #453 fix is what makes that given hold.
+            #
+            # Reached while an ACTIVE span is still open, that S is a PHANTOM
+            # quote: inside a double-quoted span bash reads it as ordinary
+            # literal text, so the forward scan above pairs it with some
+            # unrelated LATER S, and the stretch between them can hold genuinely
+            # live, executing code. Copying that stretch verbatim made the lexer
+            # skip a real $( ) that bash actually runs:
+            #
+            #   echo "donSt $(true; <recursive-force rm of an out-of-repo path>) wonSt"
+            #
+            # That is parseable (the apostrophes are balanced), the substitution
+            # really executes, and the guard allowed it — a deny before #443
+            # became an allow after it. The earlier claim that every such shape
+            # needs an ODD quote count and so cannot parse was simply wrong; the
+            # #450 test block pins the parseability mechanically next to the deny.
+            # So: an S reached with `acn > 0` stays on the legacy active-walk path
+            # below, where separators remain live and the smuggled payload is
+            # still segmented and classified. Do NOT drop the `acn == 0` term as
+            # a simplification — it is the entire scoping of the #443 branch.
+            if ((qc == SQ && acn == 0) || (index(inner, "$(") == 0 && index(inner, "`") == 0)) {
                 seg = seg substr(s, i, ci - i + 1)   # inert span: verbatim (newlines stay literal)
                 # KNOWN LIMIT (#130): the only branch that can LOSE a boundary —
                 # it consumes whatever the forward scan paired with, which for a
@@ -1611,11 +1877,31 @@ function ml_segment(buf, segs,   SQ, DQ, s, n, seg, segc, i, c, qc, ci, tc, j, i
             # quote of the same kind" index is NOT usable here: a backslash-escaped
             # `\"` inside the span is literal text, so ending the span there would
             # leave the REAL close to open a bogus span (`echo "$(a \" b)" ;
-            # <destructive>` — a shape the pre-#113 walk denied). trusted_close()
-            # skips escaped candidates and returns 0 when the pairing is ambiguous,
-            # in which case NO close is recorded and this span is walked exactly
-            # the legacy way.
-            tc = trusted_close(s, n, ci, qc)
+            # <destructive>` — a shape the pre-#113 walk denied). It is ALSO not
+            # usable when the span is double-quoted and that naive index actually
+            # belongs to a NESTED `$( )`/backtick substitution one level deeper
+            # than this span-s own opener (#453): a double-quoted string opened
+            # INSIDE a command substitution is parsed by that inner subshell, not
+            # by the shell that opened THIS span, so an unescaped `"` there is not
+            # this span-s close — it just happens to be the same byte value. The
+            # pre-#453 walk accepted it anyway (a phantom close), which handed
+            # everything up to the REAL close — genuinely live code this span-s
+            # own `$( )` is still executing — to the inert verbatim-copy branch
+            # above instead of to this active, separator-tracking one (S stands
+            # for the single quote this single-quoted awk source string cannot
+            # contain):
+            #
+            #   echo "x $(echo "ySz $(true; <destructive>) wSv") q"
+            #
+            # trusted_close() now skips BOTH escaped candidates and (for a
+            # double-quoted span) same-kind quotes at the wrong substitution
+            # depth, continuing to scan forward for the real close; it returns 0
+            # when no such candidate exists, in which case NO close is recorded
+            # and this span is walked exactly the legacy way. Single-quoted spans
+            # pass their own depth check trivially (see trusted_close()-s doc
+            # comment in _ESCAPE_AWK) since a single quote-s close is always the
+            # very next single-quote byte, nesting depth notwithstanding.
+            tc = trusted_close(s, n, ci, qc, DQ, sdep, sdep[i])
             if (tc > 0) acs[++acn] = tc
             i++
             continue
@@ -2177,8 +2463,130 @@ strip_literal_text() {
 # an unterminated quote copies the remainder verbatim (never redacts), and the
 # result feeds only the NARROWING scans, so the worst case is a raw substring
 # surviving (a false block) — never a catastrophic block being skipped.
+#
+# ---------------------------------------------------------------------------
+# OPT-IN QUERY SINKS (repo#311) — $2 non-empty enables them
+# ---------------------------------------------------------------------------
+# `jq`, `grep`/`egrep`/`fgrep`/`rg`, `sed` and `awk` are data sinks in exactly
+# the same sense echo/printf are: their pattern/program argument is text they
+# MATCH AGAINST or PRINT, never text they execute. A `jq` query over this very
+# repo's guard-decision log, or a `grep` for the literal text of a catastrophic
+# pattern, was denied purely because the pattern text appeared as the query
+# (repo#311). They are behind an opt-in second argument rather than always-on
+# because COMMAND_ASK_SCAN feeds two DENY-tier consumers whose SUBJECT is a
+# grep/sed command word (the SQL DDL scan and extract_write_targets()'s write
+# confinement — see the consumer audit table at _POSITIONAL_MASK_NEVER); only
+# the catastrophic working copy, whose sole consumer is the
+# ALWAYS_BLOCK_PATTERNS loop, opts in.
+#
+# Unlike echo/printf — where every argument is data by definition — these
+# commands have flags and sub-forms that DO act. A command word is admitted as
+# a query sink only after its whole simple command (raw, pre-redaction, read
+# with qseg() below) survives a per-command veto:
+#
+#   sed   — vetoed by `-i`/`--in-place` (edits the file), by a `w`/`W` write
+#           command or s///w flag, and by an `e` execute command or s///e flag.
+#           What remains is a query-only `sed -n '…p'` / `sed 's/…/…/'`.
+#   awk   — vetoed by `system(…)`, by a pipe-to-command (`print | "cmd"`,
+#           `|&` coprocess), and by the one-way `"cmd" | getline` exec form.
+#           What remains is pure pattern/print program text.
+#   rg    — vetoed by `--pre`/`--pre-glob`/`--hostname-bin`, which name an
+#           external program ripgrep executes.
+#   jq /
+#   grep  — no execution surface at all (jq has no shell-out filter; grep has
+#           no exec flag), so nothing to veto.
+#
+# The veto is whole-command, not per-argument: one `system(` anywhere in the
+# simple command disqualifies the entire command from sink treatment, so there
+# is no argument-position arithmetic to get wrong (a `sed -i` flag or an
+# `awk -F ':'` separator can never be mistaken for program text, because a
+# vetoed command is not a sink at all and a non-vetoed one has no argument that
+# executes). The vetoes are deliberately over-broad — they may decline a
+# genuinely inert command — because declining is the SAFE direction: it keeps
+# today's behaviour (a false block), never widens a deny into an allow.
+#
+# The rest of the safety floor is shared verbatim with echo/printf above: spans
+# carrying `$(`/backtick are never redacted, redirection targets are never
+# redacted, the command_has_shell_segment() gate at the call site skips this
+# whole function whenever any segment could feed a shell, and `bash -c`/`sh -c`/
+# `eval`/`xargs` are not sinks and never will be.
+#
+# $1 = command string. $2 = non-empty to enable the query sinks (absent/empty
+# keeps the historical echo/printf-only behaviour).
+#
+# CONTRACT (repo#434): when $2 enables the query sinks, $1 MUST be the RAW
+# command, not a copy another masking pass has already redacted. The vetoes
+# below are text checks — they can only refuse what they can still SEE — so a
+# copy in which strip_literal_text() has already blanked a `--title "… -i …"`
+# value hides the very `-i` the sed veto exists to catch, and admits as an inert
+# query sink a command the veto was meant to refuse. strip_literal_text()'s
+# quoted-value redaction is a global textual regex with no notion of which
+# simple command a flag belongs to, so the hidden token need only share a simple
+# command with the sink word. The call site therefore runs THIS function first
+# and strip_literal_text() second; ordering them that way is safe in both
+# directions because neither pass can create text the other keys on (see the
+# PASS 2 comment at the call site for the full argument).
 strip_datasink_literals() {
-    printf '%s' "$1" | awk '
+    printf '%s' "$1" | awk -v qsinks="${2:-}" '
+    # Raw text of the simple command starting at `start`, up to the first
+    # UNQUOTED shell separator (or end of buffer). Quote-aware so an `awk`
+    # program that contains `|` or `;` inside its quoted program text is read
+    # as one unit — which is exactly what the vetoes below must see.
+    function qseg(s, start, n,    i, c, q, out) {
+        out = ""; q = ""
+        for (i = start; i <= n; i++) {
+            c = substr(s, i, 1)
+            if (q != "") { out = out c; if (c == q) q = ""; continue }
+            if (c == SQ || c == DQ) { q = c; out = out c; continue }
+            if (c == ";" || c == "&" || c == "|" || c == "\n") break
+            out = out c
+        }
+        return out
+    }
+    # Is `tok` a query-sink command word at all? (The veto is separate.)
+    function is_query_sink(tok) {
+        return (tok == "jq" || tok == "grep" || tok == "egrep" || \
+                tok == "fgrep" || tok == "rg" || tok == "sed" || \
+                tok == "awk" || tok == "gawk" || tok == "mawk")
+    }
+    # Per-command veto over the RAW simple command. Returns 1 to admit.
+    #
+    # "RAW" is a contract on the CALLER (repo#434): `seg` comes from qseg() over
+    # $1, so these checks are only as honest as $1 is unredacted. See the
+    # CONTRACT paragraph in the shell header comment above this function.
+    function query_sink_ok(tok, seg) {
+        if (tok == "sed") {
+            # In-place edit: --in-place, or any short-flag cluster carrying i
+            # (-i, -ni, -i.bak). A leading `--` can never start such a cluster.
+            if (seg ~ /(^|[ \t])--in-place/) return 0
+            if (seg ~ /(^|[ \t])-[A-Za-z]*i/) return 0
+            # `w file` / `W file` / s///w flag — writes a file. `e cmd` /
+            # s///e flag — EXECUTES the pattern space. The character BEFORE the
+            # command letter is whatever delimiter the author chose (`s|a|b|w`
+            # is as valid as `s/a/b/w`), so the guard is "not part of a word"
+            # rather than a fixed delimiter set — deliberately over-broad, since
+            # declining to treat a sed as a sink only preserves the verdict the
+            # guard already produces.
+            if (seg ~ /(^|[^A-Za-z0-9_])[wW][ \t]/) return 0
+            if (seg ~ /(^|[^A-Za-z0-9_])e([ \t;}'"'"'"]|$)/) return 0
+            return 1
+        }
+        if (tok == "awk" || tok == "gawk" || tok == "mawk") {
+            if (seg ~ /system[ \t]*\(/) return 0      # system("cmd")
+            if (seg ~ /\|[ \t]*"/) return 0           # print | "cmd"
+            if (seg ~ /\|[ \t]*&/) return 0           # |& coprocess
+            if (seg ~ /\|[ \t]*getline/) return 0     # "cmd" | getline (one-way exec)
+            return 1
+        }
+        if (tok == "rg") {
+            # ripgrep flags that name an external program it then executes.
+            if (seg ~ /(^|[ \t])--pre([ \t=]|$)/) return 0
+            if (seg ~ /(^|[ \t])--pre-glob([ \t=]|$)/) return 0
+            if (seg ~ /(^|[ \t])--hostname-bin([ \t=]|$)/) return 0
+            return 1
+        }
+        return 1   # jq / grep / egrep / fgrep: no execution surface
+    }
     BEGIN {
         SQ = sprintf("%c", 39)   # single quote
         DQ = sprintf("%c", 34)   # double quote
@@ -2229,6 +2637,15 @@ strip_datasink_literals() {
                     out = out tok; i = j; atcmd = 1; continue
                 }
                 if (tok == "echo" || tok == "printf") { sink = 1 }
+                # repo#311 query sinks (opt-in): admitted only when the RAW
+                # remainder of this simple command carries no acting sub-form.
+                # A path-qualified spelling (/usr/bin/jq, ./rg) is classified on
+                # its basename, exactly like command_has_shell_segment() does.
+                else if (qsinks != "") {
+                    base = tok
+                    sub(/.*\//, "", base)
+                    if (is_query_sink(base) && query_sink_ok(base, qseg(s, j, n))) { sink = 1 }
+                }
                 out = out tok; i = j; continue
             }
             # Mid-command: a quoted span is redacted only inside a data sink.
@@ -2376,15 +2793,29 @@ mask_ask_positional_args() {
 }
 
 # Return 0 (success) if ANY quote-aware segment's command word is a shell binary
-# (sh/bash/dash/zsh/ksh/csh/tcsh/fish/pwsh, with or without a leading path).
-# GATES strip_datasink_literals(): when a shell could consume the command's data
-# (e.g. `echo '<payload>' | sh`), the data-sink redaction is skipped so the raw
-# catastrophic scan still sees — and blocks — the payload. Conservative by
-# construction: a shell ANYWHERE in the command disables the (narrowing)
-# redaction, so the worst case is a preserved false BLOCK, never a skipped one.
-# `guard-destructive.sh` (basename is not a bare shell word) is deliberately NOT
-# matched, so the guard's own `echo '<json>' | guard-destructive.sh` self-test
-# still redacts and no longer false-blocks (#53). Emits "yes"/"no".
+# (sh/bash/dash/zsh/ksh/csh/tcsh/fish/pwsh, with or without a leading path) OR a
+# pipeline consumer that can itself spawn a shell over its input (`xargs`,
+# `parallel`). GATES strip_datasink_literals(): when a shell could consume the
+# command's data (e.g. `echo '<payload>' | sh`, or the same payload reached
+# through `echo '<payload>' | xargs -I{} sh -c '{}'`), the data-sink redaction
+# is skipped so the raw catastrophic scan still sees — and blocks — the
+# payload. Conservative by construction: a shell-or-shell-spawner ANYWHERE in
+# the command disables the (narrowing) redaction, so the worst case is a
+# preserved false BLOCK, never a skipped one.
+#
+# `xargs`/`parallel` are matched UNCONDITIONALLY — regardless of what command
+# they themselves invoke — because `xargs <anything>` handed attacker-shaped
+# input on the pipe is the hazard, not just the `sh -c`/`bash -c` sub-form of
+# it (repo#429). The precision cost is measured and accepted: an ordinary,
+# non-shell `xargs`/`parallel` pipeline that carries no dangerous text (e.g.
+# `grep '<text>' f | xargs -I{} echo {}`) goes back to being redaction-blind,
+# i.e. it now depends on the raw scan not matching `<text>` rather than on the
+# redaction — a false DENY only if `<text>` itself matches ALWAYS_BLOCK, never
+# a missed catastrophic block.
+#
+# `guard-destructive.sh` (basename is not a bare shell/xargs/parallel word) is
+# deliberately NOT matched, so the guard's own `echo '<json>' | guard-destructive.sh`
+# self-test still redacts and no longer false-blocks (#53). Emits "yes"/"no".
 command_has_shell_segment() {
     printf '%s' "$1" | awk "$_ESCAPE_AWK$_QSPLIT_AWK"'
     { buf = buf (NR > 1 ? "\n" : "") $0 }
@@ -2397,7 +2828,9 @@ command_has_shell_segment() {
             sub(/^[ \t]+/, "", seg)
             # Strip any run of leading VAR=val assignments, then a sudo/env wrapper,
             # so the REAL command word is classified. The required trailing [ \t]+
-            # in the assignment pattern guarantees the loop makes progress.
+            # in the assignment pattern guarantees the loop makes progress. This
+            # also composes with xargs/parallel below: `sudo xargs …` / `env
+            # parallel …` are stripped down to the same bare command word.
             while (match(seg, /^[A-Za-z_][A-Za-z0-9_]*=[^ \t]*[ \t]+/)) { seg = substr(seg, RLENGTH + 1) }
             sub(/^sudo[ \t]+/, "", seg)
             sub(/^env[ \t]+/, "", seg)
@@ -2407,7 +2840,8 @@ command_has_shell_segment() {
             w = toks[1]
             sub(/.*\//, "", w)   # basename only
             if (w == "sh" || w == "bash" || w == "dash" || w == "zsh" || \
-                w == "ksh" || w == "csh" || w == "tcsh" || w == "fish" || w == "pwsh") { found = 1 }
+                w == "ksh" || w == "csh" || w == "tcsh" || w == "fish" || w == "pwsh" || \
+                w == "xargs" || w == "parallel") { found = 1 }
         }
         print (found ? "yes" : "no")
     }'
@@ -2567,22 +3001,12 @@ ALWAYS_BLOCK_PATTERNS=(
     # (#3584).
 )
 
-# Build a literal-text-redacted working copy ONLY for the catastrophic scan
-# below, so a force-push-to-main phrase quoted inside a
-# --body/-m/--title/--notes/--comment value no longer false-positives (#3679,
-# --comment added #3756). The awk only runs when one of those flags is actually
-# present, keeping it off the hot path (mirrors the COMMAND_NO_COMMENT
-# `#`-present guard). `-c` is intentionally excluded so `bash -c '<payload>'`
-# payloads still reach the raw scan; spans carrying `$(` / backtick are left
-# intact so command-substitution smuggling still hard-denies.
+# Build a redacted working copy ONLY for the catastrophic scan below. TWO
+# passes feed it, and their ORDER is load-bearing (repo#434) — see the block
+# comment on the second one for why the data-sink pass must run FIRST.
 COMMAND_NO_LITERAL_TEXT="$COMMAND"
-if [[ "$COMMAND" == *"--body"* || "$COMMAND" == *"--message"* || \
-      "$COMMAND" == *"--title"* || "$COMMAND" == *"--notes"* || \
-      "$COMMAND" == *"--comment"* || "$COMMAND" == *"-m"* ]]; then
-    COMMAND_NO_LITERAL_TEXT=$(strip_literal_text "$COMMAND")
-fi
-# ALSO redact the quoted args of a data-sink command word (echo/printf), so a
-# dangerous string handed to echo/printf as inert DATA no longer trips the raw
+# PASS 1 — redact the quoted args of a data-sink command word (echo/printf), so
+# a dangerous string handed to echo/printf as inert DATA no longer trips the raw
 # scan (#53) — the meta false-positive that blocked guard self-tests and filing
 # this issue's heredoc body. Gated on echo/printf being present (off the hot
 # path otherwise) AND on NO shell segment existing: when data is piped into a
@@ -2590,9 +3014,56 @@ fi
 # so the raw scan still blocks the payload. `-c` wrappers (bash -c/sh -c) are
 # never data sinks, and `$(`/backtick spans are never redacted, so smuggling
 # still hard-denies.
-if [[ "$COMMAND" == *"echo"* || "$COMMAND" == *"printf"* ]] && \
+#
+# repo#311: the QUERY sinks (jq/grep/egrep/fgrep/rg/inert sed/awk) are enabled
+# here — and ONLY here. Their pattern/program argument is text they match
+# against or print, never text they execute, so a `jq` query over this repo's
+# own guard-decision log, or a `grep` for the literal text of a catastrophic
+# pattern, is inert data in exactly the sense an echo argument is. This copy's
+# only consumer is the ALWAYS_BLOCK_PATTERNS loop below, which is why the
+# opt-in is safe to make here: the ASK-tier copy deliberately does NOT enable
+# them, because it also feeds two DENY-tier consumers whose subject IS a
+# grep/sed command word (the SQL DDL scan and extract_write_targets()'s write
+# confinement — see the consumer audit table at _POSITIONAL_MASK_NEVER above).
+# Same gate, same floor: a shell segment anywhere, or `$(`/backtick inside the
+# span, and nothing is redacted.
+#
+# ORDER (repo#434): this pass reads $COMMAND — the RAW command — and must keep
+# doing so. Its query-sink vetoes (`sed -i`, `awk system(…)`, `rg --pre`, …) are
+# text checks over the simple command they are classifying, so running
+# strip_literal_text() first handed them a copy in which the veto token itself
+# could already have been blanked: `sed -n --title "pass -i to edit" 's|<danger>|X|p'`
+# had its `-i` masked to `X`s by the --title redaction, the `-i` veto therefore
+# never fired, the sed was admitted as a query sink, and its program text — the
+# real payload — was redacted out of the catastrophic scan. See
+# strip_datasink_literals()'s "$1 MUST be the raw command" contract.
+if [[ "$COMMAND" == *"echo"* || "$COMMAND" == *"printf"* || \
+      "$COMMAND" == *"jq"* || "$COMMAND" == *"grep"* || "$COMMAND" == *"rg"* || \
+      "$COMMAND" == *"sed"* || "$COMMAND" == *"awk"* ]] && \
    [[ "$(command_has_shell_segment "$COMMAND")" == "no" ]]; then
-    COMMAND_NO_LITERAL_TEXT=$(strip_datasink_literals "$COMMAND_NO_LITERAL_TEXT")
+    COMMAND_NO_LITERAL_TEXT=$(strip_datasink_literals "$COMMAND" query)
+fi
+# PASS 2 — redact literal text, so a force-push-to-main phrase quoted inside a
+# --body/-m/--title/--notes/--comment value no longer false-positives (#3679,
+# --comment added #3756). The awk only runs when one of those flags is actually
+# present, keeping it off the hot path (mirrors the COMMAND_NO_COMMENT
+# `#`-present guard). `-c` is intentionally excluded so `bash -c '<payload>'`
+# payloads still reach the raw scan; spans carrying `$(` / backtick are left
+# intact so command-substitution smuggling still hard-denies.
+#
+# Running SECOND costs this pass nothing, because neither pass can hide input
+# the other needs: both only ever rewrite the interior of a quoted span, both
+# refuse any span carrying `$(`/backtick, and both replace a character with `X`
+# — which can never synthesize a `-`, a quote, a `(` or a flag name. So pass 1
+# can only ever shrink the set of spans pass 2 masks (never grow it), and the
+# composed output is identical to the old order on every command where pass 1's
+# vetoes were not being fooled. The gate still tests $COMMAND, so a flag name
+# that pass 1 masked away (inside an echo argument) cannot skip this pass
+# either — it just finds nothing left to redact there.
+if [[ "$COMMAND" == *"--body"* || "$COMMAND" == *"--message"* || \
+      "$COMMAND" == *"--title"* || "$COMMAND" == *"--notes"* || \
+      "$COMMAND" == *"--comment"* || "$COMMAND" == *"-m"* ]]; then
+    COMMAND_NO_LITERAL_TEXT=$(strip_literal_text "$COMMAND_NO_LITERAL_TEXT")
 fi
 
 # =============================================================================

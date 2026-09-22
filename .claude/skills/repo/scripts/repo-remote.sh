@@ -33,6 +33,17 @@
 #   repo-remote status|--status [--json] [aws|gcp]   List instances this command
 #       created (tagged repo-remote=<name>) with state; no mutation.
 #
+#   repo-remote verify|--verify [--json] [aws|gcp]   Prove the SSH alias still
+#       reaches THIS repo's instance before anything is trusted to it. Opens one
+#       SSH session over repo-remote-<name>, asks the host for its OWN instance
+#       id, and compares it with the id this repo expects (a pinned
+#       REPO_REMOTE_INSTANCE_ID, else the repo-remote=<name> tag). Exits 6 on a
+#       mismatch AND on any answer it cannot establish (unreachable host, no
+#       identity source) — it fails CLOSED, because "I could not tell" is not
+#       evidence that the host is the right one. See "Host-identity
+#       verification" below. No cloud mutation; no cloud call at all when the
+#       instance id is pinned.
+#
 #   repo-remote down|--down [--yes] [--force] [--json] [aws|gcp]   Teardown.
 #       Without --yes: a DRY-RUN listing of exactly what would stop/terminate
 #       (fleet-marked instances, if any, are annotated but never block a dry
@@ -59,7 +70,7 @@
 # stale-tag-prone: a host provisioned once for an ephemeral dev session can
 # later become a persistent fleet worker while still carrying the repo-remote
 # tag, at which point this ephemeral tooling would happily reuse it
-# (2AMLogic/2am#52). `down` is the strictly worse case: it STOPS the resolved
+# (operator incident, private tracker). `down` is the strictly worse case: it STOPS the resolved
 # instance, or — with --delete — TERMINATES it, disk and all, unrecoverable.
 # So before `up` starts/aliases a REUSED instance, or `down` stops/terminates
 # any resolved instance, its tags (AWS) / labels (GCP) are checked for a fleet
@@ -73,6 +84,37 @@
 # a dry run (which touches no cloud resource at all) — a `down` dry run
 # annotates any fleet-marked instances in its listing instead of blocking.
 #
+# Host-identity verification (repo#458): an EC2 auto-assigned public IPv4 is
+# RELEASED when the instance stops and a different one is assigned on its next
+# start — and the released address is handed to whoever starts an instance next,
+# very possibly another AWS customer entirely. The SSH alias this script writes
+# is therefore only as fresh as the last `up` (or `verify`) run: nothing keeps it
+# current between sessions. In the incident behind this check, a stopped/started
+# box's old address came back up on a stranger's instance, the unchanged alias
+# resolved, ssh connected, key auth succeeded, and three agents wrote work
+# products to a machine that was not theirs. Every signal the tooling had said
+# "fine".
+#
+# So `up` (after it writes the alias) and the standalone `verify` subcommand both
+# ask the reached host for its OWN instance id and compare it against the id this
+# repo expects. The id is read, in order, from: the marker file this tool drops at
+# provision time (REPO_REMOTE_HOST_ID_FILE, default /etc/repo-remote-instance-id),
+# the instance metadata service (IMDSv2, then IMDSv1, then GCP's), and finally
+# cloud-init's /var/lib/cloud/data/instance-id — so an instance provisioned before
+# the marker existed is still verifiable. A MISMATCH always exits 6, in both
+# paths; --force does NOT override it (that flag is the fleet-marker override and
+# nothing else). The two paths differ only on an answer that could not be
+# established at all:
+#   verify  — exits 6. Fails CLOSED: it exists precisely to be run before an
+#             agent trusts a session it did not just create.
+#   up      — warns loudly and continues. `up` resolved the IP from the cloud API
+#             and rewrote the alias in the SAME run, so the alias is fresh by
+#             construction there; failing the run on an IMDS-locked-down or
+#             pre-marker box would break provisioning for no safety gain.
+# Pinning REPO_REMOTE_INSTANCE_ID is the recommended configuration for any
+# session expected to survive a stop/start: it makes the expectation explicit
+# rather than re-derived from a tag that a fleet host can also be wearing.
+#
 # Exit codes:
 #   0  success (including a dry-run plan)
 #   2  missing / invalid required config (the cost gate; loud failure)
@@ -80,6 +122,9 @@
 #   4  cloud operation failed
 #   5  refused to act (reuse via `up`, stop/terminate via `down`) on a
 #      fleet-marked instance (pass --force to override)
+#   6  host-identity verification failed — the host reachable at the SSH alias
+#      is not the instance this repo expects, or its identity could not be
+#      established (NOT overridable with --force)
 #   64 usage error
 #
 # Testability hooks (honored so the suite can exercise the full contract against
@@ -98,6 +143,26 @@
 #                                      see "SSH alias lock" below, repo#213)
 #   REPO_REMOTE_SSH_LOCK_POLL_INTERVAL seconds between lock-acquisition
 #                                      retries (default 1)
+#   REPO_REMOTE_SSH_READY_TIMEOUT      total seconds the end-of-run SSH
+#                                      reachability probe waits for a
+#                                      still-booting guest before failing
+#                                      loudly (default 120; see
+#                                      aws_check_reachability, repo#449)
+#   REPO_REMOTE_SSH_READY_POLL_INTERVAL seconds between readiness probe
+#                                      attempts (default 5)
+#   REPO_REMOTE_IP_POLL_ATTEMPTS       how many times `up` polls for the
+#                                      instance's public IP after it is running
+#                                      (default 6; see aws_wait_public_ip,
+#                                      repo#451)
+#   REPO_REMOTE_IP_POLL_INTERVAL       seconds between those polls (default 2;
+#                                      0 makes the suite's exhausted-budget
+#                                      case instant)
+#   REPO_REMOTE_HOST_ID_FILE           on-host path of the instance-id marker
+#                                      written at provision time and read back
+#                                      by `verify` (default
+#                                      /etc/repo-remote-instance-id; repo#458)
+#   REPO_REMOTE_VERIFY_SSH_TIMEOUT     ConnectTimeout for the single
+#                                      host-identity probe session (default 10)
 #
 set -uo pipefail
 
@@ -374,8 +439,8 @@ require_cost_config() {
 # the repo-remote=<name> tag/label, and neither of those handles expires: a box
 # provisioned once as an ephemeral dev session can since have become a
 # persistent, daemon-managed fleet worker while still carrying the old tag. That
-# is exactly how `repo-remote=anvil` tooling kept rediscovering `loom-worker-1`
-# after it became a fleet host (2AMLogic/2am#52).
+# is exactly how `repo-remote=anvil` tooling kept rediscovering a fleet host
+# after it became a fleet host (operator incident, private tracker).
 #
 # So: before a REUSED instance is started or aliased, look for a fleet marker
 # the fleet-management side already had to set deliberately elsewhere. This is a
@@ -407,7 +472,7 @@ fleet_marker_gate() {  # <resource-id> <marker-value> <"tag"|"label">
   # Same "repo-remote: ERROR:" shape as die(), but die() is a single line and
   # this refusal is only actionable with the remediation lines that follow it.
   printf '%s\n' "repo-remote: ERROR: refusing to reuse ${id}: it carries the fleet marker ${kind} ${FLEET_TAG_KEY}=${val}." >&2
-  log "  That marker means the host is managed as part of a fleet (e.g. a persistent loom-daemon worker), so starting or re-aliasing it from ephemeral dev-session tooling is almost certainly not what you want (2AMLogic/2am#52)."
+  log "  That marker means the host is managed as part of a fleet (e.g. a persistent loom-daemon worker), so starting or re-aliasing it from ephemeral dev-session tooling is almost certainly not what you want (operator incident, private tracker)."
   log "  If you really mean to target it, re-run with --force."
   log "  To use a different box instead, clear REPO_REMOTE_INSTANCE_ID from ${REPO_ENV:-<git-root>/.env} (and/or remove the repo-remote=${NAME} tag from the fleet host)."
   log "  To disable this check entirely, set REPO_REMOTE_FLEET_TAG_KEY= (empty)."
@@ -446,6 +511,19 @@ gcp_fleet_marker() {  # <instance-name>
 # (loom-daemon or otherwise) does NOT, by itself, keep this host alive. If a
 # future daemon-presence veto is ever wanted it must be added deliberately here
 # and documented; it is not implied by the current logic.
+#
+# BACKGROUND JOBS DO NOT HOLD THIS GUARD (repo#451). A job started over a single
+# non-interactive SSH command — `ssh <alias> 'nohup make -j8 &'` and friends —
+# stops counting as activity via `who` the MOMENT that ssh command returns: the
+# login shell that ran it has already exited, so there is no session left for
+# `who` to report. From then on the job is protected ONLY by its own CPU usage
+# keeping the load average above 0.2, and there is no process-name veto to fall
+# back on. A long build with I/O-bound or license-wait lulls can dip under that
+# threshold for a full IDLE_MIN window and be powered off mid-run (the reported
+# incident: a ~20-minute nohup'd build killed by a 120-minute window's guard).
+# For work that may go CPU-idle, either hold a real session for its duration
+# (`tmux`/`screen` on the host, or an interactive SSH session left open) or size
+# REPO_REMOTE_IDLE_SHUTDOWN_MIN to the job.
 #
 # Idle-exit marker contract (published by this repo so a daemon side can conform
 # without this repo depending on it): when $IDLE_MARKER exists on-host, the guard
@@ -512,6 +590,145 @@ GUARD
 chmod +x /usr/local/bin/repo-remote-idle-check
 echo "* * * * * root /usr/local/bin/repo-remote-idle-check" >/etc/cron.d/repo-remote-idle
 EOF
+}
+
+# ── host-identity verification (repo#458) ───────────────────────────────────
+# See "Host-identity verification" in the header block for the incident and the
+# contract. The short version: an SSH alias is a cached IP, an auto-assigned EC2
+# public IP is released on stop, and the tooling's other checks (does the alias
+# resolve? does ssh connect? does auth succeed?) ALL pass on a stranger's box
+# that inherited the address. The host's own instance id is the one thing that
+# cannot be inherited with the IP, so it is what gets compared.
+#
+# Deliberately NOT a heuristic (hostname, uptime, "does our repo exist here") —
+# those are guesses that a coincidentally-similar host can satisfy. This asks
+# the cloud's own authority for the host's identity and compares exact strings.
+REPO_REMOTE_HOST_ID_FILE="${REPO_REMOTE_HOST_ID_FILE:-/etc/repo-remote-instance-id}"
+REPO_REMOTE_VERIFY_SSH_TIMEOUT="${REPO_REMOTE_VERIFY_SSH_TIMEOUT:-10}"
+
+# The user-data fragment that records the instance's OWN id on disk at boot.
+# The id is NOT interpolated from this script (it isn't known until after
+# run-instances returns anyway) — the host reads it from its metadata service,
+# so the marker can only ever name the box it is actually sitting on. Best
+# effort: if IMDS is unreachable the marker is simply not written and the probe
+# below falls back to querying IMDS itself at verify time.
+host_identity_userdata() {
+  cat <<EOF
+# repo-remote host-identity marker (repo#458): lets a later session prove this
+# SSH alias still reaches THIS instance and not a stranger's box that inherited
+# the public IP released when this one was stopped.
+RR_MARKER='${REPO_REMOTE_HOST_ID_FILE}'
+RR_TOK="\$(curl -s -m 5 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null || true)"
+RR_ID="\$(curl -sf -m 5 -H "X-aws-ec2-metadata-token: \${RR_TOK}" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || true)"
+[ -n "\$RR_ID" ] || RR_ID="\$(curl -sf -m 5 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || true)"
+if [ -n "\$RR_ID" ]; then
+  printf '%s\n' "\$RR_ID" >"\$RR_MARKER"
+  chmod 644 "\$RR_MARKER"
+fi
+EOF
+}
+
+# The POSIX-sh script executed ON the remote host to report its identity.
+# Ordered cheapest-and-most-specific first; exits 1 (printing nothing) when it
+# can name no identity at all, which the caller treats as "unverified", never as
+# "verified".
+host_identity_probe() {
+  # Only the marker path is interpolated; everything else is literal.
+  cat <<EOF
+rr_marker='${REPO_REMOTE_HOST_ID_FILE}'
+EOF
+  cat <<'EOF'
+if [ -r "$rr_marker" ]; then head -n1 "$rr_marker"; exit 0; fi
+rr_imds=http://169.254.169.254
+rr_tok="$(curl -s -m 5 -X PUT "$rr_imds/latest/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null || true)"
+if [ -n "$rr_tok" ]; then
+  rr_id="$(curl -sf -m 5 -H "X-aws-ec2-metadata-token: $rr_tok" "$rr_imds/latest/meta-data/instance-id" 2>/dev/null || true)"
+  if [ -n "$rr_id" ]; then printf '%s\n' "$rr_id"; exit 0; fi
+fi
+rr_id="$(curl -sf -m 5 "$rr_imds/latest/meta-data/instance-id" 2>/dev/null || true)"
+if [ -n "$rr_id" ]; then printf '%s\n' "$rr_id"; exit 0; fi
+rr_id="$(curl -sf -m 5 -H 'Metadata-Flavor: Google' "$rr_imds/computeMetadata/v1/instance/name" 2>/dev/null || true)"
+if [ -n "$rr_id" ]; then printf '%s\n' "$rr_id"; exit 0; fi
+if [ -r /var/lib/cloud/data/instance-id ]; then head -n1 /var/lib/cloud/data/instance-id; exit 0; fi
+exit 1
+EOF
+}
+
+# remote_host_identity <alias> -- sets REMOTE_HOST_IDENTITY to the id the host
+# reports and returns 0; returns 1 with it empty when the identity could not be
+# established. The ssh stderr is captured into REMOTE_HOST_IDENTITY_ERR so the
+# refusal can say WHY rather than just "failed".
+#
+# Results come back through globals rather than stdout DELIBERATELY: a caller
+# writing `id="$(remote_host_identity …)"` would run this in a subshell, and the
+# captured stderr — the whole point of REMOTE_HOST_IDENTITY_ERR — would be
+# discarded with that subshell. Runs ONE ssh session; nothing here can create,
+# start, or otherwise touch a cloud resource.
+REMOTE_HOST_IDENTITY=""
+REMOTE_HOST_IDENTITY_ERR=""
+remote_host_identity() {  # <alias>
+  local alias="$1" script out rc errf
+  REMOTE_HOST_IDENTITY=""
+  REMOTE_HOST_IDENTITY_ERR=""
+  script="$(host_identity_probe)"
+  errf="$(mktemp)"
+  out="$(ssh -o ConnectTimeout="$REPO_REMOTE_VERIFY_SSH_TIMEOUT" -o BatchMode=yes \
+             -o StrictHostKeyChecking=accept-new "$alias" 'sh -s' <<<"$script" 2>"$errf")"
+  rc=$?
+  REMOTE_HOST_IDENTITY_ERR="$(cat "$errf" 2>/dev/null)"
+  rm -f "$errf"
+  # An instance id is a single bare token; normalize away CR/whitespace and any
+  # trailing chatter so a cosmetic difference can never read as a mismatch.
+  out="$(printf '%s' "$out" | head -n1 | tr -d '[:space:]')"
+  [[ $rc -eq 0 && -n "$out" ]] || return 1
+  REMOTE_HOST_IDENTITY="$out"
+  return 0
+}
+
+# verify_host_identity <alias> <expected-id> <expected-source> [strict|advisory]
+# Sets HOST_ID_OBSERVED to what the host actually said (empty when unknown).
+# A MISMATCH exits 6 in BOTH modes — that is the incident, and --force does not
+# override it. The modes differ only on an identity that could not be
+# established: strict (the `verify` subcommand) exits 6 too, advisory (the tail
+# of `up`) warns and returns 0. See the header block for why.
+HOST_ID_OBSERVED=""
+verify_host_identity() {
+  local alias="$1" expected="$2" src="$3" mode="${4:-strict}" got=""
+  HOST_ID_OBSERVED=""
+
+  if remote_host_identity "$alias"; then
+    got="$REMOTE_HOST_IDENTITY"
+    HOST_ID_OBSERVED="$got"
+  else
+    local why="${REMOTE_HOST_IDENTITY_ERR:-the host answered but named no identity source (no ${REPO_REMOTE_HOST_ID_FILE} marker and no reachable instance metadata service)}"
+    if [[ "$mode" == strict ]]; then
+      printf '%s\n' "repo-remote: ERROR: could not establish the identity of the host reachable at ssh alias '${alias}'." >&2
+      log "  expected instance: ${expected} (${src})"
+      log "  reason: ${why}"
+      log "  Failing closed: an unverifiable host is NOT evidence that the alias still points at your instance. An EC2 auto-assigned public IP is released when the instance stops, so a stale alias can resolve to an unrelated AWS customer's box (repo#458)."
+      log "  Re-run 'repo-remote up --yes' to re-resolve the public IP and rewrite the alias, then verify again."
+      exit 6
+    fi
+    log "WARNING: could not verify the host identity of ${alias} (expected ${expected}); ${why}"
+    log "  The alias was rewritten from this run's freshly resolved address, so it is current as of now — but before trusting a LATER reconnect over it, run: repo-remote verify"
+    return 0
+  fi
+
+  if [[ "$got" != "$expected" ]]; then
+    # Same "repo-remote: ERROR:" shape as die(), but spelled out over several
+    # lines because the remediation is the actionable part (cf.
+    # fleet_marker_gate above).
+    printf '%s\n' "repo-remote: ERROR: HOST IDENTITY MISMATCH for ssh alias '${alias}'." >&2
+    log "  expected instance:     ${expected} (${src})"
+    log "  host at that alias is: ${got}"
+    log "  An auto-assigned EC2 public IP is released when its instance stops and reassigned on the next start — very possibly to another AWS customer's instance. The alias resolving and ssh connecting therefore prove NOTHING about which machine you reached (repo#458)."
+    log "  Do NOT read from or write to this alias: work written through it lands on somebody else's host."
+    log "  Fix: re-run 'repo-remote up --yes' to re-resolve the public IP and rewrite the alias, then re-run 'repo-remote verify'."
+    log "  If ${expected} is not the box you meant, correct REPO_REMOTE_INSTANCE_ID in ${REPO_ENV:-<git-root>/.env}."
+    log "  --force does NOT override this check (it is the fleet-marker override only)."
+    exit 6
+  fi
+  return 0
 }
 
 # ── AWS provider ────────────────────────────────────────────────────────────
@@ -680,6 +897,65 @@ aws_public_ip() {  # <instance-id>
   return "$rc"
 }
 
+# aws_wait_public_ip: poll aws_public_ip() with a BOUNDED retry budget, echoing
+# the resolved IP and returning 0, or echoing nothing and returning 1 when the
+# budget is exhausted (repo#451).
+#
+# Why a poll at all: a stop/start cycle (the idle guard stops the box; the next
+# `up` starts it again) assigns a BRAND NEW public IP, and AWS does not always
+# have it attached by the time `wait instance-running` returns. The single
+# unretried query this replaces could therefore observe "no IP yet" and hand
+# write_ssh_alias() nothing to write — which, by design (repo#216), leaves the
+# PREVIOUS session's now-wrong HostName in place. Nothing in the old output
+# distinguished that silent staleness from a host that has no public IP on
+# purpose, so the exhausted-budget case below says so explicitly.
+#
+# "Not yet" for retry purposes means any of: an empty value, the AWS CLI's
+# literal "None" rendering of a null scalar, or an outright API-call failure
+# (throttling / a transient error — exactly the case worth retrying).
+# aws_public_ip() still surfaces the underlying stderr on every failing attempt,
+# so nothing is swallowed; the budget is what keeps this from hanging.
+#
+# The budget is deliberately small (6 attempts, 2s apart => ~10s worst case) and
+# is overridable via REPO_REMOTE_IP_POLL_ATTEMPTS / REPO_REMOTE_IP_POLL_INTERVAL
+# so the test suite can drive both the late-IP and exhausted paths without real
+# sleeps. Both overrides are validated: a non-numeric (or zero) attempt count
+# falls back to the default rather than degenerating into "never poll" or an
+# unbounded loop.
+aws_wait_public_ip() {  # <instance-id> -> echoes the IP, or returns 1
+  local iid="$1" attempts interval i ip rc=0
+  attempts="${REPO_REMOTE_IP_POLL_ATTEMPTS:-6}"
+  interval="${REPO_REMOTE_IP_POLL_INTERVAL:-2}"
+  [[ "$attempts" =~ ^[0-9]+$ ]] && (( attempts >= 1 )) || attempts=6
+  [[ "$interval" =~ ^[0-9]+$ ]] || interval=2
+
+  for (( i = 1; i <= attempts; i++ )); do
+    ip="$(aws_public_ip "$iid")"; rc=$?
+    # Trim whitespace (the CLI appends a newline) and normalize "None" to empty.
+    ip="${ip#"${ip%%[![:space:]]*}"}"
+    ip="${ip%"${ip##*[![:space:]]}"}"
+    [[ "$ip" == "None" ]] && ip=""
+    if [[ $rc -eq 0 && -n "$ip" ]]; then
+      (( i > 1 )) && log "public IP for ${iid} resolved on attempt ${i}/${attempts}"
+      printf '%s' "$ip"
+      return 0
+    fi
+    (( i < attempts )) && sleep "$interval"
+  done
+
+  if [[ $rc -ne 0 ]]; then
+    # Preserved verbatim from the pre-poll implementation: the API call itself
+    # failed and the run continues anyway (the instance is up; the IP may
+    # resolve on a later `status`/`up`).
+    log "continuing with no public IP for ${iid} (see error above)"
+  fi
+  # The distinct, actionable warning the generic "@ <no public ip>" result line
+  # never gave (repo#451): say that the alias was NOT refreshed, so a silently
+  # stale HostName is distinguishable from a host with no public IP by design.
+  log "WARNING: no public IP for ${iid} after ${attempts} attempt(s) over ~$(( (attempts - 1) * interval ))s — the SSH alias 'repo-remote-${NAME}' was NOT refreshed. If this host previously had a public IP (e.g. it was just restarted after an idle shutdown), the HostName recorded in ${REPO_REMOTE_SSH_CONFIG:-$HOME/.ssh/config} is now STALE and 'ssh repo-remote-${NAME}' will reach the wrong address — re-run 'repo-remote up --yes' once AWS reports an IP. If this instance has no public IP by design (e.g. a private-subnet host), this is informational."
+  return 1
+}
+
 # ── AWS: security group resolve-or-create + SSH ingress (repo#176) ─────────
 # aws_create() previously only conditionally attached a PRE-EXISTING security
 # group via REPO_REMOTE_SECURITY_GROUP; if unset, run-instances fell back to
@@ -780,12 +1056,79 @@ aws_authorize_ssh_ingress() {  # <sg-id> <cidr>
 # incident in-run: a security group whose ingress set was empty
 # ({port: null, cidr: []}), with SSH timing out indefinitely as the only
 # symptom. Fail loudly here instead, before any instance is even launched.
-aws_verify_ssh_ingress() {  # <sg-id>
+aws_has_ssh_ingress() {  # <sg-id> -> 0 when a tcp/22 rule is present
   local sg="$1" out
   out="$(aws ec2 describe-security-groups --group-ids "$sg" \
     --query 'SecurityGroups[0].IpPermissions[?ToPort==`22`]' --output text 2>/dev/null)"
-  [[ -n "$out" && "$out" != "None" ]] \
+  [[ -n "$out" && "$out" != "None" ]]
+}
+
+aws_verify_ssh_ingress() {  # <sg-id>
+  local sg="$1"
+  aws_has_ssh_ingress "$sg" \
     || die 4 "security group ${sg} has no tcp/22 ingress rule after provisioning — SSH would time out indefinitely. Check REPO_REMOTE_SECURITY_GROUP / REPO_REMOTE_SSH_CIDR, or add the rule manually with: aws ec2 authorize-security-group-ingress --group-id ${sg} --protocol tcp --port 22 --cidr <your-ip>/32"
+}
+
+# The whole ingress chain in one place: resolve the group, resolve the CIDR to
+# authorize, authorize it, prove it landed. Run on EVERY `up` — both when
+# creating (before run-instances, so the money-spending call is never made
+# against a group that cannot admit SSH) and when REUSING an existing instance
+# (repo#451).
+#
+# Why reuse needs it too: the authorized CIDR is pinned to whatever the
+# operator's IP was at ORIGINAL create time. Laptop IPs move (the reported
+# incident: 52.119.115.124 -> 104.7.12.215 between sessions), so restarting an
+# instance that was created days ago left ingress pointing at an address that no
+# longer reaches it — an SSH timeout whose only fix was revoking/re-authorizing
+# the /32 by hand. Re-running the chain on reuse re-authorizes for the CURRENTLY
+# detected CIDR, so `up` self-heals instead.
+#
+# Repeating it is safe: the group is RESOLVED (explicit REPO_REMOTE_SECURITY_GROUP,
+# else the repo-remote=<name> tag) rather than created per run, and a duplicate
+# tcp/22 rule is treated as success by aws_authorize_ssh_ingress.
+#
+# --no-create (the reuse path) additionally refuses to CREATE a group when none
+# resolves, and logs a notice instead. Creating one there would be worse than
+# doing nothing: the new group is not attached to the already-running instance,
+# so it would neither restore SSH nor be reachable — it would just leak an
+# unused group per repo while *looking* like the ingress had been repaired.
+# (repo#176's "no new SG accumulates per invocation" property, asserted by the
+# suite, says the same thing.) The same limitation applies whenever a reused
+# instance is attached to some OTHER group (created outside this tooling, or
+# before repo#176): the group refreshed here is not the one guarding it, and
+# that group has to be fixed by hand.
+#
+# --no-create also never WIDENS an existing rule on a failed IP detection — see
+# the inline note below. Refreshing ingress on reuse must not be able to turn a
+# working /32 into 0.0.0.0/0 just because an echo service was unreachable.
+aws_refresh_ssh_ingress() {  # [--no-create]
+  if [[ "${1:-}" == "--no-create" ]]; then
+    local sg="${REPO_REMOTE_SECURITY_GROUP:-}"
+    [[ -n "$sg" ]] || sg="$(aws_find_tagged_sg)"
+    if [[ -z "$sg" ]]; then
+      log "NOTICE: SSH ingress was NOT refreshed for this reused instance — no group is pinned via REPO_REMOTE_SECURITY_GROUP and none is tagged repo-remote=${NAME}, so there is no group this tooling owns to re-authorize (creating one would not be attached to an already-running instance). If SSH does not connect, authorize tcp/22 from your current address on the instance's own security group: aws ec2 authorize-security-group-ingress --group-id <its-sg> --protocol tcp --port 22 --cidr <your-ip>/32"
+      return 0
+    fi
+    RESOLVED_SG="$sg"
+    aws_resolve_ssh_cidr                                # sets RESOLVED_SSH_CIDR
+    # Reuse must never WIDEN exposure. A 0.0.0.0/0 that came from *failed*
+    # detection (rather than an explicit REPO_REMOTE_SSH_CIDR opt-in) is the
+    # documented least-bad tradeoff when CREATING — the alternative is a brand
+    # new box nobody can reach. On reuse the group normally already admits SSH
+    # from an earlier run, so applying that fallback here would be a pure
+    # exposure increase on a path that previously touched ingress at all. So:
+    # if the rule is already there, leave it exactly as it is and say so.
+    if [[ -z "${SSH_CIDR:-}" && "$RESOLVED_SSH_CIDR" == "0.0.0.0/0" ]] \
+       && aws_has_ssh_ingress "$RESOLVED_SG"; then
+      log "NOTICE: current-IP detection failed, so SSH ingress on ${RESOLVED_SG} was left EXACTLY as it is rather than widened to 0.0.0.0/0 for this reused instance. If SSH cannot connect, set REPO_REMOTE_SSH_CIDR to the address you are connecting from and re-run."
+      return 0
+    fi
+  else
+    aws_resolve_or_create_sg                            # sets RESOLVED_SG
+    aws_resolve_ssh_cidr                                # sets RESOLVED_SSH_CIDR
+  fi
+  aws_authorize_ssh_ingress "$RESOLVED_SG" "$RESOLVED_SSH_CIDR"
+  aws_verify_ssh_ingress "$RESOLVED_SG"
 }
 
 # Belt-and-suspenders SSH access (repo#177): append the resolved public key to
@@ -808,12 +1151,15 @@ EOF
 
 # Build the full AWS EC2 user-data script for a newly created instance:
 # ALWAYS injects the resolved SSH public key into authorized_keys
-# (unconditional belt-and-suspenders, repo#177), then folds in the
+# (unconditional belt-and-suspenders, repo#177) and ALWAYS records the
+# host-identity marker (repo#458 — unconditional for the same reason: the check
+# that reads it must not depend on optional configuration), then folds in the
 # idle-shutdown guard's cron watchdog when idle_guard_enabled (repo#163's
 # IDLE_MIN<=0 opt-out still applies to THAT section only).
 aws_userdata() {  # <pubkey-line>
   printf '#!/bin/bash\n'
   authorized_keys_userdata "$1"
+  host_identity_userdata
   if idle_guard_enabled; then
     # idle_guard_userdata() emits its own leading shebang; strip it since the
     # combined script only needs the ONE shebang emitted above.
@@ -832,11 +1178,9 @@ aws_create() {
   aws_resolve_keypair; key="$RESOLVED_KEY_NAME"
 
   # Resolve-or-create the security group and prove it actually allows SSH
-  # BEFORE spending money on run-instances (repo#176).
-  aws_resolve_or_create_sg                              # sets RESOLVED_SG
-  aws_resolve_ssh_cidr                                  # sets RESOLVED_SSH_CIDR
-  aws_authorize_ssh_ingress "$RESOLVED_SG" "$RESOLVED_SSH_CIDR"
-  aws_verify_ssh_ingress "$RESOLVED_SG"
+  # BEFORE spending money on run-instances (repo#176). The reuse paths in
+  # aws_up() run the same chain (repo#451).
+  aws_refresh_ssh_ingress                               # sets RESOLVED_SG
 
   udfile="$(mktemp)"; aws_userdata "$RESOLVED_PUB_KEY_LINE" >"$udfile"
   errfile="$(mktemp)"
@@ -896,16 +1240,64 @@ aws_create() {
 # right after the SSH alias is written, instead of it surfacing as a bare
 # timeout on the caller's next attempt. AWS-only, mirroring the scope of the
 # rest of this fix (GCP already documents OS Login / IAP instead).
+#
+# Readiness wait (repo#449): a single 10s attempt fired immediately after
+# `run-instances` returns is a coin flip — a freshly booted guest routinely
+# refuses connections for tens of seconds while cloud-init and sshd come up,
+# which made `up` report a *false* provisioning failure on a perfectly good
+# instance. The probe therefore retries across a bounded, configurable window,
+# using the same deadline/poll-interval shape as acquire_ssh_alias_lock()
+# below, and only ever re-runs the `ssh` call: nothing in this function can
+# create, start, or otherwise touch the instance, so a readiness retry can
+# never relaunch anything.
+REPO_REMOTE_SSH_READY_TIMEOUT="${REPO_REMOTE_SSH_READY_TIMEOUT:-120}"
+REPO_REMOTE_SSH_READY_POLL_INTERVAL="${REPO_REMOTE_SSH_READY_POLL_INTERVAL:-5}"
+
+# ssh_error_is_boot_in_progress <ssh-stderr> -- true (0) only when the captured
+# stderr matches a known "the host is not listening yet" phrasing. Everything
+# else -- `Permission denied`, a bad key/user, an unrecognized message, or no
+# stderr at all -- is deliberately treated as a hard failure so an
+# authentication/configuration error surfaces immediately instead of silently
+# burning the whole retry budget. `ssh` exits 255 for both classes, so the
+# stderr text is the only available discriminator.
+ssh_error_is_boot_in_progress() {  # <ssh-stderr>
+  printf '%s' "$1" | grep -Eq \
+    'Connection refused|Operation timed out|Connection timed out|No route to host|Connection reset|Connection closed by remote host|Network is unreachable|Host is unreachable'
+}
+
 aws_check_reachability() {  # <ssh-alias> <ip>
-  if [[ -z "$2" ]]; then
+  local alias="$1" ip="$2"
+  if [[ -z "$ip" ]]; then
     log "no public IP resolved yet; skipping the end-of-run SSH reachability check"
     return 0
   fi
-  if ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$1" true >/dev/null 2>&1; then
-    log "SSH reachability check passed (${1})"
-  else
-    die 4 "SSH reachability check failed for ${1} (${2}) after provisioning. The instance was created/started and its SSH alias written, but SSH did not respond within 10s. Check the security group ingress rule (REPO_REMOTE_SSH_CIDR), REPO_REMOTE_SSH_KEY, and REPO_REMOTE_SSH_USER, or retry: ssh ${1}"
-  fi
+
+  local started; started="$(date +%s)"
+  local deadline=$(( started + REPO_REMOTE_SSH_READY_TIMEOUT ))
+  local attempts=0 err=""
+
+  while true; do
+    attempts=$(( attempts + 1 ))
+    if err="$(ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$alias" true 2>&1 >/dev/null)"; then
+      if (( attempts > 1 )); then
+        log "SSH reachability check passed (${alias}) after ${attempts} attempts / $(( $(date +%s) - started ))s of readiness wait"
+      else
+        log "SSH reachability check passed (${alias})"
+      fi
+      return 0
+    fi
+
+    if ! ssh_error_is_boot_in_progress "$err"; then
+      die 4 "SSH reachability check failed for ${alias} (${ip}) after provisioning. The failure does not look like a host that is still booting, so waiting longer will not help: ${err:-(ssh produced no error output)}. Check the security group ingress rule (REPO_REMOTE_SSH_CIDR), REPO_REMOTE_SSH_KEY, and REPO_REMOTE_SSH_USER, or retry: ssh ${alias}"
+    fi
+
+    if [[ $(date +%s) -ge $deadline ]]; then
+      die 4 "SSH reachability check failed for ${alias} (${ip}) after provisioning. The instance was created/started and its SSH alias written, but SSH did not respond within ${REPO_REMOTE_SSH_READY_TIMEOUT}s (${attempts} attempt(s)); last error: ${err:-(none)}. Check the security group ingress rule (REPO_REMOTE_SSH_CIDR), REPO_REMOTE_SSH_KEY, and REPO_REMOTE_SSH_USER, raise REPO_REMOTE_SSH_READY_TIMEOUT if this image is simply slow to boot, or retry: ssh ${alias}"
+    fi
+
+    log "SSH not ready yet on ${alias} (attempt ${attempts}: ${err:-no error output}); still booting -- retrying in ${REPO_REMOTE_SSH_READY_POLL_INTERVAL}s (up to ${REPO_REMOTE_SSH_READY_TIMEOUT}s total)"
+    sleep "$REPO_REMOTE_SSH_READY_POLL_INTERVAL"
+  done
 }
 
 aws_up() {
@@ -951,20 +1343,30 @@ aws_up() {
     aws_create           # sets CREATED_ID or dies (main-shell context)
     iid="$CREATED_ID"
     reused=false
+  else
+    # REUSE path (already-running pinned id, restarted pinned id, or restarted
+    # tag-discovered instance): re-authorize SSH ingress for the CURRENTLY
+    # detected CIDR (repo#451). aws_create() already ran this chain for the
+    # create path, pre-launch, so this is the reuse half of the same contract
+    # -- deliberately placed AFTER the fleet-marker gate above, which must
+    # still be able to refuse a run before it touches any cloud resource.
+    # --no-create: never conjure a group for a host that is already attached to
+    # one (see aws_refresh_ssh_ingress).
+    aws_refresh_ssh_ingress --no-create
   fi
 
   aws ec2 wait instance-running --instance-ids "$iid" >/dev/null 2>&1 || true
+  # Bounded poll rather than a single query (repo#451): a just-restarted
+  # instance's NEW public IP is not always propagated by the time `wait
+  # instance-running` returns, and an empty value here silently leaves the
+  # previous session's stale HostName in the SSH config. aws_wait_public_ip()
+  # logs the underlying API error (if any) plus an explicit "alias was NOT
+  # refreshed" warning when its budget is exhausted; the run still continues
+  # -- the instance is up, the IP may resolve on a later `status`/`up`, and
+  # write_ssh_alias() independently refuses to write a broken stanza for an
+  # empty IP either way (repo#216).
   local ip
-  if ! ip="$(aws_public_ip "$iid")"; then
-    # aws_public_ip already logged the underlying API error; treat it the
-    # same as "no public IP yet" here rather than dying -- the instance is up
-    # and reachable state may still resolve on a later `status`/`up` run, and
-    # write_ssh_alias() below independently refuses to write a broken stanza
-    # for an empty/None IP either way (repo#216).
-    log "continuing with no public IP for ${iid} (see error above)"
-    ip=""
-  fi
-  [[ "$ip" == "None" ]] && ip=""
+  ip="$(aws_wait_public_ip "$iid")" || ip=""
 
   writeback_instance_id "$iid"
   local alias
@@ -972,9 +1374,63 @@ aws_up() {
     log "SSH alias write for ${alias} was rejected (see error above); the SSH config was left untouched -- ssh ${alias} (or git-over-SSH via it) will not work until this is retried"
   fi
 
+  # The readiness wait inside aws_check_reachability applies to EVERY `up`, not
+  # just a freshly created instance (repo#449): a stopped -> started instance
+  # goes through the exact same boot sequence and refuses connections for the
+  # same window, so gating the retry on `reused == false` would leave the
+  # identical false failure on the reuse path. `reused` is therefore
+  # deliberately not passed down. Note this call is AFTER writeback_instance_id
+  # above on purpose -- the instance id must already be persisted to REPO_ENV
+  # before the probe can die, so a readiness timeout never orphans the box.
   aws_check_reachability "$alias" "$ip"
 
+  # Host-identity verification (repo#458). Reaching SOMETHING at the alias is
+  # not the same as reaching THIS instance: the probe above is satisfied by any
+  # host that answers, including a stranger's box that inherited the public IP
+  # released when this instance was last stopped. So confirm the box at the
+  # other end says it is $iid before `up` reports success.
+  #
+  # Advisory mode: a MISMATCH still exits 6 (that is the incident — the alias
+  # this run just wrote does not reach the instance this run just resolved),
+  # but an identity it could not establish is a warning, because `up` rewrote
+  # the alias from a freshly-resolved address in this very run. `verify` is the
+  # fail-closed half, for the reconnect case where nothing re-derived the IP.
+  if [[ -n "$ip" ]]; then
+    verify_host_identity "$alias" "$iid" "this run's resolved instance" advisory
+    if [[ -n "$HOST_ID_OBSERVED" ]]; then
+      log "host identity verified: ${alias} reaches ${HOST_ID_OBSERVED}"
+    fi
+  else
+    log "WARNING: no public IP resolved, so ${alias} was not refreshed and its host identity could not be verified -- whatever HostName it still carries is from a previous session and may now resolve to an unrelated instance. Re-run 'repo-remote up --yes' once the IP is available, then 'repo-remote verify', before using it."
+  fi
+
   emit_up_result "$iid" "$ip" "$alias" "$reused"
+}
+
+# `verify` (repo#458): resolve the instance id this repo EXPECTS at the alias,
+# then prove the host actually reachable there agrees. A pinned
+# REPO_REMOTE_INSTANCE_ID needs no cloud call at all, which is the point of
+# recommending the pin: verification stays cheap enough to run before every
+# session, and the expectation is explicit rather than re-derived from a tag
+# that some other host may also be wearing.
+aws_verify() {
+  local expected="" src=""
+  if [[ -n "$INSTANCE_ID" ]]; then
+    expected="$INSTANCE_ID"
+    src="pinned REPO_REMOTE_INSTANCE_ID"
+  else
+    aws_authenticate
+    local found; found="$(aws_find_tagged)"
+    if [[ -n "$found" ]]; then
+      expected="$(printf '%s' "$found" | awk '{print $1}')"
+      src="discovered via the repo-remote=${NAME} tag"
+    fi
+  fi
+  [[ -n "$expected" ]] || die 2 "nothing to verify against: REPO_REMOTE_INSTANCE_ID is not set and no instance is tagged repo-remote=${NAME}. Pin REPO_REMOTE_INSTANCE_ID in ${REPO_ENV:-<git-root>/.env} (the recommended configuration for any session that outlives a stop/start), or run 'repo-remote up --yes' to provision one."
+
+  local alias="repo-remote-${NAME}"
+  verify_host_identity "$alias" "$expected" "$src" strict
+  emit_verify_result "$alias" "$expected" "$HOST_ID_OBSERVED" "$src"
 }
 
 aws_status() {
@@ -1097,6 +1553,24 @@ gcp_status() {
     --filter="labels.repo-remote=${NAME}" \
     --format='value(name,status,machineType.basename(),networkInterfaces[0].accessConfigs[0].natIP,creationTimestamp)' 2>/dev/null || true)"
   emit_status_result "$rows"
+}
+
+# GCP analogue of aws_verify (repo#458). GCP's identity token is the instance
+# NAME (what the metadata server's instance/name key reports), and gcp_up()
+# derives that name deterministically as repo-remote-<name> — so, unlike AWS,
+# there is nothing to discover and no cloud call is ever needed here.
+gcp_verify() {
+  local expected src
+  if [[ -n "$INSTANCE_ID" ]]; then
+    expected="$INSTANCE_ID"
+    src="pinned REPO_REMOTE_INSTANCE_ID"
+  else
+    expected="repo-remote-${NAME}"
+    src="the instance name derived from this repo"
+  fi
+  local alias="repo-remote-${NAME}"
+  verify_host_identity "$alias" "$expected" "$src" strict
+  emit_verify_result "$alias" "$expected" "$HOST_ID_OBSERVED" "$src"
 }
 
 gcp_down() {
@@ -1346,6 +1820,27 @@ emit_up_result() {  # <id> <ip> <alias> <reused>
   fi
 }
 
+emit_verify_result() {  # <alias> <expected-id> <observed-id> <source>
+  local alias="$1" expected="$2" observed="$3" src="$4"
+  if [[ "$JSON_OUT" == true ]]; then
+    printf '{'
+    printf '"action":"verify",'
+    printf '"provider":"%s",' "$(json_escape "$PROVIDER")"
+    printf '"name":"%s",' "$(json_escape "$NAME")"
+    printf '"ssh_alias":"%s",' "$(json_escape "$alias")"
+    printf '"expected_instance_id":"%s",' "$(json_escape "$expected")"
+    printf '"host_instance_id":"%s",' "$(json_escape "$observed")"
+    printf '"identity_source":"%s",' "$(json_escape "$src")"
+    # Only ever emitted on the success path -- verify_host_identity() exits 6
+    # before reaching here on a mismatch or an unverifiable host, so this field
+    # is never false and a caller can gate on its presence alone.
+    printf '"verified":true'
+    printf '}\n'
+  else
+    log "host identity verified: ssh alias ${alias} reaches ${observed} (expected ${expected} — ${src})"
+  fi
+}
+
 emit_status_result() {  # <rows: id state type ip launch, tab/space separated per line>
   local rows="$1"
   if [[ "$JSON_OUT" == true ]]; then
@@ -1418,9 +1913,10 @@ usage() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      up|status|down) [[ -z "$ACTION" ]] && ACTION="$1" || die 64 "multiple actions given ($ACTION, $1)" ;;
+      up|status|down|verify) [[ -z "$ACTION" ]] && ACTION="$1" || die 64 "multiple actions given ($ACTION, $1)" ;;
       --status)       ACTION="status" ;;
       --down)         ACTION="down" ;;
+      --verify)       ACTION="verify" ;;
       --yes|-y)       YES=true ;;
       --force)        FORCE=true ;;
       --json)         JSON_OUT=true ;;
@@ -1431,7 +1927,7 @@ parse_args() {
     esac
     shift
   done
-  [[ -n "$ACTION" ]] || die 64 "no action given (expected: up | status | down; see --help)"
+  [[ -n "$ACTION" ]] || die 64 "no action given (expected: up | status | verify | down; see --help)"
 }
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -1459,6 +1955,16 @@ main() {
       case "$PROVIDER" in
         aws) aws_status ;;
         gcp) gcp_status ;;
+        *)   die 2 "unknown provider '$PROVIDER'" ;;
+      esac
+      ;;
+    verify)
+      # No cost gate: `verify` spends nothing and mutates nothing — it opens one
+      # SSH session and compares strings (repo#458).
+      [[ -n "$PROVIDER" ]] || die 2 "REPO_REMOTE_PROVIDER (or an aws|gcp argument) is required for verify"
+      case "$PROVIDER" in
+        aws) aws_verify ;;
+        gcp) gcp_verify ;;
         *)   die 2 "unknown provider '$PROVIDER'" ;;
       esac
       ;;

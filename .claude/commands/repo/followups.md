@@ -128,6 +128,12 @@ Every candidate has to land in *some* repo. Build the routing table by reusing
   the slug can be read straight off `source_ref` (a `<git-url>@<tag-or-rev>`
   string) without a `git -C <source> config` lookup.
 
+  **Loom's sidecar is named differently, but still conforms to C6's ladder.**
+  Where C6 step 1 names the sidecar `<tool-root>/.install-local.json`, Loom's
+  actual sidecar is the plain-text `.loom/loom-source-path` (a single path,
+  not JSON) — check that file, not `.install-local.json`, when resolving
+  Loom's source clone here. Full detail: `/repo:update-tools` step 1.
+
   Then derive the slug from the resolved clone's remote:
 
   ```bash

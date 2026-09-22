@@ -1,6 +1,6 @@
 ---
 name: "deps"
-description: "Third-party dependency currency — verify/scaffold Dependabot (config and the repo-level security flag) and triage open Dependabot PRs, always confirmed first"
+description: "Third-party dependency currency — reconcile organization policy, Renovate or Dependabot setup, and bot PRs; report-only under --check"
 domain: repo
 type: command
 user-invocable: true
@@ -11,10 +11,10 @@ user-invocable: true
 Keep the repo's **third-party dependencies** current: npm / pip / cargo / Go
 packages and GitHub Actions. Two halves, usually run together:
 
-1. **Install / verify Dependabot** — the config file *and* the repo-level
-   security-updates flag, which are two independent things.
-2. **Triage open Dependabot PRs** — what each one is, whether it's risky, and
-   whether to take it.
+1. **Resolve organization policy and verify the updater** — Renovate or
+   Dependabot, independently of GitHub vulnerability alerts and security PRs.
+2. **Triage dependency PRs** — actual changes, age eligibility, security
+   relevance, CI coverage, and merge policy.
 
 This is the companion to [[update-tools]], not a part of it. `update-tools`
 compares *installer-managed tool packages* (Loom, Anvil, Repo Skills) against a
@@ -24,22 +24,23 @@ package." Keeping them separate keeps `update-tools`' comparison model intact.
 
 Everything here either writes repo config, flips a repository setting, or
 merges a PR — so like `release`, `remote`, `followups`, and `update-tools`,
-this command **always confirms first** and never auto-applies. `--check` is the
-report-only form.
+this command requires authorization for writes and merges. Apply existing
+authorization when it covers the concrete changes; otherwise show the changes
+and confirm first. `--check` is always report-only.
 
 ## Usage
 
 ```
-/repo:deps                  # Report status + open Dependabot PRs, then offer actions
+/repo:deps                  # Report policy, updater status, and open dependency PRs
 /repo:deps --check          # Report only — never writes, never merges
-/repo:deps --install        # Only the install/verify half (config + security flag)
+/repo:deps --install        # Only setup reconciliation (policy + config + settings)
 /repo:deps --review         # Only the PR-triage half
 /repo:deps --review 123     # Triage one PR in depth
 ```
 
 ## Prerequisites
 
-Dependabot is a GitHub feature. Confirm the repo is on GitHub before doing
+This command currently supports GitHub. Confirm the repo is on GitHub before doing
 anything else — if `origin` points at Gitea or another forge, say so and stop
 rather than scaffolding config that will never run:
 
@@ -48,7 +49,82 @@ git config --get remote.origin.url    # → derive OWNER/REPO; must be a GitHub 
 gh auth status
 ```
 
-## Steps — install / verify
+## 0. Resolve policy and choose the provider
+
+Read root `repo-policy.json` from `OWNER/.github` on its default branch, if
+accessible. This is the deployed organization policy. It records the canonical
+source in **rjwalters/repo/policies/**, its revision, desired provider/settings,
+and `dependencies.renovatePreset`. [[org-policy]] compares that installed copy
+with the canonical source and prepares organization updates. Do not invent a
+second organization preference file in a client or change an installed org copy
+as if it were authoritative. An absent file, access failure, and invalid policy
+are distinct states; do not silently fall back after a permissions/network or
+validation error.
+
+Also detect existing Renovate config, including `renovate.json`, `renovate.json5`,
+`.github/renovate.json[5]`, `.renovaterc[.json]`, `.renovaterc.json5`,
+`.gitlab/renovate.json[5]`, and the `renovate` key in `package.json`, alongside
+Dependabot config. Inspect Renovate's current supported config locations if
+none of these explains an active installation. Preserve an existing provider
+unless migration is authorized. With no provider or organization policy, offer
+[[org-policy]] before proposing new automation; do not silently assume that
+missing `dependabot.yml` means dependencies are unmanaged.
+
+Report separately: deployed policy source/revision and drift, provider/config,
+app operation, dependency graph, vulnerability alerts, security PR provider,
+effective release-age rules, automerge/required checks, and open bot PRs.
+`dependabotSecurityUpdates: false` is expected when Renovate owns security PRs;
+it is not a finding that should be "fixed" by enabling a second provider.
+
+### Renovate setup path
+
+When Renovate is selected, use this path instead of Dependabot steps 1, 4–6.
+Reuse steps 2–3 below for ecosystem/ownership detection and label validation.
+
+- Confirm the organization policy PR is merged and its preset is readable by
+  the Renovate installation. Config presence alone does not prove an active
+  GitHub App or a successful scan: inspect onboarding, the Dependency Dashboard,
+  and job logs. App installation may require an organization administrator.
+- Update the existing active Renovate config (do not add a competing file) to
+  extend the deployed `dependencies.renovatePreset`, usually
+  `github>OWNER/.github:renovate-config`. Preserve intentional client exceptions
+  and report any override that changes age or merge policy. Use a minimal
+  `renovate.json` with that `extends` entry only when no config exists.
+- Exclude the installer-owned roots discovered in step 2a through `ignorePaths`,
+  preserving existing exclusions. Skip dependency-free manifests. Validate the
+  resulting effective native config with `renovate-config-validator`.
+- Keep the dependency graph and Dependabot alerts enabled and grant Renovate
+  read access to alerts. Probe the dedicated alerts and security-fixes endpoints
+  shown in step 1. Treat `dependencies.dependabotSecurityUpdates` as desired
+  state: disable Dependabot PR generation only after Renovate's fix coverage is
+  verified for this client's ecosystems and lockfiles. Report pending migration
+  instead of temporarily removing all security-fix automation.
+- During migration, remove/disable the overlapping Dependabot version-update
+  entries once Renovate is operational. Retain any deliberately assigned
+  Dependabot-only coverage and inspect old PRs individually; do not bulk-close
+  them just because the provider changed.
+- Verify release timestamps and package-manager age controls, including new
+  transitive versions during lockfile generation. The baseline is 14 days for
+  routine versions, one day for advisory-backed security fixes. Check that the
+  explicit security age override is honored by the deployed bot; its default
+  security behavior is zero delay. A changelog claim or patch version number is
+  insufficient to automatically grant the security exception. An emergency
+  override requires the affected advisory/dependency and explicit authorization;
+  scope it to this client and remove it afterward.
+- Eligibility and merging are separate. The shared baseline leaves automerge
+  off. Before opting in, verify required checks cover the affected ecosystems;
+  never bypass CI or assume all Actions majors are low-risk. Do not attach
+  reserved Loom labels to route bot PRs into another merge pipeline.
+
+Show concrete config/settings changes before applying authorized setup. Continue
+with the common PR review below. Under `--check`, make no changes, including
+organization deployments, client files, flags, or merges.
+
+## Steps — Dependabot install / verify
+
+Use this path when Dependabot remains the chosen provider. An organization's
+Renovate policy is a migration proposal until adoption is authorized, not a
+reason to silently replace a working Dependabot installation.
 
 ### 1. Report config and the security flag as two distinct items
 
@@ -112,8 +188,9 @@ the authoritative source either way.
 ### 2. Detect the ecosystems actually present
 
 Scaffold from what the repo really contains, never from a fixed template. Look
-for manifests at the root **and** in subdirectories (each distinct directory
-needs its own `updates:` entry with the right `directory:` value):
+for manifests at the root **and** in subdirectories (every distinct directory
+needs coverage — either its own `updates:` entry with the right `directory:`
+value, or a slot in one entry's plural `directories:` list, see below):
 
 | Ecosystem | Detect via |
 |---|---|
@@ -141,8 +218,19 @@ is a **hard error that aborts the whole command line**, so a repo with `.yml`
 workflows can end up reporting no Actions ecosystem at all. `2>/dev/null` does
 not save you — zsh fails before `ls` ever runs.
 
-If **nothing** is detected, say there is nothing to scaffold and stop — do not
-guess an ecosystem the repo doesn't have.
+If **nothing** is detected, say there is nothing to scaffold; do not guess an
+ecosystem. Still report alerts/settings through the selected provider's path.
+
+**One ecosystem in many directories**: when the same ecosystem appears in
+several places (say, four independent crates, each with its own `Cargo.toml`
+and `Cargo.lock`, under one directory tree), Dependabot's plural `directories:`
+key collapses them into a **single** `updates:` entry instead of N
+near-identical ones. Scans still open one PR per directory — the key changes
+how the config is written, not how many PRs arrive. The trade-off is that one
+entry means **one shared policy**: the same schedule, grouping, `labels:`, and
+`exclude-patterns` apply to every listed directory. Keep separate
+per-directory entries whenever two manifests genuinely need different grouping
+or cadence. Syntax in step 4.
 
 #### 2a. Classify each manifest as repo-owned or installer-owned
 
@@ -202,8 +290,9 @@ was installer-owned, dependency-free, or both — do not propose a
 findings at `/repo:update-tools` as the remediation path for their
 dependencies (that command upgrades the vendored manifest itself; a Dependabot
 PR against it would just be reverted by the next install). Still continue to
-step 5 for the repo-level security flags — those are useful independent of
-whether there is anything to scaffold.
+the selected provider's repo-level alert/settings checks — those are useful
+independent of whether there is anything to scaffold. Use step 5 only on the
+Dependabot path; Renovate must not re-enable duplicate security PRs.
 
 ### 3. Validate every label the config would reference — by description
 
@@ -307,6 +396,30 @@ updates:
     # majors are deliberately ungrouped: one reviewable PR each
 ```
 
+For an ecosystem step 2 found in several directories, use the plural
+`directories:` key **in place of** `directory:` — a list of paths (globs
+allowed) sharing one entry's schedule, grouping, and labels:
+
+```yaml
+  - package-ecosystem: "cargo"
+    directories:                       # plural — several manifests, one policy
+      - "/crates/alpha"
+      - "/crates/beta"
+      - "/crates/gamma"
+    schedule:
+      interval: "weekly"
+    groups:
+      cargo-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+```
+
+Expect one PR per directory on the first scan even though there is only one
+entry — `directories:` shares the *policy*, not the PRs. Split it back into
+per-directory entries the moment two of those crates need different grouping,
+cadence, or labels: `directories:` buys brevity, and pays for it with a single
+shared policy across every path listed.
+
 Add `labels: ["<validated-label>"]` only if step 3 approved one. Write the file
 only on explicit approval; under `--check`, stop here and show it as a proposal.
 
@@ -331,9 +444,16 @@ arrive within a couple of minutes of the config landing on the default branch,
 regardless of `interval: weekly`. Never tell the user to "expect your first PR
 Monday" — wait briefly, then run the PR review half below.
 
-## Steps — review open Dependabot PRs
+## Steps — review open dependency PRs
 
-### 7. List the bot's open PRs
+### 7. List the selected providers' open PRs
+
+For hosted Renovate include `renovate[bot]` (CLI author `app/renovate`);
+for self-hosted installations discover the configured bot identity rather than
+assuming that login. During migration include both providers, verifying authors
+against the actual installation. A `renovate/` branch name alone proves no bot
+identity. The examples below show Dependabot; extend the author filter for the
+providers actually present.
 
 ```bash
 gh pr list --author "app/dependabot" --state open \
@@ -400,94 +520,27 @@ merged on a green check that had built nothing. Re-check this note against
 the workflow files each run rather than trusting this parenthetical, since
 either side of it can drift.)
 
-#### Stale check — compare the PR's target against the manifest on the base branch
+#### Stale check — compare actual dependency state on the current base
 
-**Dependabot's open PRs go stale after any bulk-update merge.** Its scan runs
-on an interval, so a scan that started before a "update everything" PR landed
-will still open PRs proposing versions the merge already declared — or *older*
-ones. Counting those as pending upgrade work is a false signal, and it is
-exactly the state the repo is in right after someone merges a bulk update and
-runs this command to confirm the repo is clean. Before classifying update type,
-decide whether each PR is **stale** (already satisfied by the manifest) or
-**real** (still forward work):
+Inspect every targeted manifest **and lockfile** from the current remote base
+commit. A manifest range permitting the proposed version does not prove the
+installed dependency already uses it: `^1.0.0` can still lock a vulnerable
+`1.0.0` while a security PR changes only the lockfile to `1.0.1`.
 
-1. **Identify the manifest(s) the PR touches.** Reuse the
-   `pulls/<N>/files` filenames already fetched above — the manifest is the
-   ecosystem file among them (`package.json`, `Cargo.toml`,
-   `requirements*.txt`, `pyproject.toml`, `go.mod`, `Gemfile`,
-   `composer.json`, …), the same set step 2 detects. Dependabot may touch a
-   lockfile too; read the **manifest**, since that is where the declared range
-   lives.
+A PR is stale only when every proposed change is already present or superseded
+on the base. Use the ecosystem's version/range semantics, not lexical ordering
+or a generic comparison of leading digits. For grouped/workspace updates check
+all affected manifests and lockfiles. For security fixes also confirm the
+resolved version is outside the advisory's affected range; a higher version
+can still be vulnerable. Check digest changes independently of version tags.
 
-2. **Read each manifest from the base branch, not the PR head.** The PR head
-   necessarily contains the bump, so comparing against it always reports
-   "satisfied". Read the base branch instead:
+For GitHub Actions, compare the pins in every workflow/action file the PR
+changes. Two PRs with the same version pair can update different workflows;
+a matching title never establishes duplication. Treat ambiguous or partially
+satisfied PRs as pending work, not stale, and do not close them automatically.
 
-   ```bash
-   # <base> is the PR's baseRefName (usually the default branch); <path> is the
-   # manifest filename from pulls/<N>/files.
-   git show <base>:<path>
-   ```
-
-   Extract the currently-declared range for the dependency named in the PR
-   title (e.g. `vitest`, `@biomejs/biome`) from that base-branch manifest.
-
-3. **Compare with semver ordering, not string equality.** The PR is satisfied
-   by a manifest when the range that manifest already declares permits a
-   version **at or above** the PR's proposed target:
-   - an exact/`^`/`~` range that already permits the PR's target — `^4.1.10`
-     permits a PR proposing `4.1.10` → satisfied;
-   - a declared version that is itself **ahead** of the PR's target — `^2.5.7`
-     against a PR proposing `2.5.6`, or `^5.20260804.1` against
-     `5.20260801.1` → satisfied (the PR is behind). Use semver ordering:
-     `2.5.7` > `2.5.6`, so string comparison alone would misread it.
-
-   This is the same leading-component comparison the update-type classification
-   already uses for "major vs minor/patch".
-
-4. **Multi-manifest workspaces: stale only if _every_ targeted manifest is at
-   or ahead.** A dependency declared in several packages (a monorepo/workspace)
-   is stale **only** when every manifest Dependabot's config targets for that
-   ecosystem already satisfies the PR's target. If even one manifest still
-   declares a range below the PR's version, the PR is **real, pending work** —
-   not stale — because that lagging package genuinely needs the bump. (In the
-   reported case `vitest` was `^4.1.10` in `tools/pulse` and `tools/xctl` but
-   `^4.0.0` in `website`; had the PR targeted `4.1.10`, the `website` package
-   would still have needed it — a single satisfied manifest is not enough.)
-
-5. **`github-actions`: each workflow file is its own manifest, and a matching
-   title is not enough to call a PR stale.** `github-actions` has no lockfile
-   and no package root — a single action name can appear verbatim across N
-   unrelated `.github/workflows/*.yml` files that were never conceptually
-   "packages," and each one drifts independently. The common source of that
-   drift is a **newly added** workflow file: it is authored against whatever
-   version was current when someone wrote it, not whatever version the rest
-   of the repo already bumped to. Never conclude "stale" from the PR title's
-   version pair alone — compare that PR's `pulls/<N>/files` against the pins
-   in **every** workflow file that declares the dependency before deciding.
-
-   Concrete case: PR #224 (the grouped `github-actions` PR) bumped
-   `actions/checkout` 4 → 7 in `.github/workflows/ci.yml` and merged first.
-   PR #236 also bumped `actions/checkout` 4 → 7 — but in
-   `.github/workflows/docker-build.yml`, a workflow file PR #235 had just
-   added, still pinned to `actions/checkout@v4`. Despite the identical
-   dependency, the identical version pair, and `ci.yml` on the base branch
-   already showing `@v7`, #236 was **not** stale: it fixed a workflow file
-   #224 never touched. Closing it as a duplicate would have left the new
-   Docker-build workflow pinned to a runtime GitHub had already deprecated —
-   the same class of deprecation #224 was merged to clear.
-
-**When in doubt, treat the PR as real, not stale.** The two failure modes are
-not symmetric: calling a real PR "stale" silently drops a pending upgrade —
-it vanishes from the report and never gets applied — while calling a stale PR
-"real" only re-merges a no-op, which is harmless. Given that asymmetry,
-resolve any ambiguity toward "real."
-
-A PR that is satisfied everywhere it is declared is **stale** — note it as
-`stale — already satisfied by manifest`. A stale PR is **excluded from the
-majors tally** even when its title/branch names a major-version bump: it
-represents no forward change, so it must never be counted as, or described as,
-pending upgrade work.
+Exclude truly stale PRs from the pending-major tally, but retain their separate
+count and evidence in the report.
 
 For **GitHub Actions** bumps specifically, check whether the update **clears a
 deprecation annotation** — often the actual reason to take a scary-looking
@@ -510,14 +563,14 @@ alongside the existing CI-status/diff notes, so a stale PR is visible as such at
 a glance:
 
 ```
-OPEN DEPENDABOT PRs
+OPEN DEPENDENCY PRs
 ===================
 | PR  | Ecosystem      | Update                     | Type  | CI    | Note                              |
 |-----|----------------|----------------------------|-------|-------|-----------------------------------|
 | #12 | github-actions | actions/checkout 4 → 5     | MAJOR | green | clears "Node.js 20 deprecated"    |
 | #13 | npm            | 6 packages (minor + patch) | minor | green | grouped                           |
 | #14 | npm            | playwright-core 1.4 → 2.0  | MAJOR | red   | browser binary coupling           |
-| #15 | npm            | @biomejs/biome 2.5.5 → 2.5.6 | patch | green | stale — already satisfied by manifest (base declares ^2.5.7) |
+| #15 | npm            | @biomejs/biome 2.5.5 → 2.5.6 | patch | green | stale — base lockfile already resolves 2.5.7 |
 ```
 
 Summarize the split explicitly below the table so callers (including
@@ -529,7 +582,7 @@ Summarize the split explicitly below the table so callers (including
 ```
 
 The majors count excludes every stale PR. A PR whose title names a major bump
-but whose manifest is already at or ahead (stale) is **not** a major here — it
+but whose resolved dependency state already satisfies it (stale) is **not** a major here — it
 is counted only in the stale total.
 
 ### 9. Offer to merge the safe ones (confirm first)
@@ -546,19 +599,39 @@ when the branch is linked to a worktree:
 gh pr merge <N> --squash             # otherwise
 ```
 
+**Re-poll mergeability between sequential merges.** Merging one bot PR that
+touches a shared lockfile invalidates its siblings: GitHub recomputes their
+mergeability asynchronously, and for ~20 s the remaining PRs report
+`mergeable: null` / `mergeable_state: "unknown"` (`mergeStateStatus: UNKNOWN`
+via `gh`) before settling back to `clean`. `merge-pr.sh` refuses inside that
+window, which reads as a spurious failure mid-loop. After each merge, re-read
+the next PR's state and wait for `clean` before merging it:
+
+```bash
+for _ in $(seq 1 12); do
+  state=$(gh pr view <N> --json mergeStateStatus -q .mergeStateStatus)
+  [ "$state" = "UNKNOWN" ] || break
+  sleep 5
+done
+echo "$state"   # CLEAN → merge; DIRTY/BLOCKED → real conflict or failing checks, re-triage
+```
+
+A state that settles on `DIRTY` (or `BLOCKED`) is **not** a timing artifact —
+the earlier merge produced a genuine lockfile conflict, so stop the loop and
+report it rather than retrying.
+
 Under `--check`, stop at the report and merge nothing.
 
-## Dependabot PRs are inert to Loom automation by default
+## Check how dependency PRs interact with Loom
 
 State this in the report whenever a `.loom/` directory is present. It is the
 natural wrong assumption, and it is safety-relevant:
 
-- Dependabot PRs carry **no `loom:` label**, so `/loom:sweep` Mode C skips them
-  ("no actionable label") and Champion will not auto-merge them without
-  `loom:pr`.
-- That is **safe by default and probably correct** — but it means nothing in
-  the Loom pipeline is watching these PRs. They sit open until a human or
-  `/repo:deps` triages them.
+- Inspect the actual bot PR labels and installed Loom routing. Do not assume
+  either Dependabot or Renovate PRs are watched or ignored based on bot identity
+  alone; unlabeled PR handling can vary with the installed Loom version.
+- Report who is responsible for merging: a human, the configured updater, or an
+  explicitly authorized Loom workflow. Eligibility is not merge authorization.
 - Do **not** "fix" this by applying `loom:` labels to bot PRs. Routing bot PRs
   into an auto-merge pipeline is a policy decision for the repo's owner, not a
   side effect of a hygiene command — and any label used for it still has to
@@ -566,10 +639,10 @@ natural wrong assumption, and it is safety-relevant:
 
 ## Safety Rules
 
-1. **Never write without confirmation** — the config file, the repo-level
-   flags, and each merge are three separate approvals, not one.
-2. **Config and security flag are reported independently** — a present
-   `dependabot.yml` says nothing about whether CVE alerting is on. Report
+1. **Writes and merges require authorization** — show the concrete scope and
+   use existing authorization when it covers it. Under `--check`, write nothing.
+2. **Policy, updater, alerts, and security PRs are independent** — a present
+   config says nothing about whether CVE alerting is on. Report
    UNKNOWN (not `disabled`) when the token can't read the setting.
 3. **Never create a label**, and never reference one whose description reserves
    it for any party (`Applied by: <party>` — humans, Champion, a bot, …). No
