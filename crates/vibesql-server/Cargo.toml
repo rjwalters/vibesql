@@ -67,9 +67,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # OpenTelemetry observability
-opentelemetry = { version = "0.33", features = ["metrics", "trace", "logs"] }
-opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics", "trace", "logs"] }
-opentelemetry_sdk = { version = "0.33", features = ["rt-tokio"] }
+# opentelemetry* pinned to 0.32: tracing-opentelemetry's latest release (0.33.0)
+# itself depends on opentelemetry 0.32, not 0.33, so bumping these three to 0.33
+# creates two incompatible opentelemetry versions in the dependency graph and
+# breaks the build. Revisit once a tracing-opentelemetry release depends on
+# opentelemetry 0.33 (see #6720).
+opentelemetry = { version = "0.32", features = ["metrics", "trace", "logs"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "metrics", "trace", "logs"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 tracing-opentelemetry = "0.33"
 
 # Utilities
