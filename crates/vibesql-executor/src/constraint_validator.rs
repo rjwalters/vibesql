@@ -154,6 +154,16 @@ struct GeneratedColumnDependencyCollector<'a> {
 
 impl ExpressionVisitor for GeneratedColumnDependencyCollector<'_> {
     fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        // `x IN ()` / `x NOT IN ()` is a constant: SQLite folds it to FALSE /
+        // TRUE at parse time and discards the left operand entirely, so no
+        // column referenced there is ever a dependency (altertab3.test 27.1:
+        // `b AS ((WITH w1(xyz) AS (SELECT t1.b FROM t1) SELECT 123) IN ())`
+        // is not a self-referential generated column).
+        if let Expression::InList { values, .. } = expr {
+            if values.is_empty() {
+                return VisitResult::Skip;
+            }
+        }
         if let Expression::ColumnRef(col_id) = expr {
             if let Some(table) = col_id.table_canonical() {
                 if !table.eq_ignore_ascii_case(self.table_canonical) {
@@ -1268,5 +1278,31 @@ mod tests {
             schema.primary_key_effective_collations(),
             Some(vec![Some("nocase".to_string())])
         );
+    }
+
+    fn gen_col(name: &str, expr: Expression) -> ColumnSchema {
+        let mut c = col(name);
+        c.generated_expr = Some(expr);
+        c
+    }
+
+    fn in_list(lhs: Expression, values: Vec<Expression>) -> Expression {
+        Expression::InList { expr: Box::new(lhs), values, negated: false }
+    }
+
+    #[test]
+    fn test_generated_column_self_ref_under_empty_in_list_is_not_a_loop() {
+        // altertab3.test 27.1: SQLite folds `x IN ()` to a constant and drops
+        // `x`, so a self-reference on the left of an empty IN list is not a
+        // dependency.
+        let cols = vec![col("a"), gen_col("b", in_list(qualified_col_ref("t1", "b"), vec![]))];
+        validate_generated_column_cycles("t1", &cols).unwrap();
+    }
+
+    #[test]
+    fn test_generated_column_self_ref_under_nonempty_in_list_is_a_loop() {
+        let cols = vec![col("a"), gen_col("b", in_list(col_ref("b"), vec![col_ref("a")]))];
+        let err = validate_generated_column_cycles("t1", &cols).unwrap_err();
+        assert!(err.to_string().contains("generated column loop on \"b\""), "{err}");
     }
 }

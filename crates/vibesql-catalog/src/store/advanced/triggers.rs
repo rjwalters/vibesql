@@ -12,14 +12,32 @@ use crate::{errors::CatalogError, trigger::TriggerDefinition};
 ///
 /// The schema component is normalized case-insensitively, with `None` and
 /// `main` collapsing to the default (`main`) schema. The name component
-/// preserves the (already parser-normalized) identifier spelling so this keeps
-/// the previous exact-name collision semantics *within* a schema. A control
-/// character separates the two parts so a schema/name that happens to contain a
-/// `.` cannot forge a different key.
-fn trigger_storage_key(schema: Option<&str>, name: &str) -> String {
+/// respects `case_sensitive_identifiers` exactly like `view_storage_key`: in
+/// the default (case-insensitive) mode trigger names match regardless of case,
+/// as in SQLite — `CREATE TRIGGER AFTER ...` is dropped by `DROP TRIGGER after`
+/// (altertab3.test 7.2.1), and `tr`/`TR` collide on CREATE. The definition's
+/// own `name` keeps its original spelling for display. A control character
+/// separates the two parts so a schema/name that happens to contain a `.`
+/// cannot forge a different key.
+fn trigger_storage_key(
+    schema: Option<&str>,
+    name: &str,
+    case_sensitive_identifiers: bool,
+) -> String {
     let schema =
         schema.map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| crate::DEFAULT_SCHEMA.to_string());
-    format!("{schema}\u{1f}{name}")
+    let name_key = if case_sensitive_identifiers { name.to_string() } else { name.to_uppercase() };
+    format!("{schema}\u{1f}{name_key}")
+}
+
+/// Whether two trigger names denote the same trigger under the catalog's
+/// identifier case rule (see [`trigger_storage_key`]).
+fn trigger_names_match(a: &str, b: &str, case_sensitive_identifiers: bool) -> bool {
+    if case_sensitive_identifiers {
+        a == b
+    } else {
+        a.to_uppercase() == b.to_uppercase()
+    }
 }
 
 impl super::super::Catalog {
@@ -33,7 +51,11 @@ impl super::super::Catalog {
     /// [`trigger_storage_key`]): creating `temp.tr1` when a `main.tr1` already
     /// exists succeeds, matching SQLite's per-schema trigger namespace.
     pub fn create_trigger(&mut self, trigger: TriggerDefinition) -> Result<(), CatalogError> {
-        let key = trigger_storage_key(trigger.schema.as_deref(), &trigger.name);
+        let key = trigger_storage_key(
+            trigger.schema.as_deref(),
+            &trigger.name,
+            self.case_sensitive_identifiers,
+        );
         if self.triggers.contains_key(&key) {
             return Err(CatalogError::TriggerAlreadyExists(trigger.name));
         }
@@ -53,13 +75,21 @@ impl super::super::Catalog {
     /// the first match. Callers that know the schema should prefer
     /// [`Catalog::get_trigger_in_schema`].
     pub fn get_trigger(&self, name: &str) -> Option<&TriggerDefinition> {
-        if let Some(trigger) = self.triggers.get(&trigger_storage_key(Some("temp"), name)) {
+        if let Some(trigger) = self.triggers.get(&trigger_storage_key(
+            Some("temp"),
+            name,
+            self.case_sensitive_identifiers,
+        )) {
             return Some(trigger);
         }
-        if let Some(trigger) = self.triggers.get(&trigger_storage_key(None, name)) {
+        if let Some(trigger) =
+            self.triggers.get(&trigger_storage_key(None, name, self.case_sensitive_identifiers))
+        {
             return Some(trigger);
         }
-        self.triggers.values().find(|t| t.name == name)
+        self.triggers
+            .values()
+            .find(|t| trigger_names_match(&t.name, name, self.case_sensitive_identifiers))
     }
 
     /// Get a TRIGGER definition scoped to a specific schema.
@@ -74,7 +104,7 @@ impl super::super::Catalog {
         name: &str,
         schema: Option<&str>,
     ) -> Option<&TriggerDefinition> {
-        self.triggers.get(&trigger_storage_key(schema, name))
+        self.triggers.get(&trigger_storage_key(schema, name, self.case_sensitive_identifiers))
     }
 
     /// Returns true if a trigger of `name` exists in the given schema.
@@ -82,7 +112,11 @@ impl super::super::Catalog {
     /// Used by the executor's `CREATE TRIGGER` path to enforce SQLite's
     /// per-schema "trigger already exists" rule without colliding across schemas.
     pub fn trigger_exists_in_schema(&self, name: &str, schema: Option<&str>) -> bool {
-        self.triggers.contains_key(&trigger_storage_key(schema, name))
+        self.triggers.contains_key(&trigger_storage_key(
+            schema,
+            name,
+            self.case_sensitive_identifiers,
+        ))
     }
 
     /// Iterate over every trigger definition in the catalog, regardless of
@@ -96,7 +130,11 @@ impl super::super::Catalog {
 
     /// Update a TRIGGER (for ALTER TRIGGER operations)
     pub fn update_trigger(&mut self, trigger: TriggerDefinition) -> Result<(), CatalogError> {
-        let key = trigger_storage_key(trigger.schema.as_deref(), &trigger.name);
+        let key = trigger_storage_key(
+            trigger.schema.as_deref(),
+            &trigger.name,
+            self.case_sensitive_identifiers,
+        );
         if !self.triggers.contains_key(&key) {
             return Err(CatalogError::TriggerNotFound(trigger.name));
         }
@@ -109,12 +147,25 @@ impl super::super::Catalog {
     /// Resolves the target in SQLite's unqualified search order (`temp`, then
     /// `main`, then any other schema) and removes the first match.
     pub fn drop_trigger(&mut self, name: &str) -> Result<(), CatalogError> {
-        let key = if self.triggers.contains_key(&trigger_storage_key(Some("temp"), name)) {
-            trigger_storage_key(Some("temp"), name)
-        } else if self.triggers.contains_key(&trigger_storage_key(None, name)) {
-            trigger_storage_key(None, name)
+        let key = if self.triggers.contains_key(&trigger_storage_key(
+            Some("temp"),
+            name,
+            self.case_sensitive_identifiers,
+        )) {
+            trigger_storage_key(Some("temp"), name, self.case_sensitive_identifiers)
+        } else if self.triggers.contains_key(&trigger_storage_key(
+            None,
+            name,
+            self.case_sensitive_identifiers,
+        )) {
+            trigger_storage_key(None, name, self.case_sensitive_identifiers)
         } else {
-            match self.triggers.iter().find(|(_, t)| t.name == name) {
+            let case_sensitive = self.case_sensitive_identifiers;
+            match self
+                .triggers
+                .iter()
+                .find(|(_, t)| trigger_names_match(&t.name, name, case_sensitive))
+            {
                 Some((k, _)) => k.clone(),
                 None => return Err(CatalogError::TriggerNotFound(name.to_string())),
             }
@@ -138,7 +189,7 @@ impl super::super::Catalog {
         schema: Option<&str>,
     ) -> Result<(), CatalogError> {
         self.triggers
-            .remove(&trigger_storage_key(schema, name))
+            .remove(&trigger_storage_key(schema, name, self.case_sensitive_identifiers))
             .map(|_| ())
             .ok_or_else(|| CatalogError::TriggerNotFound(name.to_string()))
     }
@@ -459,6 +510,39 @@ mod tests {
         catalog.drop_trigger("t1").unwrap();
         catalog.drop_trigger("t2").unwrap();
         assert!(!catalog.has_any_triggers());
+    }
+
+    /// In the default case-insensitive mode trigger names match regardless of
+    /// case (altertab3.test 7.2.1: `CREATE TRIGGER AFTER ...` is dropped by
+    /// `DROP TRIGGER after`), while the definition keeps its original spelling.
+    #[test]
+    fn trigger_names_are_case_insensitive_by_default() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(false);
+
+        catalog.create_trigger(sample_trigger("AFTER", "t1")).unwrap();
+        assert!(matches!(
+            catalog.create_trigger(sample_trigger("after", "t1")),
+            Err(CatalogError::TriggerAlreadyExists(_))
+        ));
+        assert_eq!(catalog.get_trigger("after").map(|t| t.name.as_str()), Some("AFTER"));
+        assert!(catalog.trigger_exists_in_schema("After", None));
+        catalog.drop_trigger("after").unwrap();
+        assert!(catalog.get_trigger("AFTER").is_none());
+    }
+
+    /// In case-sensitive mode trigger names that differ only in case are
+    /// distinct triggers.
+    #[test]
+    fn trigger_names_are_exact_in_case_sensitive_mode() {
+        let mut catalog = Catalog::new();
+        catalog.set_case_sensitive_identifiers(true);
+
+        catalog.create_trigger(sample_trigger("tr", "t1")).unwrap();
+        catalog.create_trigger(sample_trigger("TR", "t1")).unwrap();
+        assert!(catalog.drop_trigger("Tr").is_err());
+        catalog.drop_trigger("tr").unwrap();
+        assert_eq!(catalog.get_trigger("TR").map(|t| t.name.as_str()), Some("TR"));
     }
 
     /// A `main` trigger and a `temp` trigger sharing a name coexist without a

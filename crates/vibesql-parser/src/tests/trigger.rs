@@ -1332,6 +1332,27 @@ fn test_drop_trigger_if_exists_single_quoted_name() {
     }
 }
 
+#[test]
+fn test_drop_trigger_fallback_keyword_name() {
+    // CREATE TRIGGER accepts SQLite fallback keywords as the trigger name
+    // (`CREATE TRIGGER AFTER INSERT ON t1 ...` names the trigger `AFTER`), so
+    // DROP TRIGGER must accept them too (altertab3.test 7.2.1).
+    for (sql, expected) in [
+        ("DROP TRIGGER after;", "after"),
+        ("DROP TRIGGER IF EXISTS after;", "after"),
+        ("DROP TRIGGER main.after;", "after"),
+    ] {
+        match Parser::parse_sql(sql) {
+            Ok(Statement::DropTrigger(drop_trigger)) => {
+                assert!(drop_trigger.trigger_name.eq_ignore_ascii_case(expected), "{sql}");
+            }
+            other => panic!("Expected DropTrigger statement for {sql}, got {other:?}"),
+        }
+    }
+    // Truly-reserved words stay rejected.
+    assert!(Parser::parse_sql("DROP TRIGGER select;").is_err());
+}
+
 // -- Schema-qualified ON target (e_delete-2.2.1.1 / e_update-2.1.1) --------
 
 #[test]

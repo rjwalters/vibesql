@@ -736,13 +736,17 @@ impl Parser {
 
         // Parse trigger name. SQLite accepts a single-quoted string literal as
         // the trigger name in DROP TRIGGER (e.g. `DROP TRIGGER 'tr'`), so accept
-        // a string token in addition to bare / delimited identifiers.
+        // a string token in addition to bare / delimited identifiers. SQLite
+        // fallback keywords are accepted too, mirroring CREATE TRIGGER, which
+        // already accepts them as the trigger name (`CREATE TRIGGER AFTER
+        // INSERT ON t1 ...` creates a trigger named `AFTER`, so `DROP TRIGGER
+        // after` must be able to drop it — altertab3.test 7.2.1).
         let trigger_name = if let Token::String(s) = self.peek() {
             let name = s.clone();
             self.advance();
             name
         } else {
-            self.parse_identifier()?
+            self.parse_identifier_or_fallback_keyword()?
         };
 
         // Parse optional CASCADE or RESTRICT

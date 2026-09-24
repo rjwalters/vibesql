@@ -366,6 +366,18 @@ pub fn rewrite_column_refs_in_trigger_sql(
             }
         }
 
+        // An identifier immediately followed by `(` is a function call (scalar,
+        // aggregate, or window function invocation, optionally followed by a
+        // `FILTER (WHERE ...)` clause) — never a column reference, even when its
+        // spelling happens to match a column being renamed (altertab3.test 17.2:
+        // `SELECT a () FILTER (WHERE a>0) FROM t1` renames the `WHERE a>0`
+        // reference but must leave the `a ()` function-call name alone).
+        if let Some(&next_idx) = significant.get(pos + 1) {
+            if matches!(tokens[next_idx].0, Token::LParen) {
+                continue;
+            }
+        }
+
         // Unqualified reference: rename only if the renamed table is the in-scope
         // owner of this column.
         if name.eq_ignore_ascii_case(old_column) && is_column_position(&tokens, &significant, pos) {
@@ -766,6 +778,21 @@ mod tests {
     fn col_no_match_returns_unchanged() {
         let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 WHERE b=1; END";
         assert_eq!(rewrite_col(sql, "t2", "c", "abc"), sql);
+    }
+
+    /// altertab3.test 17.2: an identifier immediately followed by `(` is a
+    /// function-call name, not a column reference, even when its spelling
+    /// matches the column being renamed. The `WHERE a>0` reference inside the
+    /// FILTER clause (and `new.a` in the WHEN clause) are genuine column
+    /// references and must still be renamed.
+    #[test]
+    fn col_function_call_name_not_renamed() {
+        let sql = "CREATE TRIGGER r1 INSERT ON t1 WHEN new.a NOT NULL BEGIN SELECT a () FILTER (WHERE a>0) FROM t1; END";
+        let got = rewrite_col(sql, "t1", "a", "aaa");
+        assert_eq!(
+            got,
+            "CREATE TRIGGER r1 INSERT ON t1 WHEN new.aaa NOT NULL BEGIN SELECT a () FILTER (WHERE aaa>0) FROM t1; END"
+        );
     }
 
     #[test]
