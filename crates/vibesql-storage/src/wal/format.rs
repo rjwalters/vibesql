@@ -45,7 +45,16 @@ pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 ///   transaction unconditionally, resurrecting rows a savepoint rollback had already undone in
 ///   memory. Older v1-v3 logs contain no such markers and are still readable (replay behaves
 ///   exactly as before: nothing to reconcile).
-pub const WAL_VERSION: u32 = 4;
+/// - v5: adds `StatementSavepoint`/`RollbackStatementSavepoint` marker ops — the unnamed,
+///   single-slot analogue of v4's named-savepoint markers, covering the implicit per-statement
+///   savepoint SQLite (and `Database::arm_statement_savepoint`) uses to scope `RAISE(ABORT)` /
+///   `RAISE(FAIL)` / an ordinary constraint violation to just the offending top-level statement
+///   (issue #6438, sibling of #6170). Without them, a multi-row statement that partially applied
+///   then aborted, rolling back only that statement while the enclosing transaction went on to
+///   commit, had its rolled-back rows resurrected by recovery for the same reason v4 fixed for
+///   named `ROLLBACK TO SAVEPOINT`. Older v1-v4 logs contain no such markers and are still readable
+///   (replay behaves exactly as before: nothing to reconcile).
+pub const WAL_VERSION: u32 = 5;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;

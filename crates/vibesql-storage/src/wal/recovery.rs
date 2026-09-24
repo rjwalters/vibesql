@@ -174,6 +174,16 @@ struct TransactionTracker {
     /// reproduces the same in-memory undo instead of replaying every buffered
     /// DML op unconditionally at commit.
     savepoint_marks: HashMap<u64, HashMap<String, usize>>,
+    /// Implicit statement-savepoint mark within each in-flight transaction's
+    /// buffered-op stream (issue #6438, sibling of #6170 above): `Key: txn_id,
+    /// Value: buffered_ops length when the statement savepoint was last
+    /// armed`. Unlike named savepoints there is no stack and no name — at
+    /// most one implicit statement savepoint is ever armed per transaction at
+    /// a time, so a single mark per txn suffices; a later
+    /// `RollbackStatementSavepoint` truncates the transaction's buffered ops
+    /// back to that length, mirroring `Database::rollback_statement_savepoint`'s
+    /// wholesale in-memory restore.
+    statement_savepoint_marks: HashMap<u64, usize>,
 }
 
 impl TransactionTracker {
@@ -182,6 +192,7 @@ impl TransactionTracker {
             states: HashMap::new(),
             buffered_ops: HashMap::new(),
             savepoint_marks: HashMap::new(),
+            statement_savepoint_marks: HashMap::new(),
         }
     }
 
@@ -196,6 +207,7 @@ impl TransactionTracker {
     fn commit_transaction(&mut self, txn_id: u64) -> Vec<(Lsn, WalOp)> {
         self.states.insert(txn_id, TransactionState::Committed);
         self.savepoint_marks.remove(&txn_id);
+        self.statement_savepoint_marks.remove(&txn_id);
         self.buffered_ops.remove(&txn_id).unwrap_or_default()
     }
 
@@ -204,6 +216,7 @@ impl TransactionTracker {
         self.states.insert(txn_id, TransactionState::RolledBack);
         self.buffered_ops.remove(&txn_id);
         self.savepoint_marks.remove(&txn_id);
+        self.statement_savepoint_marks.remove(&txn_id);
     }
 
     /// Buffer an operation for a transaction
@@ -229,6 +242,28 @@ impl TransactionTracker {
     /// older version with no marker) is a no-op — nothing to truncate.
     fn rollback_to_savepoint(&mut self, txn_id: u64, name: &str) {
         if let Some(&mark) = self.savepoint_marks.get(&txn_id).and_then(|m| m.get(name)) {
+            if let Some(ops) = self.buffered_ops.get_mut(&txn_id) {
+                ops.truncate(mark);
+            }
+        }
+    }
+
+    /// Record the implicit statement savepoint at the transaction's current
+    /// buffered-op position (issue #6438). Arming a second statement
+    /// savepoint before the first is rolled back or released simply
+    /// overwrites the mark, mirroring the live engine's "at most one armed at
+    /// a time" model.
+    fn mark_statement_savepoint(&mut self, txn_id: u64) {
+        let mark = self.buffered_ops.get(&txn_id).map(|ops| ops.len()).unwrap_or(0);
+        self.statement_savepoint_marks.insert(txn_id, mark);
+    }
+
+    /// Roll back to the marked implicit statement savepoint: truncate the
+    /// transaction's buffered ops to the length recorded when it was armed.
+    /// A rollback with no matching mark (e.g. a WAL entry from an older
+    /// version with no marker) is a no-op — nothing to truncate.
+    fn rollback_to_statement_savepoint(&mut self, txn_id: u64) {
+        if let Some(&mark) = self.statement_savepoint_marks.get(&txn_id) {
             if let Some(ops) = self.buffered_ops.get_mut(&txn_id) {
                 ops.truncate(mark);
             }
@@ -634,6 +669,21 @@ impl RecoveryManager {
                                 tracker.rollback_to_savepoint(txn_id, name);
                             }
                         }
+                        WalOp::StatementSavepoint => {
+                            // Like standalone SAVEPOINT above: only meaningful
+                            // inside a transaction (the live engine's
+                            // arm_statement_savepoint is itself a no-op
+                            // outside one, so this marker is never emitted
+                            // without a transaction in practice).
+                            if let Some(txn_id) = current_txn_id {
+                                tracker.mark_statement_savepoint(txn_id);
+                            }
+                        }
+                        WalOp::RollbackStatementSavepoint => {
+                            if let Some(txn_id) = current_txn_id {
+                                tracker.rollback_to_statement_savepoint(txn_id);
+                            }
+                        }
                         WalOp::CheckpointBegin { .. } | WalOp::CheckpointComplete { .. } => {
                             // Skip checkpoint markers during replay
                         }
@@ -883,6 +933,12 @@ impl RecoveryManager {
                 // Intercepted and consumed by the transaction tracker
                 // (`mark_savepoint`/`rollback_to_savepoint`) before ops are
                 // ever buffered — never reaches apply_op in normal operation.
+            }
+            WalOp::StatementSavepoint | WalOp::RollbackStatementSavepoint => {
+                // Intercepted and consumed by the transaction tracker
+                // (`mark_statement_savepoint`/`rollback_to_statement_savepoint`)
+                // before ops are ever buffered — never reaches apply_op in
+                // normal operation.
             }
             WalOp::CheckpointBegin { .. } | WalOp::CheckpointComplete { .. } => {
                 // Skip checkpoint markers
@@ -1978,6 +2034,206 @@ mod tests {
         let table = db.get_table("main.t").unwrap();
         let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
         assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_recovery_discards_rows_after_rollback_statement_savepoint() {
+        // Regression for #6438 (sibling of #6170/fkey2-2.60): a row inserted
+        // after an implicit statement-level savepoint is armed and then
+        // undone by `rollback_statement_savepoint` (SQLite's `RAISE(ABORT)`
+        // scope) must NOT reappear when a *later* process recovers from WAL —
+        // even though the enclosing transaction went on to COMMIT
+        // successfully.
+        //
+        // Before the WalOp::StatementSavepoint/RollbackStatementSavepoint
+        // markers, recovery's buffer-until-commit replay applied every DML op
+        // logged inside a committed transaction unconditionally, resurrecting
+        // the already-rolled-back row.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+
+            db.begin_transaction().unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("kept")),
+                ]),
+            )
+            .unwrap();
+
+            // Arm the implicit statement savepoint (as the executor does
+            // before a top-level DML statement that may RAISE(ABORT)), write
+            // a row that the "statement" partially applies, then abort just
+            // that statement.
+            assert!(db.arm_statement_savepoint(), "must arm inside an active transaction");
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("rolled_back")),
+                ]),
+            )
+            .unwrap();
+            assert!(
+                db.rollback_statement_savepoint(),
+                "must restore the armed statement savepoint"
+            );
+
+            db.commit_transaction().unwrap();
+            db.sync_persistence().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+
+        assert_eq!(
+            live_row_count(&db, "main.t"),
+            1,
+            "row inserted after the statement savepoint and rolled back must not survive recovery"
+        );
+        let table = db.get_table("main.t").unwrap();
+        let rows: Vec<_> = table.scan_live().map(|(_, r)| r.clone()).collect();
+        assert_eq!(rows[0].values[0], SqlValue::Integer(1));
+    }
+
+    #[test]
+    fn test_recovery_keeps_rows_when_statement_savepoint_not_rolled_back() {
+        // Edge case for #6438: arming a statement savepoint and then
+        // *releasing* it normally (the statement succeeded — no
+        // RAISE(ABORT)) is the overwhelmingly common path. Recovery must
+        // still replay every row in this case; the marker machinery must not
+        // regress the ordinary success path.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+
+            db.begin_transaction().unwrap();
+            assert!(db.arm_statement_savepoint(), "must arm inside an active transaction");
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("kept")),
+                ]),
+            )
+            .unwrap();
+            // Statement succeeded: release rather than roll back.
+            db.release_statement_savepoint();
+
+            db.commit_transaction().unwrap();
+            db.sync_persistence().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+
+        assert_eq!(
+            live_row_count(&db, "main.t"),
+            1,
+            "a released (non-aborted) statement savepoint must not discard its row on recovery"
+        );
+    }
+
+    #[test]
+    fn test_recovery_handles_statement_savepoint_rollback_then_later_commit() {
+        // Edge case for #6438: a statement-savepoint rollback followed by the
+        // transaction going on to commit via a *different, later* statement
+        // (not an immediate ROLLBACK/COMMIT) — mirrors the acceptance
+        // criteria's "resolve/COMMIT" scenario. Only the row from the aborted
+        // statement should be discarded; everything before and after must
+        // survive.
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        {
+            let mut db = Database::new();
+            let engine = PersistenceEngine::new(&wal_path, PersistenceConfig::default()).unwrap();
+            db.enable_persistence(engine);
+
+            db.create_table(simple_schema("t")).unwrap();
+
+            db.begin_transaction().unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(1),
+                    SqlValue::Varchar(arcstr::ArcStr::from("before")),
+                ]),
+            )
+            .unwrap();
+
+            // Statement 2: partially applies two rows, then RAISE(ABORT)s.
+            assert!(db.arm_statement_savepoint());
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(2),
+                    SqlValue::Varchar(arcstr::ArcStr::from("aborted_a")),
+                ]),
+            )
+            .unwrap();
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(3),
+                    SqlValue::Varchar(arcstr::ArcStr::from("aborted_b")),
+                ]),
+            )
+            .unwrap();
+            assert!(db.rollback_statement_savepoint());
+
+            // Statement 3: a later, independent statement in the same
+            // transaction that succeeds normally.
+            assert!(db.arm_statement_savepoint());
+            db.insert_row(
+                "main.t",
+                crate::row::Row::new(vec![
+                    SqlValue::Integer(4),
+                    SqlValue::Varchar(arcstr::ArcStr::from("after")),
+                ]),
+            )
+            .unwrap();
+            db.release_statement_savepoint();
+
+            db.commit_transaction().unwrap();
+            db.sync_persistence().unwrap();
+        }
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+
+        assert_eq!(
+            live_row_count(&db, "main.t"),
+            2,
+            "only the two rows from the aborted statement should be discarded"
+        );
+        let table = db.get_table("main.t").unwrap();
+        let mut ids: Vec<i64> = table
+            .scan_live()
+            .map(|(_, r)| match &r.values[0] {
+                SqlValue::Integer(i) => *i,
+                other => panic!("expected Integer, got {other:?}"),
+            })
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec![1, 4]);
     }
 
     #[test]

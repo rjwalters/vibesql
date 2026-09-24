@@ -406,11 +406,24 @@ impl Database {
         let catalog = self.catalog.clone();
         let tables = self.tables.clone();
         let operations = self.operations.clone();
-        self.lifecycle.transaction_manager_mut().arm_statement_savepoint(
+        let armed = self.lifecycle.transaction_manager_mut().arm_statement_savepoint(
             &catalog,
             &tables,
             &operations,
-        )
+        );
+
+        if armed {
+            // #6438: mark this statement savepoint's position in the WAL op
+            // stream so a later rollback_statement_savepoint can tell
+            // recovery which buffered ops to discard (see
+            // WalOp::StatementSavepoint's doc comment; sibling of #6170's
+            // named-savepoint fix). No-op (and no marker emitted) when
+            // `arm_statement_savepoint` itself was a no-op — outside an
+            // explicit transaction there is nothing for recovery to buffer.
+            self.emit_wal_op(WalOp::StatementSavepoint);
+        }
+
+        armed
     }
 
     /// Roll back to the armed statement savepoint, undoing just the current
@@ -436,6 +449,13 @@ impl Database {
             // the full-ROLLBACK path this has no cheap touched-table set, so
             // clear the whole cache (statement aborts are rare).
             self.clear_columnar_cache();
+
+            // #6438: record the rollback in the WAL so crash/process-boundary
+            // recovery discards the same buffered ops this in-memory restore
+            // just discarded, instead of replaying them unconditionally at
+            // commit (see WalOp::RollbackStatementSavepoint's doc comment;
+            // sibling of #6170's named-savepoint fix).
+            self.emit_wal_op(WalOp::RollbackStatementSavepoint);
         }
         restored
     }
