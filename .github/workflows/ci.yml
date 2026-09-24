@@ -117,13 +117,45 @@ jobs:
   #   - If this pattern (cap creeping back up against real run times) recurs a
   #     third time, look for the same shape: redundant rebuilds sharing one
   #     clock, not just "raise the cap again".
+  #   - #6725 (third occurrence — checked for the #6479 shape first; it is NOT
+  #     a redundant rebuild). Reported as the arrow 59->60 Dependabot bump
+  #     (PR #6720) getting timeout-killed at exactly 25m18s twice, but the
+  #     per-step timings (`gh run view --json jobs` -> `.steps[]`) across the
+  #     ~30 most recent CI runs (2026-09-14..24) showed the dependency bump
+  #     was not the distinguishing factor:
+  #       * The killed "Run unit tests" steps had only run 725s / 1017s —
+  #         inside the range of *successful* runs (693-1120s). The same
+  #         25m18s kill also hit two unrelated feature-branch runs
+  #         (feature/issue-6174) whose rust-cache restore was a full key
+  #         match, so this is not a cache-invalidation-only problem.
+  #       * What all four killed runs shared was a slow
+  #         `./.github/actions/free-disk-space` step: 405-685s, vs a typical
+  #         33-235s. That step is pure disk I/O (`sudo rm -rf` of large
+  #         toolcache trees + docker prune) and its runtime varies ~20x by
+  #         runner, eating the fixed budget before cargo even starts.
+  #       * sccache reports 0 hits on successful runs too (only ~22 cacheable
+  #         workspace compiles per run; deps come from the rust-cache-restored
+  #         target/), so a "cold sccache" is not specific to major bumps.
+  #     Worst observed components summed: ~685s free-disk + ~1120s unit tests
+  #     + ~110s checkout/setup ~= 32 min, so 25 was below the realistic worst
+  #     case. Raised both test-unit and test-integration to 40 (~8 min margin
+  #     above that sum) rather than an arbitrarily large cap, so a genuine
+  #     hang still gets killed well before GitHub's 6h default.
+  #     Cache-key remedy (issue #6725 remedy 2) considered and not pursued:
+  #     Swatinem/rust-cache@v2 already falls back to a prefix restore key
+  #     when the Cargo.lock hash changes, so partial `target/` reuse across a
+  #     major bump already happens; only crates downstream of the bumped dep
+  #     rebuild, which is unavoidable.
+  #   - If this recurs again, check the free-disk-space step's duration
+  #     before touching the cap: making that step cheaper/less variable is the
+  #     real lever, not the cargo phase (tracked in #6729).
   # ============================================================================
   test-unit:
     runs-on: ubuntu-latest
-    # Provisional estimate for a single from-scratch release build + unit test
-    # run (no more back-to-back double build — see history above). Revisit
-    # once several real runs establish an actual measured range.
-    timeout-minutes: 25
+    # Budget for checkout + free-disk-space (highly variable, up to ~11 min
+    # observed) + one release build + unit tests (up to ~19 min observed).
+    # See the #6725 history entry above for the measured breakdown.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,10 +173,12 @@ jobs:
 
   test-integration:
     runs-on: ubuntu-latest
-    # See test-unit above: same provisional budget, independent clock. Runs
-    # on its own runner in parallel with test-unit, so no shared disk/clock
-    # pressure and no need for the old mid-job `cargo clean` workaround.
-    timeout-minutes: 25
+    # See test-unit above: same budget, independent clock. Runs on its own
+    # runner in parallel with test-unit, so no shared disk/clock pressure and
+    # no need for the old mid-job `cargo clean` workaround. Integration tests
+    # themselves run shorter (up to ~15 min observed) but pay the same
+    # variable free-disk-space cost, so worst case (~28 min) also exceeded 25.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
         with:
