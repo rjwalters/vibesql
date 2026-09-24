@@ -969,7 +969,226 @@ fn find_trigger_resolution_error(
         return Some(format!("no such column: {}", pseudo));
     }
 
+    // 3) A bare column reference inside an uncorrelated FROM-less SELECT, which has no relation for
+    //    it to resolve against at all.
+    if let Some(column) = find_unresolvable_column_in_fromless_selects(&statements) {
+        return Some(format!("no such column: {}", column));
+    }
+
     None
+}
+
+// ============================================================================
+// Column references in FROM-less, uncorrelated SELECTs
+// ============================================================================
+
+/// First bare (unqualified, unquoted) column reference inside a trigger-body
+/// SELECT that has **no FROM clause** and **cannot see an outer query** — the
+/// body's own top-level SELECT, an `INSERT ... SELECT` source, a FROM-clause
+/// derived table (SQLite has no LATERAL, so these are never correlated), or a
+/// CTE body. Such a reference has no relation to resolve against, so SQLite's
+/// schema re-parse on `ALTER TABLE` fails with `no such column: <c>`:
+///
+/// - altertab3.test 14.2: `SELECT sum() FILTER (WHERE (SELECT ...) AND a);` → `error in trigger
+///   AFTER: no such column: a`
+/// - altertab3.test 26.6: `UPDATE t1 SET xx=xx FROM (SELECT xx);` → `error in trigger xx: no such
+///   column: xx`
+///
+/// Deliberately conservative (false negatives only):
+/// - compound SELECTs (`set_operation`) are not judged;
+/// - ORDER BY / GROUP BY are not inspected (they may name result-column aliases);
+/// - a reference matching a select-list alias is accepted (SQLite resolves aliases in WHERE /
+///   HAVING);
+/// - quoted identifiers are accepted (a double-quoted name may fall back to a string literal under
+///   SQLite's DQS rule), as are `rowid` aliases;
+/// - nested expression subqueries are not descended into here (they may be correlated to an outer
+///   scope that does have a FROM); any FROM-derived tables / CTEs *inside* them are still visited
+///   because those are uncorrelated.
+fn find_unresolvable_column_in_fromless_selects(statements: &[Statement]) -> Option<String> {
+    for stmt in statements {
+        let mut selects: Vec<&SelectStmt> = Vec::new();
+        collect_uncorrelated_selects_in_statement(stmt, &mut selects);
+        if let Some(found) =
+            selects.into_iter().find_map(first_unresolvable_column_in_fromless_select)
+        {
+            return Some(found);
+        }
+        let mut checker = ExprSubqueryFromlessColumnChecker { found: None };
+        walk_statement(&mut checker, stmt);
+        if checker.found.is_some() {
+            return checker.found;
+        }
+    }
+    None
+}
+
+/// Push `select` and, recursively, every uncorrelated SELECT reachable from
+/// its FROM tree / WITH clause (see [`find_unresolvable_column_in_fromless_selects`]).
+fn push_uncorrelated_select<'a>(select: &'a SelectStmt, out: &mut Vec<&'a SelectStmt>) {
+    out.push(select);
+    push_uncorrelated_inner_selects(select, out);
+}
+
+/// Push the uncorrelated SELECTs *nested inside* `select`'s FROM tree and
+/// WITH clause (but not `select` itself).
+fn push_uncorrelated_inner_selects<'a>(select: &'a SelectStmt, out: &mut Vec<&'a SelectStmt>) {
+    if let Some(ctes) = &select.with_clause {
+        for cte in ctes {
+            push_uncorrelated_select(&cte.query, out);
+        }
+    }
+    if let Some(from) = &select.from {
+        push_uncorrelated_selects_in_from(from, out);
+    }
+}
+
+fn push_uncorrelated_selects_in_from<'a>(from: &'a FromClause, out: &mut Vec<&'a SelectStmt>) {
+    match from {
+        FromClause::Subquery { query, .. } => push_uncorrelated_select(query, out),
+        FromClause::Join { left, right, .. } => {
+            push_uncorrelated_selects_in_from(left, out);
+            push_uncorrelated_selects_in_from(right, out);
+        }
+        FromClause::Table { .. } | FromClause::Values { .. } | FromClause::TableFunction { .. } => {
+        }
+    }
+}
+
+/// Collect the uncorrelated SELECTs of one trigger-body statement, including
+/// FROM-derived tables / CTE bodies found inside expression subqueries.
+fn collect_uncorrelated_selects_in_statement<'a>(
+    stmt: &'a Statement,
+    out: &mut Vec<&'a SelectStmt>,
+) {
+    let push_ctes = |ctes: &'a Option<Vec<CommonTableExpr>>, out: &mut Vec<&'a SelectStmt>| {
+        if let Some(ctes) = ctes {
+            for cte in ctes {
+                push_uncorrelated_select(&cte.query, out);
+            }
+        }
+    };
+    match stmt {
+        Statement::Select(select) => push_uncorrelated_select(select, out),
+        Statement::Insert(insert) => {
+            push_ctes(&insert.with_clause, out);
+            if let InsertSource::Select(select) = &insert.source {
+                push_uncorrelated_select(select, out);
+            }
+        }
+        Statement::Update(update) => {
+            push_ctes(&update.with_clause, out);
+            if let Some(from) = &update.from_clause {
+                for source in from {
+                    push_uncorrelated_selects_in_from(source, out);
+                }
+            }
+        }
+        Statement::Delete(delete) => push_ctes(&delete.with_clause, out),
+        _ => {}
+    }
+}
+
+/// Visitor that checks the uncorrelated SELECTs (FROM-derived tables / CTE
+/// bodies) nested inside every expression subquery of a statement. The
+/// expression subqueries themselves may be correlated to an outer scope and
+/// are therefore not judged; the generic walker descends through them so
+/// deeper nesting is reached too.
+struct ExprSubqueryFromlessColumnChecker {
+    found: Option<String>,
+}
+
+impl ExpressionVisitor for ExprSubqueryFromlessColumnChecker {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.found.is_some() {
+            return VisitResult::Stop;
+        }
+        match expr {
+            Expression::ScalarSubquery(subquery)
+            | Expression::In { subquery, .. }
+            | Expression::Exists { subquery, .. }
+            | Expression::QuantifiedComparison { subquery, .. } => {
+                let mut inner: Vec<&SelectStmt> = Vec::new();
+                push_uncorrelated_inner_selects(subquery, &mut inner);
+                self.found =
+                    inner.into_iter().find_map(first_unresolvable_column_in_fromless_select);
+                if self.found.is_some() {
+                    return VisitResult::Stop;
+                }
+            }
+            _ => {}
+        }
+        VisitResult::Continue
+    }
+}
+
+impl StatementVisitor for ExprSubqueryFromlessColumnChecker {}
+
+/// First bare column reference in `select` when it is a simple (non-compound)
+/// SELECT with no FROM clause — see
+/// [`find_unresolvable_column_in_fromless_selects`] for the exact rules.
+fn first_unresolvable_column_in_fromless_select(select: &SelectStmt) -> Option<String> {
+    if select.from.is_some() || select.set_operation.is_some() || select.values.is_some() {
+        return None;
+    }
+
+    let aliases: Vec<&str> = select
+        .select_list
+        .iter()
+        .filter_map(|item| match item {
+            SelectItem::Expression { alias: Some(alias), .. } => Some(alias.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    struct BareColumnFinder<'a> {
+        aliases: &'a [&'a str],
+        found: Option<String>,
+    }
+    impl ExpressionVisitor for BareColumnFinder<'_> {
+        fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+            if self.found.is_some() {
+                return VisitResult::Stop;
+            }
+            match expr {
+                // A nested subquery has its own (possibly FROM-bearing) scope.
+                Expression::ScalarSubquery(_)
+                | Expression::Exists { .. }
+                | Expression::QuantifiedComparison { .. } => VisitResult::Skip,
+                Expression::In { expr: inner, .. } => {
+                    walk_expression(self, inner);
+                    VisitResult::Skip
+                }
+                Expression::ColumnRef(col) => {
+                    let name = col.column_canonical();
+                    if col.table_canonical().is_none()
+                        && col.schema_canonical().is_none()
+                        && !col.is_column_quoted()
+                        && !is_rowid_pseudo(&name.to_ascii_lowercase())
+                        && !self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
+                    {
+                        self.found = Some(col.column_display().to_string());
+                        return VisitResult::Stop;
+                    }
+                    VisitResult::Continue
+                }
+                _ => VisitResult::Continue,
+            }
+        }
+    }
+
+    let mut finder = BareColumnFinder { aliases: &aliases, found: None };
+    for item in &select.select_list {
+        if let SelectItem::Expression { expr, .. } = item {
+            walk_expression(&mut finder, expr);
+        }
+    }
+    if let Some(where_clause) = &select.where_clause {
+        walk_expression(&mut finder, where_clause);
+    }
+    if let Some(having) = &select.having {
+        walk_expression(&mut finder, having);
+    }
+    finder.found
 }
 
 /// First `NEW.<col>` / `OLD.<col>` reference in `trigger` (WHEN condition
@@ -1032,6 +1251,7 @@ fn find_missing_table_in_statements(
     let mut cte_names: Vec<String> = Vec::new();
     for stmt in statements {
         collect_table_refs_in_statement(stmt, &mut refs, &mut cte_names);
+        collect_table_refs_in_expr_subqueries(stmt, &mut refs, &mut cte_names);
     }
 
     for name in refs {
@@ -1058,10 +1278,61 @@ fn find_missing_table_in_statements(
     None
 }
 
+/// Visitor that, for every subquery nested inside an *expression* of a
+/// trigger-body statement (scalar subquery, `IN (SELECT ...)`, `EXISTS`,
+/// quantified comparison), accumulates that subquery's own base-table
+/// references and CTE names via [`collect_table_refs_in_select`].
+///
+/// The generic expression walker descends into each subquery's expressions on
+/// its own, so a subquery nested inside another subquery's expression is
+/// reached as well. This covers subqueries in every expression position the
+/// walker visits — SELECT lists, WHERE/HAVING, named `WINDOW` definitions,
+/// UPDATE `SET` values (including row-value `SET (a,b)=(...)` tuples), INSERT
+/// VALUES rows, and so on.
+///
+/// SQLite's schema re-parse on `ALTER TABLE ... RENAME TO` resolves these
+/// nested references too, so a trigger whose body only mentions a missing
+/// table inside such a subquery still aborts the ALTER — altertab3.test 11.2
+/// (`WINDOW b AS (ORDER BY NOT EXISTS(SELECT 1 FROM abc))` → `error in trigger
+/// b: no such table: main.abc`) and 23.2 (`UPDATE t1 SET (c,d)=((SELECT 1 FROM
+/// t1 JOIN t2 ON b=x),1)` → `error in trigger r1: no such table: main.t2`).
+struct ExprSubqueryTableRefCollector<'a> {
+    refs: &'a mut Vec<String>,
+    cte_names: &'a mut Vec<String>,
+}
+
+impl ExpressionVisitor for ExprSubqueryTableRefCollector<'_> {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        match expr {
+            Expression::ScalarSubquery(subquery)
+            | Expression::In { subquery, .. }
+            | Expression::Exists { subquery, .. }
+            | Expression::QuantifiedComparison { subquery, .. } => {
+                collect_table_refs_in_select(subquery, self.refs, self.cte_names);
+            }
+            _ => {}
+        }
+        VisitResult::Continue
+    }
+}
+
+impl StatementVisitor for ExprSubqueryTableRefCollector<'_> {}
+
+/// Accumulate base-table references (and CTE names) from every subquery nested
+/// inside an expression of `stmt` — see [`ExprSubqueryTableRefCollector`].
+fn collect_table_refs_in_expr_subqueries(
+    stmt: &Statement,
+    refs: &mut Vec<String>,
+    cte_names: &mut Vec<String>,
+) {
+    let mut collector = ExprSubqueryTableRefCollector { refs, cte_names };
+    walk_statement(&mut collector, stmt);
+}
+
 /// Accumulate base-table references and CTE names from one trigger-body
 /// statement. Only INSERT/UPDATE/DELETE targets and FROM-clause tables are
-/// collected; subqueries nested inside expressions are intentionally not
-/// descended into (a false negative is safe, a false positive is not).
+/// collected here; subqueries nested inside expressions are handled
+/// separately by [`collect_table_refs_in_expr_subqueries`].
 fn collect_table_refs_in_statement(
     stmt: &Statement,
     refs: &mut Vec<String>,
