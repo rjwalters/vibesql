@@ -70,7 +70,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 opentelemetry = { version = "0.33", features = ["metrics", "trace", "logs"] }
 opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics", "trace", "logs"] }
 opentelemetry_sdk = { version = "0.33", features = ["rt-tokio"] }
-tracing-opentelemetry = "0.33"
+tracing-opentelemetry = "0.34"
 
 # Utilities
 bytes = "1.0"
