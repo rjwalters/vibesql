@@ -1160,6 +1160,12 @@ fn first_unresolvable_column_in_fromless_select(select: &SelectStmt) -> Option<S
                 }
                 Expression::ColumnRef(col) => {
                     let name = col.column_canonical();
+                    // The parser represents the `*` of `count(*)` as a bare
+                    // `ColumnRef("*")`; it is not a column reference at all, and
+                    // `SELECT count(*);` is valid with no FROM clause.
+                    if name == "*" {
+                        return VisitResult::Continue;
+                    }
                     if col.table_canonical().is_none()
                         && col.schema_canonical().is_none()
                         && !col.is_column_quoted()

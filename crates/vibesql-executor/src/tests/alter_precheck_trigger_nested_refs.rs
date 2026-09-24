@@ -153,6 +153,13 @@ fn valid_fromless_selects_do_not_block_rename() {
              SELECT (SELECT b) FROM t2; \
              INSERT INTO t2 SELECT new.a + 1; \
              UPDATE t2 SET b = z FROM (SELECT 5 AS z); END",
+            // The parser represents `count(*)`'s `*` as a bare `ColumnRef("*")`;
+            // it must not be mistaken for an unresolvable column in a FROM-less
+            // SELECT (`SELECT count(*);` is valid SQLite).
+            "CREATE TRIGGER tr_star AFTER INSERT ON t1 BEGIN \
+             SELECT count(*); \
+             SELECT count(*) OVER (); \
+             INSERT INTO t2 SELECT count(*); END",
         ],
         "ALTER TABLE t1 RENAME TO t1x",
     );
