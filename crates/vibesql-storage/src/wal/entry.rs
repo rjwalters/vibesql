@@ -122,6 +122,36 @@ pub enum WalOp {
     /// survives" semantics).
     RollbackToSavepoint { name: String },
 
+    // Implicit statement-level savepoint (WAL format v5, issue #6438 — sibling
+    // of #6170's named-savepoint fix above).
+    //
+    // SQLite (and `Database::arm_statement_savepoint`/`rollback_statement_savepoint`,
+    // #5417) wraps every top-level statement inside an open transaction in an
+    // implicit savepoint so a `RAISE(ABORT)` (or an ordinary constraint
+    // violation) can undo just that statement's partial changes without
+    // rolling back the whole transaction. This marker pair is the unnamed,
+    // single-slot analogue of `Savepoint`/`RollbackToSavepoint`: unlike named
+    // savepoints there is no stack and no name to disambiguate, since at most
+    // one implicit statement savepoint is ever armed at a time (the caller
+    // arms exactly one per top-level statement and releases or rolls it back
+    // before the next). Without these markers, recovery's buffer-until-commit
+    // replay had no way to know that DML ops logged by a statement that
+    // aborted partway through (e.g. row 3 of a multi-row `UPDATE` trips
+    // `RAISE(ABORT)` after rows 1-2 already wrote) were undone in memory
+    // before the enclosing transaction went on to commit — it replayed every
+    // buffered op unconditionally, resurrecting the already-rolled-back rows.
+    /// Mark the current position in the transaction's operation stream as the
+    /// start of a newly-armed implicit statement savepoint. A second
+    /// `StatementSavepoint` before any `RollbackStatementSavepoint`/release
+    /// simply overwrites the mark, mirroring the live engine's "at most one
+    /// armed at a time" model.
+    StatementSavepoint,
+    /// Roll back to the most recently marked implicit statement savepoint:
+    /// recovery discards every buffered operation recorded after the matching
+    /// `StatementSavepoint` marker (the marker itself, and everything before
+    /// it, survives).
+    RollbackStatementSavepoint,
+
     // Checkpoint Operations
     /// Begin a checkpoint
     CheckpointBegin { checkpoint_id: u64 },
@@ -145,6 +175,8 @@ pub enum WalOpTag {
     TxnRollback = 0x22,
     Savepoint = 0x23,
     RollbackToSavepoint = 0x24,
+    StatementSavepoint = 0x25,
+    RollbackStatementSavepoint = 0x26,
     CheckpointBegin = 0x30,
     CheckpointComplete = 0x31,
 }
@@ -164,6 +196,8 @@ impl WalOpTag {
             0x22 => Ok(WalOpTag::TxnRollback),
             0x23 => Ok(WalOpTag::Savepoint),
             0x24 => Ok(WalOpTag::RollbackToSavepoint),
+            0x25 => Ok(WalOpTag::StatementSavepoint),
+            0x26 => Ok(WalOpTag::RollbackStatementSavepoint),
             0x30 => Ok(WalOpTag::CheckpointBegin),
             0x31 => Ok(WalOpTag::CheckpointComplete),
             _ => Err(StorageError::IoError(format!("Unknown WAL op tag: 0x{:02X}", tag))),
@@ -311,6 +345,16 @@ impl WalOp {
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_string(writer, name)?;
             }
+            WalOp::StatementSavepoint => {
+                writer
+                    .write_all(&[WalOpTag::StatementSavepoint as u8])
+                    .map_err(|e| StorageError::IoError(e.to_string()))?;
+            }
+            WalOp::RollbackStatementSavepoint => {
+                writer
+                    .write_all(&[WalOpTag::RollbackStatementSavepoint as u8])
+                    .map_err(|e| StorageError::IoError(e.to_string()))?;
+            }
             WalOp::CheckpointBegin { checkpoint_id } => {
                 writer
                     .write_all(&[WalOpTag::CheckpointBegin as u8])
@@ -436,6 +480,8 @@ impl WalOp {
                 let name = read_string(reader)?;
                 Ok(WalOp::RollbackToSavepoint { name })
             }
+            WalOpTag::StatementSavepoint => Ok(WalOp::StatementSavepoint),
+            WalOpTag::RollbackStatementSavepoint => Ok(WalOp::RollbackStatementSavepoint),
             WalOpTag::CheckpointBegin => {
                 let checkpoint_id = read_u64(reader)?;
                 Ok(WalOp::CheckpointBegin { checkpoint_id })
@@ -661,6 +707,24 @@ mod tests {
         let entries = vec![
             WalEntry::new(11, 1234567900, WalOp::Savepoint { name: "outer".to_string() }),
             WalEntry::new(12, 1234567901, WalOp::RollbackToSavepoint { name: "outer".to_string() }),
+        ];
+
+        for entry in entries {
+            let mut buf = Vec::new();
+            entry.serialize(&mut buf).unwrap();
+
+            let mut reader = &buf[..];
+            let decoded = WalEntry::deserialize(&mut reader).unwrap();
+
+            assert_eq!(entry, decoded);
+        }
+    }
+
+    #[test]
+    fn test_wal_entry_roundtrip_statement_savepoint_ops() {
+        let entries = vec![
+            WalEntry::new(13, 1234567902, WalOp::StatementSavepoint),
+            WalEntry::new(14, 1234567903, WalOp::RollbackStatementSavepoint),
         ];
 
         for entry in entries {
