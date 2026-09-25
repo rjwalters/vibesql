@@ -85,6 +85,31 @@ fn add_column_with_non_constant_default_is_rejected() {
 }
 
 #[test]
+fn add_column_with_binary_expression_default_is_rejected() {
+    // alter4-2.7: SQLite's `sqlite3ValueFromExpr` cannot fold `(-5+1)`, so the
+    // ALTER fails with the non-constant-default message rather than being
+    // accepted (or failing later with an internal "unsupported expression").
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();
+    exec_sql(&mut db, "INSERT INTO t1 VALUES(1, 2)").unwrap();
+    for default in ["(-5+1)", "(1||2)", "(NOT 1)", "(~1)"] {
+        let err = exec_sql(&mut db, &format!("ALTER TABLE t1 ADD COLUMN d DEFAULT {default}"))
+            .unwrap_err();
+        assert_eq!(err, "Cannot add a column with non-constant default", "DEFAULT {default}");
+    }
+    // Every rejection left the table untouched: the same column name can still
+    // be added, and existing rows get backfilled with a signed-literal default.
+    exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN d DEFAULT (- -5)").unwrap();
+    exec_sql(&mut db, "ALTER TABLE t1 ADD COLUMN e DEFAULT +7").unwrap();
+    let t = db.get_table("t1").unwrap();
+    assert_eq!(t.schema.columns.len(), 4);
+    let row = &t.scan()[0];
+    assert_eq!(row.values.len(), 4, "every existing row must be backfilled");
+    assert_eq!(row.values[2], vibesql_types::SqlValue::Integer(5));
+    assert_eq!(row.values[3], vibesql_types::SqlValue::Integer(7));
+}
+
+#[test]
 fn add_column_to_view_is_rejected() {
     let mut db = Database::new();
     exec_sql(&mut db, "CREATE TABLE t1(a, b)").unwrap();

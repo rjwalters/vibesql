@@ -1004,8 +1004,13 @@ fn try_fold_constant(expr: &Expression) -> Option<SqlValue> {
                 UnaryOperator::Minus => {
                     // Negate the value
                     match inner_val {
-                        SqlValue::Integer(n) => Some(SqlValue::Integer(-n)),
-                        SqlValue::Bigint(n) => Some(SqlValue::Bigint(-n)),
+                        // -i64::MIN overflows: SQLite promotes to REAL (#6174).
+                        SqlValue::Integer(n) => Some(
+                            n.checked_neg().map_or(SqlValue::Real(-(n as f64)), SqlValue::Integer),
+                        ),
+                        SqlValue::Bigint(n) => Some(
+                            n.checked_neg().map_or(SqlValue::Real(-(n as f64)), SqlValue::Bigint),
+                        ),
                         SqlValue::Smallint(n) => Some(SqlValue::Smallint(-n)),
                         SqlValue::Float(n) => Some(SqlValue::Float(-n)),
                         SqlValue::Double(n) => Some(SqlValue::Double(-n)),

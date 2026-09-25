@@ -1032,14 +1032,26 @@ impl CreateTableExecutor {
 
         // Create the table
         database
-            .create_table_with_identifier(table_schema, identifier)
+            .create_table_with_identifier(table_schema, identifier.clone())
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
 
-        // Insert the result rows into the new table
+        // Insert the result rows into the NEW table. The bare `table_name`
+        // must not be used as the storage key when it would resolve to a
+        // different schema: unqualified lookup follows SQLite's
+        // temp-shadows-main search path, so with a same-named `temp.t1`
+        // present, `CREATE TABLE aux.t1 AS SELECT * FROM t1` (alter4.test
+        // 5.1) or `CREATE TABLE main.t1 AS ...` created the target table
+        // correctly but routed every copied row into `temp.t1` instead,
+        // leaving the new table empty. Route through the schema-qualified
+        // storage name whenever the bare name resolves elsewhere; otherwise
+        // keep the bare name (the key the rest of the insert path — indexes,
+        // WAL, change broadcast — already uses for ordinary tables).
+        let insert_target =
+            Self::ctas_insert_target(database, table_name, schema_name, &identifier);
         let row_count = rows.len();
         for row in rows {
             database
-                .insert_row(table_name, row)
+                .insert_row(&insert_target, row)
                 .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
         }
 
@@ -1047,6 +1059,33 @@ impl CreateTableExecutor {
             "Table '{}' created successfully in schema '{}' with {} rows",
             table_name, schema_name, row_count
         ))
+    }
+
+    /// Storage name to insert a freshly-created CTAS table's rows under.
+    ///
+    /// Returns the bare `table_name` when unqualified resolution already lands
+    /// on the new table's schema (the common, unshadowed case — unchanged
+    /// behavior). Otherwise — a same-named table in a schema earlier on the
+    /// search path (e.g. `temp`) shadows it — returns the schema-qualified
+    /// storage key, the same form a qualified `INSERT INTO <schema>.<table>`
+    /// uses.
+    fn ctas_insert_target(
+        database: &Database,
+        table_name: &str,
+        schema_name: &str,
+        identifier: &TableIdentifier,
+    ) -> String {
+        let resolves_to_target = database
+            .catalog
+            .resolve_table_schema_name(table_name)
+            .is_some_and(|resolved| resolved.eq_ignore_ascii_case(schema_name));
+        if resolves_to_target {
+            table_name.to_string()
+        } else if identifier.is_qualified() {
+            identifier.canonical().to_string()
+        } else {
+            format!("{}.{}", schema_name, identifier.table_canonical())
+        }
     }
 
     /// Derive `(column name, SQLite type affinity)` pairs from a CTAS SELECT

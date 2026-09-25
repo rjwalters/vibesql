@@ -113,7 +113,7 @@ pub fn enforce_strict_type(
 
 /// Is `f` an integer value representable in `i64` without loss?
 fn real_is_lossless_int(f: f64) -> Option<i64> {
-    if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+    if f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f < i64::MAX as f64 {
         Some(f as i64)
     } else {
         None
