@@ -715,6 +715,38 @@ pub(super) fn execute_rename_column(
     // Rename in the schema (keeps the column-index cache consistent).
     table.schema_mut().rename_column(col_index, &stmt.new_column_name)?;
 
+    // Propagate the rename into this table's OWN table-level/column-level CHECK
+    // constraints and any OTHER column's `GENERATED ALWAYS AS` expression that
+    // references the renamed column. Both are stored as parsed `Expression`
+    // ASTs (`schema.check_constraints`, `ColumnSchema::generated_expr`) that
+    // are resolved by NAME against the CURRENT schema at evaluation time (see
+    // `ExpressionEvaluator::eval_column_ref`) — unlike PRIMARY KEY/UNIQUE/
+    // FOREIGN KEY, which `rename_column` above already fixed up because those
+    // are plain column-name lists, not ASTs. Left un-rewritten, a CHECK or
+    // generated column referencing the renamed column would fail every
+    // subsequent INSERT/UPDATE with a spurious `no such column: <old name>`
+    // (issue #6174). SQLite rewrites both unconditionally on RENAME COLUMN,
+    // matching the trigger/view/FK propagation just below, which is likewise
+    // never gated on `legacy_alter_table` (see the call-site note on
+    // `execute_rename_table`'s `precheck_schema_objects` for why RENAME
+    // COLUMN's propagation differs from RENAME TABLE's in this respect).
+    for (_, expr) in table.schema_mut().check_constraints.iter_mut() {
+        vibesql_ast::rename::rename_column_in_expression(
+            expr,
+            &stmt.old_column_name,
+            &stmt.new_column_name,
+        );
+    }
+    for col in table.schema_mut().columns.iter_mut() {
+        if let Some(gen_expr) = col.generated_expr.as_mut() {
+            vibesql_ast::rename::rename_column_in_expression(
+                gen_expr,
+                &stmt.old_column_name,
+                &stmt.new_column_name,
+            );
+        }
+    }
+
     // Invalidate the database-level columnar cache since the schema changed.
     database.invalidate_columnar_cache(&stmt.table_name);
 
