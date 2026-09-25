@@ -436,7 +436,17 @@ fn parse_rename(
         // RENAME TO <new_table>
         Token::Keyword { keyword: Keyword::To, .. } => {
             parser.advance();
-            let new_table_name = parser.parse_identifier()?;
+            // SQLite's `nm ::= id | STRING` rule also accepts a single-quoted
+            // string as the new name: `ALTER TABLE t RENAME TO 'x'`
+            // (altertab.test 5.1).
+            let new_table_name = match parser.peek() {
+                Token::String(s) => {
+                    let name = s.clone();
+                    parser.advance();
+                    name
+                }
+                _ => parser.parse_identifier()?,
+            };
             Ok(AlterTableStmt::RenameTable(RenameTableStmt { table_name, new_table_name }))
         }
         // RENAME COLUMN <old> TO <new>
