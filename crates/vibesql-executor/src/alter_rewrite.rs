@@ -231,6 +231,51 @@ pub fn rename_table(create_sql: &str, new_name: &str) -> Option<String> {
     Some(replace_span(create_sql, span, &quote_ident(new_name)))
 }
 
+/// Rewrite the renamed table's *own* qualified references inside its verbatim
+/// `CREATE TABLE` text (for example `CHECK(t1.a != t1.b)`) to the
+/// double-quoted `new_name`. This matches SQLite's `ALTER TABLE ... RENAME TO`
+/// with `legacy_alter_table=OFF`:
+/// `CREATE TABLE t1(a, b, CHECK(t1.a != t1.b))` renamed to `t1new` is stored
+/// as `CREATE TABLE "t1new"(a, b, CHECK("t1new".a != "t1new".b))`
+/// (altertab.test 1.4). `main.t1.a` becomes `main."t1new".a`.
+///
+/// Only a bare or delimited identifier that matches `old_name`
+/// (case-insensitively) *and* is directly followed by `.` is rewritten, so
+/// column names, string literals, and the header name (handled by
+/// [`rename_table`]) are untouched. Self-referencing `REFERENCES <old>`
+/// clauses are handled separately by [`rename_references_parent`].
+///
+/// Returns `None` when no such qualifier is present, so the caller keeps the
+/// text as is.
+pub fn rename_table_self_qualifiers(
+    create_sql: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Option<String> {
+    let tokens = tokenize(create_sql)?;
+    let header = table_name_index(&tokens);
+    let replacement = quote_ident(new_name);
+    let spans: Vec<Span> = tokens
+        .iter()
+        .enumerate()
+        .filter(|&(i, (tok, _))| {
+            Some(i) != header
+                && matches!(tok, Token::Identifier(_) | Token::DelimitedIdentifier(_))
+                && ident_matches(tok, old_name)
+                && matches!(tokens.get(i + 1), Some((Token::Symbol('.'), _)))
+        })
+        .map(|(_, (_, span))| *span)
+        .collect();
+    if spans.is_empty() {
+        return None;
+    }
+    let mut out = create_sql.to_string();
+    for span in spans.iter().rev() {
+        out.replace_range(span.start..span.end, &replacement);
+    }
+    Some(out)
+}
+
 /// Index of the table-name identifier token in a `CREATE TABLE` statement.
 fn table_name_index(tokens: &[(Token, Span)]) -> Option<usize> {
     let mut i = 0;
@@ -988,6 +1033,31 @@ mod tests {
         let sql = "CREATE TABLE IF NOT EXISTS t (x int)";
         let out = rename_table(sql, "t2").unwrap();
         assert_eq!(out, "CREATE TABLE IF NOT EXISTS \"t2\" (x int)");
+    }
+
+    #[test]
+    fn rename_table_self_qualifiers_rewrites_check_refs() {
+        // altertab.test 1.4, verified against sqlite3 (legacy_alter_table=OFF).
+        let sql = "CREATE TABLE \"t1new\"(a, b, CHECK(t1.a != t1.b))";
+        let out = rename_table_self_qualifiers(sql, "t1", "t1new").unwrap();
+        assert_eq!(out, "CREATE TABLE \"t1new\"(a, b, CHECK(\"t1new\".a != \"t1new\".b))");
+    }
+
+    #[test]
+    fn rename_table_self_qualifiers_handles_quoted_and_schema_qualified_refs() {
+        let sql = "CREATE TABLE \"t2\"(a, b, CHECK (main.t1.b > 0 AND 't1' <> b AND \"T1\".a IS NOT NULL))";
+        let out = rename_table_self_qualifiers(sql, "t1", "t2").unwrap();
+        assert_eq!(
+            out,
+            "CREATE TABLE \"t2\"(a, b, CHECK (main.\"t2\".b > 0 AND 't1' <> b AND \"t2\".a IS NOT NULL))"
+        );
+    }
+
+    #[test]
+    fn rename_table_self_qualifiers_none_without_qualifier() {
+        // A column that happens to share the old table's name is not a qualifier.
+        let sql = "CREATE TABLE \"t2\"(t1, b, CHECK(t1 > b))";
+        assert_eq!(rename_table_self_qualifiers(sql, "t1", "t2"), None);
     }
 
     // rename_references_parent — quote-aware child REFERENCES rewriter.

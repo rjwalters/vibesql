@@ -214,6 +214,16 @@ pub(super) fn execute_rename_table(
         None => new_table.schema_mut().invalidate_sql_source(),
     }
 
+    // The table's own qualified references (`CHECK(t1.a != t1.b)`) must follow
+    // the rename too (altertab.test 1.4). Otherwise every later INSERT/UPDATE
+    // fails with `Invalid table qualifier 't1'`, because the CHECK still names
+    // a table that no longer exists, and a reload re-parses the same stale
+    // text. Like the dependent-object rewrite below, this is skipped under
+    // `legacy_alter_table=ON`.
+    if !database.legacy_alter_table() {
+        rewrite_own_table_qualifiers(&mut new_table, &old_table_bare_name, &stmt.new_table_name);
+    }
+
     // `database.drop_table` below cascade-drops every trigger whose `ON <table>`
     // target is the table being dropped (the correct behavior for a genuine
     // `DROP TABLE`, per SQL standard R-37808-62273). RENAME TABLE, however, is
@@ -515,6 +525,48 @@ fn rebind_child_foreign_keys(database: &mut Database, old_name: &str, new_name: 
             table.schema.clone()
         };
         database.catalog.replace_table_schema(&tbl, updated_schema);
+    }
+}
+
+/// Rewrite `old_name.` qualifiers inside the renamed table's own verbatim
+/// `CREATE TABLE` text (see [`crate::alter_rewrite::rename_table_self_qualifiers`])
+/// and rebuild the in-memory CHECK constraints from the rewritten text. That
+/// keeps enforcement and the `CHECK constraint failed: ...` wording
+/// consistent with what a reload would re-parse.
+///
+/// The CHECK list is replaced only when the rewritten text re-parses and
+/// yields the same number of CHECK constraints the schema already holds.
+/// Anything unexpected leaves the in-memory constraints as they were.
+fn rewrite_own_table_qualifiers(
+    table: &mut vibesql_storage::Table,
+    old_name: &str,
+    new_name: &str,
+) {
+    let Some(rewritten) = table.schema.sql_source.as_deref().and_then(|sql| {
+        crate::alter_rewrite::rename_table_self_qualifiers(sql, old_name, new_name)
+    }) else {
+        return;
+    };
+
+    let rebuilt_checks = match vibesql_parser::Parser::parse_sql(&rewritten) {
+        Ok(vibesql_ast::Statement::CreateTable(create)) => {
+            crate::constraint_validator::process_constraints(
+                new_name,
+                &create.columns,
+                &create.table_constraints,
+            )
+            .ok()
+            .map(|result| result.check_constraints)
+        }
+        _ => None,
+    };
+
+    let schema = table.schema_mut();
+    schema.set_sql_source(rewritten);
+    if let Some(checks) = rebuilt_checks {
+        if checks.len() == schema.check_constraints.len() {
+            schema.check_constraints = checks;
+        }
     }
 }
 

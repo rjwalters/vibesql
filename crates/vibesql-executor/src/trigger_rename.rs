@@ -131,7 +131,23 @@ fn collect_table_ref_spans(
                 // A new scope: subqueries reset FROM-list tracking. Inherit
                 // `false` so commas inside e.g. function args are not treated
                 // as table separators until a FROM keyword appears.
-                from_list_stack.push(false);
+                //
+                // The exception is a parenthesized join group written directly
+                // in a FROM list, e.g. `FROM t1, (t1 AS a0, t1)`: SQLite
+                // rewrites the table names inside it (altertab.test 19.100).
+                // That `(` directly follows FROM/JOIN, a FROM-list comma, or
+                // another such `(`. A subquery `(SELECT ...` in the same place
+                // is harmless because its SELECT keyword clears the flag at
+                // once.
+                let opens_join_group = *from_list_stack.last().unwrap_or(&false)
+                    && pos > 0
+                    && matches!(
+                        &tokens[significant[pos - 1]].0,
+                        Token::Keyword { keyword: Keyword::From | Keyword::Join, .. }
+                            | Token::Comma
+                            | Token::LParen
+                    );
+                from_list_stack.push(opens_join_group);
             }
             Token::RParen => {
                 if from_list_stack.len() > 1 {
@@ -146,7 +162,13 @@ fn collect_table_ref_spans(
                     continue;
                 }
             }
-            Token::Identifier(name) => {
+            // A double-quoted `DelimitedIdentifier` names a table exactly
+            // like a bare one (see `ident_name`). This matters most for a
+            // *second* RENAME TABLE: the first rename emits the new name
+            // double-quoted (`ON "t2"`, `FROM "t2"`), so matching only bare
+            // identifiers left every reference stale on the next rename
+            // (altertab3.test 29.7).
+            Token::Identifier(name) | Token::DelimitedIdentifier(name) => {
                 let is_match = name.eq_ignore_ascii_case(old_table);
 
                 // Header `ON <table>` target.
@@ -226,6 +248,10 @@ fn is_table_position(
         ),
         // A comma inside a FROM list separates table references.
         Token::Comma => *from_list_stack.last().unwrap_or(&false),
+        // The first table of a parenthesized FROM-list join group (the scope
+        // flag for this `(` is only set for such groups; see
+        // `collect_table_ref_spans`).
+        Token::LParen => *from_list_stack.last().unwrap_or(&false),
         _ => false,
     }
 }
@@ -976,5 +1002,61 @@ mod tests {
         let sql = "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM T3; END";
         let got = rewrite(sql, "t3", "t5");
         assert_eq!(got, "CREATE TRIGGER r1 INSERT ON t1 BEGIN UPDATE t1 SET a=1 FROM \"t5\"; END");
+    }
+
+    /// altertab3.test 29.7: a second RENAME TABLE must rewrite references
+    /// that the first rename emitted double-quoted (header, qualifier, FROM).
+    #[test]
+    fn rewrites_previously_quoted_refs_on_second_rename() {
+        let sql = "CREATE TRIGGER Trigger1 DELETE ON t1 \n  BEGIN \n    SELECT t1.*, t1.z FROM t1 ORDER BY t1.z;\n  END";
+        let once = rewrite(sql, "t1", "t2");
+        assert_eq!(
+            once,
+            "CREATE TRIGGER Trigger1 DELETE ON \"t2\" \n  BEGIN \n    SELECT \"t2\".*, \"t2\".z FROM \"t2\" ORDER BY \"t2\".z;\n  END"
+        );
+        let twice = rewrite(&once, "t2", "t3");
+        assert_eq!(
+            twice,
+            "CREATE TRIGGER Trigger1 DELETE ON \"t3\" \n  BEGIN \n    SELECT \"t3\".*, \"t3\".z FROM \"t3\" ORDER BY \"t3\".z;\n  END"
+        );
+    }
+
+    #[test]
+    fn view_rewrites_previously_quoted_table_on_second_rename() {
+        let sql = "CREATE VIEW v AS SELECT \"t2\".x FROM \"t2\", [t2] AS b";
+        assert_eq!(
+            rewrite_table_refs_in_view_sql(sql, "t2", "t3"),
+            "CREATE VIEW v AS SELECT \"t3\".x FROM \"t3\", \"t3\" AS b"
+        );
+    }
+
+    /// altertab.test 19.100: table names inside a parenthesized join group in
+    /// a FROM list are rewritten (verified against sqlite3 with
+    /// `legacy_alter_table=OFF`).
+    #[test]
+    fn view_rewrites_tables_in_parenthesized_from_group() {
+        let sql = "CREATE VIEW t2 AS SELECT 1 FROM t1, (t1 AS a0, t1)";
+        assert_eq!(
+            rewrite_table_refs_in_view_sql(sql, "t1", "t3"),
+            "CREATE VIEW t2 AS SELECT 1 FROM \"t3\", (\"t3\" AS a0, \"t3\")"
+        );
+    }
+
+    /// Parentheses that do not open a FROM-list join group keep their
+    /// contents untouched: function arguments, USING lists, IN lists, and
+    /// INSERT column lists.
+    #[test]
+    fn non_join_group_parens_are_not_table_positions() {
+        let sql = "CREATE VIEW v AS SELECT f(t1, t1) FROM x JOIN y USING (t1) WHERE a IN (t1, t1)";
+        assert_eq!(rewrite_table_refs_in_view_sql(sql, "t1", "t3"), sql);
+        let sql =
+            "CREATE TRIGGER r AFTER INSERT ON x BEGIN INSERT INTO y(t1, t1) VALUES(1, 2); END";
+        assert_eq!(rewrite(sql, "t1", "t3"), sql);
+        // A subquery in FROM position still rewrites only its own FROM list.
+        let sql = "CREATE VIEW v AS SELECT * FROM (SELECT t1 FROM t1)";
+        assert_eq!(
+            rewrite_table_refs_in_view_sql(sql, "t1", "t3"),
+            "CREATE VIEW v AS SELECT * FROM (SELECT t1 FROM \"t3\")"
+        );
     }
 }

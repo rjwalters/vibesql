@@ -787,3 +787,18 @@ fn test_parse_alter_table_rename_to_main_qualified_still_works() {
         other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
     }
 }
+
+#[test]
+fn test_parse_alter_table_rename_to_string_literal() {
+    // SQLite's `nm ::= id | STRING` accepts a single-quoted string as the new
+    // table name (altertab.test 5.1: `ALTER TABLE temp.t9 RENAME TO 't1234567890'`).
+    let result = Parser::parse_sql("ALTER TABLE temp.t9 RENAME TO 't1234567890'");
+    assert!(result.is_ok(), "string-literal new name should parse: {:?}", result.err());
+
+    match result.unwrap() {
+        vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameTable(rename)) => {
+            assert_eq!(rename.new_table_name, "t1234567890");
+        }
+        other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
+    }
+}
