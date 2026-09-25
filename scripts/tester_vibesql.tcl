@@ -1454,6 +1454,50 @@ proc rewrite_sqlite_master_self_exclusion {sql exclude_names} {
     return $out
 }
 
+proc normalize_unshadowed_temp_qualified_create {sql} {
+    # See the call site in strip_temp_table_keyword for rationale (#6174).
+    set ident {(\[[^\]]+\]|"[^"]+"|`[^`]+`|[A-Za-z_][A-Za-z0-9_]*)}
+    set qpat "\\yCREATE\\s+TABLE\\s+(IF\\s+NOT\\s+EXISTS\\s+)?temp\\s*\\.\\s*$ident"
+    if {![regexp -nocase $qpat $sql]} {
+        return $sql
+    }
+    # Count every CREATE TABLE of each (unqualified) name in this batch, with
+    # or without a schema qualifier.
+    set counts [dict create]
+    set apat "\\yCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:$ident\\s*\\.\\s*)?$ident"
+    foreach {- - tname} [regexp -all -inline -nocase $apat $sql] {
+        set k [string tolower [string trim $tname {[]"`}]]
+        dict incr counts $k
+    }
+    set out ""
+    set pos 0
+    while {1} {
+        set rest [string range $sql $pos end]
+        if {![regexp -indices -nocase $qpat $rest m c1 c2]} {
+            append out $rest
+            break
+        }
+        lassign $m ms me
+        append out [string range $rest 0 [expr {$ms - 1}]]
+        set name [string range $rest [lindex $c2 0] [lindex $c2 1]]
+        set key [string tolower [string trim $name {[]"`}]]
+        set shadowed [expr {[dict get $counts $key] > 1 \
+                || [dict exists $::temp_replay_ddl $key]}]
+        if {$shadowed} {
+            append out [string range $rest $ms $me]
+        } else {
+            set ine ""
+            if {[lindex $c1 0] >= 0} {
+                set ine [string range $rest [lindex $c1 0] [lindex $c1 1]]
+            }
+            append out "CREATE TEMP TABLE ${ine}${name}"
+        }
+        set pos [expr {$pos + $me + 1}]
+        if {$pos > [string length $sql]} break
+    }
+    return $out
+}
+
 proc strip_temp_table_keyword {sql} {
     # Demote every `CREATE TEMP[ORARY] TABLE <name>` to a plain `CREATE TABLE`,
     # keeping <name> unchanged, and prepend `DROP TABLE IF EXISTS <name>;` to
@@ -1470,6 +1514,26 @@ proc strip_temp_table_keyword {sql} {
     # the runner is on 8.5). \y word boundaries keep the keyword match out of
     # identifiers/string literals; the captured name handles optional []/""/``
     # quoting. Submatches: c1 = optional "IF NOT EXISTS ", c2 = the table name.
+
+    # `CREATE TABLE temp.<name>` (no TEMP keyword, literal `temp.` schema
+    # qualifier) creates exactly the same connection-scoped TEMP table as
+    # `CREATE TEMP TABLE <name>` in SQLite. Left alone it reaches VibeSQL as a
+    # REAL temp table that vanishes when that batch's short-lived CLI process
+    # exits, so every later batch sees "no such table" (alter4-2.1..2.99:
+    # `CREATE TABLE temp.t1(a, b)` then `ALTER TABLE t1 ADD ...` in the next
+    # catchsql). Normalize it to the keyword form so it takes the identical
+    # demote path below. Part of #6174.
+    #
+    # Deliberately CONSERVATIVE: only when no other `CREATE TABLE [<schema>.]<name>`
+    # for the same name appears in this batch and the name is not already
+    # registered for TEMP replay. Files that build same-named main/temp/aux
+    # tables side by side (e_delete-1.x `CREATE TABLE temp.t7 ... main.t7 ...
+    # aux.t7`, trigger1-10.1 `main.t4 / temp.t4 / aux.t4`) must keep the real
+    # temp table: demoting it there would `DROP TABLE IF EXISTS t4` the MAIN
+    # table (the main_creates scan below only sees unqualified names).
+    # Normalizing unconditionally was measured to regress trigger1 51->33 and
+    # e_delete 96->43 passing.
+    set sql [normalize_unshadowed_temp_qualified_create $sql]
 
     # Reset per-batch tracking of TEMP tables created in THIS batch (so the
     # prelude does not redundantly re-create what the batch itself creates).
@@ -7216,32 +7280,14 @@ array set vibesql_skip_tests {
 
     cast-10.5 "CAST behavior differs"
 
-    alter4-1.1b "ALTER TABLE behavior differs"
-    alter4-1.2b "ALTER TABLE behavior differs"
-    alter4-1.3b "ALTER TABLE behavior differs"
-    alter4-1.4b "ALTER TABLE behavior differs"
-    alter4-1.99 "ALTER TABLE behavior differs"
-    alter4-2.1 "ALTER TABLE behavior differs"
-    alter4-2.2 "ALTER TABLE behavior differs"
-    alter4-2.3 "ALTER TABLE behavior differs"
-    alter4-2.4 "ALTER TABLE behavior differs"
-    alter4-2.5 "ALTER TABLE behavior differs"
-    alter4-2.6 "ALTER TABLE behavior differs"
-    alter4-2.7 "ALTER TABLE behavior differs"
-    alter4-2.99 "ALTER TABLE behavior differs"
-    alter4-3.2 "ALTER TABLE behavior differs"
-    alter4-3.4 "ALTER TABLE behavior differs"
-    alter4-4.2 "ALTER TABLE behavior differs"
-    alter4-4.4 "ALTER TABLE behavior differs"
-    alter4-4.99 "ALTER TABLE behavior differs"
-    alter4-8.2 "ALTER TABLE behavior differs"
-    alter4-9.2 "ALTER TABLE behavior differs"
-    alter4-9.3 "ALTER TABLE behavior differs"
-    alter4-10.1 "ALTER TABLE behavior differs"
-    alter4-11.0 "ALTER TABLE behavior differs"
-    alter4-11.1 "ALTER TABLE behavior differs"
-    alter4-11.2 "ALTER TABLE behavior differs"
-    alter4-11.3 "ALTER TABLE behavior differs"
+    alter4-1.1b "Bucket-A: queries temp.sqlite_master for a TEMP table (abc) that strip_temp_table_keyword demotes to an ordinary main-schema table, so the temp-schema catalog legitimately has no row for it; its setup step alter4-1.1 is itself auto-skipped for sqlite_temp_master. Same temp-vs-main separation is untestable under this shim's per-batch-process TEMP-table demotion limitation as #6173/#6406 (cf. fkey2-14.1tmp.6). Part of #6174."
+    alter4-1.2b "Bucket-A: temp.sqlite_master read of a demoted TEMP table; setup alter4-1.2 auto-skipped for sqlite_temp_master. TEMP-table demotion limitation, #6173/#6406 (see alter4-1.1b). Part of #6174."
+    alter4-1.3b "Bucket-A: temp.sqlite_master read of a demoted TEMP table; setup alter4-1.3 auto-skipped for sqlite_temp_master. TEMP-table demotion limitation, #6173/#6406 (see alter4-1.1b). Part of #6174."
+    alter4-1.4b "Bucket-A: temp.sqlite_master read of a demoted TEMP table; setup alter4-1.4 auto-skipped for sqlite_temp_master. TEMP-table demotion limitation, #6173/#6406 (see alter4-1.1b). Part of #6174."
+    alter4-1.99 "Bucket-A: cleanup step that drops the TEMP tables abc/t1/t3 created only by alter4-1.1..1.7, all of which are auto-skipped for sqlite_temp_master, so the tables never exist. TEMP-table demotion limitation, #6173/#6406 (see alter4-1.1b). Part of #6174."
+    alter4-3.4 "Bucket-A: asserts that ALTER TABLE on a TEMP table leaves the MAIN schema's PRAGMA schema_version cookie unchanged (SQLite bumps only the temp schema's cookie). Under strip_temp_table_keyword's demotion the table is an ordinary main-schema table, so the ALTER necessarily bumps main's cookie. TEMP-table demotion limitation, #6173/#6406. Part of #6174."
+    alter4-4.4 "Bucket-A: same main-vs-temp PRAGMA schema_version cookie assertion as alter4-3.4, after ALTER TABLE ... ADD c DEFAULT on a demoted TEMP table. TEMP-table demotion limitation, #6173/#6406. Part of #6174."
+
 
     analyze-1.1 "ANALYZE behavior differs"
     analyze-1.3 "ANALYZE behavior differs"
@@ -8334,6 +8380,7 @@ array set vibesql_attach_replay_files {
     autoinc 1
     pragma4 1
     e_dropview 1
+    alter4 1
 }
 
 # e_createtable.test's ATTACH usage (#6404) is a single unconditional
@@ -8411,6 +8458,24 @@ array set vibesql_attach_replay_files {
 # for the specific gaps this surfaced, none of which regress a previously
 # passing test.
 
+# alter4.test's ATTACH usage (#6174) is confined to one `ifcapable attach`
+# block, alter4-5.1..5.99: ATTACH 'test2.db' AS aux, then
+# `CREATE TABLE aux.t1 AS SELECT * FROM t1` (t1 being a demoted TEMP table),
+# ALTER TABLE aux.t1 ADD COLUMN twice, and reads of aux.t1 / aux.sqlite_master
+# / PRAGMA aux.schema_version. All nine tests are allow-listed because the
+# section is a single dependent chain (5.3/5.7 read the columns 5.2/5.6 add,
+# so skipping any link would cascade). Measured: 5.1/5.3/5.7/5.9/5.99 pass
+# (5.3 exercises the CTAS-into-shadowed-target row routing fix in
+# create_table.rs). Four fail VISIBLY rather than being skipped — Bucket-B,
+# genuine ATTACH-persistence gaps, not shim artifacts of this change:
+#   - 5.2/5.6: after the ALTER, aux.sqlite_master.sql reads back regenerated
+#     as `CREATE TABLE t1 (a, b, c VARCHAR(128))` instead of SQLite's spliced
+#     `CREATE TABLE t1(a,b, c VARCHAR(128))`. In a single CLI session the
+#     spliced text is correct; it is lost when the ATTACHed file database is
+#     persisted and reopened by the next per-batch process.
+#   - 5.4/5.8: PRAGMA aux.schema_version reads 34/35 instead of 31/32 (the
+#     cookie is bumped more than once per ALTER on the attached database).
+
 # Individual tests within a vibesql_attach_replay_files file that are verified
 # safe to actually un-skip (#6363). Narrower than the file-level list above on
 # purpose: trigger1.test's `ifcapable tempdb&&attach` block (trigger1-10.0
@@ -8463,6 +8528,15 @@ array set vibesql_attach_ok {
     e_dropview-5.1 1
     e_dropview-5.2 1
     e_dropview-5.3 1
+    alter4-5.1 1
+    alter4-5.2 1
+    alter4-5.3 1
+    alter4-5.4 1
+    alter4-5.6 1
+    alter4-5.7 1
+    alter4-5.8 1
+    alter4-5.9 1
+    alter4-5.99 1
 }
 
 # Narrow exception to the ATTACH-setup rescue's single-shot ::attach_skipped

@@ -177,6 +177,15 @@ pub fn validate_row_column_counts(
 
 /// Coerce a value to match the expected column type
 /// Performs automatic type conversions where appropriate
+///
+/// Every "whole-valued REAL converts to INTEGER" check below uses strict
+/// bounds on both ends, `i64::MIN as f64 < f < i64::MAX as f64`, mirroring
+/// SQLite's `sqlite3VdbeIntegerAffinity` (`ix > SMALLEST_INT64 && ix <
+/// LARGEST_INT64`). `i64::MAX as f64` rounds up to exactly 2^63, which is not
+/// representable in i64, so the old inclusive `<=` let a REAL of
+/// 9.223372036854775808e18 through and the saturating `as i64` cast silently
+/// stored 9223372036854775807; SQLite keeps both +2^63 and -2^63 REAL
+/// (alter4.test 9.2, Part of #6174).
 pub fn coerce_value(
     value: vibesql_types::SqlValue,
     expected_type: &vibesql_types::DataType,
@@ -207,14 +216,14 @@ pub fn coerce_value(
             Ok(value)
         }
         (SqlValue::Numeric(f) | SqlValue::Double(f), DataType::Boolean) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(value)
             }
         }
         (SqlValue::Real(f), DataType::Boolean) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(value)
@@ -222,7 +231,7 @@ pub fn coerce_value(
         }
         (SqlValue::Float(f), DataType::Boolean) => {
             let f64_val = *f as f64;
-            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+            if f64_val.fract() == 0.0 && f64_val > i64::MIN as f64 && f64_val < i64::MAX as f64 {
                 Ok(SqlValue::Integer(f64_val as i64))
             } else {
                 Ok(SqlValue::Double(f64_val))
@@ -235,7 +244,7 @@ pub fn coerce_value(
             if let Ok(i) = trimmed.parse::<i64>() {
                 Ok(SqlValue::Integer(i))
             } else if let Ok(f) = trimmed.parse::<f64>() {
-                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                     Ok(SqlValue::Integer(f as i64))
                 } else {
                     Ok(SqlValue::Double(f))
@@ -276,7 +285,7 @@ pub fn coerce_value(
         (SqlValue::Bigint(_), DataType::Bigint) => Ok(value),
         // NUMERIC affinity: if the value is a whole number, store as integer
         (SqlValue::Numeric(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(value)
@@ -305,7 +314,7 @@ pub fn coerce_value(
         // SQLite type affinity: try to convert to integer if possible,
         // otherwise keep as numeric (SQLite stores values with actual type, not column affinity)
         (SqlValue::Numeric(f), DataType::Integer) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 // SQLite affinity: non-integer values stay as REAL in INTEGER column
@@ -321,7 +330,7 @@ pub fn coerce_value(
             }
         }
         (SqlValue::Numeric(f), DataType::Bigint) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Bigint(*f as i64))
             } else {
                 // SQLite affinity: non-integer values stay as REAL in BIGINT column
@@ -339,7 +348,7 @@ pub fn coerce_value(
         // "Type mismatch" error instead of applying affinity like every other
         // real-typed variant already does.
         (SqlValue::Real(f) | SqlValue::Double(f), DataType::Integer) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(value)
@@ -347,7 +356,7 @@ pub fn coerce_value(
         }
         (SqlValue::Float(f), DataType::Integer) => {
             let f64_val = *f as f64;
-            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+            if f64_val.fract() == 0.0 && f64_val > i64::MIN as f64 && f64_val < i64::MAX as f64 {
                 Ok(SqlValue::Integer(f64_val as i64))
             } else {
                 Ok(value)
@@ -369,7 +378,7 @@ pub fn coerce_value(
             }
         }
         (SqlValue::Real(f) | SqlValue::Double(f), DataType::Bigint) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Bigint(*f as i64))
             } else {
                 Ok(value)
@@ -377,7 +386,7 @@ pub fn coerce_value(
         }
         (SqlValue::Float(f), DataType::Bigint) => {
             let f64_val = *f as f64;
-            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+            if f64_val.fract() == 0.0 && f64_val > i64::MIN as f64 && f64_val < i64::MAX as f64 {
                 Ok(SqlValue::Bigint(f64_val as i64))
             } else {
                 Ok(value)
@@ -391,7 +400,7 @@ pub fn coerce_value(
             if let Ok(i) = trimmed.parse::<i64>() {
                 Ok(SqlValue::Integer(i))
             } else if let Ok(f) = trimmed.parse::<f64>() {
-                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                     Ok(SqlValue::Integer(f as i64))
                 } else {
                     // Non-integer float stored as REAL
@@ -421,7 +430,7 @@ pub fn coerce_value(
             if let Ok(i) = trimmed.parse::<i64>() {
                 Ok(SqlValue::Bigint(i))
             } else if let Ok(f) = trimmed.parse::<f64>() {
-                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                     Ok(SqlValue::Bigint(f as i64))
                 } else {
                     Ok(SqlValue::Double(f))
@@ -465,7 +474,7 @@ pub fn coerce_value(
             if let Ok(i) = trimmed.parse::<i64>() {
                 Ok(SqlValue::Integer(i))
             } else if let Ok(f) = trimmed.parse::<f64>() {
-                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                     Ok(SqlValue::Integer(f as i64))
                 } else {
                     Ok(SqlValue::Double(f))
@@ -500,21 +509,21 @@ pub fn coerce_value(
         // SQLite NUMERIC affinity: if the value is a whole number, store as integer
         (SqlValue::Float(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
             let f64_val = *f as f64;
-            if f64_val.fract() == 0.0 && f64_val >= i64::MIN as f64 && f64_val <= i64::MAX as f64 {
+            if f64_val.fract() == 0.0 && f64_val > i64::MIN as f64 && f64_val < i64::MAX as f64 {
                 Ok(SqlValue::Integer(f64_val as i64))
             } else {
                 Ok(SqlValue::Double(f64_val))
             }
         }
         (SqlValue::Real(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(SqlValue::Double(*f))
             }
         }
         (SqlValue::Double(f), DataType::Numeric { .. } | DataType::Decimal { .. }) => {
-            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                 Ok(SqlValue::Integer(*f as i64))
             } else {
                 Ok(SqlValue::Double(*f))
@@ -638,7 +647,7 @@ pub fn coerce_value(
                         | SqlValue::Smallint(_)
                         | SqlValue::Unsigned(_) => Ok(value),
                         SqlValue::Numeric(f) => {
-                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                                 Ok(SqlValue::Integer(*f as i64))
                             } else {
                                 // Non-integer stays as-is (SQLite stores actual type)
@@ -646,7 +655,7 @@ pub fn coerce_value(
                             }
                         }
                         SqlValue::Double(f) => {
-                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                                 Ok(SqlValue::Integer(*f as i64))
                             } else {
                                 Ok(value)
@@ -655,8 +664,8 @@ pub fn coerce_value(
                         SqlValue::Real(f) => {
                             let f64_val = *f as f64;
                             if f64_val.fract() == 0.0
-                                && f64_val >= i64::MIN as f64
-                                && f64_val <= i64::MAX as f64
+                                && f64_val > i64::MIN as f64
+                                && f64_val < i64::MAX as f64
                             {
                                 Ok(SqlValue::Integer(f64_val as i64))
                             } else {
@@ -669,8 +678,7 @@ pub fn coerce_value(
                                 Ok(SqlValue::Integer(i))
                             } else if let Ok(f) = s.trim().parse::<f64>() {
                                 // Try as float, convert to int if whole number
-                                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64
-                                {
+                                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                                     Ok(SqlValue::Integer(f as i64))
                                 } else {
                                     // Store as text if can't convert to integer
@@ -720,14 +728,14 @@ pub fn coerce_value(
                         // SQLite algorithm) keeps 6.0 as REAL, so quote()/typeof() diverge
                         // from SQLite (window1.test 29.2, #6191).
                         SqlValue::Numeric(f) => {
-                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                                 Ok(SqlValue::Integer(*f as i64))
                             } else {
                                 Ok(value)
                             }
                         }
                         SqlValue::Double(f) => {
-                            if f.fract() == 0.0 && *f >= i64::MIN as f64 && *f <= i64::MAX as f64 {
+                            if f.fract() == 0.0 && *f > i64::MIN as f64 && *f < i64::MAX as f64 {
                                 Ok(SqlValue::Integer(*f as i64))
                             } else {
                                 Ok(value)
@@ -736,8 +744,8 @@ pub fn coerce_value(
                         SqlValue::Real(f) => {
                             let f64_val = *f as f64;
                             if f64_val.fract() == 0.0
-                                && f64_val >= i64::MIN as f64
-                                && f64_val <= i64::MAX as f64
+                                && f64_val > i64::MIN as f64
+                                && f64_val < i64::MAX as f64
                             {
                                 Ok(SqlValue::Integer(f64_val as i64))
                             } else {
@@ -747,8 +755,8 @@ pub fn coerce_value(
                         SqlValue::Float(f) => {
                             let f64_val = *f as f64;
                             if f64_val.fract() == 0.0
-                                && f64_val >= i64::MIN as f64
-                                && f64_val <= i64::MAX as f64
+                                && f64_val > i64::MIN as f64
+                                && f64_val < i64::MAX as f64
                             {
                                 Ok(SqlValue::Integer(f64_val as i64))
                             } else {
@@ -765,8 +773,7 @@ pub fn coerce_value(
                             // Try float next
                             if let Ok(f) = trimmed.parse::<f64>() {
                                 // SQLite converts to integer if it's a whole number
-                                if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64
-                                {
+                                if f.fract() == 0.0 && f > i64::MIN as f64 && f < i64::MAX as f64 {
                                     return Ok(SqlValue::Integer(f as i64));
                                 }
                                 return Ok(SqlValue::Double(f));

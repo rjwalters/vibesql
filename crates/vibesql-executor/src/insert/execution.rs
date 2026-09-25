@@ -106,7 +106,7 @@ pub(crate) fn coerce_rowid_affinity(
 
     // Coerce a lossless-integer f64 to i64, else datatype mismatch.
     let from_float = |f: f64| -> Result<i64, ExecutorError> {
-        if f.fract() == 0.0 && f >= i64::MIN as f64 && f <= i64::MAX as f64 {
+        if f.fract() == 0.0 && f >= i64::MIN as f64 && f < i64::MAX as f64 {
             Ok(f as i64)
         } else {
             Err(datatype_mismatch())
@@ -843,10 +843,15 @@ fn execute_insert_internal(
                         unreachable!("guarded by matches! above")
                     };
                     let negated = match inner {
-                        vibesql_types::SqlValue::Integer(i) => {
-                            vibesql_types::SqlValue::Integer(-*i)
-                        }
-                        vibesql_types::SqlValue::Bigint(i) => vibesql_types::SqlValue::Bigint(-*i),
+                        // -i64::MIN overflows: SQLite promotes to REAL (#6174).
+                        vibesql_types::SqlValue::Integer(i) => i.checked_neg().map_or(
+                            vibesql_types::SqlValue::Real(-(*i as f64)),
+                            vibesql_types::SqlValue::Integer,
+                        ),
+                        vibesql_types::SqlValue::Bigint(i) => i.checked_neg().map_or(
+                            vibesql_types::SqlValue::Real(-(*i as f64)),
+                            vibesql_types::SqlValue::Bigint,
+                        ),
                         vibesql_types::SqlValue::Smallint(i) => {
                             vibesql_types::SqlValue::Smallint(-*i)
                         }

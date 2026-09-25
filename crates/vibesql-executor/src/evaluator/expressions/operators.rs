@@ -32,10 +32,17 @@ pub(crate) fn eval_unary_op(
         (Plus, SqlValue::Double(n)) => Ok(SqlValue::Double(*n)),
         (Plus, SqlValue::Numeric(s)) => Ok(SqlValue::Numeric(*s)),
 
-        // Unary minus - negation (preserves type in both modes)
-        (Minus, SqlValue::Integer(n)) => Ok(SqlValue::Integer(-n)),
+        // Unary minus - negation (preserves type in both modes).
+        //
+        // Negating the smallest 64-bit integer overflows i64. SQLite (OP_Negative
+        // / sqlite3VdbeExec's integer-subtract overflow check) promotes the
+        // result to REAL instead of wrapping: `SELECT -(-9223372036854775808)`
+        // → real 9.22337203685478e+18 (alter4.test 9.2/9.3, Part of #6174).
+        // A bare `-n` wraps back to i64::MIN in release builds (and panics in
+        // debug builds), so use checked negation with a REAL fallback.
+        (Minus, SqlValue::Integer(n)) => Ok(negate_i64(*n, SqlValue::Integer)),
         (Minus, SqlValue::Smallint(n)) => Ok(SqlValue::Smallint(-n)),
-        (Minus, SqlValue::Bigint(n)) => Ok(SqlValue::Bigint(-n)),
+        (Minus, SqlValue::Bigint(n)) => Ok(negate_i64(*n, SqlValue::Bigint)),
         (Minus, SqlValue::Float(n)) => Ok(SqlValue::Float(-n)),
         (Minus, SqlValue::Real(n)) => Ok(SqlValue::Real(-n)),
         (Minus, SqlValue::Double(n)) => Ok(SqlValue::Double(-n)),
@@ -69,7 +76,7 @@ pub(crate) fn eval_unary_op(
             if is_float {
                 Ok(SqlValue::Real(-float_val))
             } else {
-                Ok(SqlValue::Integer(-int_val))
+                Ok(negate_i64(int_val, SqlValue::Integer))
             }
         }
 
@@ -86,7 +93,7 @@ pub(crate) fn eval_unary_op(
             if is_float {
                 Ok(SqlValue::Real(-float_val))
             } else {
-                Ok(SqlValue::Integer(-int_val))
+                Ok(negate_i64(int_val, SqlValue::Integer))
             }
         }
 
@@ -162,6 +169,16 @@ pub(crate) fn eval_unary_op(
             "Unary operator {:?} not supported in this context",
             op
         ))),
+    }
+}
+
+/// Negate a 64-bit integer the way SQLite does: the result stays an integer
+/// (wrapped by `ctor`) unless negation overflows — only possible for
+/// `i64::MIN` — in which case it is promoted to REAL (`9.223372036854775808e18`).
+fn negate_i64(n: i64, ctor: fn(i64) -> SqlValue) -> SqlValue {
+    match n.checked_neg() {
+        Some(neg) => ctor(neg),
+        None => SqlValue::Real(-(n as f64)),
     }
 }
 
@@ -266,6 +283,38 @@ mod tests {
         assert_eq!(
             eval_unary_op(&UnaryOperator::Not, &SqlValue::Numeric(0.0)).unwrap(),
             SqlValue::Boolean(true)
+        );
+    }
+
+    #[test]
+    fn test_unary_minus_i64_min_promotes_to_real() {
+        // SQLite: SELECT typeof(-(-9223372036854775808)), -(-9223372036854775808)
+        //   → real | 9.2233720368547758e+18   (alter4.test 9.2/9.3, #6174)
+        let expected = SqlValue::Real(2f64.powi(63)); // 9.223372036854775808e18
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Integer(i64::MIN)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Bigint(i64::MIN)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            eval_unary_op(
+                &UnaryOperator::Minus,
+                &SqlValue::Varchar(arcstr::ArcStr::from("-9223372036854775808"))
+            )
+            .unwrap(),
+            expected
+        );
+        // Every other integer still negates to an integer.
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Integer(i64::MAX)).unwrap(),
+            SqlValue::Integer(-i64::MAX)
+        );
+        assert_eq!(
+            eval_unary_op(&UnaryOperator::Minus, &SqlValue::Integer(-i64::MAX)).unwrap(),
+            SqlValue::Integer(i64::MAX)
         );
     }
 

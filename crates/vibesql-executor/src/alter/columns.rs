@@ -16,19 +16,20 @@ fn is_auto_index(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("sqlite_autoindex_")
 }
 
-/// Whether a DEFAULT expression is a compile-time constant, mirroring SQLite's
-/// `sqlite3ExprIsConstant` gate in `sqlite3AlterFinishAddColumn`. SQLite rejects
-/// `ALTER TABLE ... ADD COLUMN` with a non-constant default (e.g. `CURRENT_TIME`,
-/// a function call, or a column reference) because the new column's value must be
-/// materializable without a row context. Literals and arithmetic/unary
-/// combinations of literals are constant; everything else (CURRENT_*, functions,
-/// column refs, subqueries) is not.
+/// Whether a DEFAULT expression is a constant SQLite can materialize for an
+/// added column, mirroring the `sqlite3ValueFromExpr` gate in
+/// `sqlite3AlterFinishAddColumn`: when that call yields no value, SQLite fails
+/// the ALTER with "Cannot add a column with non-constant default".
+/// `sqlite3ValueFromExpr` only understands a bare literal optionally wrapped in
+/// unary `-`/`+` (`DEFAULT -5`, `DEFAULT (- -5)`, `DEFAULT (-(-9223372036854775808))`
+/// — alter4-9.3). Anything else is rejected, including binary arithmetic over
+/// literals (`DEFAULT (-5+1)`, alter4-2.7), `NOT`/`~`, CURRENT_*, function
+/// calls, and column references (verified against sqlite3 3.54.0).
 fn is_constant_default(expr: &Expression) -> bool {
     match expr {
         Expression::Literal(_) => true,
-        Expression::UnaryOp { expr, .. } => is_constant_default(expr),
-        Expression::BinaryOp { left, right, .. } => {
-            is_constant_default(left) && is_constant_default(right)
+        Expression::UnaryOp { op: UnaryOperator::Minus | UnaryOperator::Plus, expr } => {
+            is_constant_default(expr)
         }
         _ => false,
     }
@@ -173,6 +174,20 @@ pub(super) fn execute_add_column(
         None
     };
 
+    // Materialize the backfill value for a plain (non-generated) column BEFORE
+    // touching the schema. Evaluating it after `add_column` meant a DEFAULT
+    // that passed the constancy gate above but then failed to evaluate
+    // returned an error with the new column already appended to the schema
+    // while no existing row had been backfilled — a schema/row-width mismatch
+    // that the CLI then persisted as an unreadable checkpoint on exit.
+    let plain_default_value = if stmt.column_def.generated_expr.is_some() {
+        None
+    } else if let Some(ref default_expr) = stmt.column_def.default_value {
+        Some(evaluate_simple_default(default_expr)?)
+    } else {
+        Some(SqlValue::Null)
+    };
+
     // Add column to schema
     let mut new_column = ColumnSchema::new(
         stmt.column_def.name.clone(),
@@ -232,13 +247,9 @@ pub(super) fn execute_add_column(
             row.add_value(coerced);
         }
     } else {
-        // Add default value (or NULL) to all existing rows
-        let default_value = if let Some(ref default_expr) = stmt.column_def.default_value {
-            // Evaluate the default expression for simple cases (literals)
-            evaluate_simple_default(default_expr)?
-        } else {
-            SqlValue::Null
-        };
+        // Add default value (or NULL) to all existing rows (evaluated above,
+        // before the schema mutation).
+        let default_value = plain_default_value.unwrap_or(SqlValue::Null);
 
         if let Some(st) = added_strict_type {
             if table.row_count() > 0
