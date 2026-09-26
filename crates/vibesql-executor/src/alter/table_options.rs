@@ -234,11 +234,28 @@ pub(super) fn execute_rename_table(
     // catalog afterward, before `rewrite_triggers_for_rename` runs (which
     // performs the actual on-target/body rewrite over whatever triggers are in
     // the catalog at that point).
-    let triggers_on_renamed_table: Vec<TriggerDefinition> = database
+    //
+    // Each trigger's original `sqlite_master` creation ordinal is captured
+    // alongside it, mirroring `indexes_on_renamed_table` below: `iter_triggers()`
+    // walks a `HashMap` whose iteration order varies per process (Rust's default
+    // `RandomState` reseeds per launch), so collecting bare `TriggerDefinition`s
+    // here and letting the restore loop's `create_trigger` calls assign fresh
+    // ordinals in whatever order the `HashMap` happened to yield them made two
+    // triggers on the same renamed table swap relative `sqlite_schema` listing
+    // order nondeterministically across runs (issue #6737). Restoring each
+    // trigger's captured ordinal explicitly after re-inserting it keeps both its
+    // absolute schema position and its order relative to any other trigger
+    // restored in this same pass deterministic, regardless of `HashMap` order.
+    let triggers_on_renamed_table: Vec<(TriggerDefinition, Option<u64>)> = database
         .catalog
         .iter_triggers()
         .filter(|t| t.table_name.eq_ignore_ascii_case(&stmt.table_name))
-        .cloned()
+        .map(|t| {
+            let trigger_schema =
+                t.schema.clone().unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+            let seq = database.catalog.creation_seq(&trigger_schema, &t.name);
+            (t.clone(), seq)
+        })
         .collect();
 
     // Which dependent views/triggers are *already* broken (their stored SQL does
@@ -375,9 +392,20 @@ pub(super) fn execute_rename_table(
 
     // Restore the triggers cascade-dropped above so `rewrite_triggers_for_rename`
     // (below) can rewrite their `ON`-target/body to the new table name instead of
-    // losing them permanently.
-    for trigger in triggers_on_renamed_table {
-        let _ = database.catalog.create_trigger(trigger);
+    // losing them permanently. `create_trigger` unconditionally assigns each
+    // restored trigger a fresh creation ordinal (as it must for a genuine
+    // `CREATE TRIGGER`), so the captured original ordinal is written back
+    // immediately after — see the capture comment above for why this must not
+    // be left to insertion order.
+    for (trigger, seq) in triggers_on_renamed_table {
+        let trigger_schema =
+            trigger.schema.clone().unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
+        let trigger_name = trigger.name.clone();
+        if database.catalog.create_trigger(trigger).is_ok() {
+            if let Some(seq) = seq {
+                database.catalog.set_creation_seq(&trigger_schema, &trigger_name, seq);
+            }
+        }
     }
 
     // Restore the data by getting the new table and setting its rows
