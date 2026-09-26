@@ -174,12 +174,34 @@ pub(super) fn execute_add_column(
         None
     };
 
-    // Materialize the backfill value for a plain (non-generated) column BEFORE
-    // touching the schema. Evaluating it after `add_column` meant a DEFAULT
-    // that passed the constancy gate above but then failed to evaluate
-    // returned an error with the new column already appended to the schema
-    // while no existing row had been backfilled — a schema/row-width mismatch
-    // that the CLI then persisted as an unreadable checkpoint on exit.
+    // Materialize the backfill value(s) for the new column BEFORE touching the
+    // schema. Evaluating them after `add_column` meant an eval error --
+    // whether a non-constant DEFAULT that fails at evaluation time, or (issue
+    // #6732) a generated-column expression that raises partway through the
+    // per-row backfill loop (e.g. integer overflow) -- returned with the new
+    // column already appended to the schema while zero or only some rows had
+    // been backfilled: a schema/row-width mismatch that the CLI then
+    // persisted as an unreadable checkpoint on exit. For a generated column
+    // every row's value is computed here, against the pre-existing schema
+    // (the expression can only reference already-existing columns, so their
+    // indices are unaffected by the not-yet-added column), and the whole `?`
+    // propagates before any mutation if any row's evaluation fails.
+    let generated_backfill_values: Option<Vec<SqlValue>> =
+        if let Some(ref gen_expr) = stmt.column_def.generated_expr {
+            let col_type = stmt.column_def.data_type.clone();
+            let schema_snapshot = table.schema.clone();
+            let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
+                .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
+            let mut values = Vec::with_capacity(table.row_count());
+            for row in table.scan() {
+                let value = evaluator.eval(gen_expr, row)?;
+                let coerced = crate::insert::validation::coerce_value(value, &col_type)?;
+                values.push(coerced);
+            }
+            Some(values)
+        } else {
+            None
+        };
     let plain_default_value = if stmt.column_def.generated_expr.is_some() {
         None
     } else if let Some(ref default_expr) = stmt.column_def.default_value {
@@ -216,12 +238,10 @@ pub(super) fn execute_add_column(
         table.schema_mut().strict_types.push(st);
     }
 
-    // Backfill existing rows. For a generated column, evaluate the expression
-    // per-row against each row's current (pre-existing) values, mirroring the
-    // INSERT-time materialization in `insert::defaults::apply_generated_columns`
-    // (issue #5861). The new column was appended at the end of the schema, so
-    // the indices of the pre-existing columns the expression references are
-    // unchanged, and evaluation resolves exactly as it does at INSERT time.
+    // Backfill existing rows. For a generated column, the per-row values were
+    // already evaluated above (before `add_column`), mirroring the INSERT-time
+    // materialization in `insert::defaults::apply_generated_columns` (issue
+    // #5861); applying them here is now a plain append that cannot fail.
     // Non-generated columns keep the previous behavior: a static default or NULL.
     //
     // For a STRICT table, track whether the backfilled DEFAULT value actually
@@ -235,16 +255,11 @@ pub(super) fn execute_add_column(
     // second occurrence: `DELETE FROM t1` then the same `ADD COLUMN ...
     // DEFAULT x'313233'` no longer errors).
     let mut strict_default_violation: Option<ExecutorError> = None;
-    if let Some(ref gen_expr) = stmt.column_def.generated_expr {
-        let gen_expr = *gen_expr.clone();
-        let col_type = stmt.column_def.data_type.clone();
-        let schema_snapshot = table.schema.clone();
-        let evaluator = crate::ExpressionEvaluator::new(&schema_snapshot)
-            .with_schema_context(crate::evaluator::SchemaExprContext::GeneratedColumn);
-        for row in table.rows_mut() {
-            let value = evaluator.eval(&gen_expr, row)?;
-            let coerced = crate::insert::validation::coerce_value(value, &col_type)?;
-            row.add_value(coerced);
+    if let Some(values) = generated_backfill_values {
+        // Values were computed above, before the schema mutation, so applying
+        // them here cannot fail partway through.
+        for (row, value) in table.rows_mut().iter_mut().zip(values) {
+            row.add_value(value);
         }
     } else {
         // Add default value (or NULL) to all existing rows (evaluated above,
