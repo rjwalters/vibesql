@@ -469,6 +469,14 @@ fn derive_expression_name_impl(
             // For wildcard (*), return "*" - used in COUNT(*) and similar
             "*".to_string()
         }
+        // A boolean literal is either `TRUE` / `FALSE` or an empty `[NOT] IN ()`
+        // folded by the parser (issue #6733); SQLite names both after their
+        // source text (`5 IN ()`, `TRUE`).
+        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(_))
+            if source_text.is_some() =>
+        {
+            source_text.clone().unwrap_or_default()
+        }
         vibesql_ast::Expression::Literal(val) => {
             // For literals, use a clean string representation
             match val {

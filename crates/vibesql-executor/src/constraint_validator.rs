@@ -159,8 +159,14 @@ impl ExpressionVisitor for GeneratedColumnDependencyCollector<'_> {
         // column referenced there is ever a dependency (altertab3.test 27.1:
         // `b AS ((WITH w1(xyz) AS (SELECT t1.b FROM t1) SELECT 123) IN ())`
         // is not a self-referential generated column).
-        if let Expression::InList { values, .. } = expr {
-            if values.is_empty() {
+        //
+        // The parser already performs that fold (issue #6733), so a parsed AST
+        // only reaches here with an empty `InList` when its operand holds a
+        // function call — and SQLite keeps (and resolves) such an operand, so
+        // it must still count. The skip therefore applies only to a
+        // function-free operand (e.g. a hand-built AST).
+        if let Expression::InList { expr: operand, values, .. } = expr {
+            if values.is_empty() && !vibesql_ast::has_function::has_function_call(operand) {
                 return VisitResult::Skip;
             }
         }
@@ -1297,6 +1303,20 @@ mod tests {
         // dependency.
         let cols = vec![col("a"), gen_col("b", in_list(qualified_col_ref("t1", "b"), vec![]))];
         validate_generated_column_cycles("t1", &cols).unwrap();
+    }
+
+    #[test]
+    fn test_generated_column_self_ref_in_function_operand_of_empty_in_list_is_a_loop() {
+        // SQLite keeps an empty-IN operand that holds a function call
+        // (EP_HasFunc), so `abs(b) IN ()` still depends on `b` (issue #6733).
+        let abs_b = Expression::Function {
+            name: vibesql_ast::FunctionIdentifier::new("abs"),
+            args: vec![col_ref("b")],
+            character_unit: None,
+        };
+        let cols = vec![col("a"), gen_col("b", in_list(abs_b, vec![]))];
+        let err = validate_generated_column_cycles("t1", &cols).unwrap_err();
+        assert!(err.to_string().contains("generated column loop on \"b\""), "{err}");
     }
 
     #[test]

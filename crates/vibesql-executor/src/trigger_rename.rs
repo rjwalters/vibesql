@@ -40,7 +40,8 @@ pub fn rewrite_table_refs_in_trigger_sql(sql: &str, old_table: &str, new_table: 
     // Collect the spans of identifier tokens that should be rewritten. `true`
     // enables the "first ON is the trigger's own header target" heuristic,
     // which only applies to `CREATE TRIGGER ... ON <table> ...` text.
-    let edits = collect_table_ref_spans(&tokens, old_table, true);
+    let mut edits = collect_table_ref_spans(&tokens, old_table, true);
+    drop_edits_in_discarded_operands(sql, &mut edits);
     if edits.is_empty() {
         return sql.to_string();
     }
@@ -67,12 +68,44 @@ pub fn rewrite_table_refs_in_view_sql(sql: &str, old_table: &str, new_table: &st
         Err(_) => return sql.to_string(),
     };
 
-    let edits = collect_table_ref_spans(&tokens, old_table, false);
+    let mut edits = collect_table_ref_spans(&tokens, old_table, false);
+    drop_edits_in_discarded_operands(sql, &mut edits);
     if edits.is_empty() {
         return sql.to_string();
     }
 
     apply_edits(sql, &edits, new_table)
+}
+
+/// Byte ranges of `sql` that hold the left operand of an empty `[NOT] IN ()`
+/// list which the parser discards (issue #6733).
+///
+/// SQLite folds `<expr> IN ()` to a constant at parse time and deletes a
+/// function-free `<expr>` without resolving it, so `ALTER TABLE ... RENAME`
+/// never rewrites a name inside it: `WHERE a=1 OR (b IN ())` keeps `b` after
+/// `RENAME b TO bbb` (altertab3.test 3.2), and a discarded scalar subquery
+/// keeps its FROM tables after `RENAME TO` (altertab3.test 10.2). An operand
+/// holding a function call is kept by SQLite and renamed as usual
+/// (`LIKELIHOOD(c0, 1.0) IN ()`, altertab3.test 8.2.2); the parser does not
+/// fold (or report) those.
+fn discarded_empty_in_operands(sql: &str) -> Vec<Span> {
+    vibesql_parser::Parser::empty_in_discarded_operand_spans(sql)
+}
+
+/// Is `span` inside one of the `discarded` operand ranges?
+fn is_in_discarded_operand(span: &Span, discarded: &[Span]) -> bool {
+    discarded.iter().any(|d| d.start <= span.start && span.end <= d.end)
+}
+
+/// Remove every edit that falls inside a discarded empty-`IN ()` operand.
+fn drop_edits_in_discarded_operands(sql: &str, edits: &mut Vec<Span>) {
+    if edits.is_empty() {
+        return;
+    }
+    let discarded = discarded_empty_in_operands(sql);
+    if !discarded.is_empty() {
+        edits.retain(|span| !is_in_discarded_operand(span, &discarded));
+    }
 }
 
 /// Apply replacement edits (sorted, non-overlapping spans) to `sql`, replacing
@@ -327,6 +360,10 @@ pub fn rewrite_column_refs_in_trigger_sql(
     // an unqualified column can be resolved to its owning table.
     let scopes = collect_scope_tables(&tokens, &significant);
 
+    // Names inside a discarded empty-`IN ()` operand are never resolved by
+    // SQLite: they are neither renamed nor reported as ambiguous.
+    let discarded = discarded_empty_in_operands(sql);
+
     // Collect the spans of the *column identifier* tokens that should be renamed.
     let mut edits: Vec<Span> = Vec::new();
 
@@ -354,6 +391,9 @@ pub fn rewrite_column_refs_in_trigger_sql(
         }
 
         let Some(name) = ident_name(&tokens[idx].0) else { continue };
+        if is_in_discarded_operand(&tokens[idx].1, &discarded) {
+            continue;
+        }
 
         // Qualified reference: `<qualifier> . <name>`.
         if pos >= 2 {
@@ -1057,6 +1097,85 @@ mod tests {
         assert_eq!(
             rewrite_table_refs_in_view_sql(sql, "t1", "t3"),
             "CREATE VIEW v AS SELECT * FROM (SELECT t1 FROM \"t3\")"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Discarded empty `IN ()` operands (issue #6733)
+    // ------------------------------------------------------------------
+
+    fn rewrite_view_col(sql: &str, table: &str, old: &str, new: &str) -> String {
+        rewrite_column_refs_in_trigger_sql(sql, table, old, new, &altertrig_schema, false)
+            .expect("rewrite should not be ambiguous in this fixture")
+    }
+
+    /// altertab3.test 3.2: `b IN ()` is folded away by SQLite, so the rename
+    /// leaves `b` alone.
+    #[test]
+    fn column_rename_skips_discarded_empty_in_operand() {
+        let sql = "CREATE VIEW v1 AS SELECT * FROM t1 WHERE a=1 OR (b IN ())";
+        assert_eq!(rewrite_view_col(sql, "t1", "b", "bbb"), sql);
+        // References outside the operand still rename.
+        let sql = "CREATE VIEW v1 AS SELECT b FROM t1 WHERE b=1 OR (b NOT IN ())";
+        assert_eq!(
+            rewrite_view_col(sql, "t1", "b", "bbb"),
+            "CREATE VIEW v1 AS SELECT bbb FROM t1 WHERE bbb=1 OR (b NOT IN ())"
+        );
+        // The whole IN-tier operand is discarded, not just the last term.
+        let sql = "CREATE VIEW v1 AS SELECT 1 FROM t1 WHERE a AND a + b = 3 IN ()";
+        assert_eq!(
+            rewrite_view_col(sql, "t1", "a", "x"),
+            "CREATE VIEW v1 AS SELECT 1 FROM t1 WHERE x AND a + b = 3 IN ()"
+        );
+    }
+
+    /// altertab3.test 8.2.2: an operand holding a function call is kept by
+    /// SQLite, so its names are renamed as usual.
+    #[test]
+    fn column_rename_still_rewrites_function_operand() {
+        let sql = "CREATE VIEW v AS SELECT * FROM t1 WHERE likelihood(b, 1.0) IN ()";
+        assert_eq!(
+            rewrite_view_col(sql, "t1", "b", "c1"),
+            "CREATE VIEW v AS SELECT * FROM t1 WHERE likelihood(c1, 1.0) IN ()"
+        );
+    }
+
+    /// An ambiguous name inside a discarded operand is never resolved, so it
+    /// cannot abort the rename.
+    #[test]
+    fn column_rename_ignores_ambiguity_inside_discarded_operand() {
+        let sql = "CREATE VIEW v AS SELECT 1 FROM t3, t4 WHERE e IN ()";
+        assert_eq!(rewrite_view_col(sql, "t3", "e", "x"), sql);
+    }
+
+    /// altertab3.test 10.2: the discarded operand is a scalar subquery; its
+    /// FROM tables are not renamed.
+    #[test]
+    fn table_rename_skips_discarded_subquery_operand() {
+        let sql = "CREATE VIEW v1 AS SELECT * FROM t1 WHERE (\n    SELECT t1.a FROM t1, t2\n  ) IN () OR t1.a=5";
+        assert_eq!(rewrite_table_refs_in_view_sql(sql, "t2", "t3"), sql);
+        // The rest of the view is still rewritten.
+        assert_eq!(
+            rewrite_table_refs_in_view_sql(sql, "t1", "tx"),
+            "CREATE VIEW v1 AS SELECT * FROM \"tx\" WHERE (\n    SELECT t1.a FROM t1, t2\n  ) IN () OR \"tx\".a=5"
+        );
+    }
+
+    #[test]
+    fn trigger_rename_skips_discarded_operand_in_body() {
+        let sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+                   SELECT 1 FROM t2 WHERE (SELECT d FROM t2) IN () OR c = 1;\nEND";
+        assert_eq!(
+            rewrite(sql, "t2", "t9"),
+            "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+             SELECT 1 FROM \"t9\" WHERE (SELECT d FROM t2) IN () OR c = 1;\nEND"
+        );
+        let sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+                   UPDATE t2 SET c = 1 WHERE d NOT IN () AND d = 2;\nEND";
+        assert_eq!(
+            rewrite_col(sql, "t2", "d", "dd"),
+            "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN\n  \
+             UPDATE t2 SET c = 1 WHERE d NOT IN () AND dd = 2;\nEND"
         );
     }
 }

@@ -703,3 +703,135 @@ fn test_matrix_in_between_shift_bound() {
         panic!("expected Between at top level");
     }
 }
+
+// ========================================================================
+// Empty IN () folding (issue #6733)
+// ========================================================================
+//
+// SQLite folds `<expr> IN ()` / `<expr> NOT IN ()` to FALSE / TRUE at parse
+// time and discards a function-free left operand without resolving it.
+
+fn boolean_literal(expr: &vibesql_ast::Expression) -> Option<bool> {
+    match expr {
+        vibesql_ast::Expression::Literal(vibesql_types::SqlValue::Boolean(b)) => Some(*b),
+        _ => None,
+    }
+}
+
+#[test]
+fn test_empty_in_folds_to_false() {
+    let expr = parse_select_expr("SELECT nosuch IN () FROM t1");
+    assert_eq!(boolean_literal(&expr), Some(false), "got {expr:?}");
+}
+
+#[test]
+fn test_empty_not_in_folds_to_true() {
+    let expr = parse_select_expr("SELECT a + b NOT IN () FROM t1");
+    assert_eq!(boolean_literal(&expr), Some(true), "got {expr:?}");
+}
+
+#[test]
+fn test_empty_in_with_function_operand_is_kept() {
+    for sql in [
+        "SELECT abs(nosuch) IN () FROM t1",
+        "SELECT 1 + count(*) NOT IN () FROM t1",
+        "SELECT (a LIKE 'x') IN () FROM t1",
+        "SELECT CASE WHEN a THEN upper(b) END IN () FROM t1",
+    ] {
+        let expr = parse_select_expr(sql);
+        assert!(
+            matches!(&expr, vibesql_ast::Expression::InList { values, .. } if values.is_empty()),
+            "{sql}: expected an empty InList, got {expr:?}"
+        );
+    }
+}
+
+#[test]
+fn test_empty_in_function_inside_subquery_does_not_count() {
+    // EP_HasFunc does not propagate out of a subquery.
+    let expr = parse_select_expr("SELECT (SELECT max(a) FROM t2) IN () FROM t1");
+    assert_eq!(boolean_literal(&expr), Some(false), "got {expr:?}");
+}
+
+#[test]
+fn test_empty_in_fold_in_arena_parser_matches() {
+    let stmt =
+        crate::parse_with_arena_fallback("SELECT nosuch IN (), abs(x) IN () FROM t1").unwrap();
+    let vibesql_ast::Statement::Select(select) = stmt else { panic!("expected SELECT") };
+    let exprs: Vec<_> = select
+        .select_list
+        .iter()
+        .map(|item| match item {
+            vibesql_ast::SelectItem::Expression { expr, .. } => expr.clone(),
+            other => panic!("unexpected select item {other:?}"),
+        })
+        .collect();
+    assert_eq!(boolean_literal(&exprs[0]), Some(false), "got {:?}", exprs[0]);
+    assert!(matches!(&exprs[1], vibesql_ast::Expression::InList { .. }), "got {:?}", exprs[1]);
+
+    let owned =
+        crate::arena_parser::parse_select_to_owned("SELECT nosuch NOT IN () FROM t1").unwrap();
+    match &owned.select_list[0] {
+        vibesql_ast::SelectItem::Expression { expr, .. } => {
+            assert_eq!(boolean_literal(expr), Some(true), "got {expr:?}")
+        }
+        other => panic!("unexpected select item {other:?}"),
+    }
+}
+
+#[test]
+fn test_empty_in_not_folded_inside_create_index() {
+    // Index expressions are re-rendered from the AST into sqlite_master.sql,
+    // so they keep the user's `'1' IN ()` spelling (altertab3.test 8.1).
+    let stmt = Parser::parse_sql("CREATE INDEX i0 ON t0('1' IN ())").unwrap();
+    let rendered = format!("{stmt:?}");
+    assert!(rendered.contains("InList"), "expected InList in {rendered}");
+}
+
+#[test]
+fn test_empty_in_not_folded_by_expression_reload() {
+    // `parse_expression_sql` reloads persisted index expressions, so it must
+    // round-trip an `InList` the DDL parse deliberately kept (altertab3.test
+    // 8.1 reopens the database between statements).
+    let expr = Parser::parse_expression_sql("'1' IN ()").unwrap();
+    assert!(
+        matches!(&expr, vibesql_ast::Expression::InList { values, .. } if values.is_empty()),
+        "got {expr:?}"
+    );
+}
+
+#[test]
+fn test_empty_in_discarded_operand_spans() {
+    let sql = "CREATE VIEW v1 AS SELECT * FROM t1 WHERE a=1 OR (b IN ())";
+    let spans = Parser::empty_in_discarded_operand_spans(sql);
+    let texts: Vec<&str> = spans.iter().map(|s| s.extract(sql)).collect();
+    assert_eq!(texts, vec!["b"]);
+
+    // The operand is everything at the IN tier to its left.
+    let sql = "SELECT * FROM t WHERE x AND a + b * c = d NOT IN () OR e";
+    let spans = Parser::empty_in_discarded_operand_spans(sql);
+    let texts: Vec<&str> = spans.iter().map(|s| s.extract(sql)).collect();
+    assert_eq!(texts, vec!["a + b * c = d"]);
+
+    // A function-call operand is kept, so nothing is reported.
+    let sql = "CREATE VIEW v AS SELECT * FROM t WHERE likelihood(c0, 1.0) IN ()";
+    assert!(Parser::empty_in_discarded_operand_spans(sql).is_empty());
+
+    // No empty IN list at all.
+    assert!(Parser::empty_in_discarded_operand_spans("SELECT a IN (1) FROM t").is_empty());
+}
+
+#[test]
+fn test_empty_in_discarded_operand_spans_in_trigger() {
+    let sql = "CREATE TRIGGER r1 AFTER INSERT ON t1 WHEN new.a IN () BEGIN\n  \
+               SELECT 1 FROM t2 WHERE t2.c IN ();\n  UPDATE t2 SET c = 1 WHERE d NOT IN ();\nEND";
+    let spans = Parser::empty_in_discarded_operand_spans(sql);
+    let texts: Vec<&str> = spans.iter().map(|s| s.extract(sql)).collect();
+    assert_eq!(texts, vec!["new.a", "t2.c", "d"]);
+
+    // A stored raw body (`TriggerAction::RawSql`) has the same shape.
+    let body = "BEGIN SELECT 1 FROM t2 WHERE e IN ( ) ; END";
+    let spans = Parser::empty_in_discarded_operand_spans(body);
+    let texts: Vec<&str> = spans.iter().map(|s| s.extract(body)).collect();
+    assert_eq!(texts, vec!["e"]);
+}

@@ -34,6 +34,7 @@
 //! ```
 
 pub mod arena;
+pub mod has_function;
 pub mod pretty_print;
 pub mod rename;
 pub mod visitor;

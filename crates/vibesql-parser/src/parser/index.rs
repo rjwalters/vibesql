@@ -15,6 +15,17 @@ impl Parser {
     pub(super) fn parse_create_index_statement(
         &mut self,
     ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
+        // Index key expressions and the partial-index WHERE clause are
+        // re-rendered from the AST into `sqlite_master.sql`, so folding an
+        // empty `IN ()` here would print a bare literal in place of the
+        // user's spelling (`CREATE INDEX i0 ON t0('1' IN ())`, altertab3.test
+        // 8.1). Keep the `InList` node; it evaluates to the same constant.
+        self.with_empty_in_fold_disabled(Self::parse_create_index_statement_unfolded)
+    }
+
+    fn parse_create_index_statement_unfolded(
+        &mut self,
+    ) -> Result<vibesql_ast::CreateIndexStmt, ParseError> {
         // Expect CREATE keyword
         self.expect_keyword(Keyword::Create)?;
 

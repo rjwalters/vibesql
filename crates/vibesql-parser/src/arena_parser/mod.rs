@@ -25,6 +25,7 @@
 
 mod ddl;
 mod delete;
+mod empty_in;
 mod expression;
 mod insert;
 mod select;
