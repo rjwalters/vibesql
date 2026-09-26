@@ -69,6 +69,28 @@ impl CreateIndexExecutor {
         stmt: &CreateIndexStmt,
         database: &mut Database,
     ) -> Result<String, ExecutorError> {
+        Self::execute_with_source(stmt, database, None)
+    }
+
+    /// Execute a CREATE INDEX statement, recording its verbatim source text.
+    ///
+    /// SQLite stores the original `CREATE INDEX` statement text in
+    /// `sqlite_master.sql` (normalized only to `CREATE [UNIQUE] INDEX
+    /// <name-onward>`; see `index_rename::normalize_create_index_source`) and
+    /// splices renamed identifiers into it on `ALTER TABLE ... RENAME`. Pass
+    /// the statement's original text as `sql_source` to get the same behavior;
+    /// pass `None` when it is unavailable (an AST built programmatically), in
+    /// which case `sqlite_master` reconstructs the text from the index
+    /// metadata. Mirrors `CreateTableExecutor::execute_with_source` (issues
+    /// #5619, #6734).
+    ///
+    /// Source text is only recorded for B-tree indexes — the only kind listed
+    /// in `sqlite_master` with SQLite-shaped DDL.
+    pub fn execute_with_source(
+        stmt: &CreateIndexStmt,
+        database: &mut Database,
+        sql_source: Option<&str>,
+    ) -> Result<String, ExecutorError> {
         // Handle IF NOT EXISTS early (before validation which also checks this)
         if stmt.if_not_exists && index_already_exists(stmt, database) {
             return Ok(format!("Index '{}' already exists (skipped)", stmt.index_name));
@@ -97,6 +119,7 @@ impl CreateIndexExecutor {
                 &validation.qualified_table_name,
                 &validation.table_schema,
                 *unique,
+                sql_source.and_then(crate::index_rename::normalize_create_index_source),
             ),
 
             vibesql_ast::IndexType::Fulltext => Err(ExecutorError::UnsupportedFeature(

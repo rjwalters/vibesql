@@ -334,6 +334,19 @@ pub(super) fn execute_rename_table(
     database.restore_indexes_for_table(physical_indexes_on_renamed_table, &stmt.new_table_name);
     for (mut index_meta, seq) in indexes_on_renamed_table {
         index_meta.table_name = stmt.new_table_name.clone();
+        // Splice the new (double-quoted) table name into the index's verbatim
+        // `CREATE INDEX` text, as SQLite does: `CREATE INDEX i0 ON t0(c0)`
+        // becomes `CREATE INDEX i0 ON "t1"(c0)` (altertab3.test 8.1). If the
+        // text cannot be rewritten unambiguously it is invalidated, so
+        // `sqlite_master` reconstructs it from the retargeted metadata rather
+        // than showing the stale old table name (issue #6734).
+        if let Some(src) = index_meta.sql_source.take() {
+            index_meta.sql_source = crate::index_rename::rename_index_table(
+                &src,
+                &old_table_bare_name,
+                &stmt.new_table_name,
+            );
+        }
         // Mirror the physical-index rename above: an implicit
         // `sqlite_autoindex_<table>_<n>` catalog name is retargeted onto the
         // new table identity so `sqlite_master`/introspection reports the

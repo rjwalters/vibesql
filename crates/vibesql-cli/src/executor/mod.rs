@@ -1051,7 +1051,13 @@ impl SqlExecutor {
                 }
             }
             vibesql_ast::Statement::CreateIndex(index_stmt) => {
-                match vibesql_executor::CreateIndexExecutor::execute(&index_stmt, &mut self.db) {
+                // Pass the verbatim original statement text so sqlite_master.sql
+                // preserves the user's exact CREATE INDEX formatting (issue #6734).
+                match vibesql_executor::CreateIndexExecutor::execute_with_source(
+                    &index_stmt,
+                    &mut self.db,
+                    Some(sql),
+                ) {
                     Ok(msg) => {
                         result.message = Some(msg);
                         result.row_count = 0; // DDL doesn't return rows
@@ -1847,9 +1853,14 @@ impl SqlExecutor {
                 );
                 continue;
             }
-            if let Err(e) =
-                vibesql_executor::CreateIndexExecutor::execute(&create_stmt, &mut self.db)
-            {
+            // Carry the loaded index's verbatim CREATE INDEX text (if any) over
+            // to the rebuilt index so `sqlite_master.sql` keeps it (#6734).
+            let index_sql_source = catalog_meta.sql_source.clone();
+            if let Err(e) = vibesql_executor::CreateIndexExecutor::execute_with_source(
+                &create_stmt,
+                &mut self.db,
+                index_sql_source.as_deref(),
+            ) {
                 log::warn!(
                     "ATTACH '{}' AS {}: failed to rebuild index '{}' on '{}.{}': {} — continuing \
                      without it (#6487). The attached data is unaffected; only the index is \

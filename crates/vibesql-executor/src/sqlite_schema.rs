@@ -716,6 +716,17 @@ fn generate_create_table_sql(table: &TableSchema) -> String {
 
 /// Generate CREATE INDEX SQL statement for an index
 fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
+    // SQLite stores the original CREATE INDEX statement text in
+    // sqlite_master.sql and splices renamed identifiers into it on ALTER TABLE
+    // RENAME (issue #6734). When we captured that text at CREATE INDEX time
+    // (and it has been kept in sync with any later rename), return it as-is.
+    // Reconstruction below is the fallback for indexes without source text:
+    // synthesized programmatically, loaded from a pre-v19 binary catalog, or
+    // whose text could not be spliced unambiguously on a rename.
+    if let Some(ref src) = index.sql_source {
+        return src.clone();
+    }
+
     let unique_str = if index.is_unique { "UNIQUE " } else { "" };
 
     let columns: Vec<String> = index
@@ -738,9 +749,9 @@ fn generate_create_index_sql(index: &vibesql_catalog::IndexMetadata) -> String {
                     // WITHOUT an added outer paren layer (altercol-1.12.4),
                     // while an already-function-call expression like
                     // `t1(lower(a))` carries its own parens and needs no
-                    // extra wrap either. VibeSQL does not retain the original
-                    // source text for indexes (unlike triggers/views, which
-                    // store verbatim `sql_definition`), so a bare column
+                    // extra wrap either. This reconstruction path only runs
+                    // when the index has no verbatim `sql_source` (see the
+                    // short-circuit above, issue #6734), so a bare column
                     // reference is the one shape that DOES need a synthetic
                     // wrap: `IndexedColumn::Expression` only ever holds a
                     // lone `ColumnRef` when the user wrote explicit

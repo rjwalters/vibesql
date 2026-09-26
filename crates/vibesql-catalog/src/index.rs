@@ -36,6 +36,21 @@ pub struct IndexMetadata {
     /// mismatch checker also rejects partial UNIQUE indexes as FK targets to
     /// match SQLite's behaviour (`sqlite3FkLocateIndex`).
     pub where_clause: Option<Box<vibesql_ast::Expression>>,
+    /// The verbatim `CREATE INDEX` statement text, as SQLite stores it in
+    /// `sqlite_master.sql` (issue #6734).
+    ///
+    /// SQLite does not reconstruct an index's `sql` column from its parsed
+    /// shape: it records the user's original statement text (normalized only
+    /// to `CREATE [UNIQUE] INDEX <name-onward>` — see
+    /// `vibesql_executor::index_rename::normalize_create_index_source`) and,
+    /// on `ALTER TABLE ... RENAME TO` / `RENAME COLUMN`, splices just the
+    /// renamed identifiers into it. Mirrors `TableSchema::sql_source`.
+    ///
+    /// `None` when the text is unavailable (an index synthesized
+    /// programmatically, a database written before binary format v19, or a
+    /// RENAME that could not be spliced unambiguously); `sqlite_master` then
+    /// falls back to reconstructing the statement from the parsed metadata.
+    pub sql_source: Option<String>,
 }
 
 /// Type of physical index structure
@@ -257,6 +272,7 @@ impl IndexMetadata {
             columns,
             is_unique,
             where_clause: None,
+            sql_source: None,
         }
     }
 
@@ -280,6 +296,15 @@ impl IndexMetadata {
     /// existing predicate (the resulting index will be treated as full).
     pub fn with_where_clause(mut self, where_clause: Option<vibesql_ast::Expression>) -> Self {
         self.where_clause = where_clause.map(Box::new);
+        self
+    }
+
+    /// Attach the verbatim `CREATE INDEX` source text (builder-style
+    /// chaining). Pass `None` to leave the index without source text, in
+    /// which case `sqlite_master.sql` is reconstructed from the metadata.
+    /// See [`IndexMetadata::sql_source`] and issue #6734.
+    pub fn with_sql_source(mut self, sql_source: Option<String>) -> Self {
+        self.sql_source = sql_source;
         self
     }
 

@@ -226,6 +226,32 @@ impl Catalog {
         }
     }
 
+    /// Attach (or clear) the verbatim `CREATE INDEX` source text of an
+    /// existing index (see [`IndexMetadata::sql_source`], issue #6734).
+    ///
+    /// `schema` is the owning schema recorded on the index (e.g. `main` or a
+    /// session temp schema); `index_name` is matched case-insensitively within
+    /// it. Returns `true` if an index was found and updated.
+    pub fn set_index_sql_source(
+        &mut self,
+        schema: &str,
+        index_name: &str,
+        sql_source: Option<String>,
+    ) -> bool {
+        let resolved_schema = self.resolve_schema_name(schema).to_lowercase();
+        let target = index_name.to_lowercase();
+        if let Some(meta) = self
+            .indexes
+            .values_mut()
+            .find(|m| m.schema.to_lowercase() == resolved_schema && m.name.to_lowercase() == target)
+        {
+            meta.sql_source = sql_source;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Propagate `ALTER TABLE <table> RENAME COLUMN old TO new` into the
     /// metadata of every index on `table_name` (matched case-insensitively,
     /// across schemas — index metadata rides with its table).
@@ -237,12 +263,43 @@ impl Catalog {
     /// against the renamed table, making the database unopenable (issue
     /// #5877).
     ///
+    /// Any verbatim [`IndexMetadata::sql_source`] on an index whose metadata
+    /// changed is *invalidated* (cleared), so `sqlite_master` falls back to
+    /// reconstruction rather than showing the stale column name. Callers that
+    /// can splice the rename into the text in place should use
+    /// [`Catalog::rename_column_in_table_indexes_with_sql`] instead.
+    ///
     /// Returns the number of indexes whose metadata changed.
     pub fn rename_column_in_table_indexes(
         &mut self,
         table_name: &str,
         old_column: &str,
         new_column: &str,
+    ) -> usize {
+        self.rename_column_in_table_indexes_with_sql(table_name, old_column, new_column, &|_, _| {
+            None
+        })
+    }
+
+    /// [`Catalog::rename_column_in_table_indexes`], additionally keeping each
+    /// affected index's verbatim [`IndexMetadata::sql_source`] in sync.
+    ///
+    /// For every index whose metadata references the renamed column (i.e.
+    /// whose parsed shape actually changed), `rewrite_sql` is called with the
+    /// index's metadata (already renamed) and its current `sql_source` text. `Some(text)` replaces
+    /// the source with the spliced text; `None` — the rewrite could not be performed
+    /// unambiguously — invalidates it so `sqlite_master` reconstructs from the (already
+    /// renamed) metadata instead of showing a stale column name. Indexes that
+    /// do not reference the column keep their text untouched, byte-for-byte
+    /// (issue #6734).
+    ///
+    /// Returns the number of indexes whose metadata changed.
+    pub fn rename_column_in_table_indexes_with_sql(
+        &mut self,
+        table_name: &str,
+        old_column: &str,
+        new_column: &str,
+        rewrite_sql: &dyn Fn(&IndexMetadata, &str) -> Option<String>,
     ) -> usize {
         use vibesql_ast::rename::rename_column_in_expression;
 
@@ -269,6 +326,9 @@ impl Catalog {
                 changed |= rename_column_in_expression(where_expr, old_column, new_column);
             }
             if changed {
+                if let Some(src) = index.sql_source.take() {
+                    index.sql_source = rewrite_sql(index, &src);
+                }
                 updated += 1;
             }
         }

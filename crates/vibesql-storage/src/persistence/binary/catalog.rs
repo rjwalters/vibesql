@@ -274,6 +274,29 @@ pub fn write_catalog<W: Write>(writer: &mut W, db: &Database) -> Result<(), Stor
                     write_bool(writer, false)?;
                 }
             }
+
+            // v19+: persist the verbatim CREATE INDEX text (issue #6734), so
+            // `sqlite_master.sql` keeps the user's exact formatting across a
+            // cross-process reload. Like the WHERE clause, it lives on the
+            // catalog-side metadata only. Written last in the per-index
+            // record, after the WHERE clause. Looked up by the index's owning
+            // schema + exact name (not the bare storage key), so a same-named
+            // index in another schema can never lend this one its text.
+            let sql_source = db
+                .catalog
+                .get_schema_indexes(&metadata.schema)
+                .into_iter()
+                .find(|m| m.name.eq_ignore_ascii_case(&metadata.index_name))
+                .and_then(|m| m.sql_source.as_deref());
+            match sql_source {
+                Some(src) => {
+                    write_bool(writer, true)?;
+                    write_string(writer, src)?;
+                }
+                None => {
+                    write_bool(writer, false)?;
+                }
+            }
         }
     }
 
@@ -867,11 +890,18 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             None
         };
 
-        index_specs.push((index_name, table_name, unique, columns, where_clause));
+        // v19+: read the optional verbatim CREATE INDEX text (issue #6734).
+        // v18-and-earlier files do not include it; `None` makes
+        // `sqlite_master` reconstruct the text from the metadata, exactly as
+        // before.
+        let sql_source: Option<String> =
+            if version >= 19 && read_bool(reader)? { Some(read_string(reader)?) } else { None };
+
+        index_specs.push((index_name, table_name, unique, columns, where_clause, sql_source));
     }
 
     // Create indexes
-    for (index_name, table_name, unique, columns, where_clause) in index_specs {
+    for (index_name, table_name, unique, columns, where_clause, sql_source) in index_specs {
         // Create the storage-side index first (it manages the index body but
         // does not touch the catalog at all).
         db.create_index(index_name.clone(), table_name.clone(), unique, columns.clone())
@@ -906,7 +936,8 @@ pub fn read_catalog_v<R: Read>(reader: &mut R, version: u8) -> Result<Database, 
             catalog_columns,
             unique,
         )
-        .with_where_clause(where_clause.clone());
+        .with_where_clause(where_clause.clone())
+        .with_sql_source(sql_source);
         db.catalog.add_index(catalog_meta).map_err(|e| {
             StorageError::NotImplemented(format!(
                 "Failed to add catalog index metadata for '{}': {}",
@@ -2282,5 +2313,120 @@ mod tests {
         let tr = reloaded.catalog.get_trigger("tr").expect("tr must load under v13 reader");
         assert_eq!(tr.schema, None, "a v13 file has no trigger-schema field; must default to None");
         assert!(!tr.is_temp());
+    }
+
+    /// Build a database with table `t1(a)` and a plain index `i1 ON t1(a)`
+    /// (storage body + catalog metadata), with the given catalog-side verbatim
+    /// `sql_source`. A trigger follows the index in the serialized stream so
+    /// the version-gated read tests below also prove the reader stays aligned
+    /// past the index record.
+    fn db_with_index_sql_source(sql_source: Option<&str>) -> Database {
+        let mut db = Database::new();
+        let schema = vibesql_catalog::TableSchema::new(
+            "t1".to_string(),
+            vec![vibesql_catalog::ColumnSchema {
+                name: "a".to_string(),
+                data_type: vibesql_types::DataType::Integer,
+                nullable: true,
+                default_value: None,
+                generated_expr: None,
+                collation: None,
+                is_exact_integer_type: true,
+            }],
+        );
+        db.create_table_with_identifier(schema, vibesql_catalog::TableIdentifier::new("t1", false))
+            .unwrap();
+        let cols = vec![vibesql_ast::IndexColumn::new_column(
+            "a".to_string(),
+            vibesql_ast::OrderDirection::Asc,
+        )];
+        db.create_index("i1".to_string(), "t1".to_string(), false, cols).unwrap();
+        let catalog_meta = vibesql_catalog::IndexMetadata::new(
+            "i1".to_string(),
+            "t1".to_string(),
+            vibesql_catalog::IndexType::BTree,
+            vec![vibesql_catalog::IndexedColumn::new_column(
+                "a".to_string(),
+                vibesql_catalog::SortOrder::Ascending,
+            )],
+            false,
+        )
+        .with_sql_source(sql_source.map(str::to_string));
+        db.catalog.add_index(catalog_meta).unwrap();
+        let tr = vibesql_catalog::TriggerDefinition::new(
+            "tr".to_string(),
+            vibesql_ast::TriggerTiming::After,
+            vibesql_ast::TriggerEvent::Insert,
+            "t1".to_string(),
+            vibesql_ast::TriggerGranularity::Row,
+            None,
+            vibesql_ast::TriggerAction::RawSql("SELECT 1".to_string()),
+        );
+        db.catalog.create_trigger(tr).unwrap();
+        db
+    }
+
+    /// Issue #6734 (v19): the verbatim `CREATE INDEX` text
+    /// (`IndexMetadata::sql_source`) must survive a binary catalog round-trip
+    /// byte-for-byte, including spacing and redundant parentheses that a
+    /// reconstruction would normalize away.
+    #[test]
+    fn test_binary_catalog_preserves_index_sql_source() {
+        let original = "CREATE INDEX i1 ON  t1 ( (a * 2) , a DESC )";
+        let db = db_with_index_sql_source(Some(original));
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let meta = reloaded.catalog.find_index_by_name("i1").expect("i1 must survive");
+        assert_eq!(meta.sql_source.as_deref(), Some(original));
+        assert!(reloaded.catalog.get_trigger("tr").is_some(), "reader must stay aligned");
+    }
+
+    /// An index without captured source text round-trips as `None` (the
+    /// reconstruction fallback), not as an empty string.
+    #[test]
+    fn test_binary_catalog_no_index_sql_source_round_trips_as_none() {
+        let db = db_with_index_sql_source(None);
+
+        let mut buf = Vec::new();
+        write_catalog(&mut buf, &db).unwrap();
+        let reloaded = read_catalog_v(&mut &buf[..], VERSION).unwrap();
+
+        let meta = reloaded.catalog.find_index_by_name("i1").expect("i1 must survive");
+        assert_eq!(meta.sql_source, None);
+        assert!(reloaded.catalog.get_trigger("tr").is_some(), "reader must stay aligned");
+    }
+
+    /// Issue #6734 backward compat: a genuine v18 file has no per-index
+    /// `sql_source` field at all. Build one by splicing the v19 field (the
+    /// present-flag, u32 length, and text) back out of a v19 serialization,
+    /// then read it at version 18: the index must load with `sql_source =
+    /// None` and every following section (here, a trigger) must still parse.
+    #[test]
+    fn test_v18_file_loads_index_sql_source_as_none() {
+        let marker = "CREATE INDEX i1 ON t1(a) -- v19 marker";
+        let db = db_with_index_sql_source(Some(marker));
+        let mut v19 = Vec::new();
+        write_catalog(&mut v19, &db).unwrap();
+
+        let marker_pos = v19
+            .windows(marker.len())
+            .position(|w| w == marker.as_bytes())
+            .expect("the v19 stream must contain the verbatim index text");
+        // Layout: [flag=1][u32 len][text]. Remove all three.
+        let field_start = marker_pos - 4 - 1;
+        assert_eq!(v19[field_start], 1, "present-flag must precede the length prefix");
+        let mut v18 = v19[..field_start].to_vec();
+        v18.extend_from_slice(&v19[marker_pos + marker.len()..]);
+
+        let reloaded = read_catalog_v(&mut &v18[..], 18).unwrap();
+        let meta = reloaded.catalog.find_index_by_name("i1").expect("i1 must load under v18");
+        assert_eq!(meta.sql_source, None, "a v18 file has no index sql_source; must be None");
+        assert!(
+            reloaded.catalog.get_trigger("tr").is_some(),
+            "the v18 reader must stay aligned past the index record"
+        );
     }
 }

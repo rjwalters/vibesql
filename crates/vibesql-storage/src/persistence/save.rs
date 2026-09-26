@@ -236,6 +236,25 @@ impl Database {
             if self.catalog.is_attached_schema(&metadata.schema) {
                 continue;
             }
+            // Emit the verbatim CREATE INDEX text when we captured it (issue
+            // #6734), so sqlite_master.sql keeps the user's exact formatting
+            // across a .vbsql save/reload round-trip — the reload path
+            // re-stamps `sql_source` from this emitted text, mirroring the
+            // CREATE TABLE `sql_source` handling above. The verbatim text names
+            // the table unqualified, so it is only used for main-schema indexes.
+            if metadata.schema.eq_ignore_ascii_case(vibesql_catalog::DEFAULT_SCHEMA) {
+                let verbatim = self
+                    .catalog
+                    .get_schema_indexes(&metadata.schema)
+                    .into_iter()
+                    .find(|m| m.name.eq_ignore_ascii_case(&metadata.index_name))
+                    .and_then(|m| m.sql_source.as_deref());
+                if let Some(src) = verbatim {
+                    writeln!(writer, "{};", src.trim_end_matches(';').trim_end())
+                        .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
+                    continue;
+                }
+            }
             write!(writer, "CREATE")
                 .map_err(|e| StorageError::NotImplemented(format!("Write error: {}", e)))?;
             if metadata.unique {
