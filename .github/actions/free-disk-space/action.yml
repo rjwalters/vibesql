@@ -7,23 +7,84 @@ runs:
     - name: Free disk space
       shell: bash
       run: |
-        # Maximum cleanup to free disk space for large Rust builds
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /opt/hostedtoolcache/CodeQL
-        sudo rm -rf /opt/hostedtoolcache/go
-        sudo rm -rf /opt/hostedtoolcache/Ruby
-        sudo rm -rf /opt/hostedtoolcache/node
-        sudo rm -rf /opt/microsoft
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf /usr/share/swift
-        sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk
-        sudo rm -rf /opt/hostedtoolcache/PyPy
-        sudo rm -rf /opt/hostedtoolcache/Python
-        sudo rm -rf /var/log/*
-        sudo rm -rf /var/cache/apt/archives/*
+        # Maximum cleanup to free disk space for large Rust builds.
+        #
+        # Timing + df instrumentation (#6729): this step's total runtime has
+        # been observed to vary ~33s-685s (~20x) across otherwise-similar
+        # ubuntu-latest CI runs, and a slow run can eat several minutes of the
+        # test-unit/test-integration jobs' 40-minute timeout budget before
+        # `cargo` even starts (see ci.yml's history comment on those jobs).
+        # Previously this step logged nothing but a trailing `df -h`, so it
+        # was impossible to tell which removal dominated a slow run. Each
+        # phase below now reports its own wall-clock cost as a GitHub Actions
+        # `::notice::` annotation, and a `df -h` runs both before and after
+        # cleanup, so a few real CI runs will show exactly where the 20x
+        # spread comes from (docker prune is the prime suspect since it has
+        # to walk/compare image and volume state rather than doing a flat
+        # directory delete).
+        #
+        # As an initial, safe optimization (not dependent on the measurement
+        # above): the `rm -rf` targets are mutually independent (distinct
+        # top-level paths, no shared state), so they now run in parallel
+        # rather than serially. The docker prune commands are left serial
+        # since each depends on the daemon's current image/container/volume
+        # state.
+        #
+        # AC1 (measure per-command cost) and AC3 (revisit the 40-min
+        # timeout-minutes cap) both require observing this instrumentation
+        # across a few real CI runs post-merge -- see the discussion on
+        # #6729.
+        echo "--- df before cleanup ---"
+        df -h
+
+        # Each backgrounded `rm -rf` records its PID, and every PID is then
+        # reaped individually. A bare `wait` always returns 0 regardless of
+        # the background jobs' exit statuses, which would silently swallow a
+        # failed removal under the step's implicit `set -e` -- unlike the
+        # original sequential form, where any failing `rm -rf` aborted the
+        # step. Checking each PID preserves that guarantee: if any removal
+        # fails, the step fails (after all jobs are reaped, so no orphaned
+        # `rm` outlives the step).
+        start=$(date +%s)
+        rm_pids=()
+        sudo rm -rf /usr/share/dotnet & rm_pids+=("$!")
+        sudo rm -rf /usr/local/lib/android & rm_pids+=("$!")
+        sudo rm -rf /opt/ghc & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/CodeQL & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/go & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/Ruby & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/node & rm_pids+=("$!")
+        sudo rm -rf /opt/microsoft & rm_pids+=("$!")
+        sudo rm -rf /usr/local/share/boost & rm_pids+=("$!")
+        sudo rm -rf /usr/share/swift & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/Java_Temurin_jdk & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/PyPy & rm_pids+=("$!")
+        sudo rm -rf /opt/hostedtoolcache/Python & rm_pids+=("$!")
+        sudo rm -rf /var/log/* & rm_pids+=("$!")
+        sudo rm -rf /var/cache/apt/archives/* & rm_pids+=("$!")
+        rm_failed=0
+        for pid in "${rm_pids[@]}"; do
+          if ! wait "$pid"; then
+            rm_failed=1
+          fi
+        done
+        if [ "$rm_failed" -ne 0 ]; then
+          echo "::error title=free-disk-space::one or more parallel rm -rf commands failed (see output above)"
+          exit 1
+        fi
+        echo "::notice title=free-disk-space::parallel toolcache+log rm -rf took $(( $(date +%s) - start ))s"
+
+        start=$(date +%s)
         sudo docker image prune --all --force
+        echo "::notice title=free-disk-space::docker image prune took $(( $(date +%s) - start ))s"
+
+        start=$(date +%s)
         sudo docker system prune --all --force --volumes
+        echo "::notice title=free-disk-space::docker system prune took $(( $(date +%s) - start ))s"
+
+        start=$(date +%s)
         sudo docker volume prune --all --force
+        echo "::notice title=free-disk-space::docker volume prune took $(( $(date +%s) - start ))s"
+
+        echo "--- df after cleanup ---"
         df -h
