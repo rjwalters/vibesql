@@ -146,75 +146,125 @@ fn check_schema_objects(
     // references in any spelling ("T1", "main.t1", ...) simulate the drop.
     let sim = DropSimulation::new(database, dropped);
 
-    // Iterate view definitions directly rather than via `list_views()` +
-    // `get_view()`: views are keyed per schema (#6490), so a name-only
-    // `get_view` resolves temp-first-then-main-then-attached and could skip a
-    // `main` view that shares a name with a `temp`/attached-schema view
-    // (mirrors the trigger loop immediately below — issue #6296).
+    // Iterate view/trigger definitions directly rather than via `list_*()` +
+    // `get_*()`: both are keyed per schema (#6490, #6296), so a name-only
+    // lookup resolves temp-first-then-main-then-attached and could skip a
+    // `main` object that shares a name with a `temp`/attached-schema one.
     //
-    // Both walks sort by name before raising an error: the catalog stores
-    // views/triggers in `HashMap`s whose iteration order is randomized per
-    // process, so with more than one broken in-scope object the *reported*
-    // error would otherwise differ run to run for the same database and
-    // statement (observed as altercol-17.3 flapping between two failure
-    // texts). SQLite's reload order is its schema-table order (creation
-    // order), which the catalog does not track; name order is the same
-    // deterministic tie-break the persistence layer already applies to these
-    // maps for the same reason (persistence/save.rs).
-    let mut views: Vec<&ViewDefinition> =
-        database.catalog.iter_views().filter(|view| view.is_temp() == owner_is_temp).collect();
-    views.sort_by(|a, b| {
-        a.name
-            .to_ascii_lowercase()
-            .cmp(&b.name.to_ascii_lowercase())
-            .then_with(|| a.name.cmp(&b.name))
-    });
-    for view in views {
-        // SQLite's schema re-parse resolves each view's body, so a view that
-        // (transitively) selects from itself aborts the ALTER with
-        // `error in view <name>: view <name> is circularly defined`
-        // (altertab3.test 22.2/22.4/23.3). Checked before column resolution
-        // because it is reported when the view body is first expanded.
-        if view_is_circular(database, view) {
-            return Err(ExecutorError::Other(format!(
-                "error in view {}{}: view {} is circularly defined",
-                view.name, suffix, view.name
-            )));
-        }
-        if let Some(missing) = find_missing_column_in_view(view, &sim) {
-            return Err(ExecutorError::Other(format!(
-                "error in view {}{}: no such column: {}",
-                view.name, suffix, missing
-            )));
-        }
-    }
-
-    // Iterate trigger definitions directly rather than via `list_triggers()` +
-    // `get_trigger()`: triggers are keyed per schema, so a name-only `get_trigger`
-    // resolves temp-first and would skip a `main` trigger that shares a name with
-    // a `temp` trigger (issue #6296). Sorted by name for deterministic error
-    // attribution — see the views loop above.
-    let mut triggers: Vec<&TriggerDefinition> = database
+    // Views and triggers are checked as ONE list in schema-table (creation)
+    // order, which is the order SQLite's `renameTestSchema` scans
+    // `sqlite_schema` in — so with more than one broken in-scope object the
+    // one reported is the one SQLite reports (altertab.test 24.2.1: a trigger
+    // created before the broken view it writes to is reported, not the view).
+    // The catalog stores both in `HashMap`s whose iteration order is
+    // randomized per process, so the sort is also what keeps the reported
+    // error deterministic run to run (altercol-17.3 used to flap between two
+    // failure texts). Objects without a recorded ordinal sort last, by name.
+    let mut objects: Vec<(u64, SchemaObject<'_>)> = database
         .catalog
-        .iter_triggers()
-        .filter(|trigger| trigger.is_temp() == owner_is_temp)
+        .iter_views()
+        .filter(|view| view.is_temp() == owner_is_temp)
+        .map(|view| {
+            (
+                object_creation_seq(database, view.schema.as_deref(), &view.name),
+                SchemaObject::View(view),
+            )
+        })
+        .chain(
+            database
+                .catalog
+                .iter_triggers()
+                .filter(|trigger| trigger.is_temp() == owner_is_temp)
+                .map(|trigger| {
+                    (
+                        object_creation_seq(database, trigger.schema.as_deref(), &trigger.name),
+                        SchemaObject::Trigger(trigger),
+                    )
+                }),
+        )
         .collect();
-    triggers.sort_by(|a, b| {
-        a.name
-            .to_ascii_lowercase()
-            .cmp(&b.name.to_ascii_lowercase())
-            .then_with(|| a.name.cmp(&b.name))
+    objects.sort_by(|(seq_a, a), (seq_b, b)| {
+        seq_a
+            .cmp(seq_b)
+            .then_with(|| a.name().to_ascii_lowercase().cmp(&b.name().to_ascii_lowercase()))
+            .then_with(|| a.name().cmp(b.name()))
+            .then_with(|| a.is_trigger().cmp(&b.is_trigger()))
     });
-    for trigger in triggers {
-        if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
-            return Err(ExecutorError::Other(format!(
-                "error in trigger {}{}: {}",
-                trigger.name, suffix, inner
-            )));
+
+    for (_, object) in objects {
+        match object {
+            SchemaObject::View(view) => {
+                // SQLite's schema re-parse resolves each view's body, so a view
+                // that (transitively) selects from itself aborts the ALTER with
+                // `error in view <name>: view <name> is circularly defined`
+                // (altertab3.test 22.2/22.4/23.3). Checked before table and
+                // column resolution because it is reported when the view body
+                // is first expanded.
+                if view_is_circular(database, view) {
+                    return Err(ExecutorError::Other(format!(
+                        "error in view {}{}: view {} is circularly defined",
+                        view.name, suffix, view.name
+                    )));
+                }
+                // A FROM-clause table that does not exist (the view was created
+                // over it, or it was dropped since) — resolved before any
+                // column, as SQLite's name resolution binds FROM first
+                // (altertab.test 9.1).
+                if let Some(missing) = find_missing_table_in_view(view, database) {
+                    return Err(ExecutorError::Other(format!(
+                        "error in view {}{}: no such table: {}",
+                        view.name, suffix, missing
+                    )));
+                }
+                if let Some(missing) = find_missing_column_in_view(view, &sim) {
+                    return Err(ExecutorError::Other(format!(
+                        "error in view {}{}: no such column: {}",
+                        view.name, suffix, missing
+                    )));
+                }
+            }
+            SchemaObject::Trigger(trigger) => {
+                if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
+                    return Err(ExecutorError::Other(format!(
+                        "error in trigger {}{}: {}",
+                        trigger.name, suffix, inner
+                    )));
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// A view or trigger taking part in [`check_schema_objects`]' creation-order
+/// walk.
+enum SchemaObject<'a> {
+    View(&'a ViewDefinition),
+    Trigger(&'a TriggerDefinition),
+}
+
+impl SchemaObject<'_> {
+    fn name(&self) -> &str {
+        match self {
+            SchemaObject::View(view) => &view.name,
+            SchemaObject::Trigger(trigger) => &trigger.name,
+        }
+    }
+
+    fn is_trigger(&self) -> bool {
+        matches!(self, SchemaObject::Trigger(_))
+    }
+}
+
+/// The creation ordinal of a view/trigger (both are recorded under their own
+/// schema tag, `main` when untagged — see `Catalog::create_view` /
+/// `create_trigger`), or `u64::MAX` when none was recorded.
+fn object_creation_seq(database: &Database, schema: Option<&str>, name: &str) -> u64 {
+    database
+        .catalog
+        .creation_seq(schema.unwrap_or(vibesql_catalog::DEFAULT_SCHEMA), name)
+        .unwrap_or(u64::MAX)
 }
 
 // ============================================================================
@@ -281,7 +331,9 @@ pub(super) fn snapshot_broken_schema_objects(database: &Database) -> BrokenSchem
     let sim = DropSimulation::new(database, None);
     let mut broken = BrokenSchemaObjects::default();
     for view in database.catalog.iter_views() {
-        if find_missing_column_in_view(view, &sim).is_some() {
+        if find_missing_table_in_view(view, database).is_some()
+            || find_missing_column_in_view(view, &sim).is_some()
+        {
             broken.views.insert((view.is_temp(), view.name.to_ascii_lowercase()));
         }
     }
@@ -1248,10 +1300,75 @@ fn find_missing_pseudo_in_trigger(
 /// CTE names in scope are excluded (they are not base tables), and the check
 /// is skipped (returns `None`) for anything it cannot judge — conservative in
 /// the direction that never blocks an ALTER SQLite allows.
+///
+/// A reference that resolves to a **view** is expanded: SQLite's schema
+/// re-parse resolves a trigger body's reference to a view by expanding that
+/// view, so a trigger that writes to / reads from a view whose own body names
+/// a missing table reports the *view's* missing table (altertab.test 24.2.1:
+/// `INSERT INTO v1 ...` with `v1 AS SELECT * FROM nosuchtable` → `error in
+/// trigger AFTER: no such table: main.nosuchtable`).
 fn find_missing_table_in_statements(
     statements: &[Statement],
     db: &Database,
     owner_is_temp: bool,
+) -> Option<String> {
+    let qualifier = if owner_is_temp { None } else { Some("main") };
+    let mut visiting: HashSet<String> = HashSet::new();
+    missing_table_in_statements(statements, db, qualifier, &mut visiting)
+}
+
+/// First missing base table reachable from `view`'s defining query (its own
+/// FROM clauses, CTE bodies, expression subqueries, and — transitively — the
+/// bodies of any views it selects from), spelled the way SQLite's `no such
+/// table:` message spells it for an object owned by `view`'s schema:
+/// `main.<t>` for a main view, `<alias>.<t>` for an ATTACHed-schema view, and
+/// bare `<t>` for a TEMP view.
+///
+/// SQLite never resolves a view's body at `CREATE VIEW` time
+/// (`sqlite3CreateView`, build.c), so a view over a table that does not exist
+/// is legal to create; the ALTER-time schema re-parse is what reports it
+/// (altertab.test 9.1: `error in view v1: no such table: main.t2`).
+fn find_missing_table_in_view(view: &ViewDefinition, db: &Database) -> Option<String> {
+    let mut visiting: HashSet<String> = HashSet::new();
+    missing_table_in_view(view, db, &mut visiting)
+}
+
+/// Recursive worker for [`find_missing_table_in_view`]. `visiting` holds the
+/// views already expanded on this walk so a circular view nest terminates
+/// (circularity itself is reported separately, by [`view_is_circular`]).
+fn missing_table_in_view(
+    view: &ViewDefinition,
+    db: &Database,
+    visiting: &mut HashSet<String>,
+) -> Option<String> {
+    let key = format!(
+        "{}\u{1}{}",
+        view.schema.as_deref().unwrap_or(vibesql_catalog::DEFAULT_SCHEMA).to_ascii_lowercase(),
+        view.name.to_ascii_lowercase()
+    );
+    if !visiting.insert(key) {
+        return None;
+    }
+    let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
+    let query = reparsed.unwrap_or_else(|| view.query.clone());
+    let statements = [Statement::Select(Box::new(query))];
+    let qualifier = if view.is_temp() {
+        None
+    } else {
+        Some(view.schema.as_deref().unwrap_or(vibesql_catalog::DEFAULT_SCHEMA))
+    };
+    missing_table_in_statements(&statements, db, qualifier, visiting)
+}
+
+/// Shared worker for [`find_missing_table_in_statements`] and
+/// [`missing_table_in_view`]. `qualifier` is the schema prefix used to spell
+/// an unqualified missing name (`None` = report it bare, as for a TEMP-schema
+/// owner).
+fn missing_table_in_statements(
+    statements: &[Statement],
+    db: &Database,
+    qualifier: Option<&str>,
+    visiting: &mut HashSet<String>,
 ) -> Option<String> {
     let mut refs: Vec<String> = Vec::new();
     let mut cte_names: Vec<String> = Vec::new();
@@ -1266,19 +1383,27 @@ fn find_missing_table_in_statements(
         if cte_names.iter().any(|c| c.eq_ignore_ascii_case(bare)) {
             continue;
         }
-        // Resolve as written (handles `schema.table`, temp shadowing, and the
-        // implicit main schema) and, failing that, by its bare name.
-        if db.catalog.get_table(&name).is_some()
-            || db.catalog.get_view(&name).is_some()
-            || db.catalog.get_table(bare).is_some()
-            || db.catalog.get_view(bare).is_some()
-        {
+        // Names with the reserved `sqlite_` prefix are SQLite's own system
+        // tables (`sqlite_master`/`sqlite_schema`, `sqlite_temp_master`,
+        // `sqlite_sequence`, `sqlite_stat*`), served virtually rather than
+        // registered in the catalog. They always resolve, so never report them.
+        if bare.len() >= 7 && bare.as_bytes()[..7].eq_ignore_ascii_case(b"sqlite_") {
             continue;
         }
-        return Some(if name.contains('.') || owner_is_temp {
-            name
-        } else {
-            format!("main.{}", name)
+        // Resolve as written (handles `schema.table`, temp shadowing, and the
+        // implicit main schema) and, failing that, by its bare name.
+        if db.catalog.get_table(&name).is_some() || db.catalog.get_table(bare).is_some() {
+            continue;
+        }
+        if let Some(view) = db.catalog.get_view(&name).or_else(|| db.catalog.get_view(bare)) {
+            if let Some(missing) = missing_table_in_view(view, db, visiting) {
+                return Some(missing);
+            }
+            continue;
+        }
+        return Some(match qualifier {
+            Some(schema) if !name.contains('.') => format!("{}.{}", schema, name),
+            _ => name,
         });
     }
     None
