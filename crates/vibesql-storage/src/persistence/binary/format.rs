@@ -99,7 +99,17 @@ pub const MAGIC: &[u8; 5] = b"VBSQL";
 ///   COLUMN`'s dependent-index error disappeared after a checkpoint. v17 and earlier files remain
 ///   readable: the read path is gated on `version >= 18` and treats absence as `is_quoted = false`
 ///   (prior behavior). Issue #6560.
-pub const VERSION: u8 = 18;
+/// - v19: Added verbatim `IndexMetadata::sql_source` persistence per index (the original `CREATE
+///   INDEX` text shown in `sqlite_master.sql`, kept in sync with ALTER TABLE RENAME TO / RENAME
+///   COLUMN). Encoded as a present-flag bool + optional string, appended after the index's
+///   partial-index WHERE clause. Without it, a reloaded index lost its verbatim text and
+///   `sqlite_master.sql` fell back to an AST-reconstructed form (normalized spacing, dropped
+///   redundant parentheses and quoting), so an index's `sql` column changed after a checkpoint
+///   (altertab3.test 8.x). v18 and earlier files remain readable: the read path is gated on
+///   `version >= 19` and treats absence as `sql_source = None` (prior reconstruction behavior). A
+///   v19 file opened by a v18 binary is rejected cleanly by `read_header` (version > VERSION).
+///   Issue #6734.
+pub const VERSION: u8 = 19;
 
 /// Type tags for binary serialization
 #[repr(u8)]

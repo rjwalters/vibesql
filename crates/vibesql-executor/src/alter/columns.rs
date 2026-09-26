@@ -822,10 +822,25 @@ pub(super) fn execute_rename_column(
     // table, and the fail-closed open policy makes the database unopenable
     // (issue #5877). Runs after the trigger rewrite so a trigger-side abort
     // leaves the index metadata untouched.
-    database.catalog.rename_column_in_table_indexes(
+    //
+    // The catalog copy's verbatim `CREATE INDEX` text (`sql_source`) is kept
+    // in sync too: SQLite splices the renamed column into the stored index
+    // SQL in place (altertab3.test 8.2). The splice is verified against the
+    // renamed metadata; when it cannot be done unambiguously the text is
+    // invalidated and `sqlite_master` reconstructs it instead (issue #6734).
+    database.catalog.rename_column_in_table_indexes_with_sql(
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
+        &|renamed_meta, src| {
+            crate::index_rename::rename_index_column(
+                src,
+                &renamed_meta.table_name,
+                &stmt.old_column_name,
+                &stmt.new_column_name,
+                renamed_meta,
+            )
+        },
     );
     database.rename_column_in_table_indexes(
         &stmt.table_name,

@@ -124,7 +124,9 @@ fn execute_statement_for_load(
             )?;
         }
         vibesql_ast::Statement::CreateIndex(index_stmt) => {
-            CreateIndexExecutor::execute(&index_stmt, db)?;
+            // Re-stamp the verbatim CREATE INDEX text for sqlite_master.sql
+            // (issue #6734); the dump writer emits the captured source as-is.
+            CreateIndexExecutor::execute_with_source(&index_stmt, db, Some(original_sql))?;
         }
         vibesql_ast::Statement::CreateView(mut view_stmt) => {
             // Store original SQL for sqlite_master compatibility

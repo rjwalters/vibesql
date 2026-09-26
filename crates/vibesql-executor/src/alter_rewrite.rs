@@ -36,7 +36,7 @@ use vibesql_parser::{Keyword, Lexer, Span, Token};
 
 /// Tokenize `sql`, dropping the trailing `Eof`. Returns `None` if the text
 /// cannot be tokenized (it always should, since it round-tripped the parser).
-fn tokenize(sql: &str) -> Option<Vec<(Token, Span)>> {
+pub(crate) fn tokenize(sql: &str) -> Option<Vec<(Token, Span)>> {
     let mut tokens = Lexer::new(sql).tokenize_with_spans().ok()?;
     if matches!(tokens.last(), Some((Token::Eof, _))) {
         tokens.pop();
@@ -191,7 +191,7 @@ fn first_trailing_constraint_start(
 /// failed to locate a string-literal-spelled name and fell back to
 /// invalidating `sql_source` (losing the verbatim text) instead of rewriting
 /// it in place (issue #6634).
-fn ident_matches(tok: &Token, name: &str) -> bool {
+pub(crate) fn ident_matches(tok: &Token, name: &str) -> bool {
     match tok {
         Token::Identifier(s) | Token::DelimitedIdentifier(s) | Token::String(s) => {
             s.eq_ignore_ascii_case(name)
@@ -209,7 +209,7 @@ fn ident_matches(tok: &Token, name: &str) -> bool {
 /// re-emits a renamed identifier in double-quotes when the token it replaced was
 /// quoted in *any* form, single-quote-as-identifier included (altercol.test 23.0:
 /// `CREATE TABLE t1('a'"b",c)` renaming column `'a'` emits `"x"`, not bare `x`).
-fn is_quoted_ident(tok: &Token) -> bool {
+pub(crate) fn is_quoted_ident(tok: &Token) -> bool {
     matches!(tok, Token::DelimitedIdentifier(_) | Token::String(_))
 }
 
@@ -410,7 +410,7 @@ pub fn rename_references_parent(
 /// 3.51.0 (altercol.test 1.2/1.9 — a quoted `"b"`/`"B"` becomes quoted `"d"`
 /// even though `d` is a safe bare name; 4.4 — a quoted `"silly name"` becomes
 /// quoted `"reasonable"`).
-fn emit_renamed_ident(new_col: &str, replaced_was_quoted: bool) -> String {
+pub(crate) fn emit_renamed_ident(new_col: &str, replaced_was_quoted: bool) -> String {
     if replaced_was_quoted || !is_safe_bare_identifier(new_col) {
         quote_ident(new_col)
     } else {

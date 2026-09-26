@@ -30,6 +30,7 @@ pub fn create_btree_index(
     qualified_table_name: &str,
     table_schema: &TableSchema,
     unique: bool,
+    sql_source: Option<String>,
 ) -> Result<String, ExecutorError> {
     let index_name = &stmt.index_name;
 
@@ -67,7 +68,9 @@ pub fn create_btree_index(
     // Tag the owning schema (e.g. `main` or a session temp schema) so a
     // temp-table index is separable from a main-table index. See issue #5513.
     .with_schema(super::schema_of_qualified(qualified_table_name))
-    .with_where_clause(stmt.where_clause.as_ref().map(|expr| (**expr).clone()));
+    .with_where_clause(stmt.where_clause.as_ref().map(|expr| (**expr).clone()))
+    // Verbatim `CREATE INDEX` text for `sqlite_master.sql` (issue #6734).
+    .with_sql_source(sql_source);
     database.catalog.add_index(index_metadata)?;
 
     // Create the B-tree index. On build failure the catalog entry added above

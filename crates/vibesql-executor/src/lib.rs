@@ -26,6 +26,7 @@ pub mod expression_index_maintenance;
 pub mod foreign_key_check;
 mod grant;
 pub mod index_ddl;
+mod index_rename;
 pub mod information_schema;
 mod insert;
 mod introspection;
