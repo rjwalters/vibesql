@@ -391,6 +391,20 @@ pub(super) fn execute_rename_table(
             .map_err(|e| ExecutorError::StorageError(e.to_string()))?;
     }
 
+    // Retarget this table's `sqlite_sequence` row (if any) from the old name to
+    // the new one, so an AUTOINCREMENT table's high-water mark survives the
+    // rename. Matches SQLite's `sqlite3AlterRenameTable`, which runs this same
+    // `UPDATE sqlite_sequence SET name=... WHERE name=...` unconditionally
+    // (never gated on `legacy_alter_table`) whenever `sqlite_sequence` exists —
+    // unlike the trigger/view/FK propagation below (alter.test alter-4.3, issue
+    // #6174). A no-op when the table was never AUTOINCREMENT (no matching row).
+    crate::autoincrement::rename_sequence_entry(
+        database,
+        &old_table_bare_name,
+        &stmt.new_table_name,
+        &rename_seq_schema,
+    );
+
     // Propagate the rename into dependent triggers, child-table foreign keys,
     // and views that reference the old table name — but only in SQLite's
     // default "smart rename" mode (`legacy_alter_table=OFF`). When

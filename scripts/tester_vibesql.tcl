@@ -8364,15 +8364,19 @@ array set vibesql_attach_replay_files {
 # section is a single dependent chain (5.3/5.7 read the columns 5.2/5.6 add,
 # so skipping any link would cascade). Measured: 5.1/5.3/5.7/5.9/5.99 pass
 # (5.3 exercises the CTAS-into-shadowed-target row routing fix in
-# create_table.rs). Four fail VISIBLY rather than being skipped — Bucket-B,
-# genuine ATTACH-persistence gaps, not shim artifacts of this change:
-#   - 5.2/5.6: after the ALTER, aux.sqlite_master.sql reads back regenerated
-#     as `CREATE TABLE t1 (a, b, c VARCHAR(128))` instead of SQLite's spliced
-#     `CREATE TABLE t1(a,b, c VARCHAR(128))`. In a single CLI session the
-#     spliced text is correct; it is lost when the ATTACHed file database is
-#     persisted and reopened by the next per-batch process.
-#   - 5.4/5.8: PRAGMA aux.schema_version reads 34/35 instead of 31/32 (the
-#     cookie is bumped more than once per ALTER on the attached database).
+# create_table.rs). 5.2/5.6 also pass since the attached schema's WAL-mode
+# checkpoint started carrying each table's verbatim CREATE TABLE text
+# (`carry_over_attached_sql_sources` in vibesql-cli, #6174): previously the
+# checkpoint was rebuilt from the reconstructed-DDL dump, so the next
+# per-batch process read `CREATE TABLE t1 (a, b, c VARCHAR(128))` instead of
+# SQLite's spliced `CREATE TABLE t1(a,b, c VARCHAR(128))`. Two still fail
+# VISIBLY rather than being skipped — Bucket-B, not shim artifacts of this
+# change:
+#   - 5.4/5.8: PRAGMA aux.schema_version reads 34/35 instead of 31/32. The
+#     shim's running schema_version cookie (::pragma_schema_version_cookie) is
+#     keyed by the MAIN db file only, so `PRAGMA aux.schema_version = 30` and
+#     every DDL batch are folded into main's cookie; separately, the engine
+#     does not persist schema_version across processes at all.
 
 # Individual tests within a vibesql_attach_replay_files file that are verified
 # safe to actually un-skip (#6363). Narrower than the file-level list above on
