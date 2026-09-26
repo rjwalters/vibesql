@@ -95,6 +95,39 @@ fn add_generated_column_backfills_existing_rows() {
     assert_eq!(query_col(&db, "SELECT y FROM g ORDER BY x"), vec![int(11), int(21)]);
 }
 
+/// Issue #6732: a generated-column backfill that errors partway through (e.g.
+/// integer overflow) must leave the table exactly as it was -- no column
+/// added, no partial backfill -- matching the existing CHECK/NOT NULL
+/// rollback behavior further down `execute_add_column`. Before the fix, the
+/// new column was appended to the schema and per-row evaluation ran
+/// afterward; a mid-loop eval error returned with the schema already mutated
+/// but zero (or only some) rows backfilled, leaving a schema/row-width
+/// mismatch that a later checkpoint persisted unreadably. sqlite3 3.54.0
+/// rejects the identical ALTER with `integer overflow` and leaves the table
+/// intact (verified manually; not part of the automated TCL suite).
+#[test]
+fn add_generated_column_overflow_error_leaves_table_unchanged() {
+    let mut db = Database::new();
+    exec_ddl_dml(&mut db, "CREATE TABLE t1(a)");
+    exec_ddl_dml(&mut db, "INSERT INTO t1 VALUES(1)");
+
+    let stmt = Parser::parse_sql("ALTER TABLE t1 ADD COLUMN g AS (abs(-9223372036854775808))")
+        .expect("parse ADD COLUMN with overflowing generated expression");
+    let Statement::AlterTable(alter) = stmt else { panic!("expected ALTER TABLE") };
+    let err = AlterTableExecutor::execute(&alter, &mut db)
+        .expect_err("overflowing generated-column backfill must error");
+    assert!(err.to_string().contains("integer overflow"), "unexpected error: {err}");
+
+    // The schema must be exactly as it was: no `g` column added.
+    let schema = &db.get_table("t1").expect("table t1").schema;
+    assert!(schema.get_column_index("g").is_none(), "column g must not have been added");
+    assert_eq!(schema.columns.len(), 1, "table must still have exactly one column");
+
+    // The original row must be untouched (no partial backfill, no row-width
+    // mismatch): a subsequent read must succeed and return the original data.
+    assert_eq!(query_col(&db, "SELECT a FROM t1"), vec![int(1)]);
+}
+
 /// On an *empty* table sqlite3 3.51.0 accepts both STORED and VIRTUAL via ALTER
 /// and computes the value on the subsequent insert; VibeSQL must match (both
 /// materialized at write time). The STORED-on-populated case is rejected — see
