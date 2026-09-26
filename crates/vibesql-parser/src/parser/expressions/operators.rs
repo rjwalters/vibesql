@@ -409,6 +409,10 @@ impl Parser {
     pub(super) fn parse_comparison_expression(
         &mut self,
     ) -> Result<vibesql_ast::Expression, ParseError> {
+        // Every operator in this tier is left-associative, so the left operand
+        // of each IN below always starts here (needed to record the source
+        // range of an operand discarded by the empty-`IN ()` fold).
+        let operand_start = self.position;
         let mut left = self.parse_relational_expression()?;
 
         loop {
@@ -507,14 +511,16 @@ impl Parser {
                             let values = self.parse_expression_list()?;
                             self.expect_token(Token::RParen)?;
 
-                            // Empty IN lists are allowed per SQL:1999 (evaluates to TRUE for NOT
-                            // IN) Don't return - assign to left and
-                            // continue to check for IS NULL
-                            left = vibesql_ast::Expression::InList {
-                                expr: Box::new(left),
+                            // An empty list folds to TRUE like SQLite (see
+                            // `build_in_list_expression`). Don't return - assign to
+                            // left and continue to check for IS NULL
+                            left = self.build_in_list_expression(
+                                left,
                                 values,
-                                negated: true,
-                            };
+                                true,
+                                operand_start,
+                                saved_pos,
+                            );
                         }
                     }
 
@@ -702,6 +708,7 @@ impl Parser {
                 }
             } else if self.peek_keyword(Keyword::In) {
                 // It's IN (not negated)
+                let in_pos = self.position;
                 self.consume_keyword(Keyword::In)?;
 
                 // Check if it's IN table_name (SQLite syntax) or IN (...)
@@ -788,13 +795,16 @@ impl Parser {
                         let values = self.parse_expression_list()?;
                         self.expect_token(Token::RParen)?;
 
-                        // Empty IN lists are allowed per SQL:1999 (evaluates to FALSE)
-                        // Don't return - assign to left and continue to check for IS NULL
-                        left = vibesql_ast::Expression::InList {
-                            expr: Box::new(left),
+                        // An empty list folds to FALSE like SQLite (see
+                        // `build_in_list_expression`). Don't return - assign to left
+                        // and continue to check for IS NULL
+                        left = self.build_in_list_expression(
+                            left,
                             values,
-                            negated: false,
-                        };
+                            false,
+                            operand_start,
+                            in_pos,
+                        );
                     }
                 }
 

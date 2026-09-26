@@ -110,6 +110,21 @@ pub struct Parser {
     /// surfacing as a syntax error — a composite-key AUTOINCREMENT has no
     /// documented meaning and no test exercises it).
     pending_table_pk_autoincrement_column: Option<String>,
+    /// Whether `<expr> [NOT] IN ()` (empty list) is folded to a boolean
+    /// literal at parse time, discarding a function-free left operand the way
+    /// SQLite's `parse.y` does (issue #6733; see
+    /// [`Parser::build_in_list_expression`]). On by default; switched off
+    /// while parsing a `CREATE INDEX` statement, whose key expressions and
+    /// partial-index `WHERE` clause are re-rendered from the AST into
+    /// `sqlite_master.sql` (so a folded literal would print in place of the
+    /// user's `'1' IN ()` spelling — altertab3.test 8.1).
+    fold_empty_in_lists: bool,
+    /// Byte spans (into `source`) of every left operand discarded by the
+    /// empty-`IN ()` fold. Only populated when the parser was built with
+    /// source/span info. Read by [`Parser::empty_in_discarded_operand_spans`],
+    /// which `ALTER TABLE ... RENAME` uses so it leaves names inside a
+    /// discarded operand untouched, exactly as SQLite does.
+    discarded_empty_in_operands: Vec<Span>,
 }
 
 impl Parser {
@@ -130,6 +145,8 @@ impl Parser {
             spans: Vec::new(),
             column_default_sources: Vec::new(),
             pending_table_pk_autoincrement_column: None,
+            fold_empty_in_lists: true,
+            discarded_empty_in_operands: Vec::new(),
         }
     }
 
@@ -150,6 +167,8 @@ impl Parser {
             spans,
             column_default_sources: Vec::new(),
             pending_table_pk_autoincrement_column: None,
+            fold_empty_in_lists: true,
+            discarded_empty_in_operands: Vec::new(),
         }
     }
 
@@ -359,6 +378,80 @@ impl Parser {
         parser.parse_statement()
     }
 
+    /// Return the byte ranges of `sql` holding the left operand of an empty
+    /// `[NOT] IN ()` list that the parser discards (issue #6733).
+    ///
+    /// SQLite folds `<expr> IN ()` to a constant while parsing and deletes a
+    /// function-free `<expr>` without ever resolving it, so `ALTER TABLE ...
+    /// RENAME` leaves the names inside it untouched (altertab3.test 3.2 /
+    /// 10.2). The token-level rename rewriters use these ranges to skip such
+    /// names. Ranges come from the parser's own fold, so they always match
+    /// what the parser drops (see `build_in_list_expression`).
+    ///
+    /// `sql` may be a whole statement (`CREATE VIEW`, `CREATE TRIGGER`, ...) or
+    /// a stored trigger body (`BEGIN <stmt>; ... END`). A trigger body is not
+    /// parsed as part of `CREATE TRIGGER` (it is kept as raw text), so each of
+    /// its statements is parsed separately here, with spans still relative to
+    /// `sql`. Parse errors are ignored: whatever was folded before the error is
+    /// still reported. Returns an empty list when `sql` has no `IN ()`.
+    pub fn empty_in_discarded_operand_spans(sql: &str) -> Vec<Span> {
+        let Ok(tokens_with_spans) = Lexer::new(sql).tokenize_with_spans() else {
+            return Vec::new();
+        };
+        let has_empty_in = tokens_with_spans.windows(3).any(|w| {
+            matches!(w[0].0, Token::Keyword { keyword: Keyword::In, .. })
+                && matches!(w[1].0, Token::LParen)
+                && matches!(w[2].0, Token::RParen)
+        });
+        if !has_empty_in {
+            return Vec::new();
+        }
+        let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
+
+        let mut found: Vec<Span> = Vec::new();
+        let mut collect = |parser: &Parser| {
+            for span in parser.discarded_empty_in_operands() {
+                if !found.contains(span) {
+                    found.push(*span);
+                }
+            }
+        };
+
+        // The statement itself (covers views, and a trigger's WHEN clause).
+        let mut parser = Parser::new_with_source(tokens.clone(), spans.clone(), sql.to_string());
+        let _ = parser.parse_statement();
+        collect(&parser);
+
+        // Trigger-body statements, between the first BEGIN and the last END.
+        let begin =
+            tokens.iter().position(|t| matches!(t, Token::Keyword { keyword: Keyword::Begin, .. }));
+        let end =
+            tokens.iter().rposition(|t| matches!(t, Token::Keyword { keyword: Keyword::End, .. }));
+        if let (Some(begin), Some(end)) = (begin, end) {
+            let mut stmt_start = begin + 1;
+            for i in begin + 1..=end {
+                if i < end && !matches!(tokens[i], Token::Semicolon) {
+                    continue;
+                }
+                if i > stmt_start {
+                    let mut stmt_tokens = tokens[stmt_start..i].to_vec();
+                    let mut stmt_spans = spans[stmt_start..i].to_vec();
+                    stmt_tokens.push(Token::Eof);
+                    stmt_spans.push(spans[i]);
+                    let mut parser =
+                        Parser::new_with_source(stmt_tokens, stmt_spans, sql.to_string());
+                    parser.in_trigger_body = true;
+                    let _ = parser.parse_statement();
+                    collect(&parser);
+                }
+                stmt_start = i + 1;
+            }
+        }
+
+        found.sort_by_key(|s| (s.start, s.end));
+        found
+    }
+
     /// Parse a standalone SQL expression using the full main-parser grammar.
     ///
     /// Reload paths (binary catalog expression indexes, partial-index WHERE
@@ -380,6 +473,13 @@ impl Parser {
         let (tokens, spans): (Vec<Token>, Vec<Span>) = tokens_with_spans.into_iter().unzip();
 
         let mut parser = Parser::new_with_source(tokens, spans, input.to_string());
+        // This re-parses an already-parsed, `ToSql`-rendered AST, so it must
+        // reproduce that AST exactly. Any empty `IN ()` still present was kept
+        // on purpose (a `CREATE INDEX` expression, or an operand holding a
+        // function call); folding it here would, e.g., turn a reloaded
+        // `CREATE INDEX i0 ON t0('1' IN ())` into `... ON t0(FALSE)`
+        // (altertab3.test 8.1, issue #6733).
+        parser.fold_empty_in_lists = false;
         let expr = parser.parse_expression()?;
         // A single trailing `;` is a benign terminator, but anything after it
         // means the rendered text did not round-trip as one expression (e.g. a

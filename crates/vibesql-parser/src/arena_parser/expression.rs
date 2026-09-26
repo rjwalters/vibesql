@@ -226,12 +226,8 @@ impl<'arena> ArenaParser<'arena> {
                     } else {
                         let values = self.parse_expression_list()?;
                         self.expect_token(Token::RParen)?;
-                        let left_ref = self.arena.alloc(left);
-                        left = Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
-                            expr: left_ref,
-                            values,
-                            negated: true,
-                        }));
+                        // An empty list folds to a boolean like SQLite (issue #6733).
+                        left = self.build_in_list_expression(left, values, true);
                     }
 
                     // IN's right operand is syntactically closed, so tighter-binding
@@ -329,12 +325,8 @@ impl<'arena> ArenaParser<'arena> {
                 } else {
                     let values = self.parse_expression_list()?;
                     self.expect_token(Token::RParen)?;
-                    let left_ref = self.arena.alloc(left);
-                    left = Expression::Extended(self.arena.alloc(ExtendedExpr::InList {
-                        expr: left_ref,
-                        values,
-                        negated: false,
-                    }));
+                    // An empty list folds to a boolean like SQLite (issue #6733).
+                    left = self.build_in_list_expression(left, values, false);
                 }
 
                 // IN's right operand is syntactically closed, so tighter-binding
