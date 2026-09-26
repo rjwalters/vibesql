@@ -302,6 +302,44 @@ pub fn remove_sequence_entry(
     Ok(())
 }
 
+/// Retarget the `sqlite_sequence` row (if any) for a table that has just been
+/// renamed via `ALTER TABLE ... RENAME TO ...`, so its AUTOINCREMENT
+/// high-water mark survives the rename under the new name.
+///
+/// Mirrors SQLite's `sqlite3AlterRenameTable` (`alter.c`), which runs `UPDATE
+/// sqlite_sequence SET name = %Q WHERE name = %Q` (new, old) unconditionally
+/// whenever a `sqlite_sequence` table exists in the renamed table's schema —
+/// this nested UPDATE is NOT gated on `legacy_alter_table`, unlike the
+/// dependent trigger/view/FK-body rewrite pass RENAME TO also runs. Without
+/// it, a renamed AUTOINCREMENT table's `seq` row is silently orphaned under
+/// its old name: the next NULL-rowid INSERT can no longer find it via
+/// [`lookup_sequence_row`], so AUTOINCREMENT's "never reuse a rowid"
+/// guarantee is lost across a rename (alter.test alter-4.3, issue #6174).
+///
+/// A no-op if the owning schema's `sqlite_sequence` doesn't exist (or has no
+/// row for this table) — renaming a table before its first AUTOINCREMENT
+/// insert is normal. `owning_schema` is the schema (`main` or a `temp_*`
+/// schema) that owned the table both before AND after the rename — `RENAME
+/// TO` never moves a table across schemas, only within one.
+pub fn rename_sequence_entry(
+    database: &mut Database,
+    old_display_name: &str,
+    new_display_name: &str,
+    owning_schema: &str,
+) {
+    let seq_table = sequence_table_in(owning_schema);
+    if database.get_table(&seq_table).is_none() {
+        return;
+    }
+    let old_name = old_display_name.to_string();
+    let new_name = new_display_name.to_string();
+    let _ = database.update_row_matching(
+        &seq_table,
+        move |row| matches!(row.values.first(), Some(SqlValue::Varchar(s)) if s.as_str() == old_name),
+        vec![("name", SqlValue::Varchar(arcstr::ArcStr::from(new_name)))],
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +410,38 @@ mod tests {
         remove_sequence_entry(&mut db, "t1", "main").unwrap();
         assert_eq!(lookup_in(&db, "main", "t1"), None);
         assert_eq!(lookup_in(&db, "main", "t2"), Some(Some(7)));
+    }
+
+    #[test]
+    fn test_rename_sequence_entry_retargets_row() {
+        // ALTER TABLE t1 RENAME TO t2 must carry the AUTOINCREMENT high-water
+        // mark over to the new name (alter.test alter-4.3, issue #6174) —
+        // without this, the next NULL-rowid insert can no longer find the row
+        // and silently restarts numbering from the table's own max rowid.
+        let mut db = Database::new();
+        bump_sequence_after_insert(&mut db, "t1", "main", 11).unwrap();
+        bump_sequence_after_insert(&mut db, "other", "main", 3).unwrap();
+
+        rename_sequence_entry(&mut db, "t1", "t2", "main");
+
+        assert_eq!(lookup_in(&db, "main", "t1"), None);
+        assert_eq!(lookup_in(&db, "main", "t2"), Some(Some(11)));
+        // An unrelated table's row is untouched.
+        assert_eq!(lookup_in(&db, "main", "other"), Some(Some(3)));
+    }
+
+    #[test]
+    fn test_rename_sequence_entry_noop_when_never_autoincrement() {
+        // Renaming a table that never had a sqlite_sequence row (or before
+        // sqlite_sequence exists at all) must not error or create one.
+        let mut db = Database::new();
+        rename_sequence_entry(&mut db, "t1", "t2", "main");
+        assert!(db.catalog.get_table(SQLITE_SEQUENCE_TABLE).is_none());
+
+        bump_sequence_after_insert(&mut db, "unrelated", "main", 1).unwrap();
+        rename_sequence_entry(&mut db, "t1", "t2", "main");
+        assert_eq!(lookup_in(&db, "main", "t2"), None);
+        assert_eq!(lookup_in(&db, "main", "unrelated"), Some(Some(1)));
     }
 
     #[test]

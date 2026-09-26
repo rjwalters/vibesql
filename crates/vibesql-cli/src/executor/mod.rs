@@ -372,6 +372,56 @@ fn load_attached_database_file(path: &str) -> anyhow::Result<(Database, u64)> {
     Ok((db, stats.last_lsn))
 }
 
+/// Restore each attached table's verbatim `CREATE TABLE` source text
+/// (`TableSchema::sql_source`) onto the checkpoint image of that attachment
+/// (issue #6174, alter4-5.2 / alter4-5.6).
+///
+/// [`SqlExecutor::persist_attached_schema`] builds the attachment's WAL-mode
+/// checkpoint by re-loading the SQL dump it just wrote. That dump
+/// *reconstructs* every `CREATE TABLE` from structured metadata
+/// (`write_create_table_ddl`), so the re-loaded `standalone` database's
+/// `sql_source` is the reconstruction (`CREATE TABLE t1 (a, b)`), not the
+/// user's original text (`CREATE TABLE t1(a,b)`). The binary checkpoint format
+/// persists `sql_source` verbatim (v9+, #5619) — which is how a `main`-schema
+/// table keeps its exact text across processes — so without this the
+/// attachment silently traded its original text for the reconstruction at
+/// the first save, and every later `ALTER TABLE aux.t ADD COLUMN` spliced
+/// into the reconstruction. SQLite keeps the byte-for-byte source.
+///
+/// The live session's copy is authoritative: it is exactly what
+/// `aux.sqlite_master` showed before the save (already schema-relative — the
+/// attachment qualifier is never part of a stored `sql_source`). A table whose
+/// live `sql_source` is `None` (invalidated by a structural ALTER) is left with
+/// the dump's reconstruction, same as before. Only the storage `Table`'s schema
+/// copy is serialized, but the catalog copy is updated too so the two stay
+/// consistent (see `Catalog::replace_table_schema`).
+fn carry_over_attached_sql_sources(live: &Database, alias: &str, standalone: &mut Database) {
+    let table_names = standalone
+        .catalog
+        .get_schema(vibesql_catalog::DEFAULT_SCHEMA)
+        .map(|s| s.list_tables())
+        .unwrap_or_default();
+
+    for table_name in &table_names {
+        let Some(live_table) = live.get_table(&format!("{}.{}", alias, table_name)) else {
+            continue;
+        };
+        let Some(src) = live_table.schema.sql_source.clone() else { continue };
+        // Defensive: never pair a source text with a structurally different
+        // table (the source is re-parsed on load to rehydrate constraints).
+        let live_column_count = live_table.schema.columns.len();
+
+        let standalone_key = format!("{}.{}", vibesql_catalog::DEFAULT_SCHEMA, table_name);
+        let Some(table) = standalone.get_table_mut(&standalone_key) else { continue };
+        if table.schema.columns.len() != live_column_count {
+            continue;
+        }
+        table.schema.set_sql_source(src);
+        let updated = table.schema.clone();
+        standalone.catalog.replace_table_schema(&standalone_key, updated);
+    }
+}
+
 /// Translate a catalog-level [`vibesql_catalog::IndexType`] (the type
 /// actually recorded for an index) into the AST-level
 /// [`vibesql_ast::IndexType`] a synthetic `CreateIndexStmt` needs (#6407).
@@ -1295,7 +1345,7 @@ impl SqlExecutor {
             return Ok(());
         };
 
-        let standalone = load_database_file(path).map_err(|e| {
+        let mut standalone = load_database_file(path).map_err(|e| {
             anyhow::anyhow!(
                 "Failed to re-read the just-written dump for attached database '{}' at {} \
                  while checkpointing it: {}",
@@ -1304,6 +1354,7 @@ impl SqlExecutor {
                 e
             )
         })?;
+        carry_over_attached_sql_sources(&self.db, alias, &mut standalone);
         let recovered_lsn = self.attached_recovered_lsn.get(alias).copied().unwrap_or(0);
         wal_state.checkpoint_attached(&standalone, path, recovered_lsn).map_err(|e| {
             anyhow::anyhow!("Failed to checkpoint attached database '{}' at {}: {}", alias, path, e)

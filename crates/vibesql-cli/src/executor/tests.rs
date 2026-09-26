@@ -3811,6 +3811,55 @@ fn test_attach_sees_state_written_through_a_direct_wal_open() {
     }
 }
 
+/// #6174 (alter4-5.2 / alter4-5.6): an attached table's verbatim `CREATE
+/// TABLE` text must survive the WAL-mode checkpoint round-trip, exactly like a
+/// `main`-schema table's does. Before the fix the checkpoint was built from
+/// the reconstructed-DDL dump, so a fresh session's `aux.sqlite_master` showed
+/// `CREATE TABLE t1 (a, b)` and a later `ADD COLUMN` spliced into that
+/// reconstruction instead of the user's original text.
+#[test]
+fn test_attached_table_sql_text_survives_wal_checkpoint_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let main_path = dir.path().join("main.vbsql");
+    let aux_path = dir.path().join("test2.db");
+
+    let aux_sql = |ex: &mut SqlExecutor| -> Vec<Vec<Option<String>>> {
+        ex.execute("SELECT sql FROM aux.sqlite_master WHERE type='table'").unwrap().rows
+    };
+
+    // Session 1: create through the alias with non-canonical formatting.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        ex.execute("CREATE TABLE aux.t1(a,b)").unwrap();
+        ex.execute("INSERT INTO aux.t1 VALUES(1, 'one')").unwrap();
+        save(&mut ex, &main_path);
+    }
+
+    // Session 2: the original text survives, and ADD COLUMN splices into it.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        assert_eq!(aux_sql(&mut ex), vec![vec![Some("CREATE TABLE t1(a,b)".to_string())]]);
+        ex.execute("ALTER TABLE aux.t1 ADD COLUMN c VARCHAR(128)").unwrap();
+        save(&mut ex, &main_path);
+    }
+
+    // Session 3: the spliced text survives too, and the data is intact.
+    {
+        let mut ex = wal_executor(&main_path);
+        ex.execute(&format!("ATTACH '{}' AS aux", aux_path.display())).unwrap();
+        assert_eq!(
+            aux_sql(&mut ex),
+            vec![vec![Some("CREATE TABLE t1(a,b, c VARCHAR(128))".to_string())]]
+        );
+        assert_eq!(
+            ex.execute("SELECT a, b, c FROM aux.t1").unwrap().rows,
+            vec![vec![Some("1".to_string()), Some("one".to_string()), None]]
+        );
+    }
+}
+
 /// #6531 direction 2 (pragma4-4.4.3): once the attached file has a checkpoint
 /// archive (created by a direct open), writes made through the alias must
 /// still be visible to a later direct open. Before the fix the alias wrote a
