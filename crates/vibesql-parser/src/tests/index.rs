@@ -583,6 +583,51 @@ fn test_create_index_concat_expression_mixed_with_columns() {
     }
 }
 
+// A table-qualified column reference (`.`) leading an index column term must
+// also be detected and re-parsed as a full expression, exactly like the
+// multi-char-operator cases above — without this, `column_name` grabs only
+// the leading identifier (`t0`) and leaves the `.` unconsumed, producing
+// `near ".": syntax error` even though SQLite's own grammar accepts a
+// `.`-qualified reference here syntactically (it is `CREATE INDEX` semantic
+// validation, not the parser, that then rejects it — issue #6746).
+#[test]
+fn test_create_index_expression_leading_dot_qualified_column() {
+    for sql in [
+        "CREATE INDEX idx ON t(t0.c0 + 1)",
+        "CREATE INDEX idx ON t(t0.c0)",
+        "CREATE INDEX idx ON t(main.t0.c0 + 1)",
+    ] {
+        let result = Parser::parse_sql(sql);
+        assert!(result.is_ok(), "Failed to parse `{sql}`: {:?}", result.err());
+        match result.unwrap() {
+            Statement::CreateIndex(stmt) => {
+                assert_eq!(stmt.columns.len(), 1, "for `{sql}`");
+                assert!(stmt.columns[0].is_expression(), "for `{sql}`");
+            }
+            other => panic!("Expected CreateIndex for `{sql}`, got: {:?}", other),
+        }
+    }
+}
+
+#[test]
+fn test_create_index_dot_qualified_expression_mixed_with_columns() {
+    // A qualified expression term followed by a plain column must both parse
+    // (the comma-continuation path after the expression backtrack).
+    let sql = "CREATE INDEX idx ON t(t0.c0 + 1, c)";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 2);
+            assert!(stmt.columns[0].is_expression());
+            assert!(!stmt.columns[1].is_expression());
+            assert_eq!(stmt.columns[1].expect_column_name(), "c");
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
 #[test]
 fn test_create_index_prefix_length_still_works() {
     // Ensure prefix length syntax still works: column_name(integer)

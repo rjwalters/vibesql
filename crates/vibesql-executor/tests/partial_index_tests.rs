@@ -840,3 +840,108 @@ fn inl_semi_join_skips_partial_index_without_implying_filters() {
     );
     assert_eq!(ids_open, vec![2]);
 }
+
+// ============================================================================
+// `.`-qualified column references in CREATE INDEX (issue #6746)
+// ============================================================================
+
+/// Parse and execute a single `CREATE INDEX`, returning the executor's error
+/// message (if any) instead of panicking.
+fn try_create_index(db: &mut Database, sql: &str) -> Result<(), String> {
+    match Parser::parse_sql(sql).expect("Failed to parse SQL") {
+        vibesql_ast::Statement::CreateIndex(s) => {
+            CreateIndexExecutor::execute(&s, db).map(|_| ()).map_err(|e| e.to_string())
+        }
+        other => panic!("expected CREATE INDEX, got {other:?}"),
+    }
+}
+
+const DOT_PROHIBITED: &str = "the \".\" operator prohibited in index expressions";
+
+/// sqlite3 3.54.0: `CREATE INDEX i2 ON t0((t0.c0 + 1))` ->
+/// `the "." operator prohibited in index expressions`, even though the
+/// qualifier names the indexed table itself.
+#[test]
+fn create_index_rejects_self_qualified_column_in_expression() {
+    let mut db = Database::new();
+    execute_sql(&mut db, "CREATE TABLE t0 (c0 INTEGER)");
+
+    for sql in [
+        "CREATE INDEX i2 ON t0((t0.c0 + 1))",
+        "CREATE INDEX i2 ON t0(t0.c0 + 1)",
+        "CREATE INDEX i2 ON t0(T0.c0 * 2)",
+        "CREATE INDEX i2 ON t0(abs(t0.c0))",
+        "CREATE INDEX i2 ON t0(main.t0.c0 + 1)",
+        // A qualified term earlier in the column list wins over an
+        // unresolvable later term, matching sqlite3's per-term resolution.
+        "CREATE INDEX i2 ON t0(t0.c0 + 1, zz)",
+    ] {
+        let err = try_create_index(&mut db, sql).expect_err(sql);
+        assert!(err.contains(DOT_PROHIBITED), "{sql}: unexpected error {err:?}");
+    }
+    assert!(!db.index_exists("i2"), "no index may be left behind by a rejected CREATE INDEX");
+}
+
+/// A qualifier naming some other table is unresolvable, not a `.` violation:
+/// sqlite3 reports `no such column: t9.c0` (even when `t9` exists).
+#[test]
+fn create_index_expression_with_foreign_qualifier_is_no_such_column() {
+    let mut db = Database::new();
+    execute_sql(&mut db, "CREATE TABLE t0 (c0 INTEGER); CREATE TABLE t9 (c0 INTEGER)");
+
+    let err = try_create_index(&mut db, "CREATE INDEX i2 ON t0(t9.c0 + 1)").unwrap_err();
+    assert!(err.contains("no such column: t9.c0"), "unexpected error {err:?}");
+    assert!(!err.contains(DOT_PROHIBITED), "unexpected error {err:?}");
+
+    // An unresolvable reference in the same term wins over the `.` error.
+    let err = try_create_index(&mut db, "CREATE INDEX i2 ON t0(t0.c0 + zz)").unwrap_err();
+    assert!(err.contains("zz"), "unexpected error {err:?}");
+}
+
+/// Unqualified index expressions are unaffected.
+#[test]
+fn create_index_accepts_unqualified_expression() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        "CREATE TABLE t0 (c0 INTEGER); INSERT INTO t0 VALUES (1); INSERT INTO t0 VALUES (2)",
+    );
+    try_create_index(&mut db, "CREATE INDEX i2 ON t0((c0 + 1))").expect("unqualified expr");
+    try_create_index(&mut db, "CREATE INDEX i3 ON t0(c0 * 2, c0)").expect("unqualified expr");
+    assert!(db.index_exists("i2"));
+    assert!(db.index_exists("i3"));
+}
+
+/// The `.` prohibition is not lifted by `PRAGMA writable_schema=ON` (sqlite3
+/// 3.54.0 still rejects `CREATE INDEX i2 ON t0(t0.c0+1)` under it).
+#[test]
+fn create_index_dot_prohibition_applies_under_writable_schema() {
+    let mut db = Database::new();
+    execute_sql(&mut db, "CREATE TABLE t0 (c0 INTEGER)");
+    db.set_writable_schema(true);
+    let err = try_create_index(&mut db, "CREATE INDEX i2 ON t0(t0.c0 + 1)").unwrap_err();
+    assert!(err.contains(DOT_PROHIBITED), "unexpected error {err:?}");
+}
+
+/// Unlike index expressions, SQLite ACCEPTS a table-qualified column in a
+/// partial-index WHERE clause (sqlite3 3.54.0: `CREATE INDEX i1 ON t0(c0)
+/// WHERE t0.c0 > 1` succeeds — the `.` restriction covers index expressions
+/// and generated columns only), but still rejects a qualifier naming a
+/// different table (`no such column: t9.c0`).
+#[test]
+fn partial_index_where_allows_self_qualified_column_only() {
+    let mut db = Database::new();
+    execute_sql(
+        &mut db,
+        "CREATE TABLE t0 (c0 INTEGER); CREATE TABLE t9 (c0 INTEGER);
+         INSERT INTO t0 VALUES (1); INSERT INTO t0 VALUES (2); INSERT INTO t0 VALUES (3)",
+    );
+
+    try_create_index(&mut db, "CREATE INDEX i1 ON t0(c0) WHERE t0.c0 > 1")
+        .expect("self-qualified partial-index WHERE is legal in SQLite");
+    assert_eq!(index_row_indices(&db, "i1"), vec![1, 2]);
+
+    let err = try_create_index(&mut db, "CREATE INDEX i3 ON t0(c0) WHERE t9.c0 > 1").unwrap_err();
+    assert!(err.contains("no such column: t9.c0"), "unexpected error {err:?}");
+    assert!(!db.index_exists("i3"));
+}

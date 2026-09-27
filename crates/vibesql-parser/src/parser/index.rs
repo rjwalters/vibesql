@@ -586,6 +586,15 @@ impl Parser {
                 // (Token::Operator, e.g. `||`, `<<`, `<=`, `!=`) must be detected here so
                 // an indexed expression like `CREATE INDEX i ON t(z||w)` is parsed as an
                 // expression rather than choking on the trailing operator token.
+                //
+                // `Token::Symbol('.')` is included so a table-qualified column
+                // reference (`t0.c0`, `main.t0.c0 + 1`) is parsed as a full
+                // expression rather than leaving the `.` unconsumed after
+                // `column_name` grabs only the leading identifier. SQLite's own
+                // grammar accepts a `.`-qualified reference here syntactically —
+                // it is `CREATE INDEX` semantic validation, not the parser, that
+                // then rejects it with `the "." operator prohibited in index
+                // expressions` (issue #6746).
                 if matches!(
                     self.peek(),
                     Token::Symbol('+')
@@ -598,6 +607,7 @@ impl Parser {
                         | Token::Symbol('<')
                         | Token::Symbol('>')
                         | Token::Symbol('=')
+                        | Token::Symbol('.')
                         | Token::Operator(_)
                 ) || matches!(self.peek(), Token::Keyword { keyword: kw, .. } if matches!(kw,
                     crate::keywords::Keyword::And
