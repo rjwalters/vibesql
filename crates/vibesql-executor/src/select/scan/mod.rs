@@ -119,6 +119,11 @@ where
             // through to the standard left-deep path, which handles VALUES leaves
             // correctly. (values.test §6, §8)
             && !reorder::from_contains_values(from)
+            // The reorder path keys relations by alias-or-name, so a FROM list
+            // that binds the same name twice (`FROM t3, t3`) would collapse
+            // into one relation and drop rows. The left-deep path keeps each
+            // occurrence distinct. (#6735)
+            && !reorder::from_has_duplicate_bindings(from)
         {
             // Apply join reordering optimization
             return reorder::execute_with_join_reordering(
@@ -147,6 +152,7 @@ where
             let inner_table_count = reorder::count_tables_in_from(left);
             if reorder::should_apply_join_reordering(inner_table_count)
                 && reorder::all_joins_are_cross(left)
+                && !reorder::from_has_duplicate_bindings(from)
             {
                 // The inner join can be reordered, and we have a semi/anti join
                 // with a derived table. Use the extended optimization that includes

@@ -127,6 +127,33 @@ pub(crate) fn from_contains_values(from: &FromClause) -> bool {
     }
 }
 
+/// Check whether a FROM tree binds the same effective name (alias, or table
+/// name when unaliased; case-insensitive) more than once.
+///
+/// The join-reordering path identifies each relation purely by its effective
+/// name: `JoinOrderAnalyzer::register_tables`, the search's table sets, and the
+/// optimizer's `table_map` / `alias_to_table` are all keyed by
+/// `alias-or-name.to_lowercase()`. A FROM list such as `FROM t3, t3` therefore
+/// collapses into a single relation there, silently dropping one side of the
+/// cross join (`count(*)` returned 2 instead of 4 — issue #6735).
+///
+/// SQLite treats each occurrence as a separate relation. The standard
+/// left-deep join path already does this correctly (`CombinedSchema::merge`
+/// stores a colliding self-join under a synthetic key and records the name in
+/// `duplicate_aliases` for ambiguous-column errors), so we suppress reordering
+/// when a duplicate binding is present. Such queries are rare — any
+/// unqualified reference to the duplicated name is ambiguous anyway — so the
+/// lost optimization opportunity is negligible.
+pub(crate) fn from_has_duplicate_bindings(from: &FromClause) -> bool {
+    let mut table_refs = Vec::new();
+    super::graph::flatten_join_tree(from, &mut table_refs);
+    let mut seen = std::collections::HashSet::with_capacity(table_refs.len());
+    table_refs
+        .iter()
+        .map(|t| t.alias.as_deref().unwrap_or(&t.name).to_lowercase())
+        .any(|key| !seen.insert(key))
+}
+
 /// Check if all joins in the tree are CROSS joins (comma-list syntax)
 ///
 /// Join reordering changes column ordering, so we only apply it to implicit CROSS joins
