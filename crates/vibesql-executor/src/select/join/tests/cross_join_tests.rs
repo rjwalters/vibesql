@@ -237,3 +237,65 @@ fn test_cross_join_with_or_predicates() {
 
     assert_eq!(result.len(), 4);
 }
+
+/// Execute a SELECT and return its result (or error) for self-join tests.
+fn run_select(db: &Database, sql: &str) -> Result<Vec<vibesql_storage::Row>, crate::ExecutorError> {
+    let executor = SelectExecutor::new(db);
+    match Parser::parse_sql(sql).unwrap() {
+        vibesql_ast::Statement::Select(s) => executor.execute(&s),
+        _ => panic!("Expected SELECT statement"),
+    }
+}
+
+/// Run `SELECT count(*) ...` and return the single integer result.
+fn count_of(db: &Database, sql: &str) -> i64 {
+    let rows = run_select(db, sql).unwrap_or_else(|e| panic!("{sql} failed: {e:?}"));
+    assert_eq!(rows.len(), 1, "{sql}: expected one row");
+    match &rows[0].values[0] {
+        vibesql_types::SqlValue::Integer(n) => *n,
+        vibesql_types::SqlValue::Bigint(n) => *n,
+        other => panic!("{sql}: unexpected count value {other:?}"),
+    }
+}
+
+fn self_join_db() -> Database {
+    let mut db = Database::new();
+    exec_sql(&mut db, "CREATE TABLE t3 (e INTEGER, f INTEGER)");
+    exec_sql(&mut db, "INSERT INTO t3 VALUES (1, 2)");
+    exec_sql(&mut db, "INSERT INTO t3 VALUES (3, 4)");
+    db
+}
+
+#[test]
+fn test_self_cross_join_unaliased_duplicate() {
+    // #6735: the join-reorder optimizer keyed relations by alias-or-name, so
+    // `FROM t3, t3` collapsed into one relation and returned 2 rows, not 4.
+    let db = self_join_db();
+
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, t3"), 4);
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, t3, t3"), 8);
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, t3 AS a0, t3"), 8);
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, (t3 AS a0, t3)"), 8);
+    // Regression guard: already-distinct bindings keep working.
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3 AS q, (t3 AS a0, t3)"), 8);
+    // Case-insensitive duplicate names also stay distinct relations.
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, T3"), 4);
+    // Qualified predicates on a duplicate self-join still filter correctly.
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, t3 AS a0 WHERE a0.e = 1"), 2);
+    assert_eq!(count_of(&db, "SELECT count(*) FROM t3, t3, t3 AS a0 WHERE a0.e = 1"), 4);
+}
+
+#[test]
+fn test_self_cross_join_unaliased_duplicate_ambiguous_column() {
+    // An unqualified column against duplicate unaliased tables must be
+    // reported as ambiguous rather than silently resolving to one side.
+    let db = self_join_db();
+
+    let err = run_select(&db, "SELECT e FROM t3, t3").expect_err("expected ambiguous column");
+    let msg = format!("{err}").to_lowercase();
+    assert!(msg.contains("ambiguous"), "unexpected error: {msg}");
+
+    let err = run_select(&db, "SELECT t3.e FROM t3, t3").expect_err("expected ambiguous column");
+    let msg = format!("{err}").to_lowercase();
+    assert!(msg.contains("ambiguous"), "unexpected error: {msg}");
+}

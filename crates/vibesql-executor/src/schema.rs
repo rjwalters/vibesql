@@ -428,23 +428,39 @@ impl CombinedSchema {
         let right_columns = right_schema.columns.len();
         let right_id = TableIdentifier::unquoted(&right_table_name);
 
-        // Track duplicate table alias/name - but NOT for self-joins
-        // A self-join is when the same table (identical schema) is joined to itself.
-        // In SQLite, self-joins like `FROM t1 JOIN t1 USING(a,b)` allow unambiguous
-        // references to `t1.column` because it's the same underlying table.
-        // Only mark as duplicate if it's a different table with the same alias.
-        if let Some((_, existing_schema)) = table_schemas.get(&right_id) {
-            // Check if it's a true self-join (same table) or alias conflict (different tables)
-            // For self-joins, the schemas are identical (same table name, same columns)
-            if existing_schema != &right_schema {
-                // Different tables with same alias - this is ambiguous
-                duplicate_aliases.insert(right_id.clone());
-            }
-            // If same schema, it's a self-join - don't mark as duplicate
+        // Track duplicate table alias/name (issue #4507, #6735): a qualified
+        // reference like `A.f1` is ambiguous whenever `A` is bound more than
+        // once in the FROM list, regardless of whether both bindings point at
+        // the *same* underlying table (`FROM t1, t1`) or two *different*
+        // tables sharing an alias (`FROM t1 AS A, t2 AS A`) — SQLite rejects
+        // both cases identically (verified against sqlite3), except when the
+        // column is a NATURAL/USING join key, which is exempted separately in
+        // `validate_qualified_reference` via `joined_columns`.
+        let is_collision = table_schemas.contains_key(&right_id);
+        if is_collision {
+            duplicate_aliases.insert(right_id.clone());
+
+            // Keep BOTH entries instead of silently overwriting the earlier
+            // occurrence, so unqualified-column ambiguity detection
+            // (`is_column_ambiguous`, which scans every entry in
+            // `table_schemas`) can see every occurrence, and so USING/NATURAL
+            // join-condition generation can distinguish the two instances.
+            // Use the same synthetic-key format as `CombinedSchema::merge`
+            // (issue #6735: `FROM t3, t3` previously collapsed to a single
+            // relation here, silently dropping the first occurrence's schema
+            // entry — while row data was unaffected, this made unqualified
+            // and qualified references to the duplicated name resolve to only
+            // one side instead of raising an ambiguous-column error).
+            let synthetic_key = TableIdentifier::unquoted(&format!(
+                "__selfjoin_right_{}_{}",
+                right_id.canonical(),
+                left_total
+            ));
+            table_schemas.insert(synthetic_key, (left_total, right_schema));
+        } else {
+            table_schemas.insert(right_id, (left_total, right_schema));
         }
 
-        // Always insert/overwrite the table
-        table_schemas.insert(right_id, (left_total, right_schema));
         CombinedSchema {
             table_schemas,
             total_columns: left_total + right_columns,
@@ -479,11 +495,16 @@ impl CombinedSchema {
             let adjusted_start = left_total + start_index;
 
             // Check if this table already exists in the left schema
-            if let Some((_, existing_schema)) = table_schemas.get(&table_id) {
-                // Only mark as duplicate if it's a different table with the same alias
-                if existing_schema != &schema {
-                    duplicate_aliases.insert(table_id.clone());
-                }
+            if table_schemas.contains_key(&table_id) {
+                // Track duplicate table alias/name (issue #4507, #6735): mark
+                // it regardless of whether this is a true self-join (same
+                // underlying table) or an alias collision between two
+                // different tables — SQLite rejects a qualified reference to
+                // either identically (verified against sqlite3) unless the
+                // column is a NATURAL/USING join key, which is exempted
+                // separately in `validate_qualified_reference` via
+                // `joined_columns`.
+                duplicate_aliases.insert(table_id.clone());
 
                 // For self-joins (same table appearing twice), we need to keep BOTH
                 // entries so that USING/NATURAL join conditions can distinguish between
@@ -864,9 +885,18 @@ impl CombinedSchema {
     /// This checks if the table identifier appears more than once in the FROM clause,
     /// which would make qualified references like "A.f1" ambiguous (issue #4507).
     ///
+    /// Columns joined via NATURAL JOIN or USING clause are exempted (issue #4517
+    /// covers this for the unqualified case via `is_column_ambiguous`; qualified
+    /// references need the same exemption): `SELECT t1.a FROM t1 NATURAL JOIN t1`
+    /// is not ambiguous in SQLite even though `t1` is bound twice, because `a` is
+    /// a coalesced join-key column. A *non*-key column of the same duplicated
+    /// table (e.g. `t1.c` when only `a` is a NATURAL/USING key) is still
+    /// ambiguous — verified against sqlite3.
+    ///
     /// # Arguments
     /// * `table` - The table name/alias from the qualified reference
-    /// * `column` - The column name (used for error message only)
+    /// * `column` - The column name (checked against `joined_columns` for the NATURAL/USING
+    ///   exemption above, and used for the error message)
     ///
     /// # Returns
     /// * `Ok(())` if the reference is unambiguous
@@ -883,7 +913,9 @@ impl CombinedSchema {
         column: &str,
     ) -> Result<(), crate::errors::ExecutorError> {
         let table_id = TableIdentifier::unquoted(table);
-        if self.duplicate_aliases.contains(&table_id) {
+        if self.duplicate_aliases.contains(&table_id)
+            && !self.joined_columns.contains(&column.to_lowercase())
+        {
             return Err(crate::errors::ExecutorError::AmbiguousColumnName {
                 column_name: format!("{}.{}", table, column),
             });
@@ -1451,8 +1483,17 @@ impl SchemaBuilder {
         let num_columns = schema.columns.len();
         let table_id = TableIdentifier::unquoted(&name);
 
-        // Track duplicate table alias/name - but NOT for self-joins
-        // (same logic as CombinedSchema::combine())
+        // Track duplicate table alias/name - but NOT for self-joins.
+        //
+        // NOTE: unlike `CombinedSchema::combine`/`merge` (fixed for issue
+        // #6735), this builder still silently overwrites a colliding entry
+        // rather than keeping both under a synthetic key. That's a known,
+        // deliberately tolerated edge case: `SchemaBuilder` is only used to
+        // build a throwaway schema for WHERE-clause equijoin-predicate
+        // extraction (an optimization, not a correctness-critical path — see
+        // the call site comment in `select/scan/join_scan/mod.rs`), never for
+        // the schema used to validate or resolve a query's actual output
+        // columns.
         if let Some((_, existing_schema)) = self.table_schemas.get(&table_id) {
             // Only mark as duplicate if it's a different table with the same alias
             if existing_schema != &schema {
