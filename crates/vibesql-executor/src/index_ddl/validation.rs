@@ -7,7 +7,10 @@
 //! - Prefix length validation
 //! - Index name collision checks
 
-use vibesql_ast::{CreateIndexStmt, Expression, IndexColumn};
+use vibesql_ast::{
+    visitor::{walk_expression, ExpressionVisitor, VisitResult},
+    CreateIndexStmt, Expression, IndexColumn,
+};
 use vibesql_catalog::TableSchema;
 use vibesql_storage::Database;
 
@@ -199,7 +202,10 @@ pub fn validate_create_index(
     // unchanged, matching the analogous CHECK-constraint gate in
     // `create_table.rs`.
     if !database.writable_schema() {
-        // Validate that all indexed columns exist in the table
+        // Validate that all indexed columns exist in the table (and that no
+        // index expression uses a `.`-qualified column reference, checked per
+        // column right after that column resolves — see
+        // `reject_dot_operator_in_index_expression`).
         validate_indexed_columns(&stmt.columns, &table_schema, &qualified_table_name)?;
 
         // Validate that the partial-index WHERE clause only references
@@ -210,6 +216,17 @@ pub fn validate_create_index(
         // immediately, even against an empty table with no rows to scan).
         if let Some(where_expr) = &stmt.where_clause {
             validate_expression_columns(where_expr, &table_schema, &qualified_table_name)?;
+        }
+    } else {
+        // The `.`-operator prohibition is NOT relaxed by
+        // `PRAGMA writable_schema=ON` (verified against sqlite3 3.54.0:
+        // `PRAGMA writable_schema=ON; CREATE INDEX i2 ON t0(t0.c0+1)` still
+        // fails with `the "." operator prohibited in index expressions`), so
+        // it runs here even though the column-existence pass above is skipped.
+        for index_col in &stmt.columns {
+            if let Some(expr) = index_col.get_expression() {
+                reject_dot_operator_in_index_expression(expr)?;
+            }
         }
     }
 
@@ -298,10 +315,60 @@ fn validate_indexed_columns(
             }
         }
 
-        // Validate column references in expressions
+        // Validate column references in expressions. SQLite resolves each
+        // indexed term in turn and only then applies the `.`-operator
+        // prohibition to it, so an unresolvable reference anywhere in a term
+        // (`t0(T0.c0 + zz)` -> `no such column: zz`) wins over the `.` error
+        // for that same term, while a qualified reference in an earlier term
+        // wins over an unresolvable one in a later term (`t0(t0.c0, zz)` ->
+        // the `.` error). Verified against sqlite3 3.54.0 (issue #6746).
         if let Some(expr) = index_col.get_expression() {
             validate_expression_columns(expr, table_schema, qualified_table_name)?;
+            reject_dot_operator_in_index_expression(expr)?;
         }
+    }
+    Ok(())
+}
+
+/// Visitor that flags the first `.`-qualified column reference
+/// (`t.c` / `schema.t.c`) reached while walking an index expression.
+struct QualifiedColumnRefFinder {
+    found: bool,
+}
+
+impl ExpressionVisitor for QualifiedColumnRefFinder {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if let Expression::ColumnRef(col_id) = expr {
+            if col_id.is_qualified() {
+                self.found = true;
+                return VisitResult::Stop;
+            }
+        }
+        VisitResult::Continue
+    }
+}
+
+/// Reject a `.`-qualified column reference inside an index expression.
+///
+/// SQLite prohibits the `.` operator in index expressions — `CREATE INDEX i2
+/// ON t0((t0.c0 + 1))`, and even a bare `CREATE INDEX i2 ON t0(t0.c0)`, fail
+/// with `the "." operator prohibited in index expressions` — even when the
+/// qualifier names the indexed table itself. Accepting it would also leave a
+/// qualifier in the catalog that `ALTER TABLE ... RENAME TO` never retargets,
+/// so a later reconstruction of the index DDL could name a table that no
+/// longer exists (issue #6746).
+///
+/// This deliberately applies to index *expressions* only: SQLite accepts a
+/// qualified reference in a partial-index `WHERE` clause (`CREATE INDEX i1 ON
+/// t0(c0) WHERE t0.c0 > 1` succeeds in sqlite3 3.54.0 — the `.` restriction
+/// covers `NC_IdxExpr|NC_GenCol` resolution contexts, not `NC_PartIdx`).
+fn reject_dot_operator_in_index_expression(expr: &Expression) -> Result<(), ExecutorError> {
+    let mut finder = QualifiedColumnRefFinder { found: false };
+    walk_expression(&mut finder, expr);
+    if finder.found {
+        return Err(ExecutorError::SqliteCompatError(
+            "the \".\" operator prohibited in index expressions".to_string(),
+        ));
     }
     Ok(())
 }
@@ -426,6 +493,19 @@ pub fn validate_expression_columns(
 ) -> Result<(), ExecutorError> {
     match expr {
         Expression::ColumnRef(col_id) => {
+            // A table qualifier must name the indexed table itself; any other
+            // table is unresolvable (`CREATE INDEX i ON t0(t9.c0+1)` /
+            // `... WHERE t9.c0 > 1` -> `no such column: t9.c0` in sqlite3,
+            // even when `t9` exists). A self-qualified reference resolves here
+            // and is then subject to the index-expression `.` prohibition
+            // (issue #6746); in a partial-index WHERE clause it is legal.
+            if let Some(table) = col_id.table_canonical() {
+                if !table.eq_ignore_ascii_case(&table_schema.name) {
+                    return Err(ExecutorError::NoSuchColumn {
+                        column_ref: col_id.display().to_string(),
+                    });
+                }
+            }
             let col_name = col_id.column_canonical();
             if table_schema.get_column(col_name).is_none() {
                 // SQLite appends "- should this be a string literal in
