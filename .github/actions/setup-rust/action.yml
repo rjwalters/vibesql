@@ -42,6 +42,12 @@ runs:
       with:
         # x86-64-v2 suffix busts cache after target-cpu change (see .cargo/config.toml)
         shared-key: rust-${{ inputs.cache-key-suffix }}-x86-64-v2
+        # Save only on main. A PR-ref entry can only ever be restored by that one
+        # PR, so PR saves buy nothing and evict the main entry every PR restores
+        # from. Measured 2026-09-27: 9.16 GB of this repo's 9.91 GB cache sat on
+        # PR refs, against GitHub's 10 GB per-repo cap. rjwalters/loom#9065 is the
+        # same fix for the same reason.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
         # Automatically handles:
         # - ~/.cargo/bin/
         # - ~/.cargo/registry/index/
