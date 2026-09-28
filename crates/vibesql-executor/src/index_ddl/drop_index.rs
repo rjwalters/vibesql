@@ -46,11 +46,18 @@ impl DropIndexExecutor {
             // Target the resolved index exactly via its owning schema so a temp
             // index and a same-named main index are dropped independently.
             let schema = metadata.schema().to_string();
-            let qualified_table = format!("{}.{}", schema, metadata.table_name);
+            let table_name = metadata.table_name.clone();
+            let qualified_table = format!("{}.{}", schema, table_name);
             let qualified_index = format!("{}.{}", schema, index_name);
 
-            // Emit WAL entry for persistence BEFORE dropping
-            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+            // Emit WAL entry for persistence BEFORE dropping, naming the
+            // owning schema so recovery drops exactly this index (#6741).
+            database.emit_wal_drop_index_in_schema(
+                index_name_to_id(index_name),
+                index_name,
+                &schema,
+                &table_name,
+            );
 
             // Drop from catalog (schema-qualified table so the exact index goes)
             database
@@ -128,11 +135,18 @@ impl DropIndexExecutor {
             .find(|idx| idx.name == *index_name && idx.schema() == resolved_schema);
 
         if let Some(metadata) = index_metadata {
-            let qualified_table = format!("{}.{}", resolved_schema, metadata.table_name);
+            let table_name = metadata.table_name.clone();
+            let qualified_table = format!("{}.{}", resolved_schema, table_name);
             let qualified_index = format!("{}.{}", resolved_schema, index_name);
 
-            // Emit WAL entry for persistence BEFORE dropping
-            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+            // Emit WAL entry for persistence BEFORE dropping, naming the
+            // owning schema so recovery drops exactly this index (#6741).
+            database.emit_wal_drop_index_in_schema(
+                index_name_to_id(index_name),
+                index_name,
+                &resolved_schema,
+                &table_name,
+            );
 
             // Drop from catalog (schema-qualified table so the exact index goes)
             database

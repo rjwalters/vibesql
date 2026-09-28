@@ -19,7 +19,7 @@ use crate::{
 
 /// CRC-32 implementation using the IEEE polynomial
 /// This is a simple, portable implementation that works on both native and WASM
-fn crc32(data: &[u8]) -> u32 {
+pub(crate) fn crc32(data: &[u8]) -> u32 {
     const CRC32_TABLE: [u32; 256] = {
         let mut table = [0u32; 256];
         let mut i = 0;

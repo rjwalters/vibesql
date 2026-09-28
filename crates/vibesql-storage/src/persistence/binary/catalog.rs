@@ -1192,7 +1192,7 @@ pub fn read_catalog<R: Read>(reader: &mut R) -> Result<Database, StorageError> {
 /// `btree_index::create_btree_index`. We duplicate it here because the
 /// storage crate cannot depend on the executor crate, and the binary-load
 /// path needs to repopulate the catalog without re-running the executor.
-fn convert_ast_columns_to_catalog(
+pub(crate) fn convert_ast_columns_to_catalog(
     columns: &[vibesql_ast::IndexColumn],
 ) -> Vec<vibesql_catalog::IndexedColumn> {
     columns

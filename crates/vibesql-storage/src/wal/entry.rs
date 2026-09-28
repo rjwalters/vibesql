@@ -11,7 +11,7 @@ use vibesql_types::SqlValue;
 
 use crate::{
     persistence::binary::{
-        io::{read_bool, read_u32, read_u64, write_bool, write_u32, write_u64},
+        io::{read_bool, read_u32, read_u64, read_u8, write_bool, write_u32, write_u64, write_u8},
         value::{read_sql_value, write_sql_value},
     },
     StorageError,
@@ -80,15 +80,31 @@ pub enum WalOp {
     /// Drop a table
     DropTable { table_id: u32, table_name: String },
     /// Create an index
+    ///
+    /// `definition` (WAL format v6+, issue #6741) carries the full index
+    /// definition — owning schema, key parts (columns *and* expressions, with
+    /// per-part direction/collation), the partial-index `WHERE` predicate, and
+    /// the verbatim `CREATE INDEX` text — so crash recovery can faithfully
+    /// rebuild the index. It is `None` when parsed from a v5-or-earlier log
+    /// (the thin `column_indices` payload alone cannot reconstruct an index,
+    /// so such entries keep their historical log-only replay behavior) and for
+    /// index kinds recovery does not rebuild (spatial / vector indexes).
     CreateIndex {
         index_id: u32,
         index_name: String,
         table_id: u32,
         column_indices: Vec<u32>,
         is_unique: bool,
+        definition: Option<WalIndexDefinition>,
     },
     /// Drop an index
-    DropIndex { index_id: u32, index_name: String },
+    ///
+    /// `owner` (WAL format v6+, issue #6741) identifies the owning schema and
+    /// table so recovery drops exactly the index that was dropped live (a
+    /// same-named index can exist in another schema). `None` when parsed from
+    /// a v5-or-earlier log, in which case replay keeps its historical
+    /// log-only behavior.
+    DropIndex { index_id: u32, index_name: String, owner: Option<WalIndexOwner> },
 
     // Transaction Operations
     /// Begin a transaction
@@ -157,6 +173,43 @@ pub enum WalOp {
     CheckpointBegin { checkpoint_id: u64 },
     /// Complete a checkpoint (all data up to this LSN is persisted)
     CheckpointComplete { checkpoint_id: u64, lsn: Lsn },
+}
+
+/// Full definition of a B-tree index, carried by [`WalOp::CreateIndex`] as of
+/// WAL format v6 (issue #6741) so crash recovery can rebuild the index exactly
+/// as the live `CREATE INDEX` created it.
+///
+/// Mirrors the per-index record of the binary checkpoint catalog
+/// (`persistence/binary/catalog.rs`): key-part expressions and the partial
+/// `WHERE` predicate are serialized as SQL text and re-parsed with the full
+/// main-parser grammar on decode.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WalIndexDefinition {
+    /// The index's stored table identity (usually the bare table name — see
+    /// `Database::create_index_for_table` for why it is kept bare).
+    pub table_name: String,
+    /// The schema-qualified name the index body was built against (e.g.
+    /// `main.t`), used to resolve the physical table during replay.
+    pub qualified_table_name: String,
+    /// The schema that owns the index (e.g. `main`).
+    pub schema: String,
+    /// Key parts: plain columns (with direction, prefix length, collation and
+    /// quoting) and/or expressions (with direction).
+    pub columns: Vec<vibesql_ast::IndexColumn>,
+    /// Partial-index predicate (`CREATE INDEX ... WHERE expr`), if any.
+    pub where_clause: Option<vibesql_ast::Expression>,
+    /// Verbatim `CREATE INDEX` text for `sqlite_master.sql` (issue #6734).
+    pub sql_source: Option<String>,
+}
+
+/// Owning schema + table of a dropped index, carried by [`WalOp::DropIndex`]
+/// as of WAL format v6 (issue #6741).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalIndexOwner {
+    /// The schema that owned the index (e.g. `main`).
+    pub schema: String,
+    /// The index's stored table identity.
+    pub table_name: String,
 }
 
 /// Operation type tags for binary serialization
@@ -295,7 +348,14 @@ impl WalOp {
                 write_u32(writer, *table_id)?;
                 write_string(writer, table_name)?;
             }
-            WalOp::CreateIndex { index_id, index_name, table_id, column_indices, is_unique } => {
+            WalOp::CreateIndex {
+                index_id,
+                index_name,
+                table_id,
+                column_indices,
+                is_unique,
+                definition,
+            } => {
                 writer
                     .write_all(&[WalOpTag::CreateIndex as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
@@ -307,13 +367,30 @@ impl WalOp {
                     write_u32(writer, idx)?;
                 }
                 write_bool(writer, *is_unique)?;
+                // WAL format v6 (issue #6741): full index definition trailer.
+                match definition {
+                    Some(def) => {
+                        write_bool(writer, true)?;
+                        write_index_definition(writer, def)?;
+                    }
+                    None => write_bool(writer, false)?,
+                }
             }
-            WalOp::DropIndex { index_id, index_name } => {
+            WalOp::DropIndex { index_id, index_name, owner } => {
                 writer
                     .write_all(&[WalOpTag::DropIndex as u8])
                     .map_err(|e| StorageError::IoError(e.to_string()))?;
                 write_u32(writer, *index_id)?;
                 write_string(writer, index_name)?;
+                // WAL format v6 (issue #6741): owning schema + table trailer.
+                match owner {
+                    Some(owner) => {
+                        write_bool(writer, true)?;
+                        write_string(writer, &owner.schema)?;
+                        write_string(writer, &owner.table_name)?;
+                    }
+                    None => write_bool(writer, false)?,
+                }
             }
             WalOp::TxnBegin { txn_id } => {
                 writer
@@ -453,12 +530,35 @@ impl WalOp {
                     column_indices.push(read_u32(reader)?);
                 }
                 let is_unique = read_bool(reader)?;
-                Ok(WalOp::CreateIndex { index_id, index_name, table_id, column_indices, is_unique })
+                // WAL format v6 (issue #6741): full index definition trailer.
+                // Absent in v5-and-earlier logs — such entries decode as the
+                // thin op and keep their historical (log-only) replay.
+                let definition = if version >= 6 && read_bool(reader)? {
+                    Some(read_index_definition(reader)?)
+                } else {
+                    None
+                };
+                Ok(WalOp::CreateIndex {
+                    index_id,
+                    index_name,
+                    table_id,
+                    column_indices,
+                    is_unique,
+                    definition,
+                })
             }
             WalOpTag::DropIndex => {
                 let index_id = read_u32(reader)?;
                 let index_name = read_string(reader)?;
-                Ok(WalOp::DropIndex { index_id, index_name })
+                // WAL format v6 (issue #6741): owning schema + table trailer.
+                let owner = if version >= 6 && read_bool(reader)? {
+                    let schema = read_string(reader)?;
+                    let table_name = read_string(reader)?;
+                    Some(WalIndexOwner { schema, table_name })
+                } else {
+                    None
+                };
+                Ok(WalOp::DropIndex { index_id, index_name, owner })
             }
             WalOpTag::TxnBegin => {
                 let txn_id = read_u64(reader)?;
@@ -525,6 +625,165 @@ fn read_string<R: Read>(reader: &mut R) -> Result<String, StorageError> {
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf).map_err(|e| StorageError::IoError(e.to_string()))?;
     String::from_utf8(buf).map_err(|e| StorageError::IoError(format!("Invalid UTF-8: {}", e)))
+}
+
+fn write_optional_string<W: Write>(writer: &mut W, s: Option<&str>) -> Result<(), StorageError> {
+    match s {
+        Some(s) => {
+            write_bool(writer, true)?;
+            write_string(writer, s)
+        }
+        None => write_bool(writer, false),
+    }
+}
+
+fn read_optional_string<R: Read>(reader: &mut R) -> Result<Option<String>, StorageError> {
+    if read_bool(reader)? {
+        Ok(Some(read_string(reader)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn write_direction<W: Write>(
+    writer: &mut W,
+    direction: &vibesql_ast::OrderDirection,
+) -> Result<(), StorageError> {
+    let byte = match direction {
+        vibesql_ast::OrderDirection::Asc => 0u8,
+        vibesql_ast::OrderDirection::Desc => 1u8,
+    };
+    write_u8(writer, byte)
+}
+
+fn read_direction<R: Read>(reader: &mut R) -> Result<vibesql_ast::OrderDirection, StorageError> {
+    match read_u8(reader)? {
+        0 => Ok(vibesql_ast::OrderDirection::Asc),
+        1 => Ok(vibesql_ast::OrderDirection::Desc),
+        other => Err(StorageError::IoError(format!(
+            "Invalid index key-part direction in WAL CreateIndex: {}",
+            other
+        ))),
+    }
+}
+
+/// Parse SQL expression text persisted by [`write_index_definition`]. Uses the
+/// full main-parser grammar, exactly like the binary checkpoint load path
+/// (issue #5833), so every form accepted at CREATE INDEX time round-trips.
+fn parse_persisted_expression(
+    sql: &str,
+    what: &str,
+) -> Result<vibesql_ast::Expression, StorageError> {
+    vibesql_parser::Parser::parse_expression_sql(sql).map_err(|e| {
+        StorageError::IoError(format!("Failed to parse WAL CreateIndex {} '{}': {}", what, sql, e))
+    })
+}
+
+/// Serialize a [`WalIndexDefinition`] (WAL format v6+).
+///
+/// Layout: table_name, qualified_table_name, schema, key-part count, then per
+/// key part a type byte (0 = column, 1 = expression) followed by
+/// - column: name, direction, prefix-length flag (+u64), collation flag (+string), quoted flag
+/// - expression: SQL text, direction
+///
+/// then the optional `WHERE` predicate SQL and the optional verbatim
+/// `CREATE INDEX` text.
+fn write_index_definition<W: Write>(
+    writer: &mut W,
+    def: &WalIndexDefinition,
+) -> Result<(), StorageError> {
+    use vibesql_ast::pretty_print::ToSql;
+
+    write_string(writer, &def.table_name)?;
+    write_string(writer, &def.qualified_table_name)?;
+    write_string(writer, &def.schema)?;
+    write_u32(writer, def.columns.len() as u32)?;
+    for col in &def.columns {
+        match col {
+            vibesql_ast::IndexColumn::Column {
+                column_name,
+                direction,
+                prefix_length,
+                collation,
+                is_quoted,
+            } => {
+                write_u8(writer, 0)?;
+                write_string(writer, column_name)?;
+                write_direction(writer, direction)?;
+                match prefix_length {
+                    Some(len) => {
+                        write_bool(writer, true)?;
+                        write_u64(writer, *len)?;
+                    }
+                    None => write_bool(writer, false)?,
+                }
+                write_optional_string(writer, collation.as_deref())?;
+                write_bool(writer, *is_quoted)?;
+            }
+            vibesql_ast::IndexColumn::Expression { expr, direction } => {
+                write_u8(writer, 1)?;
+                write_string(writer, &expr.to_sql())?;
+                write_direction(writer, direction)?;
+            }
+        }
+    }
+    let where_sql = def.where_clause.as_ref().map(|expr| expr.to_sql());
+    write_optional_string(writer, where_sql.as_deref())?;
+    write_optional_string(writer, def.sql_source.as_deref())?;
+    Ok(())
+}
+
+/// Deserialize a [`WalIndexDefinition`] written by [`write_index_definition`].
+fn read_index_definition<R: Read>(reader: &mut R) -> Result<WalIndexDefinition, StorageError> {
+    let table_name = read_string(reader)?;
+    let qualified_table_name = read_string(reader)?;
+    let schema = read_string(reader)?;
+    let column_count = read_u32(reader)? as usize;
+    let mut columns = Vec::with_capacity(column_count);
+    for _ in 0..column_count {
+        let column = match read_u8(reader)? {
+            0 => {
+                let column_name = read_string(reader)?;
+                let direction = read_direction(reader)?;
+                let prefix_length = if read_bool(reader)? { Some(read_u64(reader)?) } else { None };
+                let collation = read_optional_string(reader)?;
+                let is_quoted = read_bool(reader)?;
+                vibesql_ast::IndexColumn::Column {
+                    column_name,
+                    direction,
+                    prefix_length,
+                    collation,
+                    is_quoted,
+                }
+            }
+            1 => {
+                let sql = read_string(reader)?;
+                let direction = read_direction(reader)?;
+                let expr = parse_persisted_expression(&sql, "key expression")?;
+                vibesql_ast::IndexColumn::Expression { expr: Box::new(expr), direction }
+            }
+            other => {
+                return Err(StorageError::IoError(format!(
+                    "Invalid index key-part type in WAL CreateIndex: {}",
+                    other
+                )))
+            }
+        };
+        columns.push(column);
+    }
+    let where_clause = match read_optional_string(reader)? {
+        Some(sql) => Some(parse_persisted_expression(&sql, "partial-index WHERE predicate")?),
+        None => None,
+    };
+    let sql_source = read_optional_string(reader)?;
+    Ok(WalIndexDefinition {
+        table_name,
+        qualified_table_name,
+        schema,
+        columns,
+        where_clause,
+        sql_source,
+    })
 }
 
 fn write_bytes<W: Write>(writer: &mut W, data: &[u8]) -> Result<(), StorageError> {
@@ -653,6 +912,7 @@ mod tests {
                 table_id: 1,
                 column_indices: vec![2, 3],
                 is_unique: true,
+                definition: None,
             },
         );
 
@@ -663,6 +923,141 @@ mod tests {
         let decoded = WalEntry::deserialize(&mut reader).unwrap();
 
         assert_eq!(entry, decoded);
+    }
+
+    fn parse_expr(sql: &str) -> vibesql_ast::Expression {
+        vibesql_parser::Parser::parse_expression_sql(sql).unwrap()
+    }
+
+    /// A v6 `CreateIndex` carrying the full definition (plain column with
+    /// collation/quoting/DESC, an expression key part, a partial WHERE
+    /// predicate, the owning schema, and the verbatim CREATE INDEX text)
+    /// round-trips losslessly (issue #6741).
+    #[test]
+    fn test_wal_entry_roundtrip_create_index_with_definition() {
+        let definition = WalIndexDefinition {
+            table_name: "users".to_string(),
+            qualified_table_name: "main.users".to_string(),
+            schema: "main".to_string(),
+            columns: vec![
+                vibesql_ast::IndexColumn::Column {
+                    column_name: "Email".to_string(),
+                    direction: vibesql_ast::OrderDirection::Desc,
+                    prefix_length: Some(8),
+                    collation: Some("NOCASE".to_string()),
+                    is_quoted: true,
+                },
+                vibesql_ast::IndexColumn::Expression {
+                    expr: Box::new(parse_expr("lower(name) || 'x'")),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                },
+            ],
+            where_clause: Some(parse_expr("age > 18 AND name IS NOT NULL")),
+            sql_source: Some(
+                "CREATE UNIQUE INDEX  idx_users ON users(\"Email\" COLLATE NOCASE DESC, \
+                 lower(name) || 'x') WHERE age > 18 AND name IS NOT NULL"
+                    .to_string(),
+            ),
+        };
+        let entry = WalEntry::new(
+            6,
+            1234567895,
+            WalOp::CreateIndex {
+                index_id: 11,
+                index_name: "idx_users".to_string(),
+                table_id: 1,
+                column_indices: vec![2, 0xFFFF_FFFF],
+                is_unique: true,
+                definition: Some(definition),
+            },
+        );
+
+        let mut buf = Vec::new();
+        entry.serialize(&mut buf).unwrap();
+
+        let mut reader = &buf[..];
+        let decoded = WalEntry::deserialize(&mut reader).unwrap();
+
+        assert_eq!(entry, decoded);
+        assert!(reader.is_empty(), "the whole entry must be consumed");
+    }
+
+    /// A `DropIndex` carrying its owning schema/table round-trips (v6+).
+    #[test]
+    fn test_wal_entry_roundtrip_drop_index_with_owner() {
+        for owner in [
+            None,
+            Some(WalIndexOwner { schema: "main".to_string(), table_name: "users".to_string() }),
+        ] {
+            let entry = WalEntry::new(
+                7,
+                1234567896,
+                WalOp::DropIndex { index_id: 11, index_name: "idx_users".to_string(), owner },
+            );
+
+            let mut buf = Vec::new();
+            entry.serialize(&mut buf).unwrap();
+
+            let mut reader = &buf[..];
+            let decoded = WalEntry::deserialize(&mut reader).unwrap();
+
+            assert_eq!(entry, decoded);
+            assert!(reader.is_empty(), "the whole entry must be consumed");
+        }
+    }
+
+    /// Backward compatibility (issue #6741): a `CreateIndex`/`DropIndex` entry
+    /// written by a v5 binary has no definition/owner trailer. Decoding it at
+    /// version 5 must consume exactly the v5 layout and yield the thin op
+    /// (`definition`/`owner` = `None`), so the entry that follows still
+    /// decodes correctly.
+    #[test]
+    fn test_v5_create_and_drop_index_decode_as_thin_ops() {
+        // Hand-build the v5 on-disk layout for two consecutive entries.
+        let mut buf = Vec::new();
+        // Entry 1: CreateIndex (v5 layout: no trailer).
+        write_u64(&mut buf, 1).unwrap();
+        write_u64(&mut buf, 100).unwrap();
+        buf.push(WalOpTag::CreateIndex as u8);
+        write_u32(&mut buf, 42).unwrap();
+        write_string(&mut buf, "idx_v5").unwrap();
+        write_u32(&mut buf, 7).unwrap();
+        write_u32(&mut buf, 1).unwrap();
+        write_u32(&mut buf, 0).unwrap();
+        write_bool(&mut buf, false).unwrap();
+        // Entry 2: DropIndex (v5 layout: no trailer).
+        write_u64(&mut buf, 2).unwrap();
+        write_u64(&mut buf, 101).unwrap();
+        buf.push(WalOpTag::DropIndex as u8);
+        write_u32(&mut buf, 42).unwrap();
+        write_string(&mut buf, "idx_v5").unwrap();
+        // Entry 3: a TxnCommit, to prove the stream stayed aligned.
+        write_u64(&mut buf, 3).unwrap();
+        write_u64(&mut buf, 102).unwrap();
+        buf.push(WalOpTag::TxnCommit as u8);
+        write_u64(&mut buf, 9).unwrap();
+
+        let mut reader = &buf[..];
+        let e1 = WalEntry::deserialize_versioned(&mut reader, 5).unwrap();
+        assert_eq!(
+            e1.op,
+            WalOp::CreateIndex {
+                index_id: 42,
+                index_name: "idx_v5".to_string(),
+                table_id: 7,
+                column_indices: vec![0],
+                is_unique: false,
+                definition: None,
+            }
+        );
+        let e2 = WalEntry::deserialize_versioned(&mut reader, 5).unwrap();
+        assert_eq!(
+            e2.op,
+            WalOp::DropIndex { index_id: 42, index_name: "idx_v5".to_string(), owner: None }
+        );
+        let e3 = WalEntry::deserialize_versioned(&mut reader, 5).unwrap();
+        assert_eq!(e3.op, WalOp::TxnCommit { txn_id: 9 });
+        assert!(reader.is_empty());
     }
 
     #[test]

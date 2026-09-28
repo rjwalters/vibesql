@@ -54,6 +54,18 @@ pub fn create_btree_index(
     // Convert AST IndexColumn to catalog IndexedColumn
     let catalog_columns = convert_to_catalog_columns(&stmt.columns);
 
+    // Full definition carried by the WAL CreateIndex op so crash recovery can
+    // rebuild this exact index (issue #6741). Captured before `sql_source` is
+    // moved into the catalog metadata below.
+    let wal_definition = vibesql_storage::wal::WalIndexDefinition {
+        table_name: table_name.to_string(),
+        qualified_table_name: qualified_table_name.to_string(),
+        schema: super::schema_of_qualified(qualified_table_name).to_string(),
+        columns: stmt.columns.clone(),
+        where_clause: stmt.where_clause.as_ref().map(|expr| (**expr).clone()),
+        sql_source: sql_source.clone(),
+    };
+
     // Add to catalog first (use unqualified table name as stored in catalog).
     // Partial indexes carry their WHERE predicate through to the catalog so
     // downstream code (FK-mismatch checker, index-scan selection) can
@@ -96,13 +108,14 @@ pub fn create_btree_index(
         return Err(e);
     }
 
-    // Emit WAL entry for persistence
-    database.emit_wal_create_index(
+    // Emit WAL entry for persistence, carrying the full definition so crash
+    // recovery actually recreates the index (issue #6741).
+    database.emit_wal_create_index_with_definition(
         index_name_to_id(index_name),
         index_name,
-        qualified_table_name,
         column_indices,
         unique,
+        wal_definition,
     );
 
     Ok(format!("Index '{}' created successfully on table '{}'", index_name, qualified_table_name))

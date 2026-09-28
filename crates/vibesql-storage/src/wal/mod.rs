@@ -88,7 +88,7 @@ pub use engine::{
     FlushNotifier, PersistenceConfig, PersistenceEngine, PersistenceStats, WalMessage,
     DEFAULT_CHANNEL_CAPACITY, DEFAULT_FLUSH_COUNT, DEFAULT_FLUSH_INTERVAL_MS,
 };
-pub use entry::{Lsn, WalEntry, WalOp, WalOpTag};
+pub use entry::{Lsn, WalEntry, WalIndexDefinition, WalIndexOwner, WalOp, WalOpTag};
 pub use format::{WalHeader, WAL_HEADER_SIZE, WAL_MAGIC, WAL_VERSION};
 pub use reader::{find_recovery_point, ReadResult, RecoveryInfo, WalIterator, WalReader};
 pub use recovery::{
@@ -99,5 +99,5 @@ pub use scheduler::{
     CheckpointTriggerState, DEFAULT_CHECKPOINT_INTERVAL_SECS, DEFAULT_KEEP_CHECKPOINTS,
     DEFAULT_WAL_SIZE_THRESHOLD,
 };
-pub use truncate::{truncate_wal, TruncateResult};
+pub use truncate::{truncate_wal, upgrade_wal_to_current_version, TruncateResult};
 pub use writer::{verify_checksum, WalWriter};

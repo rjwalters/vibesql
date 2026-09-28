@@ -30,6 +30,7 @@ use std::{
 use crate::{
     wal::{
         entry::Lsn,
+        format::{WAL_HEADER_SIZE, WAL_VERSION},
         reader::{ReadResult, WalReader},
         writer::WalWriter,
     },
@@ -163,6 +164,72 @@ pub fn truncate_wal(
         oldest_lsn: entries_to_keep.first().map(|e| e.lsn),
         newest_lsn: entries_to_keep.last().map(|e| e.lsn),
     })
+}
+
+/// Rewrite an existing WAL written at an older format version so its header
+/// (and therefore every entry appended after it) uses [`WAL_VERSION`].
+///
+/// Entries are decoded under the file's own (older) header version and
+/// re-serialized in the current layout, so nothing already logged is lost.
+/// This must run before a live engine appends to a pre-existing WAL: the
+/// reader decodes every entry with the file header's version, so a current-
+/// layout entry appended under an old header would be decoded with the old
+/// layout — e.g. a v6 `CreateIndex` would silently lose its index-definition
+/// trailer and fall back to log-only replay (issue #6741).
+///
+/// Returns `Ok(true)` when the file was rewritten, `Ok(false)` when it was
+/// already current (or missing / header-less). A torn/corrupt tail is dropped,
+/// exactly as recovery would stop at it. The replacement is atomic (temp file
+/// + rename): on any error the original WAL is left untouched.
+pub fn upgrade_wal_to_current_version(wal_path: &Path) -> Result<bool, StorageError> {
+    if fs::metadata(wal_path).map(|m| m.len() < WAL_HEADER_SIZE as u64).unwrap_or(true) {
+        return Ok(false);
+    }
+
+    let file = File::open(wal_path)
+        .map_err(|e| StorageError::IoError(format!("Failed to open WAL: {}", e)))?;
+    let mut wal_reader = WalReader::open(BufReader::new(file))?;
+    let old_version = wal_reader.header().version;
+    if old_version >= WAL_VERSION {
+        return Ok(false);
+    }
+
+    let mut entries = Vec::new();
+    loop {
+        match wal_reader.read_entry()? {
+            ReadResult::Entry(entry) => entries.push(entry),
+            ReadResult::Eof => break,
+            ReadResult::Corruption { position } => {
+                log::warn!(
+                    "WAL corruption detected at position {} during format upgrade; \
+                     dropping the torn tail",
+                    position
+                );
+                break;
+            }
+        }
+    }
+
+    let temp_path = wal_path.with_extension("wal.tmp");
+    {
+        let temp_file = File::create(&temp_path)
+            .map_err(|e| StorageError::IoError(format!("Failed to create temp WAL: {}", e)))?;
+        let mut wal_writer = WalWriter::create(BufWriter::new(temp_file))?;
+        for entry in &entries {
+            wal_writer.append(entry)?;
+        }
+        wal_writer.sync()?;
+    }
+    fs::rename(&temp_path, wal_path)
+        .map_err(|e| StorageError::IoError(format!("Failed to replace WAL: {}", e)))?;
+
+    log::info!(
+        "WAL format upgraded from v{} to v{} ({} entries rewritten)",
+        old_version,
+        WAL_VERSION,
+        entries.len()
+    );
+    Ok(true)
 }
 
 /// Truncate WAL in-place by seeking and truncating (more efficient for large files)

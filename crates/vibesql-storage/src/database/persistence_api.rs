@@ -7,7 +7,7 @@
 
 use super::Database;
 use crate::{
-    wal::{PersistenceEngine, WalOp},
+    wal::{PersistenceEngine, WalIndexDefinition, WalIndexOwner, WalOp},
     StorageError,
 };
 
@@ -141,14 +141,88 @@ impl Database {
             table_id: self.table_name_to_id(table_name),
             column_indices,
             is_unique,
+            definition: None,
+        });
+    }
+
+    /// Emit a WAL create index entry carrying the full index definition
+    /// (WAL format v6+, issue #6741), so crash recovery can faithfully rebuild
+    /// the index — key-part expressions, per-part collation/direction, the
+    /// partial-index `WHERE` predicate, the owning schema and the verbatim
+    /// `CREATE INDEX` text for `sqlite_master.sql`.
+    ///
+    /// Called by the B-tree CREATE INDEX executor after the index is created.
+    /// `definition.qualified_table_name` is the schema-qualified table the
+    /// index was built on. Indexes on session-scoped tables (temp schemas,
+    /// ATTACHed database schemas) are never persisted to WAL (#6310).
+    pub fn emit_wal_create_index_with_definition(
+        &self,
+        index_id: u32,
+        index_name: &str,
+        column_indices: Vec<u32>,
+        is_unique: bool,
+        definition: WalIndexDefinition,
+    ) {
+        if self.is_temp_table(&definition.qualified_table_name)
+            || self.is_session_scoped_schema(&definition.schema)
+        {
+            return;
+        }
+        self.emit_wal_op(WalOp::CreateIndex {
+            index_id,
+            index_name: index_name.to_string(),
+            table_id: self.table_name_to_id(&definition.qualified_table_name),
+            column_indices,
+            is_unique,
+            definition: Some(definition),
         });
     }
 
     /// Emit a WAL drop index entry for persistence
     ///
-    /// Called by the DROP INDEX executor before index is dropped.
+    /// Called by the DROP INDEX executor before index is dropped. This thin
+    /// form carries no owning schema, so recovery cannot tell which schema's
+    /// index to drop and only logs it; prefer
+    /// [`Database::emit_wal_drop_index_in_schema`] whenever the owning schema
+    /// is known.
     pub fn emit_wal_drop_index(&self, index_id: u32, index_name: &str) {
-        self.emit_wal_op(WalOp::DropIndex { index_id, index_name: index_name.to_string() });
+        self.emit_wal_op(WalOp::DropIndex {
+            index_id,
+            index_name: index_name.to_string(),
+            owner: None,
+        });
+    }
+
+    /// Emit a WAL drop index entry naming the index's owning `schema` and
+    /// stored `table_name` (WAL format v6+, issue #6741), so crash recovery
+    /// drops exactly this index. Indexes in session-scoped schemas (temp,
+    /// ATTACHed databases) are never persisted to WAL (#6310), so dropping one
+    /// emits nothing — replaying it could otherwise drop a same-named index
+    /// in `main`.
+    pub fn emit_wal_drop_index_in_schema(
+        &self,
+        index_id: u32,
+        index_name: &str,
+        schema: &str,
+        table_name: &str,
+    ) {
+        if self.is_session_scoped_schema(schema) {
+            return;
+        }
+        self.emit_wal_op(WalOp::DropIndex {
+            index_id,
+            index_name: index_name.to_string(),
+            owner: Some(WalIndexOwner {
+                schema: schema.to_string(),
+                table_name: table_name.to_string(),
+            }),
+        });
+    }
+
+    /// Whether `schema` is session-scoped (a temp schema or an ATTACHed
+    /// database schema) and therefore never persisted to WAL (#6310).
+    fn is_session_scoped_schema(&self, schema: &str) -> bool {
+        vibesql_catalog::Catalog::is_temp_schema(schema) || self.catalog.is_attached_schema(schema)
     }
 
     // ============================================================================

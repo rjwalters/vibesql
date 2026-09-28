@@ -39,12 +39,13 @@ use std::{
 
 use crate::{
     persistence::binary::{
+        catalog::convert_ast_columns_to_catalog,
         constraints::{rehydrate_constraints_from_sql_source, ParentColumnLookup},
         read_catalog_v, read_data, read_header,
     },
     wal::{
         checkpoint::{read_checkpoint_data, CheckpointInfo, CheckpointWriter},
-        entry::{Lsn, WalOp},
+        entry::{Lsn, WalIndexDefinition, WalIndexOwner, WalOp},
         reader::{ReadResult, WalReader},
     },
     Database, StorageError,
@@ -912,20 +913,42 @@ impl RecoveryManager {
                 table_id: _,
                 column_indices,
                 is_unique,
-            } => {
-                // Index creation during recovery
-                // For now, just log - full implementation would need table name resolution
-                log::trace!(
-                    "Would create index {} on columns {:?}, unique={}",
-                    index_name,
-                    column_indices,
-                    is_unique
-                );
-                stats.indexes_created += 1;
-            }
-            WalOp::DropIndex { index_id: _, index_name } => {
-                log::trace!("Would drop index {}", index_name);
-            }
+                definition,
+            } => match definition {
+                Some(definition) => {
+                    if replay_create_index(db, &index_name, is_unique, definition)? {
+                        stats.indexes_created += 1;
+                    }
+                }
+                None => {
+                    // Thin op: a v5-or-earlier log entry, or an index kind
+                    // recovery does not rebuild (spatial/vector). The
+                    // `column_indices` payload alone cannot reconstruct the
+                    // index (no table name, expressions, predicate or
+                    // schema), so keep the historical log-only behavior.
+                    log::warn!(
+                        "Skipping CreateIndex {} during recovery: WAL entry carries no index \
+                         definition (pre-v6 log or non-B-tree index); columns={:?}, unique={}",
+                        index_name,
+                        column_indices,
+                        is_unique
+                    );
+                }
+            },
+            WalOp::DropIndex { index_id: _, index_name, owner } => match owner {
+                Some(owner) => replay_drop_index(db, &index_name, &owner),
+                None => {
+                    // Thin op (v5-or-earlier log, or an index dropped without
+                    // catalog metadata): the owning schema is unknown, so a
+                    // name-only drop could remove a same-named index in a
+                    // different schema. Keep the historical log-only behavior.
+                    log::warn!(
+                        "Skipping DropIndex {} during recovery: WAL entry carries no owning \
+                         schema (pre-v6 log)",
+                        index_name
+                    );
+                }
+            },
             WalOp::TxnBegin { .. } | WalOp::TxnCommit { .. } | WalOp::TxnRollback { .. } => {
                 // These are handled by the transaction tracker
             }
@@ -945,6 +968,125 @@ impl RecoveryManager {
             }
         }
         Ok(())
+    }
+}
+
+/// Replay a WAL format v6+ `CreateIndex` carrying a full index definition
+/// (issue #6741), registering the index in both the storage index manager and
+/// the catalog — the same two halves the binary checkpoint load path restores
+/// (`persistence/binary/catalog.rs`) and the live `CREATE INDEX` executor
+/// creates.
+///
+/// Index bodies follow the checkpoint load path's deferred-rebuild contract,
+/// because storage cannot evaluate expressions:
+/// - plain column index: body built here from the table's current rows;
+/// - expression and/or partial (`WHERE`) index: registered with an empty body and marked
+///   pending-rebuild; the planner declines it until the executor's
+///   `rebuild_pending_expression_indexes` (run by every CLI open path after recovery) evaluates the
+///   key expressions / predicate and populates it.
+///
+/// Returns `Ok(true)` when the index was created. An index that already exists
+/// in its owning schema (e.g. already captured by the loaded checkpoint) is
+/// left untouched; a missing table or a storage/catalog rejection is logged and
+/// skipped, mirroring how replay treats an unappliable `CreateTable`.
+fn replay_create_index(
+    db: &mut Database,
+    index_name: &str,
+    unique: bool,
+    definition: WalIndexDefinition,
+) -> Result<bool, StorageError> {
+    let WalIndexDefinition {
+        table_name,
+        qualified_table_name,
+        schema,
+        columns,
+        where_clause,
+        sql_source,
+    } = definition;
+
+    if db.get_table(&qualified_table_name).is_none() {
+        log::warn!(
+            "Skipping CreateIndex {} during recovery: table {} not found",
+            index_name,
+            qualified_table_name
+        );
+        return Ok(false);
+    }
+
+    if db.catalog.index_name_exists_in_schema(&schema, index_name) {
+        log::debug!(
+            "Skipping CreateIndex {} during recovery: index already exists in schema {}",
+            index_name,
+            schema
+        );
+        return Ok(false);
+    }
+
+    // Storage-side index (manages the index body; never touches the catalog).
+    let storage_result = match &where_clause {
+        Some(predicate) => db.create_index_partial_deferred_for_table(
+            index_name.to_string(),
+            table_name.clone(),
+            &qualified_table_name,
+            unique,
+            columns.clone(),
+            Box::new(predicate.clone()),
+        ),
+        // Expression key parts are deferred inside `create_index` itself.
+        None => db.create_index_for_table(
+            index_name.to_string(),
+            table_name.clone(),
+            &qualified_table_name,
+            unique,
+            columns.clone(),
+        ),
+    };
+    if let Err(e) = storage_result {
+        log::warn!("Failed to create index {} during recovery: {}", index_name, e);
+        return Ok(false);
+    }
+
+    // Catalog-side metadata: schema tag, partial predicate, and the verbatim
+    // CREATE INDEX text that `sqlite_master.sql` renders (issue #6734).
+    let catalog_meta = vibesql_catalog::IndexMetadata::new(
+        index_name.to_string(),
+        table_name,
+        vibesql_catalog::IndexType::BTree,
+        convert_ast_columns_to_catalog(&columns),
+        unique,
+    )
+    .with_schema(schema.clone())
+    .with_where_clause(where_clause)
+    .with_sql_source(sql_source);
+    if let Err(e) = db.catalog.add_index(catalog_meta) {
+        // Keep the two halves consistent: never leave a storage-only index.
+        let _ = db.drop_index(&format!("{}.{}", schema, index_name));
+        log::warn!(
+            "Failed to add catalog metadata for index {} during recovery: {}",
+            index_name,
+            e
+        );
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+/// Replay a WAL format v6+ `DropIndex` naming its owning schema and table
+/// (issue #6741): drop exactly that index from the catalog and the storage
+/// index manager, mirroring `DropIndexExecutor`. An index that is already
+/// absent (e.g. never captured by the loaded checkpoint) is a no-op.
+fn replay_drop_index(db: &mut Database, index_name: &str, owner: &WalIndexOwner) {
+    let qualified_table = format!("{}.{}", owner.schema, owner.table_name);
+    let qualified_index = format!("{}.{}", owner.schema, index_name);
+
+    if let Err(e) = db.catalog.drop_index(&qualified_table, index_name) {
+        log::debug!("DropIndex {} during recovery: no catalog entry ({})", index_name, e);
+    }
+    if db.index_exists(&qualified_index) {
+        if let Err(e) = db.drop_index(&qualified_index) {
+            log::warn!("Failed to drop index {} during recovery: {}", index_name, e);
+        }
     }
 }
 
@@ -2834,6 +2976,335 @@ mod tests {
         assert!(
             manager.recover().is_err(),
             "an unparseable sql_source must fail recovery loudly, never load unenforced"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // CREATE INDEX / DROP INDEX replay (issue #6741)
+    // ------------------------------------------------------------------
+
+    fn parse_expr(sql: &str) -> vibesql_ast::Expression {
+        vibesql_parser::Parser::parse_expression_sql(sql).unwrap()
+    }
+
+    fn people_rows_ops() -> Vec<WalOp> {
+        let schema_data = crate::database::serialize_table_schema(&simple_schema("people"));
+        let mut ops =
+            vec![WalOp::CreateTable { table_id: 0, table_name: "main.people".into(), schema_data }];
+        for (i, name) in ["Ann", "bob", "Cy"].iter().enumerate() {
+            ops.push(WalOp::Insert {
+                table_id: 0,
+                table_name: "main.people".into(),
+                row_id: i as u64,
+                values: vec![
+                    SqlValue::Integer(i as i64 + 1),
+                    SqlValue::Varchar(arcstr::ArcStr::from(*name)),
+                ],
+                rowid: Some(i as u64 + 1),
+            });
+        }
+        ops
+    }
+
+    fn index_def(
+        columns: Vec<vibesql_ast::IndexColumn>,
+        where_clause: Option<vibesql_ast::Expression>,
+        sql: &str,
+    ) -> WalIndexDefinition {
+        WalIndexDefinition {
+            table_name: "people".to_string(),
+            qualified_table_name: "main.people".to_string(),
+            schema: "main".to_string(),
+            columns,
+            where_clause,
+            sql_source: Some(sql.to_string()),
+        }
+    }
+
+    fn create_index_op(name: &str, unique: bool, def: WalIndexDefinition) -> WalOp {
+        WalOp::CreateIndex {
+            index_id: 0,
+            index_name: name.to_string(),
+            table_id: 0,
+            column_indices: vec![],
+            is_unique: unique,
+            definition: Some(def),
+        }
+    }
+
+    fn write_current_wal(path: &std::path::Path, ops: Vec<WalOp>) {
+        use crate::wal::{entry::WalEntry, writer::WalWriter};
+        let file = std::fs::File::create(path).unwrap();
+        let mut writer = WalWriter::create(file).unwrap();
+        for (i, op) in ops.into_iter().enumerate() {
+            writer.append(&WalEntry::new(i as u64 + 1, 0, op)).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+
+    /// A v6 `CreateIndex` carrying its full definition is actually replayed:
+    /// plain, expression, and partial indexes all come back in both the
+    /// catalog (schema, collation/direction, WHERE predicate, verbatim
+    /// `sql_source`) and the storage index manager. Plain-column bodies are
+    /// built immediately; expression/partial bodies are deferred
+    /// (pending-rebuild) exactly like the checkpoint load path.
+    #[test]
+    fn test_create_index_replay_restores_full_definition() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let plain_sql = "CREATE INDEX people_name ON people(name COLLATE NOCASE DESC)";
+        let expr_sql = "CREATE INDEX people_lower ON people( lower(name) )";
+        let part_sql = "CREATE UNIQUE INDEX people_part ON people(id) WHERE id > 1";
+
+        let mut ops = people_rows_ops();
+        ops.push(create_index_op(
+            "people_name",
+            false,
+            index_def(
+                vec![vibesql_ast::IndexColumn::Column {
+                    column_name: "name".to_string(),
+                    direction: vibesql_ast::OrderDirection::Desc,
+                    prefix_length: None,
+                    collation: Some("NOCASE".to_string()),
+                    is_quoted: false,
+                }],
+                None,
+                plain_sql,
+            ),
+        ));
+        ops.push(create_index_op(
+            "people_lower",
+            false,
+            index_def(
+                vec![vibesql_ast::IndexColumn::Expression {
+                    expr: Box::new(parse_expr("lower(name)")),
+                    direction: vibesql_ast::OrderDirection::Asc,
+                }],
+                None,
+                expr_sql,
+            ),
+        ));
+        ops.push(create_index_op(
+            "people_part",
+            true,
+            index_def(
+                vec![vibesql_ast::IndexColumn::new_column(
+                    "id".to_string(),
+                    vibesql_ast::OrderDirection::Asc,
+                )],
+                Some(parse_expr("id > 1")),
+                part_sql,
+            ),
+        ));
+        write_current_wal(&wal_path, ops);
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.indexes_created, 3, "all three CreateIndex ops must be applied");
+
+        // Catalog half: verbatim text, owning schema, key-part details.
+        let plain = db.catalog.find_index_by_name("people_name").expect("plain index in catalog");
+        assert_eq!(plain.sql_source.as_deref(), Some(plain_sql));
+        assert_eq!(plain.schema(), "main");
+        let expr = db.catalog.find_index_by_name("people_lower").expect("expr index in catalog");
+        assert_eq!(expr.sql_source.as_deref(), Some(expr_sql));
+        assert!(expr.columns[0].is_expression());
+        let part = db.catalog.find_index_by_name("people_part").expect("partial index in catalog");
+        assert_eq!(part.sql_source.as_deref(), Some(part_sql));
+        assert!(part.where_clause.is_some(), "partial predicate must be restored");
+        assert!(part.is_unique);
+
+        // Storage half.
+        for name in ["people_name", "people_lower", "people_part"] {
+            assert!(db.index_exists(name), "{name} must exist in the storage index manager");
+        }
+        let plain_meta = db.get_index("people_name").unwrap();
+        match &plain_meta.columns[0] {
+            vibesql_ast::IndexColumn::Column { collation, direction, .. } => {
+                assert_eq!(collation.as_deref(), Some("NOCASE"));
+                assert_eq!(*direction, vibesql_ast::OrderDirection::Desc);
+            }
+            other => panic!("expected a column key part, got {other:?}"),
+        }
+        assert!(!db.is_index_pending_rebuild("people_name"), "plain index body is built");
+        assert!(db.is_index_pending_rebuild("people_lower"), "expression body is deferred");
+        assert!(db.is_index_pending_rebuild("people_part"), "partial body is deferred");
+        assert!(
+            db.get_index("people_part").unwrap().where_clause.is_some(),
+            "storage-side partial predicate must be set so DML maintenance treats it as partial"
+        );
+    }
+
+    /// A v6 `DropIndex` naming its owner drops the index from both halves;
+    /// covers an index created and dropped within the same unreplayed WAL
+    /// segment (net result: absent).
+    #[test]
+    fn test_drop_index_replay_removes_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let mut ops = people_rows_ops();
+        ops.push(create_index_op(
+            "people_id",
+            false,
+            index_def(
+                vec![vibesql_ast::IndexColumn::new_column(
+                    "id".to_string(),
+                    vibesql_ast::OrderDirection::Asc,
+                )],
+                None,
+                "CREATE INDEX people_id ON people(id)",
+            ),
+        ));
+        ops.push(WalOp::DropIndex {
+            index_id: 0,
+            index_name: "people_id".to_string(),
+            owner: Some(WalIndexOwner {
+                schema: "main".to_string(),
+                table_name: "people".to_string(),
+            }),
+        });
+        write_current_wal(&wal_path, ops);
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+        assert!(db.catalog.find_index_by_name("people_id").is_none(), "catalog entry dropped");
+        assert!(!db.index_exists("people_id"), "storage index dropped");
+        assert_eq!(db.get_table("main.people").unwrap().row_count(), 3);
+    }
+
+    /// Build the raw bytes of one WAL entry record (`[len][crc][data]`).
+    fn raw_wal_record(lsn: u64, op_bytes: &[u8]) -> Vec<u8> {
+        use crate::persistence::binary::io::{write_u32, write_u64};
+        let mut data = Vec::new();
+        write_u64(&mut data, lsn).unwrap();
+        write_u64(&mut data, 0).unwrap();
+        data.extend_from_slice(op_bytes);
+        let mut record = Vec::new();
+        write_u32(&mut record, data.len() as u32).unwrap();
+        write_u32(&mut record, crate::wal::writer::crc32(&data)).unwrap();
+        record.extend_from_slice(&data);
+        record
+    }
+
+    /// Hand-build a WAL file exactly as a format-v5 binary wrote it: a v5
+    /// header, a CreateTable + three Inserts (layout unchanged since v3), and
+    /// the thin v5 `CreateIndex` / `DropIndex` layouts (no v6 trailers).
+    fn write_v5_wal(path: &std::path::Path) {
+        use crate::persistence::binary::io::{write_bool, write_string, write_u32, write_u64};
+
+        let mut file = Vec::new();
+        file.extend_from_slice(crate::wal::format::WAL_MAGIC);
+        write_u32(&mut file, 5).unwrap();
+        write_u64(&mut file, 0).unwrap();
+        file.extend_from_slice(&[0u8; 16]);
+
+        let mut lsn = 0;
+        for op in people_rows_ops() {
+            lsn += 1;
+            let mut op_bytes = Vec::new();
+            op.serialize(&mut op_bytes).unwrap();
+            file.extend(raw_wal_record(lsn, &op_bytes));
+        }
+
+        // v5 CreateIndex: tag, index_id, name, table_id, columns, is_unique.
+        let mut create = vec![crate::wal::entry::WalOpTag::CreateIndex as u8];
+        write_u32(&mut create, 1).unwrap();
+        write_string(&mut create, "people_v5").unwrap();
+        write_u32(&mut create, 0).unwrap();
+        write_u32(&mut create, 1).unwrap();
+        write_u32(&mut create, 0).unwrap();
+        write_bool(&mut create, false).unwrap();
+        lsn += 1;
+        file.extend(raw_wal_record(lsn, &create));
+
+        // v5 DropIndex: tag, index_id, name.
+        let mut drop = vec![crate::wal::entry::WalOpTag::DropIndex as u8];
+        write_u32(&mut drop, 1).unwrap();
+        write_string(&mut drop, "people_v5").unwrap();
+        lsn += 1;
+        file.extend(raw_wal_record(lsn, &drop));
+
+        std::fs::write(path, file).unwrap();
+    }
+
+    /// Backward compatibility (issue #6741): a WAL written at format v5 still
+    /// recovers after the v6 bump. Its thin CreateIndex/DropIndex entries
+    /// decode without the v6 trailers and keep the historical log-only
+    /// behavior (neither fails the parse nor misaligns the entries after
+    /// them), and the table + rows replay exactly as before.
+    #[test]
+    fn test_v5_wal_with_thin_index_ops_still_recovers() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+        write_v5_wal(&wal_path);
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.tables_created, 1);
+        assert_eq!(stats.inserts_applied, 3);
+        assert_eq!(stats.last_lsn, 6, "every v5 entry must decode");
+        assert_eq!(stats.indexes_created, 0, "thin v5 CreateIndex stays log-only");
+        assert!(!db.index_exists("people_v5"));
+        assert_eq!(db.get_table("main.people").unwrap().row_count(), 3);
+    }
+
+    /// Re-opening a pre-v6 WAL for appending upgrades it in place to the
+    /// current format (issue #6741): otherwise a v6 `CreateIndex` appended
+    /// under the old header would be decoded with the v5 layout and silently
+    /// lose its index definition. Every previously logged entry survives the
+    /// rewrite, and a v6 CreateIndex appended afterwards replays in full.
+    #[test]
+    fn test_reopening_v5_wal_upgrades_format_before_appending() {
+        use crate::wal::{
+            engine::{PersistenceConfig, PersistenceEngine},
+            reader::WalReader,
+        };
+
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+        write_v5_wal(&wal_path);
+
+        {
+            let engine =
+                PersistenceEngine::open_with_start_lsn(&wal_path, PersistenceConfig::default(), 7)
+                    .unwrap();
+            engine
+                .send(create_index_op(
+                    "people_after",
+                    false,
+                    index_def(
+                        vec![vibesql_ast::IndexColumn::new_column(
+                            "name".to_string(),
+                            vibesql_ast::OrderDirection::Asc,
+                        )],
+                        None,
+                        "CREATE INDEX people_after ON people(name)",
+                    ),
+                ))
+                .unwrap();
+            engine.sync().unwrap();
+        }
+
+        let file = std::fs::File::open(&wal_path).unwrap();
+        let mut reader = WalReader::open(std::io::BufReader::new(file)).unwrap();
+        assert_eq!(reader.header().version, crate::wal::format::WAL_VERSION);
+        let entries = reader.read_all().unwrap();
+        assert_eq!(entries.len(), 7, "all six v5 entries survive the upgrade, plus the new one");
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.inserts_applied, 3);
+        assert_eq!(stats.indexes_created, 1);
+        assert!(db.index_exists("people_after"));
+        assert_eq!(
+            db.catalog.find_index_by_name("people_after").unwrap().sql_source.as_deref(),
+            Some("CREATE INDEX people_after ON people(name)")
         );
     }
 }

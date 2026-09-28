@@ -82,7 +82,16 @@ impl IndexManager {
         // reopened database keeps its expression indexes functional. Keeping the
         // metadata also means the catalog and ALTER/DROP-column validations
         // still see the index. See issue #5784.
-        if columns.iter().any(|c| c.is_expression()) {
+        //
+        // A partial index (`where_clause` present) registered WITHOUT the
+        // executor-evaluated `included_row_indices` takes the same deferred
+        // path: storage cannot evaluate the predicate, so it cannot know which
+        // rows belong in the body. This is how WAL crash recovery replays a
+        // partial `CREATE INDEX` (issue #6741, via
+        // `Database::create_index_partial_deferred_for_table`); the executor's
+        // rebuild evaluates the predicate and populates the body.
+        let deferred_partial = where_clause.is_some() && included_row_indices.is_none();
+        if deferred_partial || columns.iter().any(|c| c.is_expression()) {
             let metadata = IndexMetadata {
                 index_name: index_name.clone(),
                 table_name: table_name.clone(),
