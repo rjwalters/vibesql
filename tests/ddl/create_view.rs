@@ -9,18 +9,23 @@ use vibesql_storage::Database;
 fn test_create_view_simple() {
     let mut db = Database::new();
 
-    // Create view - note: this will derive column names even though table doesn't exist
-    // In practice, views require the table to exist at creation time
+    // SQLite never resolves a view's body at CREATE VIEW time
+    // (sqlite3CreateView, build.c), so this succeeds even though `users`
+    // doesn't exist yet; the missing table is only reported when the view
+    // is queried or on the next ALTER-time schema re-parse.
     let sql = "CREATE VIEW active_users AS SELECT * FROM users WHERE active = true";
     let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
 
     match stmt {
         Statement::CreateView(view_stmt) => {
-            // This will fail because table doesn't exist, but that's expected
-            let result = execute_create_view(&view_stmt, &mut db);
+            execute_create_view(&view_stmt, &mut db)
+                .expect("CREATE VIEW over a non-existent table should succeed");
 
-            // View creation should fail when table doesn't exist
-            assert!(result.is_err(), "Creating view from non-existent table should fail");
+            let view = db.catalog.get_view("active_users").expect("View should exist");
+            assert!(
+                view.columns.is_none(),
+                "No columns should be derived when the underlying table doesn't exist"
+            );
         }
         _ => panic!("Expected CreateView statement"),
     }
@@ -63,12 +68,19 @@ fn test_create_view_with_check_option() {
 
     match stmt {
         Statement::CreateView(view_stmt) => {
-            // This will fail because table doesn't exist
-            let result = execute_create_view(&view_stmt, &mut db);
-            assert!(result.is_err(), "Creating view from non-existent table should fail");
-
             // Verify the WITH CHECK OPTION flag is properly parsed
             assert!(view_stmt.with_check_option, "with_check_option should be true");
+
+            // Succeeds even though `users` doesn't exist yet, same as
+            // test_create_view_simple above.
+            execute_create_view(&view_stmt, &mut db)
+                .expect("CREATE VIEW over a non-existent table should succeed");
+
+            let view = db.catalog.get_view("active_users").expect("View should exist");
+            assert!(
+                view.columns.is_none(),
+                "No columns should be derived when the underlying table doesn't exist"
+            );
         }
         _ => panic!("Expected CreateView statement"),
     }
