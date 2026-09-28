@@ -264,6 +264,41 @@ impl Database {
         )
     }
 
+    /// Register a partial index (`CREATE INDEX ... WHERE predicate`) whose body
+    /// cannot be built here because storage cannot evaluate the predicate.
+    ///
+    /// Used by crash recovery (WAL replay of a `CreateIndex`, issue #6741),
+    /// which has no expression evaluator. The index metadata (including the
+    /// predicate) is registered with an **empty body** and marked
+    /// pending-rebuild — the same deferred-rebuild contract snapshot-reloaded
+    /// expression indexes use (issue #5784): the planner declines a
+    /// pending-rebuild index (falling back to a table scan), and the
+    /// executor's `rebuild_pending_expression_indexes`, which every CLI open
+    /// path runs after recovery, evaluates the predicate (and any key
+    /// expressions) over the live rows and populates the body.
+    pub fn create_index_partial_deferred_for_table(
+        &mut self,
+        index_name: String,
+        table_name: String,
+        table_lookup_name: &str,
+        unique: bool,
+        columns: Vec<IndexColumn>,
+        where_clause: Box<vibesql_ast::Expression>,
+    ) -> Result<(), StorageError> {
+        self.snapshot_operations_for_mutation();
+        self.operations.create_index(
+            &self.catalog,
+            &self.tables,
+            index_name,
+            table_name,
+            table_lookup_name,
+            unique,
+            columns,
+            Some(where_clause),
+            None,
+        )
+    }
+
     /// Create an index with pre-computed keys (for expression indexes)
     ///
     /// This method is used when the caller has already evaluated the expressions

@@ -691,3 +691,198 @@ fn test_replace_into_durable_across_separate_process_reopen() {
         "the surviving row must be the REPLACEd one (bb=33); got:\n{val}"
     );
 }
+
+// ----------------------------------------------------------------------------
+// CREATE INDEX / DROP INDEX crash replay (issue #6741)
+// ----------------------------------------------------------------------------
+
+/// Make the checkpoint directory read-only so every checkpoint attempt fails
+/// while the WAL keeps absorbing the ops — byte-for-byte the on-disk state a
+/// crash between WAL append and checkpoint leaves behind (same injection as
+/// `test_constraints_survive_crash_replay_of_create_table`). Returns the
+/// original permissions to restore, or `None` when running as root (root
+/// bypasses permission checks, so the failure cannot be injected).
+#[cfg(unix)]
+fn inject_checkpoint_failure(checkpoint_dir: &Path) -> Option<fs::Permissions> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let orig_perms = fs::metadata(checkpoint_dir).unwrap().permissions();
+    fs::set_permissions(checkpoint_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::File::create(checkpoint_dir.join(".probe")).is_ok() {
+        let _ = fs::remove_file(checkpoint_dir.join(".probe"));
+        fs::set_permissions(checkpoint_dir, orig_perms).unwrap();
+        eprintln!("skipping: running as root, cannot inject a permission failure");
+        return None;
+    }
+    Some(orig_perms)
+}
+
+/// Run a one-shot `-c` query in raw output mode (clean exit) and return stdout.
+#[cfg(unix)]
+fn query_raw(binary: &str, db: &Path, home: &Path, sql: &str) -> String {
+    let out = Command::new(binary)
+        .arg(db)
+        .args(["--format", "raw", "-c", sql])
+        .env("HOME", home)
+        .output()
+        .expect("failed to run vibesql");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// End-to-end regression for issue #6741: an index created AFTER the last
+/// checkpoint and only logged to the WAL must be recreated by crash
+/// recovery — with its exact `sqlite_master.sql` text — instead of being
+/// silently lost. Covers a plain index with per-key-part collation and
+/// direction, an expression index, a partial UNIQUE index, an index on a
+/// table that was itself created within the same unreplayed WAL segment, and
+/// an index created and dropped within that segment (net: absent).
+#[cfg(unix)]
+#[test]
+fn test_create_index_survives_crash_replay() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("index_crash.vbsql");
+    let bin = vibesql_binary();
+    let (wal_path, checkpoint_dir) = wal_paths(&db_path);
+
+    // --- Session 1 (healthy): table + rows, checkpointed.
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE t(a INTEGER, b TEXT, c INTEGER);\n\
+         INSERT INTO t VALUES(1, 'x', 10);\n\
+         INSERT INTO t VALUES(2, 'Y', 20);\n\
+         INSERT INTO t VALUES(3, 'z', 30);\n",
+    );
+    assert!(checkpoint_dir.is_dir(), "checkpoint dir should exist after session 1");
+
+    let Some(orig_perms) = inject_checkpoint_failure(&checkpoint_dir) else { return };
+
+    // --- Session 2: every index DDL below lands ONLY in the WAL.
+    let plain_sql = "CREATE INDEX t_b ON t(b COLLATE NOCASE DESC)";
+    let expr_sql = "CREATE INDEX t_expr ON t(lower(b), a + c)";
+    let partial_sql = "CREATE UNIQUE INDEX t_part ON t(c) WHERE a > 1";
+    let fresh_table_sql = "CREATE INDEX u_x ON u(x)";
+    let output = run_script_output(
+        bin,
+        &db_path,
+        home.path(),
+        &format!(
+            "{plain_sql};\n{expr_sql};\n{partial_sql};\n\
+             CREATE TABLE u(x INTEGER);\nINSERT INTO u VALUES(5);\n{fresh_table_sql};\n\
+             CREATE INDEX t_gone ON t(a);\nDROP INDEX t_gone;\n"
+        ),
+    );
+    assert!(
+        !output.status.success(),
+        "session 2 must exit non-zero on checkpoint failure (WAL-only state)"
+    );
+    assert!(wal_path.exists(), "the WAL must hold the un-checkpointed CreateIndex ops");
+
+    fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+
+    // --- Reopen: recovery replays the CreateIndex/DropIndex ops.
+    let out = query_raw(
+        bin,
+        &db_path,
+        home.path(),
+        "SELECT name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name",
+    );
+    for sql in [plain_sql, expr_sql, partial_sql, fresh_table_sql] {
+        assert!(
+            out.contains(sql),
+            "sqlite_master.sql must hold the verbatim CREATE INDEX text `{sql}` after crash \
+             replay; got:\n{out}"
+        );
+    }
+    assert!(
+        !out.contains("t_gone"),
+        "an index created then dropped in the same WAL segment must stay dropped; got:\n{out}"
+    );
+
+    // The recovered indexes are functional, not just catalog entries: the
+    // expression index answers lookups, and the partial UNIQUE index enforces
+    // uniqueness only over rows matching its predicate.
+    let out = query_raw(bin, &db_path, home.path(), "SELECT a FROM t WHERE lower(b) = 'y'");
+    assert!(out.contains('2'), "expression-index lookup must find a=2; got:\n{out}");
+
+    let dup = run_script_output(bin, &db_path, home.path(), "INSERT INTO t VALUES(4, 'w', 20);\n");
+    assert!(
+        !dup.status.success(),
+        "partial UNIQUE index must reject c=20 for a row matching `a > 1`; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&dup.stdout),
+        String::from_utf8_lossy(&dup.stderr)
+    );
+    let ok = run_script_output(bin, &db_path, home.path(), "INSERT INTO t VALUES(0, 'q', 20);\n");
+    assert!(
+        ok.status.success(),
+        "a row outside the partial predicate must not conflict; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&ok.stdout),
+        String::from_utf8_lossy(&ok.stderr)
+    );
+
+    // The replayed indexes are captured by the next checkpoint and survive a
+    // further clean reopen.
+    let out = query_raw(
+        bin,
+        &db_path,
+        home.path(),
+        "SELECT sql FROM sqlite_master WHERE type = 'index' ORDER BY name",
+    );
+    for sql in [plain_sql, expr_sql, partial_sql, fresh_table_sql] {
+        assert!(
+            out.contains(sql),
+            "`{sql}` must survive the post-recovery checkpoint; got:\n{out}"
+        );
+    }
+}
+
+/// End-to-end regression for issue #6741: an index dropped AFTER the last
+/// checkpoint and only logged to the WAL must stay dropped after crash
+/// recovery instead of being silently resurrected from the checkpoint.
+#[cfg(unix)]
+#[test]
+fn test_drop_index_survives_crash_replay() {
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join("drop_index_crash.vbsql");
+    let bin = vibesql_binary();
+    let (wal_path, checkpoint_dir) = wal_paths(&db_path);
+
+    // --- Session 1 (healthy): the index is captured by a checkpoint.
+    run_script(
+        bin,
+        &db_path,
+        home.path(),
+        "CREATE TABLE t(a INTEGER, b TEXT);\nINSERT INTO t VALUES(1, 'x');\n\
+         CREATE INDEX t_a ON t(a);\n",
+    );
+    let out = query_raw(bin, &db_path, home.path(), "SELECT name FROM sqlite_master");
+    assert!(out.contains("t_a"), "precondition: index checkpointed; got:\n{out}");
+
+    let Some(orig_perms) = inject_checkpoint_failure(&checkpoint_dir) else { return };
+
+    // --- Session 2: the DROP INDEX lands ONLY in the WAL.
+    let output = run_script_output(bin, &db_path, home.path(), "DROP INDEX t_a;\n");
+    assert!(
+        !output.status.success(),
+        "session 2 must exit non-zero on checkpoint failure (WAL-only state)"
+    );
+    assert!(wal_path.exists(), "the WAL must hold the un-checkpointed DropIndex op");
+
+    fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+
+    // --- Reopen: the index must be gone from sqlite_master ...
+    let out = query_raw(bin, &db_path, home.path(), "SELECT name FROM sqlite_master");
+    assert!(
+        !out.contains("t_a"),
+        "a dropped index must not be resurrected by crash recovery; got:\n{out}"
+    );
+    // ... and from the storage index manager too: re-creating it succeeds.
+    let recreate = run_script_output(bin, &db_path, home.path(), "CREATE INDEX t_a ON t(a);\n");
+    assert!(
+        recreate.status.success(),
+        "re-creating the dropped index must succeed; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&recreate.stdout),
+        String::from_utf8_lossy(&recreate.stderr)
+    );
+}

@@ -347,6 +347,16 @@ mod native {
                 .map(|m| m.len() >= WAL_HEADER_SIZE as u64)
                 .unwrap_or(false);
 
+            // An existing WAL written by an older binary must be rewritten at
+            // the current format version before we append to it: the reader
+            // decodes every entry with the file header's version, so a
+            // current-layout entry appended under an old header would lose any
+            // version-gated trailer (e.g. a v6 `CreateIndex` definition, issue
+            // #6741). Atomic (temp + rename); a no-op for a current-version WAL.
+            if has_header {
+                crate::wal::truncate::upgrade_wal_to_current_version(path.as_ref())?;
+            }
+
             let file = OpenOptions::new()
                 .create(true)
                 .read(true)

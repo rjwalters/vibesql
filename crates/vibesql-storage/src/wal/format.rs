@@ -54,7 +54,14 @@ pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 ///   commit, had its rolled-back rows resurrected by recovery for the same reason v4 fixed for
 ///   named `ROLLBACK TO SAVEPOINT`. Older v1-v4 logs contain no such markers and are still readable
 ///   (replay behaves exactly as before: nothing to reconcile).
-pub const WAL_VERSION: u32 = 5;
+/// - v6: `CreateIndex` ops carry an optional full index definition trailer (present-flag + owning
+///   schema, table identity, key parts incl. expressions / collation / direction, the partial-index
+///   `WHERE` predicate, and the verbatim `CREATE INDEX` text), and `DropIndex` ops carry an
+///   optional owning schema + table trailer, so crash recovery actually recreates / drops the index
+///   instead of merely logging it (issue #6741). Older v1-v5 logs are still readable: their
+///   `CreateIndex`/`DropIndex` entries decode without the trailer and keep the historical log-only
+///   replay behavior.
+pub const WAL_VERSION: u32 = 6;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;
