@@ -1027,7 +1027,110 @@ fn find_trigger_resolution_error(
         return Some(format!("no such column: {}", column));
     }
 
+    // 4) A `JOIN ... USING (c)` naming a column that is not present in both sides of the join
+    //    (altertab3.test 24.2).
+    if let Some(column) = find_unjoinable_using_column_in_trigger(trigger, &statements, sim) {
+        return Some(format!(
+            "cannot join using column {} - column not present in both tables",
+            column
+        ));
+    }
+
     None
+}
+
+// ============================================================================
+// JOIN ... USING column resolution in trigger bodies
+// ============================================================================
+
+/// Visitor collecting (owned copies of) every subquery nested inside an
+/// expression, at any depth.
+#[derive(Default)]
+struct ExprSubqueryCollector {
+    selects: Vec<SelectStmt>,
+}
+
+impl ExpressionVisitor for ExprSubqueryCollector {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        match expr {
+            Expression::ScalarSubquery(subquery)
+            | Expression::In { subquery, .. }
+            | Expression::Exists { subquery, .. }
+            | Expression::QuantifiedComparison { subquery, .. } => {
+                self.selects.push((**subquery).clone());
+            }
+            _ => {}
+        }
+        VisitResult::Continue
+    }
+}
+
+impl StatementVisitor for ExprSubqueryCollector {}
+
+/// First `USING (c)` column, in a trigger's WHEN clause or body, that is not
+/// present on both sides of its join. SQLite's schema re-parse reports it as
+/// `cannot join using column <c> - column not present in both tables`. Sides
+/// whose columns cannot be determined (derived tables, table functions,
+/// unknown relations) are skipped, so this never blocks an ALTER SQLite allows.
+fn find_unjoinable_using_column_in_trigger(
+    trigger: &TriggerDefinition,
+    statements: &[Statement],
+    sim: &DropSimulation,
+) -> Option<String> {
+    let mut collector = ExprSubqueryCollector::default();
+    if let Some(when) = &trigger.when_condition {
+        walk_expression(&mut collector, when);
+    }
+    for stmt in statements {
+        walk_statement(&mut collector, stmt);
+    }
+    let mut selects: Vec<&SelectStmt> = collector.selects.iter().collect();
+    for stmt in statements {
+        match stmt {
+            Statement::Select(select) => selects.push(select),
+            Statement::Insert(insert) => {
+                if let InsertSource::Select(select) = &insert.source {
+                    selects.push(select);
+                }
+            }
+            _ => {}
+        }
+    }
+    selects.into_iter().find_map(|select| unjoinable_using_in_select(select, sim))
+}
+
+fn unjoinable_using_in_select(select: &SelectStmt, sim: &DropSimulation) -> Option<String> {
+    if let Some(from) = &select.from {
+        if let Some(column) = unjoinable_using_in_from(from, sim) {
+            return Some(column);
+        }
+    }
+    select.set_operation.as_ref().and_then(|op| unjoinable_using_in_select(&op.right, sim))
+}
+
+fn unjoinable_using_in_from(from: &FromClause, sim: &DropSimulation) -> Option<String> {
+    match from {
+        FromClause::Join { left, right, using_columns, natural, .. } => {
+            if let Some(column) =
+                unjoinable_using_in_from(left, sim).or_else(|| unjoinable_using_in_from(right, sim))
+            {
+                return Some(column);
+            }
+            let using = using_columns.as_ref().filter(|_| !*natural)?;
+            let (mut left_sources, mut right_sources) = (Vec::new(), Vec::new());
+            if !collect_from_sources(left, sim, &mut left_sources)
+                || !collect_from_sources(right, sim, &mut right_sources)
+            {
+                return None;
+            }
+            let has = |sources: &[FromSource], col: &str| {
+                sources.iter().any(|s| s.columns.iter().any(|c| c.eq_ignore_ascii_case(col)))
+            };
+            using.iter().find(|c| !has(&left_sources, c) || !has(&right_sources, c)).cloned()
+        }
+        FromClause::Subquery { query, .. } => unjoinable_using_in_select(query, sim),
+        _ => None,
+    }
 }
 
 // ============================================================================
