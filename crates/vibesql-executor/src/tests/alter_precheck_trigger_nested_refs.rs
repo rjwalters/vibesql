@@ -164,3 +164,57 @@ fn valid_fromless_selects_do_not_block_rename() {
         "ALTER TABLE t1 RENAME TO t1x",
     );
 }
+
+// ---------------------------------------------------------------------------
+// JOIN ... USING columns absent from one side
+// ---------------------------------------------------------------------------
+
+#[test]
+fn using_column_missing_from_both_sides_in_when_subquery_blocks_rename() {
+    // altertab3.test 24.1/24.2
+    let err = rename_err(
+        &[
+            "CREATE TABLE v0(v1)",
+            "CREATE TABLE v2(v3 INTEGER)",
+            "CREATE TRIGGER x AFTER INSERT ON v2 WHEN \
+             ((SELECT v1 AS p FROM v2 JOIN v0 USING (VALUE)) AND 0) \
+             BEGIN DELETE FROM v2; END",
+        ],
+        "ALTER TABLE v0 RENAME TO x",
+    );
+    assert_eq!(
+        err,
+        "error in trigger x: cannot join using column VALUE - column not present in both tables"
+    );
+}
+
+#[test]
+fn using_column_missing_from_one_side_in_body_blocks_rename() {
+    let err = rename_err(
+        &[
+            "CREATE TABLE p(id, only_p)",
+            "CREATE TABLE q(id)",
+            "CREATE TRIGGER tr AFTER INSERT ON p BEGIN \
+             SELECT 1 FROM p JOIN q USING (only_p); END",
+        ],
+        "ALTER TABLE q RENAME TO q2",
+    );
+    assert_eq!(
+        err,
+        "error in trigger tr: cannot join using column only_p - column not present in both tables"
+    );
+}
+
+#[test]
+fn valid_using_join_in_trigger_does_not_block_rename() {
+    rename_ok(
+        &[
+            "CREATE TABLE p(id, a)",
+            "CREATE TABLE q(id, b)",
+            "CREATE TABLE r(id, c)",
+            "CREATE TRIGGER tr AFTER INSERT ON p WHEN (SELECT 1 FROM p JOIN q USING (ID)) BEGIN \
+             SELECT 1 FROM p JOIN q USING (id) JOIN r USING (id); END",
+        ],
+        "ALTER TABLE r RENAME TO r2",
+    );
+}
