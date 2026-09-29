@@ -134,6 +134,14 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                     // surfaces the resolution error then, and ALTER-time schema
                     // re-parses report it as `error in view <name>: ...`.
                     Err(ExecutorError::ColumnNotFound { .. }) => None,
+                    // Likewise for a FROM-clause table that does not (yet)
+                    // exist: `sqlite3CreateView` (build.c) never resolves the
+                    // view body, so `CREATE VIEW v1 AS SELECT * FROM t2` with
+                    // no `t2` succeeds. The error surfaces when the view is
+                    // queried (`no such table: main.t2`) and on the next
+                    // ALTER-time schema re-parse (`error in view v1: no such
+                    // table: main.t2` — altertab.test 9.0/9.1, 24.2.x).
+                    Err(ExecutorError::TableNotFound(_)) => None,
                     Err(other) => return Err(other),
                 }
             }
