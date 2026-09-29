@@ -88,6 +88,20 @@ impl Parser {
         let mut table_pk_autoincrement_column: Option<String> = None;
 
         loop {
+            // A body-less `CONSTRAINT <name>` list entry (e.g. altertab3-19.0's
+            // `CREATE TABLE a(a, h ..., CONSTRAINT a)`) is accepted and ignored by
+            // SQLite, exactly like the trailing form absorbed after a table
+            // constraint below. Only recognised once a column exists.
+            if !columns.is_empty() && self.peek_keyword(Keyword::Constraint) {
+                self.skip_trailing_constraint_names();
+                if matches!(self.peek(), Token::Comma) {
+                    self.advance();
+                    continue;
+                } else if matches!(self.peek(), Token::RParen) {
+                    break;
+                }
+            }
+
             // Check if this is a table-level constraint (including CONSTRAINT keyword)
             if self.peek_keyword(Keyword::Constraint)
                 || self.peek_keyword(Keyword::Primary)

@@ -723,6 +723,10 @@ fn test_parse_trailing_constraint_name_ignored() {
         "CREATE TABLE t(x INTEGER CONSTRAINT a CONSTRAINT b CHECK(x>0) CONSTRAINT c CONSTRAINT d, y)",
         // Table-level trailing name
         "CREATE TABLE t(x, y, z, CONSTRAINT u_one UNIQUE(x,z) CONSTRAINT u_two)",
+        // Standalone body-less list entry after a column (altertab3-19.0)
+        "CREATE TABLE a(a,h CONSTRAINT a UNIQUE ON CONFLICT FAIL,CONSTRAINT a)",
+        // Body-less entry mid-list
+        "CREATE TABLE t(x, CONSTRAINT n, y)",
     ] {
         let result = Parser::parse_sql(sql);
         assert!(result.is_ok(), "{sql} should parse: {:?}", result);
