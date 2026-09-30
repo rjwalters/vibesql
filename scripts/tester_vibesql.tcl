@@ -912,7 +912,9 @@ proc translate_error_to_sqlite {vibesql_error} {
     }
 
     # No tables specified: "no tables specified"
-    if {[regexp -nocase {no tables? specified|FROM clause.*required|SELECT \* requires FROM clause} $error_msg]} {
+    # An ALTER re-parse failure already wrapped as `error in trigger|view <n>[ after rename]: ...`
+    # keeps its prefix (altertab.test 32.0) and passes through unchanged.
+    if {![regexp {^error in (trigger|view) } $error_msg] && [regexp -nocase {no tables? specified|FROM clause.*required|SELECT \* requires FROM clause} $error_msg]} {
         return "no tables specified"
     }
 
