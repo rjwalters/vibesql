@@ -218,3 +218,33 @@ fn valid_using_join_in_trigger_does_not_block_rename() {
         "ALTER TABLE r RENAME TO r2",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wildcard SELECT without FROM
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fromless_wildcard_subquery_in_update_from_blocks_rename() {
+    // altertab.test 32.0
+    let err = rename_err(
+        &[
+            "CREATE TABLE t1(x)",
+            "CREATE TRIGGER r1 BEFORE INSERT ON t1 BEGIN \
+             UPDATE t1 SET x=x FROM (SELECT*); END",
+        ],
+        "ALTER TABLE t1 RENAME TO x",
+    );
+    assert_eq!(err, "error in trigger r1: no tables specified");
+}
+
+#[test]
+fn wildcard_subquery_with_from_does_not_block_rename() {
+    rename_ok(
+        &[
+            "CREATE TABLE t1(x)",
+            "CREATE TRIGGER r1 BEFORE INSERT ON t1 BEGIN \
+             UPDATE t1 SET x=x FROM (SELECT * FROM t1); END",
+        ],
+        "ALTER TABLE t1 RENAME TO x",
+    );
+}

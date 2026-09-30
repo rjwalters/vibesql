@@ -1021,6 +1021,12 @@ fn find_trigger_resolution_error(
         return Some(format!("no such column: {}", pseudo));
     }
 
+    // 3a) A `SELECT *` (or `t.*`) with no FROM clause has no tables to expand against
+    //    (altertab.test 32.0: `UPDATE t1 SET x=x FROM (SELECT*)`).
+    if statements_have_fromless_wildcard_select(&statements) {
+        return Some("no tables specified".to_string());
+    }
+
     // 3) A bare column reference inside an uncorrelated FROM-less SELECT, which has no relation for
     //    it to resolve against at all.
     if let Some(column) = find_unresolvable_column_in_fromless_selects(&statements) {
@@ -1136,6 +1142,27 @@ fn unjoinable_using_in_from(from: &FromClause, sim: &DropSimulation) -> Option<S
 // ============================================================================
 // Column references in FROM-less, uncorrelated SELECTs
 // ============================================================================
+
+/// `true` when any uncorrelated simple SELECT reachable in `statements` has no
+/// FROM clause yet selects `*` / `t.*`, which SQLite rejects with
+/// `no tables specified`.
+fn statements_have_fromless_wildcard_select(statements: &[Statement]) -> bool {
+    statements.iter().any(|stmt| {
+        let mut selects: Vec<&SelectStmt> = Vec::new();
+        collect_uncorrelated_selects_in_statement(stmt, &mut selects);
+        selects.into_iter().any(|select| {
+            select.from.is_none()
+                && select.set_operation.is_none()
+                && select.values.is_none()
+                && select.select_list.iter().any(|item| {
+                    matches!(
+                        item,
+                        SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
+                    )
+                })
+        })
+    })
+}
 
 /// First bare (unqualified, unquoted) column reference inside a trigger-body
 /// SELECT that has **no FROM clause** and **cannot see an outer query** — the
