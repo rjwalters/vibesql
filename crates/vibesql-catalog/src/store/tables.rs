@@ -462,29 +462,13 @@ impl super::Catalog {
 
         // Drop all triggers associated with this table
         // Per SQL standard (R-37808-62273): triggers are automatically dropped when the table is
-        // dropped Note: We need to normalize trigger table_name for comparison in
-        // case-insensitive mode
+        // dropped. Schema-aware (see `drop_table_triggers`): only triggers *bound* to this
+        // schema's table go. Matching on the bare table name alone also removed a same-named
+        // table's triggers in another schema — e.g. dropping (or RENAME-rebuilding) `temp.t9`
+        // silently deleted a main-schema trigger `ON t9` bound to `main.t9` (altertab.test 5.x).
+        // Must run before the table itself is removed so trigger binding still resolves.
+        self.drop_table_triggers(&format!("{schema_key}.{table_name}"));
         let case_sensitive = self.case_sensitive_identifiers;
-        // Collect the schema-scoped storage keys (not the bare trigger names):
-        // triggers are keyed per schema, so a bare name no longer identifies a
-        // single map entry.
-        let trigger_keys: Vec<String> = self
-            .triggers
-            .iter()
-            .filter(|(_, trigger)| {
-                let trigger_table = if case_sensitive {
-                    trigger.table_name.clone()
-                } else {
-                    trigger.table_name.to_lowercase()
-                };
-                trigger_table == normalized_table
-            })
-            .map(|(key, _)| key.clone())
-            .collect();
-
-        for trigger_key in trigger_keys {
-            self.triggers.remove(&trigger_key);
-        }
 
         let schema = self
             .schemas

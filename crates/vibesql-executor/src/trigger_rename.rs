@@ -206,6 +206,15 @@ fn collect_table_ref_spans(
 
                 // Header `ON <table>` target.
                 if expect_header_table {
+                    // `ON <schema>.<table>`: this identifier is only the schema
+                    // qualifier; the table name follows the `.` (altertab.test
+                    // 5.1: `ON temp.t9`). Keep expecting the target.
+                    if significant
+                        .get(pos + 1)
+                        .is_some_and(|&next| matches!(tokens[next].0, Token::Symbol('.')))
+                    {
+                        continue;
+                    }
                     expect_header_table = false;
                     if is_match {
                         spans.push(*span);
@@ -217,6 +226,9 @@ fn collect_table_ref_spans(
                     spans.push(*span);
                 }
             }
+            // The `.` between a header target's schema qualifier and its
+            // table name (see the identifier arm above).
+            Token::Symbol('.') if expect_header_table => {}
             _ => {
                 // Any non-identifier token following the header `ON` means the
                 // target was already a (quoted) identifier or something else.
