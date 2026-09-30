@@ -248,3 +248,42 @@ fn wildcard_subquery_with_from_does_not_block_rename() {
         "ALTER TABLE t1 RENAME TO x",
     );
 }
+
+// ---------------------------------------------------------------------------
+// ORDER BY terms of compound SELECTs (altertab3.test 18.3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn compound_select_order_by_expression_not_in_result_blocks_rename() {
+    let err = rename_err(
+        &[
+            "CREATE TABLE t1(a, b)",
+            "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN \
+             SELECT a, b FROM t1 INTERSECT SELECT b, a FROM t1 \
+             ORDER BY b IN (SELECT a UNION SELECT b FROM t1); END",
+        ],
+        "ALTER TABLE t1 RENAME TO t1x",
+    );
+    assert_eq!(
+        err,
+        "error in trigger r1: 1st ORDER BY term does not match any column in the result set"
+    );
+}
+
+#[test]
+fn compound_select_order_by_column_or_position_or_result_expr_allows_rename() {
+    for order_by in ["b", "2", "a + b", "b COLLATE nocase"] {
+        rename_ok(
+            &[
+                "CREATE TABLE t1(a, b)",
+                &format!(
+                    "CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN \
+                     SELECT a, b, a + b FROM t1 UNION SELECT b, a, 0 FROM t1 \
+                     ORDER BY {}; END",
+                    order_by
+                ),
+            ],
+            "ALTER TABLE t1 RENAME TO t1x",
+        );
+    }
+}

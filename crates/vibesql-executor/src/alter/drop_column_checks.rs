@@ -1027,6 +1027,12 @@ fn find_trigger_resolution_error(
         return Some("no tables specified".to_string());
     }
 
+    // 3b) A compound SELECT (UNION / INTERSECT / EXCEPT) whose ORDER BY term is an expression
+    //    matching no result column (altertab3.test 18.3).
+    if let Some(term_position) = find_unmatched_compound_order_by_term(&statements) {
+        return Some(ExecutorError::OrderByTermNotInResultSet { term_position }.to_string());
+    }
+
     // 3) A bare column reference inside an uncorrelated FROM-less SELECT, which has no relation for
     //    it to resolve against at all.
     if let Some(column) = find_unresolvable_column_in_fromless_selects(&statements) {
@@ -1137,6 +1143,58 @@ fn unjoinable_using_in_from(from: &FromClause, sim: &DropSimulation) -> Option<S
         FromClause::Subquery { query, .. } => unjoinable_using_in_select(query, sim),
         _ => None,
     }
+}
+
+// ============================================================================
+// ORDER BY terms of compound SELECTs in trigger bodies
+// ============================================================================
+
+/// 1-based position of the first ORDER BY term, in a top-level compound SELECT
+/// of a trigger body (a bare `SELECT` statement or an `INSERT ... SELECT`
+/// source), that can never match a result column: an expression that is
+/// neither a column reference, an integer literal, nor equal to a result
+/// expression of any arm of the compound. SQLite reports it as
+/// `<n>th ORDER BY term does not match any column in the result set` while
+/// re-parsing the trigger during `ALTER TABLE` (altertab3.test 18.3).
+///
+/// Deliberately conservative: bare column names and integer positions are
+/// never judged (they need schema resolution / range checks), so this only
+/// ever under-reports.
+fn find_unmatched_compound_order_by_term(statements: &[Statement]) -> Option<usize> {
+    fn check(select: &SelectStmt) -> Option<usize> {
+        select.set_operation.as_ref()?;
+        let order_by = select.order_by.as_ref()?;
+        // Result expressions of every arm of the compound.
+        let mut arm_exprs: Vec<&Expression> = Vec::new();
+        let mut arm = Some(select);
+        while let Some(current) = arm {
+            for item in &current.select_list {
+                if let SelectItem::Expression { expr, .. } = item {
+                    arm_exprs.push(expr);
+                }
+            }
+            arm = current.set_operation.as_ref().map(|op| op.right.as_ref());
+        }
+        order_by
+            .iter()
+            .position(|item| {
+                let expr = match &item.expr {
+                    Expression::Collate { expr, .. } => expr.as_ref(),
+                    other => other,
+                };
+                !matches!(expr, Expression::ColumnRef(_) | Expression::Literal(_))
+                    && !arm_exprs.iter().any(|e| *e == expr)
+            })
+            .map(|idx| idx + 1)
+    }
+    statements.iter().find_map(|stmt| match stmt {
+        Statement::Select(select) => check(select),
+        Statement::Insert(insert) => match &insert.source {
+            InsertSource::Select(select) => check(select),
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 // ============================================================================
