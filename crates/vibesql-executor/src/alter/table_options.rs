@@ -98,8 +98,15 @@ pub(super) fn execute_rename_table(
     // completely unaffected and keeps producing the same bare (unqualified)
     // `qualified_new_table_name`/error-message text as before this fix.
     let schema_qualifier = stmt.table_name.split_once('.').map(|(schema, _)| schema.to_string());
+    //
+    // An explicit qualifier is canonicalized first: `temp` names this
+    // session's internal temp schema (e.g. `temp_1`), not a schema literally
+    // called "temp", so `ALTER TABLE temp.t RENAME TO ...` must rebuild the
+    // table there — using the qualifier verbatim failed with `Schema 'temp'
+    // not found` after the old table had already been looked up
+    // (altertab.test 5.1).
     let resolved_schema_qualifier: Option<String> = match &schema_qualifier {
-        Some(schema) => Some(schema.clone()),
+        Some(schema) => Some(database.catalog.canonical_schema_name(schema)),
         None => database
             .catalog
             .resolve_table_schema_name(&stmt.table_name)
@@ -141,7 +148,13 @@ pub(super) fn execute_rename_table(
     if database.get_table(&qualified_new_table_name).is_some()
         || database.index_exists(&stmt.new_table_name)
     {
-        return Err(ExecutorError::RenameTargetExists(qualified_new_table_name));
+        // Report the target as the user qualified it (never the internal
+        // canonical temp-schema name).
+        let reported = match &schema_qualifier {
+            Some(schema) => format!("{schema}.{}", stmt.new_table_name),
+            None => qualified_new_table_name,
+        };
+        return Err(ExecutorError::RenameTargetExists(reported));
     }
 
     // Get the old table to ensure it exists
@@ -177,6 +190,42 @@ pub(super) fn execute_rename_table(
     // error`), so the pattern does not transfer to them (PR #6663 review).
     if !database.legacy_alter_table() {
         super::drop_column_checks::precheck_schema_objects(database, &stmt.table_name)?;
+    }
+
+    // Renaming a TEMP table only touches temp-schema dependents: SQLite runs
+    // its `sqlite_rename_table` rewrite over the renamed table's own schema
+    // (plus the temp schema when that is a different one), and a main-schema
+    // trigger or view can never see a temp table — its `<name>` reference
+    // binds to `main.<name>` even when a same-named temp table shadows it
+    // (altertab.test 5.0/5.1: `temp.t9` alongside `main.t9`). For such a
+    // table the dependent-object passes below match on its *bare* name (an
+    // explicit `temp.` qualifier never appears in a dependent's references to
+    // it) and skip non-temp objects. Every other table keeps matching on
+    // `stmt.table_name` exactly as before.
+    let renamed_table_is_temp = database
+        .catalog
+        .resolve_table_schema_name(&stmt.table_name)
+        .as_deref()
+        .is_some_and(vibesql_catalog::Catalog::is_temp_schema);
+    let dependent_old_name: &str =
+        if renamed_table_is_temp { rename_seq_old_bare_name } else { stmt.table_name.as_str() };
+
+    // SQLite re-parses the schema again *after* the rename ("after rename"
+    // pass of `renameTestSchema`), so a dependent view whose rewritten body
+    // no longer resolves aborts the ALTER — e.g. the new name collides with a
+    // FROM alias, making `one.a` match two relations (altertab.test 5.3/5.6).
+    // Checked here, before any mutation, against a simulation of the renamed
+    // table so a failed RENAME TO stays atomic.
+    if !database.legacy_alter_table() && !database.writable_schema() {
+        let old_columns: Vec<String> =
+            old_table.schema.columns.iter().map(|c| c.name.clone()).collect();
+        check_views_after_table_rename(
+            database,
+            dependent_old_name,
+            &stmt.new_table_name,
+            renamed_table_is_temp,
+            old_columns,
+        )?;
     }
 
     // The table's own bare (unqualified, exact-case) name as it was created —
@@ -249,7 +298,12 @@ pub(super) fn execute_rename_table(
     let triggers_on_renamed_table: Vec<(TriggerDefinition, Option<u64>)> = database
         .catalog
         .iter_triggers()
-        .filter(|t| t.table_name.eq_ignore_ascii_case(&stmt.table_name))
+        .filter(|t| {
+            t.table_name.eq_ignore_ascii_case(&stmt.table_name)
+                || (renamed_table_is_temp
+                    && t.is_temp()
+                    && t.table_name.eq_ignore_ascii_case(dependent_old_name))
+        })
         .map(|t| {
             let trigger_schema =
                 t.schema.clone().unwrap_or_else(|| vibesql_catalog::DEFAULT_SCHEMA.to_string());
@@ -487,8 +541,9 @@ pub(super) fn execute_rename_table(
         // text consistent. See `crate::trigger_rename`.
         rewrite_triggers_for_rename(
             database,
-            &stmt.table_name,
+            dependent_old_name,
             &stmt.new_table_name,
+            renamed_table_is_temp,
             &broken_before_rename,
         );
     }
@@ -521,8 +576,9 @@ pub(super) fn execute_rename_table(
         // trigger-rewrite call above.
         rewrite_views_for_table_rename(
             database,
-            &stmt.table_name,
+            dependent_old_name,
             &stmt.new_table_name,
+            renamed_table_is_temp,
             &broken_before_rename,
         );
     }
@@ -644,6 +700,7 @@ fn rewrite_triggers_for_rename(
     database: &mut Database,
     old_name: &str,
     new_name: &str,
+    only_temp: bool,
     broken: &super::drop_column_checks::BrokenSchemaObjects,
 ) {
     // Snapshot trigger definitions up front. Triggers are keyed per schema, so a
@@ -657,6 +714,10 @@ fn rewrite_triggers_for_rename(
         // writable_schema is ON: leave its stored text (and ON-target) exactly
         // as the user hand-edited it.
         if broken.is_trigger_broken(&existing) {
+            continue;
+        }
+        // A renamed TEMP table is invisible to main-schema triggers.
+        if only_temp && !existing.is_temp() {
             continue;
         }
         // Does this trigger reference the renamed table anywhere?
@@ -692,6 +753,80 @@ fn rewrite_triggers_for_rename(
     }
 }
 
+/// A view's `CREATE VIEW` text: the verbatim `sql_definition` when captured,
+/// otherwise reconstructed from the parsed query, so a view without captured
+/// source still tracks a rename.
+fn view_definition_text(view: &vibesql_catalog::ViewDefinition) -> String {
+    view.sql_definition.clone().unwrap_or_else(|| {
+        use vibesql_ast::pretty_print::ToSql;
+        let cols = view.columns.as_ref().map(|c| format!("({})", c.join(", "))).unwrap_or_default();
+        format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
+    })
+}
+
+/// SQLite's "after rename" schema re-parse for `ALTER TABLE ... RENAME TO`,
+/// restricted to dependent views: each view whose body references `old_name`
+/// is rewritten exactly as [`rewrite_views_for_table_rename`] will rewrite it,
+/// then re-resolved with the renamed table simulated under `new_name` (owning
+/// `columns`). A reference that has become ambiguous aborts the ALTER with
+/// `error in view <v> after rename: ambiguous column name: <ref>`
+/// (altertab.test 5.3/5.6: `FROM t1 AS one, t2` with `t2` renamed to `one`
+/// makes `one.a` match both relations).
+///
+/// Runs before any mutation, so nothing needs rolling back. Views are visited
+/// main schema first, then temp (the order `renameTestSchema` scans
+/// `sqlite_schema` then `sqlite_temp_schema`), each in creation order; a
+/// renamed TEMP table only affects temp views (`only_temp`).
+fn check_views_after_table_rename(
+    database: &Database,
+    old_name: &str,
+    new_name: &str,
+    only_temp: bool,
+    columns: Vec<String>,
+) -> Result<(), ExecutorError> {
+    let mut views: Vec<(bool, u64, &vibesql_catalog::ViewDefinition)> = database
+        .catalog
+        .iter_views()
+        .filter(|view| !only_temp || view.is_temp())
+        .map(|view| {
+            let seq = super::drop_column_checks::object_creation_seq(
+                database,
+                view.schema.as_deref(),
+                &view.name,
+            );
+            (view.is_temp(), seq, view)
+        })
+        .collect();
+    views.sort_by(|(temp_a, seq_a, a), (temp_b, seq_b, b)| {
+        temp_a.cmp(temp_b).then(seq_a.cmp(seq_b)).then_with(|| a.name.cmp(&b.name))
+    });
+
+    for (_, _, view) in views {
+        let old_text = view_definition_text(view);
+        let new_text = rewrite_table_refs_in_view_sql(&old_text, old_name, new_name);
+        if new_text == old_text {
+            continue;
+        }
+        let Ok(vibesql_ast::Statement::CreateView(cv)) =
+            vibesql_parser::parse_with_arena_fallback(&new_text)
+        else {
+            continue;
+        };
+        if let Some(col) = super::drop_column_checks::find_ambiguous_column_after_table_rename(
+            &cv.query,
+            database,
+            new_name,
+            columns.clone(),
+        ) {
+            return Err(ExecutorError::Other(format!(
+                "error in view {} after rename: ambiguous column name: {}",
+                view.name, col
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Rewrite all VIEW definitions in the catalog that reference `old_name` as a
 /// table, replacing table references with `new_name`, when
 /// `ALTER TABLE <old_name> RENAME TO <new_name>` runs.
@@ -723,6 +858,7 @@ fn rewrite_views_for_table_rename(
     database: &mut Database,
     old_name: &str,
     new_name: &str,
+    only_temp: bool,
     broken: &super::drop_column_checks::BrokenSchemaObjects,
 ) {
     let view_names = database.catalog.list_views();
@@ -735,15 +871,11 @@ fn rewrite_views_for_table_rename(
         if broken.is_view_broken(view) {
             continue;
         }
-        // Prefer the verbatim `CREATE VIEW` text; fall back to reconstructing it
-        // from the parsed query when a view was stored without captured source,
-        // so a view still tracks the rename either way.
-        let old_text = view.sql_definition.clone().unwrap_or_else(|| {
-            use vibesql_ast::pretty_print::ToSql;
-            let cols =
-                view.columns.as_ref().map(|c| format!("({})", c.join(", "))).unwrap_or_default();
-            format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
-        });
+        // A renamed TEMP table is invisible to main-schema views.
+        if only_temp && !view.is_temp() {
+            continue;
+        }
+        let old_text = view_definition_text(view);
         let new_text = rewrite_table_refs_in_view_sql(&old_text, old_name, new_name);
         if new_text != old_text {
             pending.push((name, new_text));
@@ -877,6 +1009,24 @@ pub(super) fn rewrite_triggers_for_column_rename(
             })
             .transpose()
             .map_err(ambiguity_error)?;
+
+        // Re-resolve the (rewritten) body against the post-rename schema: an
+        // unqualified reference the rewrite left alone (it never named the
+        // renamed column) can still become ambiguous once the new column name
+        // duplicates one another FROM relation owns (altertab.test 13.2).
+        // Skipped under writable_schema, like the other schema re-parse checks.
+        if !database.writable_schema() {
+            if let Some(col) =
+                super::drop_column_checks::find_ambiguous_column_in_trigger_after_column_rename(
+                    &new_body, database, table, old_column, new_column,
+                )
+            {
+                return Err(ExecutorError::Other(format!(
+                    "error in trigger {} after rename: ambiguous column name: {}",
+                    name, col
+                )));
+            }
+        }
 
         // The runtime WHEN condition is stored as a separate AST (evaluated per
         // row, not re-parsed from the trigger text), so it must be rewritten in

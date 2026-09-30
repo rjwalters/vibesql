@@ -38,6 +38,42 @@ impl TriggerExecutor {
         stmt: &CreateTriggerStmt,
         original_sql: Option<&str>,
     ) -> Result<String, ExecutorError> {
+        // `ON temp.<table>` names the temp table explicitly. The trigger then
+        // lives in the temp schema (SQLite creates a trigger whose name is
+        // unqualified in the schema of its temp target) and binds to its
+        // target by *bare* name: a temp trigger resolves `<table>`
+        // temp-first, so it binds to `temp.<table>` even when a same-named
+        // main table exists. Storing the qualified `temp.<table>` instead
+        // made the trigger match no DML target at all — it silently never
+        // fired (altertab.test 5.0) — and hid it from a later
+        // `ALTER TABLE temp.<table> RENAME TO ...` (altertab.test 5.1).
+        // Only applied when the trigger is (or defaults to being) a temp
+        // trigger and the temp table exists; anything else keeps the
+        // pre-existing path, including its `no such table` diagnostics.
+        let normalized_stmt;
+        let stmt = match stmt.table_name.split_once('.') {
+            Some((qualifier, bare))
+                if qualifier.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA)
+                    && stmt
+                        .schema
+                        .as_deref()
+                        .is_none_or(|s| s.eq_ignore_ascii_case(vibesql_catalog::TEMP_SCHEMA))
+                    && db.catalog.table_exists(&stmt.table_name) =>
+            {
+                normalized_stmt = CreateTriggerStmt {
+                    table_name: bare.to_string(),
+                    schema: Some(
+                        stmt.schema
+                            .clone()
+                            .unwrap_or_else(|| vibesql_catalog::TEMP_SCHEMA.to_string()),
+                    ),
+                    ..stmt.clone()
+                };
+                &normalized_stmt
+            }
+            _ => stmt,
+        };
+
         // A schema qualifier must name `main`, `temp`, or an existing
         // (e.g. ATTACHed — #6310) schema. The parser defers this check to
         // execution because only the catalog knows the attached databases;

@@ -260,7 +260,7 @@ impl SchemaObject<'_> {
 /// The creation ordinal of a view/trigger (both are recorded under their own
 /// schema tag, `main` when untagged — see `Catalog::create_view` /
 /// `create_trigger`), or `u64::MAX` when none was recorded.
-fn object_creation_seq(database: &Database, schema: Option<&str>, name: &str) -> u64 {
+pub(super) fn object_creation_seq(database: &Database, schema: Option<&str>, name: &str) -> u64 {
     database
         .catalog
         .creation_seq(schema.unwrap_or(vibesql_catalog::DEFAULT_SCHEMA), name)
@@ -371,6 +371,11 @@ pub(super) struct DropSimulation<'a> {
     /// `(canonical altered-table name, old column, new column)`; `None` when
     /// not simulating a rename.
     renamed: Option<(String, &'a str, &'a str)>,
+    /// `(new table name, columns)` when simulating `ALTER TABLE ... RENAME
+    /// TO <new table name>` ahead of the catalog mutation: a FROM-clause
+    /// reference to the new name resolves to the renamed table's columns
+    /// even though no table of that name exists in the catalog yet.
+    table_renamed: Option<(String, Vec<String>)>,
 }
 
 impl<'a> DropSimulation<'a> {
@@ -383,7 +388,18 @@ impl<'a> DropSimulation<'a> {
                 .unwrap_or_else(|| table.to_string());
             (canonical, column)
         });
-        DropSimulation { db, dropped, renamed: None }
+        DropSimulation { db, dropped, renamed: None, table_renamed: None }
+    }
+
+    /// Simulate a table as already renamed to `new_table` (whose columns are
+    /// `columns`), ahead of the drop+create that performs the rename.
+    fn new_for_table_rename(db: &'a Database, new_table: &str, columns: Vec<String>) -> Self {
+        DropSimulation {
+            db,
+            dropped: None,
+            renamed: None,
+            table_renamed: Some((new_table.to_string(), columns)),
+        }
     }
 
     /// Simulate `table`'s `old_col` as already renamed to `new_col`, ahead of
@@ -394,7 +410,12 @@ impl<'a> DropSimulation<'a> {
             .get_table(table)
             .map(|s| s.name.clone())
             .unwrap_or_else(|| table.to_string());
-        DropSimulation { db, dropped: None, renamed: Some((canonical, old_col, new_col)) }
+        DropSimulation {
+            db,
+            dropped: None,
+            renamed: Some((canonical, old_col, new_col)),
+            table_renamed: None,
+        }
     }
 
     /// The (possibly simulated) column names of a FROM-clause relation, or
@@ -402,6 +423,12 @@ impl<'a> DropSimulation<'a> {
     /// a view without a resolved column list) — the caller then skips
     /// validation of the referencing object.
     fn columns_of_relation(&self, name: &str) -> Option<Vec<String>> {
+        if let Some((new_table, columns)) = &self.table_renamed {
+            let bare = name.rsplit('.').next().unwrap_or(name);
+            if bare.eq_ignore_ascii_case(new_table) {
+                return Some(columns.clone());
+            }
+        }
         if let Some(schema) = self.db.catalog.get_table(name) {
             let mut cols: Vec<String> = schema.columns.iter().map(|c| c.name.clone()).collect();
             if let Some((altered, dropped_col)) = &self.dropped {
@@ -588,7 +615,7 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
         })
         .collect();
 
-    let scope = ViewScope { sources: &sources, aliases: &aliases };
+    let scope = ViewScope { sources: &sources, aliases: &aliases, qualified_ambiguity: false };
 
     // Walk in SQL text order so the *first* dangling reference is reported,
     // matching SQLite's message (e.g. `d` for `SELECT d, e FROM p1`).
@@ -660,15 +687,81 @@ pub(super) fn find_ambiguous_column_in_query(
     old_column: &str,
     new_column: &str,
 ) -> Option<String> {
+    let sim = DropSimulation::new_for_rename(database, table, old_column, new_column);
+    first_ambiguous_in_select(query, &sim, false)
+}
+
+/// Post-`RENAME TO` re-resolution of a dependent view's (already
+/// table-name-rewritten) defining query: the first column reference that is
+/// ambiguous once the renamed table is known as `new_table` (with
+/// `columns`), or `None`.
+///
+/// Renaming a table can collide its new name with an alias or another
+/// relation already in the query's FROM clause (`FROM t1 AS one, t2` with `t2`
+/// renamed to `one`), making a *qualified* reference such as `one.a` match
+/// two relations. SQLite's post-rename schema re-parse reports this as
+/// `error in view <v> after rename: ambiguous column name: one.a`
+/// (altertab.test 5.3/5.6), so unlike [`find_ambiguous_column_in_query`] this
+/// also judges table-qualified references.
+pub(super) fn find_ambiguous_column_after_table_rename(
+    query: &SelectStmt,
+    database: &Database,
+    new_table: &str,
+    columns: Vec<String>,
+) -> Option<String> {
+    let sim = DropSimulation::new_for_table_rename(database, new_table, columns);
+    first_ambiguous_in_select(query, &sim, true)
+}
+
+/// Post-`RENAME COLUMN` re-resolution of a trigger body (`body_sql`, already
+/// column-rewritten): the first unqualified column reference in a top-level
+/// `SELECT` (or `INSERT ... SELECT` source) that is ambiguous once `table`'s
+/// `old_column` is known as `new_column`, or `None`.
+///
+/// A reference that was unambiguous before the rename — and so is left
+/// untouched by the rewrite, since it never named the renamed column — can
+/// become ambiguous when the new column name duplicates a name another FROM
+/// relation already owns (`INSERT INTO log SELECT y FROM t1, t2` with
+/// `t2.b` renamed to `y`). SQLite's post-rename schema re-parse reports it as
+/// `error in trigger <name> after rename: ambiguous column name: y`
+/// (altertab.test 13.2). Unparseable bodies and query shapes the static
+/// resolver does not model are skipped (never a false positive).
+pub(super) fn find_ambiguous_column_in_trigger_after_column_rename(
+    body_sql: &str,
+    database: &Database,
+    table: &str,
+    old_column: &str,
+    new_column: &str,
+) -> Option<String> {
+    let statements = crate::trigger_execution::TriggerFirer::parse_trigger_sql(body_sql).ok()?;
+    let sim = DropSimulation::new_for_rename(database, table, old_column, new_column);
+    statements.iter().find_map(|stmt| match stmt {
+        Statement::Select(select) => first_ambiguous_in_select(select, &sim, false),
+        Statement::Insert(insert) => match &insert.source {
+            InsertSource::Select(select) => first_ambiguous_in_select(select, &sim, false),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+/// First ambiguously-resolving column reference in `query`, walked in SQL
+/// text order (select list, JOIN conditions, WHERE, GROUP BY, HAVING, ORDER
+/// BY), resolved against `sim`. `qualified_ambiguity` additionally judges
+/// table-qualified references (see [`check_column_ref_ambiguous`]).
+fn first_ambiguous_in_select(
+    query: &SelectStmt,
+    sim: &DropSimulation,
+    qualified_ambiguity: bool,
+) -> Option<String> {
     // Same conservative scope-shape restriction as `find_missing_column_in_view`.
     if query.with_clause.is_some() || query.values.is_some() || query.set_operation.is_some() {
         return None;
     }
     let from = query.from.as_ref()?;
 
-    let sim = DropSimulation::new_for_rename(database, table, old_column, new_column);
     let mut sources = Vec::new();
-    if !collect_from_sources(from, &sim, &mut sources) {
+    if !collect_from_sources(from, sim, &mut sources) {
         return None;
     }
 
@@ -681,7 +774,7 @@ pub(super) fn find_ambiguous_column_in_query(
         })
         .collect();
 
-    let scope = ViewScope { sources: &sources, aliases: &aliases };
+    let scope = ViewScope { sources: &sources, aliases: &aliases, qualified_ambiguity };
 
     for item in &query.select_list {
         if let SelectItem::Expression { expr, .. } = item {
@@ -789,6 +882,9 @@ fn first_ambiguous_in_join_conditions(from: &FromClause, scope: &ViewScope) -> O
 struct ViewScope<'a> {
     sources: &'a [FromSource],
     aliases: &'a [String],
+    /// Whether [`check_column_ref_ambiguous`] also judges table-qualified
+    /// references (only the post-`RENAME TO` re-check can make one ambiguous).
+    qualified_ambiguity: bool,
 }
 
 /// SQLite's implicit rowid pseudo-columns, always accepted.
@@ -955,17 +1051,34 @@ fn check_column_ref(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String>
 }
 
 /// Resolve one column reference against the view scope, reporting it as
-/// *ambiguous* when it is unqualified and matches columns owned by more than
-/// one FROM-clause relation. Schema-qualified references are never ambiguous
-/// (a qualifier picks a single relation by construction), matching
-/// `check_column_ref`'s treatment of the same case.
+/// *ambiguous* when it matches columns owned by more than one FROM-clause
+/// relation. Table-qualified references are only judged when
+/// `scope.qualified_ambiguity` is set (see below); schema-qualified references
+/// are never judged, matching `check_column_ref`'s treatment of that case.
 fn check_column_ref_ambiguous(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String> {
-    if col.schema_canonical().is_some() || col.table_canonical().is_some() {
+    if col.schema_canonical().is_some() {
         return None;
     }
     let name = col.column_canonical();
     if is_rowid_pseudo(name) {
         return None;
+    }
+    if let Some(table) = col.table_canonical() {
+        // A qualifier normally picks a single relation, but after a table
+        // RENAME TO two FROM items can share one exposed name (an alias and
+        // the renamed table): the reference is then ambiguous when more than
+        // one of them owns the column. SQLite reports it qualified, as
+        // written (`ambiguous column name: one.a`, altertab.test 5.3).
+        if !scope.qualified_ambiguity {
+            return None;
+        }
+        let match_count = scope
+            .sources
+            .iter()
+            .filter(|s| s.key == table && s.columns.iter().any(|c| c.eq_ignore_ascii_case(name)))
+            .count();
+        return (match_count > 1)
+            .then(|| format!("{}.{}", col.table_display().unwrap_or(table), col.column_display()));
     }
     let match_count = scope
         .sources

@@ -285,6 +285,12 @@ impl super::super::Catalog {
         if trigger.is_temp() {
             // Temp trigger: temp-then-main name resolution.
             self.resolve_table_schema_name(&trigger.table_name)
+        } else if let Some(attached) =
+            trigger.schema.as_deref().filter(|s| !s.eq_ignore_ascii_case(crate::DEFAULT_SCHEMA))
+        {
+            // Attached-schema trigger (#6310): it can only see its own
+            // schema's tables, so it binds to `<attached>.<table>`.
+            self.resolve_table_schema_name(&format!("{}.{}", attached, trigger.table_name))
         } else {
             // Main trigger: only the main schema is visible. Qualify explicitly so
             // temp shadowing does not apply.
