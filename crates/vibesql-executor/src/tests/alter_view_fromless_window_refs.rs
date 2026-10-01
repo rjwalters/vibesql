@@ -1,8 +1,10 @@
 //! ALTER TABLE ... RENAME re-resolves every view. A FROM-less view whose named
-//! `WINDOW` definition (partition / order / frame bound, including CTE bodies
-//! of scalar subqueries nested there) mentions a bare column has nothing to
-//! resolve it against, so SQLite aborts with `error in view <v>: no such
-//! column: <c>` (altertab3.test 19.1.2 / 19.3.2).
+//! `WINDOW` frame bound contains a scalar subquery whose CTE body mentions a
+//! bare column has nothing to resolve it against, so SQLite aborts with
+//! `error in view <v>: no such column: <c>` (altertab3.test 19.1.2 / 19.3.2).
+//! Bare names elsewhere in the window definition (PARTITION BY / ORDER BY /
+//! frame bound outside a CTE) are not resolved by SQLite and must not block
+//! the RENAME.
 
 use vibesql_ast::Statement;
 use vibesql_storage::Database;
@@ -62,25 +64,94 @@ fn resolvable_fromless_window_view_allows_rename() {
     .expect("valid view must not block RENAME");
 }
 
-/// SQLite resolves named-window ORDER BY against the select's result-column
-/// aliases, so this view is valid and must not block RENAME.
+/// SQLite does not resolve bare names in a named window's ORDER BY on the
+/// ALTER re-parse, alias or not, so these views must not block RENAME.
 #[test]
 fn alias_in_window_order_by_allows_rename() {
     rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (ORDER BY zz)")
-        .expect("select-list alias in WINDOW ORDER BY must resolve");
+        .expect("select-list alias in WINDOW ORDER BY must not block RENAME");
 }
 
 /// Same as above for named-window PARTITION BY.
 #[test]
 fn alias_in_window_partition_by_allows_rename() {
     rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (PARTITION BY zz)")
-        .expect("select-list alias in WINDOW PARTITION BY must resolve");
+        .expect("select-list alias in WINDOW PARTITION BY must not block RENAME");
 }
 
-/// A bare name that is not an alias is still rejected.
+/// A non-alias bare name in WINDOW ORDER BY is accepted by sqlite3 3.54.0.
 #[test]
-fn non_alias_in_window_order_by_rejects_rename() {
-    let err =
-        rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (ORDER BY yy)").unwrap_err();
+fn non_alias_in_window_order_by_allows_rename() {
+    rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (ORDER BY yy)")
+        .expect("bare name in WINDOW ORDER BY must not block RENAME");
+}
+
+/// A non-alias bare name in WINDOW PARTITION BY is accepted by sqlite3 3.54.0.
+#[test]
+fn non_alias_in_window_partition_by_allows_rename() {
+    rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (PARTITION BY yy)")
+        .expect("bare name in WINDOW PARTITION BY must not block RENAME");
+}
+
+/// A bare name directly in a frame bound is accepted by sqlite3 3.54.0.
+#[test]
+fn bare_name_in_frame_bound_allows_rename() {
+    rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (ROWS BETWEEN yy PRECEDING AND CURRENT ROW)",
+    )
+    .expect("bare name in frame bound must not block RENAME");
+}
+
+/// A bare name in a nested window function's PARTITION BY inside a frame
+/// bound (outside any CTE) is accepted by sqlite3 3.54.0.
+#[test]
+fn bare_name_in_frame_bound_window_partition_allows_rename() {
+    rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (ROWS BETWEEN UNBOUNDED PRECEDING AND \
+         count(*) OVER (PARTITION BY yy) FOLLOWING)",
+    )
+    .expect("bare name in nested window PARTITION BY must not block RENAME");
+}
+
+/// A CTE with an unresolvable column directly in the window's own PARTITION
+/// BY is accepted by sqlite3 3.54.0.
+#[test]
+fn cte_in_window_partition_by_allows_rename() {
+    rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (PARTITION BY (WITH c AS (VALUES(yy)) VALUES(0)))",
+    )
+    .expect("CTE in WINDOW PARTITION BY must not block RENAME");
+}
+
+/// Same for the window's own ORDER BY.
+#[test]
+fn cte_in_window_order_by_allows_rename() {
+    rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (ORDER BY (WITH c AS (VALUES(yy)) VALUES(0)))",
+    )
+    .expect("CTE in WINDOW ORDER BY must not block RENAME");
+}
+
+/// A CTE with an unresolvable column directly in a frame bound is rejected
+/// by sqlite3 3.54.0 (`no such column: yy`).
+#[test]
+fn cte_in_frame_bound_rejects_rename() {
+    let err = rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (ROWS BETWEEN \
+         (WITH c AS (VALUES(yy)) VALUES(0)) PRECEDING AND CURRENT ROW)",
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("error in view q: no such column: yy"), "{err}");
+}
+
+/// A SELECT-bodied CTE reached through a nested window function's ORDER BY
+/// in a frame bound is rejected by sqlite3 3.54.0.
+#[test]
+fn select_cte_in_frame_bound_window_order_by_rejects_rename() {
+    let err = rename_result(
+        "CREATE VIEW q AS SELECT 1 WINDOW x AS (ROWS BETWEEN UNBOUNDED PRECEDING AND \
+         count(*) OVER (ORDER BY (WITH c AS (SELECT yy) VALUES(0))) FOLLOWING)",
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("error in view q: no such column: yy"), "{err}");
 }

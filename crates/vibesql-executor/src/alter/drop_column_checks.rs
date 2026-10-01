@@ -593,16 +593,23 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
     first_missing_in_select(query, sim).or_else(|| first_missing_in_fromless_view_windows(query))
 }
 
-/// First bare column reference inside the named `WINDOW` definitions of a
-/// FROM-less view query (partition / order / frame-bound expressions, and the
-/// CTE bodies of scalar subqueries nested in them).
+/// First unresolvable column inside the CTE body of a scalar subquery nested
+/// in a frame-bound expression of a FROM-less view query's named `WINDOW`
+/// definitions.
 ///
-/// A FROM-less query has no relation to resolve a bare column against, and a
-/// scalar subquery in such a position cannot be correlated to anything, so
-/// SQLite's schema re-parse on `ALTER TABLE` fails with `error in view <v>:
-/// no such column: <c>` (altertab3.test 19.1.2 / 19.3.2). Conservative: only
-/// simple (no `WITH`, no compound, no `VALUES`) FROM-less queries are judged,
-/// quoted identifiers / `rowid` / `*` placeholders are accepted.
+/// SQLite does not resolve bare names in a named window's PARTITION BY /
+/// ORDER BY / frame-bound expressions at all on the `ALTER TABLE` schema
+/// re-parse (`SELECT 1 WINDOW x AS (ORDER BY yy)` is accepted, as is a CTE
+/// directly in the window's own PARTITION BY / ORDER BY). The one shape it
+/// does reject is a CTE body of a scalar subquery reached from a frame-bound
+/// expression — including through a nested window function's own PARTITION
+/// BY / ORDER BY — whose bare column has nothing to resolve against, failing
+/// with `error in view <v>: no such column: <c>` (altertab3.test 19.1.2 /
+/// 19.3.2). Conservative: only simple (no `WITH`, no compound, no `VALUES`)
+/// FROM-less queries are judged; quoted identifiers / `rowid` / `*`
+/// placeholders are accepted. Select-list aliases are not treated as
+/// unresolvable inside such CTEs (SQLite rejects those too — a tolerated
+/// false negative).
 fn first_missing_in_fromless_view_windows(query: &SelectStmt) -> Option<String> {
     if query.from.is_some()
         || query.with_clause.is_some()
@@ -612,55 +619,36 @@ fn first_missing_in_fromless_view_windows(query: &SelectStmt) -> Option<String> 
         return None;
     }
     let windows = query.window_definitions.as_ref()?;
-    // SQLite resolves named-window PARTITION BY / ORDER BY with the select's
-    // own NameContext (NC_UEList set), so a bare name matching one of the
-    // view's result-column aliases resolves (`SELECT 1 AS zz WINDOW x AS
-    // (ORDER BY zz)` is valid) — mirror
-    // `first_unresolvable_column_in_fromless_select`. Aliases are also accepted
-    // in frame-bound expressions: that only errs toward allowing the RENAME
-    // (never a false positive), and the altertab3 19.1.2 / 19.3.2 failures come
-    // from CTE bodies of nested scalar subqueries, which are judged against
-    // their own scope and are unaffected.
-    let aliases: Vec<&str> = query
-        .select_list
-        .iter()
-        .filter_map(|item| match item {
-            SelectItem::Expression { alias: Some(alias), .. } => Some(alias.as_str()),
-            _ => None,
-        })
-        .collect();
-    let mut finder = FromlessBareColumnFinder { aliases: &aliases, found: None };
+    let mut finder = FromlessFrameCteFinder { in_cte_values: false, found: None };
     for window in windows {
-        let spec = &window.spec;
-        for expr in spec.partition_by.iter().flatten() {
-            walk_expression(&mut finder, expr);
-        }
-        for item in spec.order_by.iter().flatten() {
-            walk_expression(&mut finder, &item.expr);
-        }
-        if let Some(frame) = &spec.frame {
+        if let Some(frame) = &window.spec.frame {
             let bounds = std::iter::once(&frame.start).chain(frame.end.iter());
             for bound in bounds {
                 if let FrameBound::Preceding(e) | FrameBound::Following(e) = bound {
                     walk_expression(&mut finder, e);
                 }
+                if finder.found.is_some() {
+                    return finder.found;
+                }
             }
-        }
-        if finder.found.is_some() {
-            return finder.found;
         }
     }
     None
 }
 
-/// Visitor for [`first_missing_in_fromless_view_windows`].
-struct FromlessBareColumnFinder<'a> {
-    /// Result-column aliases of the FROM-less view query (legal targets).
-    aliases: &'a [&'a str],
+/// Visitor for [`first_missing_in_fromless_view_windows`]. Bare column
+/// references are only judged inside CTE bodies of scalar subqueries (a
+/// `VALUES` CTE body is walked with `in_cte_values` set; a `SELECT` CTE body
+/// is judged by [`first_unresolvable_column_in_fromless_select`]). Everything
+/// else, including nested window functions' PARTITION BY / ORDER BY, is only
+/// walked to reach such subqueries.
+struct FromlessFrameCteFinder {
+    /// True while walking the rows of a `VALUES` CTE body.
+    in_cte_values: bool,
     found: Option<String>,
 }
 
-impl ExpressionVisitor for FromlessBareColumnFinder<'_> {
+impl ExpressionVisitor for FromlessFrameCteFinder {
     fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
         if self.found.is_some() {
             return VisitResult::Stop;
@@ -671,9 +659,14 @@ impl ExpressionVisitor for FromlessBareColumnFinder<'_> {
                 // construction); the subquery's own body is left alone.
                 for cte in sub.with_clause.iter().flatten() {
                     if let Some(rows) = &cte.query.values {
+                        let saved = std::mem::replace(&mut self.in_cte_values, true);
                         for e in rows.iter().flatten() {
                             walk_expression(self, e);
+                            if self.found.is_some() {
+                                break;
+                            }
                         }
+                        self.in_cte_values = saved;
                     } else {
                         self.found = first_unresolvable_column_in_fromless_select(&cte.query);
                     }
@@ -681,19 +674,22 @@ impl ExpressionVisitor for FromlessBareColumnFinder<'_> {
                         break;
                     }
                 }
-                VisitResult::Skip
+                if self.found.is_some() {
+                    VisitResult::Stop
+                } else {
+                    VisitResult::Skip
+                }
             }
             Expression::Exists { .. }
             | Expression::In { .. }
             | Expression::QuantifiedComparison { .. } => VisitResult::Skip,
-            Expression::ColumnRef(col) => {
+            Expression::ColumnRef(col) if self.in_cte_values => {
                 let name = col.column_canonical();
                 if name != "*"
                     && col.table_canonical().is_none()
                     && col.schema_canonical().is_none()
                     && !col.is_column_quoted()
                     && !is_rowid_pseudo(&name.to_ascii_lowercase())
-                    && !self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
                 {
                     self.found = Some(col.column_display().to_string());
                     return VisitResult::Stop;
