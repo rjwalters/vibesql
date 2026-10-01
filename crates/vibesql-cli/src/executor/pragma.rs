@@ -1234,6 +1234,30 @@ impl SqlExecutor {
                         message: None,
                     })
                 }
+                "PAGE_COUNT" => {
+                    // SQLite-compatible PRAGMA page_count read (altertab3-31.1).
+                    // VibeSQL has no SQLite page file, so report a logical
+                    // estimate: one header page, one root page per table, plus
+                    // enough pages to hold one fixed-width cell per row. The
+                    // estimate is deliberately independent of column payload
+                    // width, so schema-only rewrites (ALTER TABLE ... DROP
+                    // COLUMN) leave it unchanged, as SQLite's in-place drop does.
+                    let page_size = self.page_size.max(1) as u64;
+                    let mut pages: u64 = 1;
+                    for name in self.db.catalog.list_tables() {
+                        pages += 1;
+                        if let Some(t) = self.db.get_table(&name) {
+                            pages += (t.row_count() as u64 * 8).div_ceil(page_size);
+                        }
+                    }
+                    Ok(QueryResult {
+                        columns: vec!["page_count".to_string()],
+                        rows: vec![vec![Some(pages.to_string())]],
+                        row_count: 1,
+                        execution_time_ms: None,
+                        message: None,
+                    })
+                }
                 "CACHE_SIZE" => {
                     // SQLite-compatible PRAGMA cache_size read (pragma.test
                     // pragma-1.*). Returns the raw signed session value;
