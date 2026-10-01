@@ -482,7 +482,9 @@ impl Parser {
 
             // N PRECEDING or N FOLLOWING (including negative numbers like -1 PRECEDING)
             _ => {
-                let offset = self.parse_unary_expression()?;
+                // SQLite accepts any expression here (e.g. `1*2 FOLLOWING`), not just
+                // a unary operand; PRECEDING/FOLLOWING are not operators so they end it.
+                let offset = self.parse_expression()?;
 
                 match self.peek() {
                     Token::Keyword { keyword: Keyword::Preceding, .. } => {

@@ -51,6 +51,27 @@ mod tests {
         }
     }
 
+    // #6174 (altertab3-19.2.1): SQLite never resolves a view body at CREATE
+    // time, so a FROM-less SELECT naming an unresolvable column still creates
+    // the view (the error surfaces at query / ALTER re-parse time).
+    #[test]
+    fn test_create_view_from_less_unresolved_column_is_lax() {
+        let mut db = create_test_db();
+        for sql in [
+            "CREATE VIEW v1 AS SELECT nosuch",
+            "CREATE VIEW v2 AS SELECT 1 WINDOW x AS (ROWS BETWEEN UNBOUNDED PRECEDING AND nosuch * 2 FOLLOWING)",
+        ] {
+            let stmt = Parser::parse_sql(sql).expect("Failed to parse CREATE VIEW");
+            let vibesql_ast::Statement::CreateView(view_stmt) = stmt else {
+                panic!("Expected CreateView statement");
+            };
+            advanced_objects::execute_create_view(&view_stmt, &mut db)
+                .unwrap_or_else(|e| panic!("{sql}: {e}"));
+        }
+        assert!(db.catalog.get_view("v1").is_some());
+        assert!(db.catalog.get_view("v2").is_some());
+    }
+
     #[test]
     fn test_create_or_replace_view() {
         let mut db = create_test_db();
