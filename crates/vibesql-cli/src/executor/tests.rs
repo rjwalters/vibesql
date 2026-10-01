@@ -3936,3 +3936,17 @@ fn test_attach_replays_uncheckpointed_wal_from_a_crashed_direct_open() {
         );
     }
 }
+
+#[test]
+fn test_pragma_page_count_stable_across_drop_column() {
+    let mut executor = SqlExecutor::new(None).unwrap();
+    executor.execute("CREATE TABLE t1(ii INTEGER PRIMARY KEY, tt INTEGER, rr REAL)").unwrap();
+    executor.execute("INSERT INTO t1 VALUES(1, 2, 3.0)").unwrap();
+    let before = executor.execute("PRAGMA page_count").unwrap();
+    assert_eq!(before.row_count, 1);
+    let n: u64 = before.rows[0][0].as_ref().unwrap().parse().unwrap();
+    assert!(n >= 2);
+    executor.execute("ALTER TABLE t1 DROP COLUMN tt").unwrap();
+    let after = executor.execute("PRAGMA page_count").unwrap();
+    assert_eq!(before.rows, after.rows);
+}
