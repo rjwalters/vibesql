@@ -287,3 +287,65 @@ fn compound_select_order_by_column_or_position_or_result_expr_allows_rename() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unresolvable columns in trigger-body SELECTs with a FROM clause, including
+// window PARTITION BY / ORDER BY and named WINDOW definitions
+// (altertab3.test 7.2.2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn missing_column_in_named_window_order_by_blocks_rename() {
+    let err = rename_err(
+        &[
+            "CREATE TABLE t1x(a, b, c)",
+            "CREATE TRIGGER AFTER INSERT ON t1x BEGIN \
+             SELECT a, rank() OVER w1 FROM t1x \
+             WINDOW w1 AS (PARTITION BY b, percent_rank() OVER w1 ORDER BY d); END",
+        ],
+        "ALTER TABLE t1x RENAME TO t1",
+    );
+    assert_eq!(err, "error in trigger AFTER: no such column: d");
+}
+
+#[test]
+fn missing_column_in_trigger_select_blocks_rename() {
+    for body in [
+        "SELECT d FROM t1",
+        "SELECT a FROM t1 WHERE d = 1",
+        "SELECT a, rank() OVER (ORDER BY d) FROM t1",
+        "SELECT sum(a) OVER (PARTITION BY d) FROM t1",
+        "SELECT a FROM t1 WINDOW w AS (ORDER BY d)",
+        "INSERT INTO t1 SELECT a, b, d FROM t1",
+    ] {
+        let err = rename_err(
+            &[
+                "CREATE TABLE t1(a, b, c)",
+                &format!("CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN {}; END", body),
+            ],
+            "ALTER TABLE t1 RENAME TO t2",
+        );
+        assert_eq!(err, "error in trigger r1: no such column: d", "body: {body}");
+    }
+}
+
+#[test]
+fn resolvable_trigger_select_allows_rename() {
+    for body in [
+        // `a(*)`'s `*` placeholder is not a column reference (altertab3.test 13.2).
+        "SELECT a(*) OVER (ORDER BY (SELECT 1)) FROM t1",
+        "SELECT count(*) FROM t1",
+        "SELECT new.a, b, rowid FROM t1",
+        "SELECT a AS z FROM t1 ORDER BY z",
+        "SELECT a, rank() OVER w FROM t1 WINDOW w AS (PARTITION BY b ORDER BY c)",
+        "INSERT INTO t1 SELECT a, b, c FROM t1 WHERE a = new.b",
+    ] {
+        rename_ok(
+            &[
+                "CREATE TABLE t1(a, b, c)",
+                &format!("CREATE TRIGGER r1 AFTER INSERT ON t1 BEGIN {}; END", body),
+            ],
+            "ALTER TABLE t1 RENAME TO t2",
+        );
+    }
+}
