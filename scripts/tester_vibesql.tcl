@@ -3275,6 +3275,17 @@ proc track_pragma_setting {sql} {
         foreach {match value} $sv_matches {
             set base $value
         }
+        # An explicit set pre-empts every DDL statement that precedes it in
+        # this block (SQLite overwrites the cookie with N, so earlier bumps
+        # are lost); only DDL AFTER the last explicit set increments the
+        # running cookie (alter4-5.1: `CREATE TEMP TABLE ...; ATTACH ...;
+        # CREATE TABLE aux.t1 ...; PRAGMA aux.schema_version = 30; SELECT ...`
+        # must leave the cookie at exactly 30).
+        set sv_idx [regexp -all -inline -indices -nocase \
+            {PRAGMA\s+(?:\w+\.)?schema_version\s*[=(]\s*-?\d+\s*[)]?} $sql]
+        if {[llength $sv_idx] > 0} {
+            set sql [string range $sql [expr {[lindex [lindex $sv_idx end] 1] + 1}] end]
+        }
         set ddl_count [expr {
             [regexp -all -nocase {(?:^|;|\n)\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\M} $sql]
             + [regexp -all -nocase {(?:^|;|\n)\s*DROP\s+TABLE\M} $sql]
