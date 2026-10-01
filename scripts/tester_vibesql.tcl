@@ -8281,6 +8281,7 @@ array set vibesql_attach_replay_files {
     pragma4 1
     e_dropview 1
     alter4 1
+    alter 1
 }
 
 # e_createtable.test's ATTACH usage (#6404) is a single unconditional
@@ -8432,6 +8433,8 @@ array set vibesql_attach_ok {
     e_dropview-5.1 1
     e_dropview-5.2 1
     e_dropview-5.3 1
+    alter-3.2.1 1
+    alter-3.2.2 1
     alter4-5.1 1
     alter4-5.2 1
     alter4-5.3 1
