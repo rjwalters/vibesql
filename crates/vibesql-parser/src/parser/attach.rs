@@ -82,6 +82,12 @@ impl Parser {
                 self.advance();
                 Ok(name)
             }
+            // `ON` is a reserved word in SQLite's grammar with no identifier
+            // fallback, so an unquoted `ATTACH ... AS ON` / `DETACH ON` is a
+            // syntax error (alter-3.2.1); only the quoted form is a valid name.
+            Token::Keyword { keyword: Keyword::On, .. } => {
+                Err(ParseError { message: self.peek().syntax_error() })
+            }
             _ => self.parse_identifier_or_keyword(),
         }
     }

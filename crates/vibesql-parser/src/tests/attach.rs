@@ -111,3 +111,17 @@ fn test_attach_detach_not_reserved_as_identifiers() {
         );
     }
 }
+
+#[test]
+fn test_attach_unquoted_on_is_syntax_error() {
+    let err = Parser::parse_sql("ATTACH 'test3.db' AS ON").unwrap_err();
+    assert_eq!(err.message, "near \"ON\": syntax error");
+    let err = Parser::parse_sql("DETACH ON").unwrap_err();
+    assert_eq!(err.message, "near \"ON\": syntax error");
+}
+
+#[test]
+fn test_attach_quoted_on_is_accepted() {
+    assert_eq!(parse_attach("ATTACH 'test3.db' AS 'ON'").schema_name, "ON");
+    assert_eq!(parse_attach("ATTACH 'test3.db' AS \"ON\"").schema_name, "ON");
+}
