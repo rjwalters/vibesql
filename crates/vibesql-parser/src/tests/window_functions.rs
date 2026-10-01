@@ -705,3 +705,19 @@ fn test_real_filter_clause_still_parses() {
         _ => panic!("expected a SELECT"),
     }
 }
+
+// #6174 (altertab3-19.2.1): a frame bound offset is a full expression
+// (`1*2 FOLLOWING`, `count(*) OVER (...) * 2 FOLLOWING`), not just a unary operand.
+#[test]
+fn test_frame_bound_accepts_binary_expression_offset() {
+    for sql in [
+        "SELECT sum(x) OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND 1*2 FOLLOWING) FROM t",
+        "SELECT sum(x) OVER (ROWS BETWEEN 1+1 PRECEDING AND abs(2)*3 FOLLOWING) FROM t",
+        "SELECT 1 WINDOW x AS (ROWS BETWEEN UNBOUNDED PRECEDING AND count(*) OVER (PARTITION BY 1) * 2 FOLLOWING)",
+    ] {
+        Parser::parse_sql(sql).unwrap_or_else(|e| panic!("{sql}: {e:?}"));
+    }
+    // Plain and negative offsets still parse.
+    Parser::parse_sql("SELECT sum(x) OVER (ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) FROM t")
+        .unwrap();
+}

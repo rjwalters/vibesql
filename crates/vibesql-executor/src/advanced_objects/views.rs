@@ -133,7 +133,11 @@ pub fn execute_create_view(stmt: &CreateViewStmt, db: &mut Database) -> Result<(
                     // derived column list; querying it re-runs the SELECT and
                     // surfaces the resolution error then, and ALTER-time schema
                     // re-parses report it as `error in view <name>: ...`.
-                    Err(ExecutorError::ColumnNotFound { .. }) => None,
+                    // `NoSuchColumn` is the FROM-less-SELECT flavour of the same
+                    // unresolved-column condition (altertab3-19.2.1).
+                    Err(
+                        ExecutorError::ColumnNotFound { .. } | ExecutorError::NoSuchColumn { .. },
+                    ) => None,
                     // Likewise for a FROM-clause table that does not (yet)
                     // exist: `sqlite3CreateView` (build.c) never resolves the
                     // view body, so `CREATE VIEW v1 AS SELECT * FROM t2` with
