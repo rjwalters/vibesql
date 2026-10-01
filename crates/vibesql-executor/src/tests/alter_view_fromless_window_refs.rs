@@ -61,3 +61,26 @@ fn resolvable_fromless_window_view_allows_rename() {
     )
     .expect("valid view must not block RENAME");
 }
+
+/// SQLite resolves named-window ORDER BY against the select's result-column
+/// aliases, so this view is valid and must not block RENAME.
+#[test]
+fn alias_in_window_order_by_allows_rename() {
+    rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (ORDER BY zz)")
+        .expect("select-list alias in WINDOW ORDER BY must resolve");
+}
+
+/// Same as above for named-window PARTITION BY.
+#[test]
+fn alias_in_window_partition_by_allows_rename() {
+    rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (PARTITION BY zz)")
+        .expect("select-list alias in WINDOW PARTITION BY must resolve");
+}
+
+/// A bare name that is not an alias is still rejected.
+#[test]
+fn non_alias_in_window_order_by_rejects_rename() {
+    let err =
+        rename_result("CREATE VIEW q AS SELECT 1 AS zz WINDOW x AS (ORDER BY yy)").unwrap_err();
+    assert!(err.to_string().contains("error in view q: no such column: yy"), "{err}");
+}

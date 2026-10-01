@@ -612,7 +612,24 @@ fn first_missing_in_fromless_view_windows(query: &SelectStmt) -> Option<String> 
         return None;
     }
     let windows = query.window_definitions.as_ref()?;
-    let mut finder = FromlessBareColumnFinder { found: None };
+    // SQLite resolves named-window PARTITION BY / ORDER BY with the select's
+    // own NameContext (NC_UEList set), so a bare name matching one of the
+    // view's result-column aliases resolves (`SELECT 1 AS zz WINDOW x AS
+    // (ORDER BY zz)` is valid) — mirror
+    // `first_unresolvable_column_in_fromless_select`. Aliases are also accepted
+    // in frame-bound expressions: that only errs toward allowing the RENAME
+    // (never a false positive), and the altertab3 19.1.2 / 19.3.2 failures come
+    // from CTE bodies of nested scalar subqueries, which are judged against
+    // their own scope and are unaffected.
+    let aliases: Vec<&str> = query
+        .select_list
+        .iter()
+        .filter_map(|item| match item {
+            SelectItem::Expression { alias: Some(alias), .. } => Some(alias.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut finder = FromlessBareColumnFinder { aliases: &aliases, found: None };
     for window in windows {
         let spec = &window.spec;
         for expr in spec.partition_by.iter().flatten() {
@@ -637,11 +654,13 @@ fn first_missing_in_fromless_view_windows(query: &SelectStmt) -> Option<String> 
 }
 
 /// Visitor for [`first_missing_in_fromless_view_windows`].
-struct FromlessBareColumnFinder {
+struct FromlessBareColumnFinder<'a> {
+    /// Result-column aliases of the FROM-less view query (legal targets).
+    aliases: &'a [&'a str],
     found: Option<String>,
 }
 
-impl ExpressionVisitor for FromlessBareColumnFinder {
+impl ExpressionVisitor for FromlessBareColumnFinder<'_> {
     fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
         if self.found.is_some() {
             return VisitResult::Stop;
@@ -674,6 +693,7 @@ impl ExpressionVisitor for FromlessBareColumnFinder {
                     && col.schema_canonical().is_none()
                     && !col.is_column_quoted()
                     && !is_rowid_pseudo(&name.to_ascii_lowercase())
+                    && !self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
                 {
                     self.found = Some(col.column_display().to_string());
                     return VisitResult::Stop;
