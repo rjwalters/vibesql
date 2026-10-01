@@ -26,6 +26,7 @@ use vibesql_ast::{
     visitor::{walk_expression, walk_statement, ExpressionVisitor, StatementVisitor, VisitResult},
     ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FromClause, InsertSource,
     PseudoTable, SelectItem, SelectStmt, Statement, TableConstraintKind, TriggerAction,
+    WindowFunctionSpec, WindowSpec,
 };
 use vibesql_catalog::{TableSchema, TriggerDefinition, ViewDefinition};
 use vibesql_storage::Database;
@@ -589,7 +590,16 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
     // text is absent or does not re-parse to a `CREATE VIEW`.
     let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
     let query = reparsed.as_ref().unwrap_or(&view.query);
+    first_missing_in_select(query, sim)
+}
 
+/// First column reference in `query` that does not resolve against the
+/// (possibly simulated) schema, in SQL text order — or `None` when every
+/// reference resolves or the query shape is too complex to judge statically.
+/// Shared by view validation and trigger-body validation (a trigger body's
+/// top-level `SELECT` / `INSERT ... SELECT` source is re-resolved by SQLite's
+/// schema re-parse exactly like a view's defining query).
+fn first_missing_in_select(query: &SelectStmt, sim: &DropSimulation) -> Option<String> {
     // Constructs that introduce additional name scopes are skipped wholesale:
     // resolving them faithfully would duplicate the planner, and a false
     // positive here would block a DROP COLUMN that SQLite allows.
@@ -653,8 +663,27 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
             }
         }
     }
+    // Named `WINDOW w AS (PARTITION BY ... ORDER BY ...)` definitions are
+    // resolved against the same FROM scope — even a definition no window
+    // function uses (altertab3.test 7.2.2: `WINDOW w1 AS (... ORDER BY d)`
+    // with no column `d` aborts the ALTER with `no such column: d`).
+    if let Some(windows) = &query.window_definitions {
+        for window in windows {
+            if let Some(missing) = first_missing_in_window_spec(&window.spec, &scope) {
+                return Some(missing);
+            }
+        }
+    }
 
     None
+}
+
+/// First unresolvable `ColumnRef` in a window specification's `PARTITION BY`
+/// and `ORDER BY` lists. Frame bounds are not inspected (conservative).
+fn first_missing_in_window_spec(spec: &WindowSpec, scope: &ViewScope) -> Option<String> {
+    spec.partition_by.iter().flatten().find_map(|e| first_missing_in_expr(e, scope)).or_else(|| {
+        spec.order_by.iter().flatten().find_map(|item| first_missing_in_expr(&item.expr, scope))
+    })
 }
 
 /// First column reference in `query` that resolves *ambiguously* — matching
@@ -892,6 +921,14 @@ fn is_rowid_pseudo(name: &str) -> bool {
     matches!(name, "rowid" | "oid" | "_rowid_")
 }
 
+/// Names a view-scope `ColumnRef` check never judges: the rowid
+/// pseudo-columns, and the `*` placeholder the parser stores as a bare
+/// `ColumnRef("*")` for a `f(*)` argument (`count(*)`, or a window call such
+/// as `a(*) OVER (...)`, altertab3.test 13.2) — not a column reference at all.
+fn is_unjudged_column_name(name: &str) -> bool {
+    name == "*" || is_rowid_pseudo(name)
+}
+
 /// First unresolvable `ColumnRef` in `expr` (pre-order), or `None`.
 ///
 /// Only expression shapes enumerated here are descended into; anything else
@@ -947,8 +984,21 @@ fn first_missing_in_expr(expr: &Expression, scope: &ViewScope) -> Option<String>
         Expression::RowValueConstructor(values) => {
             values.iter().find_map(|v| first_missing_in_expr(v, scope))
         }
-        // Subqueries, window functions, and anything not enumerated above:
-        // do not descend (assume valid).
+        // A window function's arguments, FILTER, and inline OVER (PARTITION
+        // BY / ORDER BY) resolve against the enclosing FROM scope.
+        Expression::WindowFunction { function, over } => {
+            let (args, filter) = match function {
+                WindowFunctionSpec::Aggregate { args, filter, .. } => (args, filter.as_deref()),
+                WindowFunctionSpec::Ranking { args, .. }
+                | WindowFunctionSpec::Value { args, .. } => (args, None),
+            };
+            args.iter()
+                .find_map(|a| first_missing_in_expr(a, scope))
+                .or_else(|| filter.and_then(|f| first_missing_in_expr(f, scope)))
+                .or_else(|| first_missing_in_window_spec(over, scope))
+        }
+        // Subqueries and anything not enumerated above: do not descend
+        // (assume valid).
         _ => None,
     }
 }
@@ -1024,7 +1074,7 @@ fn check_column_ref(col: &ColumnIdentifier, scope: &ViewScope) -> Option<String>
         return None;
     }
     let name = col.column_canonical();
-    if is_rowid_pseudo(name) {
+    if is_unjudged_column_name(name) {
         return None;
     }
 
@@ -1060,7 +1110,7 @@ fn check_column_ref_ambiguous(col: &ColumnIdentifier, scope: &ViewScope) -> Opti
         return None;
     }
     let name = col.column_canonical();
-    if is_rowid_pseudo(name) {
+    if is_unjudged_column_name(name) {
         return None;
     }
     if let Some(table) = col.table_canonical() {
@@ -1152,6 +1202,15 @@ fn find_trigger_resolution_error(
         return Some(format!("no such column: {}", column));
     }
 
+    // 3c) A column reference in a top-level body SELECT (or `INSERT ... SELECT` source) with a
+    //    FROM clause that resolves against none of its FROM relations — including references in
+    //    window PARTITION BY / ORDER BY and named WINDOW definitions (altertab3.test 7.2.2:
+    //    `SELECT a, rank() OVER w1 FROM t1x WINDOW w1 AS (... ORDER BY d)` → `no such column:
+    //    d`). Shares the view resolver, so the same conservative scope rules apply.
+    if let Some(column) = find_missing_column_in_trigger_selects(&statements, sim) {
+        return Some(format!("no such column: {}", column));
+    }
+
     // 4) A `JOIN ... USING (c)` naming a column that is not present in both sides of the join
     //    (altertab3.test 24.2).
     if let Some(column) = find_unjoinable_using_column_in_trigger(trigger, &statements, sim) {
@@ -1162,6 +1221,24 @@ fn find_trigger_resolution_error(
     }
 
     None
+}
+
+/// First unresolvable column reference in a trigger body's top-level `SELECT`
+/// statements and `INSERT ... SELECT` sources that have a FROM clause (see
+/// [`first_missing_in_select`]). FROM-less SELECTs are handled separately by
+/// [`find_unresolvable_column_in_fromless_selects`].
+fn find_missing_column_in_trigger_selects(
+    statements: &[Statement],
+    sim: &DropSimulation,
+) -> Option<String> {
+    statements.iter().find_map(|stmt| match stmt {
+        Statement::Select(select) => first_missing_in_select(select, sim),
+        Statement::Insert(insert) => match &insert.source {
+            InsertSource::Select(select) => first_missing_in_select(select, sim),
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 // ============================================================================
