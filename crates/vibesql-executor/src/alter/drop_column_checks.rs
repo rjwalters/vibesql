@@ -24,9 +24,9 @@ use std::collections::HashSet;
 
 use vibesql_ast::{
     visitor::{walk_expression, walk_statement, ExpressionVisitor, StatementVisitor, VisitResult},
-    ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FromClause, InsertSource,
-    PseudoTable, SelectItem, SelectStmt, Statement, TableConstraintKind, TriggerAction,
-    WindowFunctionSpec, WindowSpec,
+    ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FrameBound, FromClause,
+    InsertSource, PseudoTable, SelectItem, SelectStmt, Statement, TableConstraintKind,
+    TriggerAction, WindowFunctionSpec, WindowSpec,
 };
 use vibesql_catalog::{TableSchema, TriggerDefinition, ViewDefinition};
 use vibesql_storage::Database;
@@ -590,7 +590,99 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
     // text is absent or does not re-parse to a `CREATE VIEW`.
     let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
     let query = reparsed.as_ref().unwrap_or(&view.query);
-    first_missing_in_select(query, sim)
+    first_missing_in_select(query, sim).or_else(|| first_missing_in_fromless_view_windows(query))
+}
+
+/// First bare column reference inside the named `WINDOW` definitions of a
+/// FROM-less view query (partition / order / frame-bound expressions, and the
+/// CTE bodies of scalar subqueries nested in them).
+///
+/// A FROM-less query has no relation to resolve a bare column against, and a
+/// scalar subquery in such a position cannot be correlated to anything, so
+/// SQLite's schema re-parse on `ALTER TABLE` fails with `error in view <v>:
+/// no such column: <c>` (altertab3.test 19.1.2 / 19.3.2). Conservative: only
+/// simple (no `WITH`, no compound, no `VALUES`) FROM-less queries are judged,
+/// quoted identifiers / `rowid` / `*` placeholders are accepted.
+fn first_missing_in_fromless_view_windows(query: &SelectStmt) -> Option<String> {
+    if query.from.is_some()
+        || query.with_clause.is_some()
+        || query.values.is_some()
+        || query.set_operation.is_some()
+    {
+        return None;
+    }
+    let windows = query.window_definitions.as_ref()?;
+    let mut finder = FromlessBareColumnFinder { found: None };
+    for window in windows {
+        let spec = &window.spec;
+        for expr in spec.partition_by.iter().flatten() {
+            walk_expression(&mut finder, expr);
+        }
+        for item in spec.order_by.iter().flatten() {
+            walk_expression(&mut finder, &item.expr);
+        }
+        if let Some(frame) = &spec.frame {
+            let bounds = std::iter::once(&frame.start).chain(frame.end.iter());
+            for bound in bounds {
+                if let FrameBound::Preceding(e) | FrameBound::Following(e) = bound {
+                    walk_expression(&mut finder, e);
+                }
+            }
+        }
+        if finder.found.is_some() {
+            return finder.found;
+        }
+    }
+    None
+}
+
+/// Visitor for [`first_missing_in_fromless_view_windows`].
+struct FromlessBareColumnFinder {
+    found: Option<String>,
+}
+
+impl ExpressionVisitor for FromlessBareColumnFinder {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.found.is_some() {
+            return VisitResult::Stop;
+        }
+        match expr {
+            Expression::ScalarSubquery(sub) => {
+                // Only the subquery's CTE bodies are judged (uncorrelated by
+                // construction); the subquery's own body is left alone.
+                for cte in sub.with_clause.iter().flatten() {
+                    if let Some(rows) = &cte.query.values {
+                        for e in rows.iter().flatten() {
+                            walk_expression(self, e);
+                        }
+                    } else {
+                        self.found = first_unresolvable_column_in_fromless_select(&cte.query);
+                    }
+                    if self.found.is_some() {
+                        break;
+                    }
+                }
+                VisitResult::Skip
+            }
+            Expression::Exists { .. }
+            | Expression::In { .. }
+            | Expression::QuantifiedComparison { .. } => VisitResult::Skip,
+            Expression::ColumnRef(col) => {
+                let name = col.column_canonical();
+                if name != "*"
+                    && col.table_canonical().is_none()
+                    && col.schema_canonical().is_none()
+                    && !col.is_column_quoted()
+                    && !is_rowid_pseudo(&name.to_ascii_lowercase())
+                {
+                    self.found = Some(col.column_display().to_string());
+                    return VisitResult::Stop;
+                }
+                VisitResult::Continue
+            }
+            _ => VisitResult::Continue,
+        }
+    }
 }
 
 /// First column reference in `query` that does not resolve against the
