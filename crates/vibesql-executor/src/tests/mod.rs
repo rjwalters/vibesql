@@ -81,6 +81,7 @@ mod alter_rename_table_twice;
 mod alter_rename_table_writable_schema;
 mod alter_system_table_restrictions;
 mod alter_table_constraints;
+mod alter_view_fromless_window_refs;
 mod alter_view_missing_table_precheck;
 mod alter_writable_schema_precheck_suppression;
 mod auto_increment_tests;
