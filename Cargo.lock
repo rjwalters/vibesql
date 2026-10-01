@@ -2991,12 +2991,6 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lru"
-version = "0.16.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
-
-[[package]]
-name = "lru"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
@@ -3116,9 +3110,9 @@ dependencies = [
 
 [[package]]
 name = "mysql"
-version = "28.0.2"
+version = "28.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e99968f000e2aadff1545932ac7f7ed4002eeb0207061f377f15ac95ae82626c"
+checksum = "7d3d30e2806645e218163f49c2656286061cc91ffce24d93d758fd136e70eb5d"
 dependencies = [
  "arc-swap",
  "bufstream",
@@ -3128,10 +3122,10 @@ dependencies = [
  "flate2",
  "io-enum",
  "libc",
- "lru 0.16.3",
+ "lru",
  "mysql_common",
  "named_pipe",
- "pem",
+ "pem 4.0.0",
  "percent-encoding",
  "socket2",
  "twox-hash",
@@ -3808,6 +3802,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
 dependencies = [
  "base64 0.22.1",
+ "serde_core",
+]
+
+[[package]]
+name = "pem"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d354a98a3d1251555de99e8fdd8afda05573c31b82f59063a7b0a29b5527f120"
+dependencies = [
+ "base64 0.23.0",
  "serde_core",
 ]
 
@@ -4598,7 +4602,7 @@ dependencies = [
  "form_urlencoded",
  "http",
  "log",
- "pem",
+ "pem 3.0.6",
  "percent-encoding",
  "reqsign-core",
  "rsa",
@@ -6478,7 +6482,7 @@ dependencies = [
  "instant",
  "libc",
  "log",
- "lru 0.18.5",
+ "lru",
  "md-5",
  "memchr",
  "mysql",
@@ -6537,7 +6541,7 @@ name = "vibesql-python-bindings"
 version = "0.2.0"
 dependencies = [
  "arcstr",
- "lru 0.18.5",
+ "lru",
  "parking_lot",
  "pyo3",
  "vibesql-ast",
@@ -6607,7 +6611,7 @@ dependencies = [
  "instant",
  "js-sys",
  "log",
- "lru 0.18.5",
+ "lru",
  "opendal",
  "parking_lot",
  "rand 0.10.3",
