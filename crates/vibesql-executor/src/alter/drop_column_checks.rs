@@ -211,6 +211,17 @@ fn check_schema_objects(
                 // over it, or it was dropped since) — resolved before any
                 // column, as SQLite's name resolution binds FROM first
                 // (altertab.test 9.1).
+                //
+                // Exception: a FROM-less view whose frame-bound CTEs hold an
+                // unresolvable column is reported on that column even when an
+                // IN right-hand side later names a missing table, because the
+                // walk resolves the left operand first (altertab3.test 19.2.2).
+                if let Some(missing) = find_missing_column_in_fromless_frame_cte(view) {
+                    return Err(ExecutorError::Other(format!(
+                        "error in view {}{}: no such column: {}",
+                        view.name, suffix, missing
+                    )));
+                }
                 if let Some(missing) = find_missing_table_in_view(view, database) {
                     return Err(ExecutorError::Other(format!(
                         "error in view {}{}: no such table: {}",
@@ -647,6 +658,29 @@ fn find_missing_column_in_view(view: &ViewDefinition, sim: &DropSimulation) -> O
     first_missing_in_select(query, sim).or_else(|| first_missing_in_fromless_view_windows(query))
 }
 
+/// Window-frame CTE column check on the view's verbatim definition (see
+/// [`first_missing_in_fromless_view_windows`]), usable ahead of table checks.
+fn find_missing_column_in_fromless_frame_cte(view: &ViewDefinition) -> Option<String> {
+    let reparsed = view.sql_definition.as_deref().and_then(reparse_view_query);
+    let query = reparsed.as_ref().unwrap_or(&view.query);
+    let missing = first_missing_in_fromless_view_windows(query)?;
+    // The lexer lower-cases keyword-spelled identifiers (`LEFT`), but SQLite's
+    // message preserves the source spelling: recover it from the definition.
+    let spelled = view.sql_definition.as_deref().and_then(|sql| {
+        let lower_sql = sql.to_ascii_lowercase();
+        let needle = missing.to_ascii_lowercase();
+        let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+        let bytes = lower_sql.as_bytes();
+        lower_sql.match_indices(&needle).find_map(|(i, _)| {
+            let end = i + needle.len();
+            let before_ok = i == 0 || !is_word(bytes[i - 1]);
+            let after_ok = end >= bytes.len() || !is_word(bytes[end]);
+            (before_ok && after_ok).then(|| sql[i..end].to_string())
+        })
+    });
+    Some(spelled.unwrap_or(missing))
+}
+
 /// First unresolvable column inside the CTE body of a scalar subquery nested
 /// in a frame-bound expression of a FROM-less view query's named `WINDOW`
 /// definitions.
@@ -734,9 +768,21 @@ impl ExpressionVisitor for FromlessFrameCteFinder {
                     VisitResult::Skip
                 }
             }
-            Expression::Exists { .. }
-            | Expression::In { .. }
-            | Expression::QuantifiedComparison { .. } => VisitResult::Skip,
+            // `<lhs> IN <subquery/table>`: the left operand is resolved before
+            // the right-hand side (altertab3.test 19.2.2 — a CTE in the LHS
+            // reports its `no such column` before the RHS's missing table), so
+            // walk the LHS to reach such CTEs; the RHS itself is left alone.
+            Expression::In { expr: lhs, .. } => {
+                walk_expression(self, lhs);
+                if self.found.is_some() {
+                    VisitResult::Stop
+                } else {
+                    VisitResult::Skip
+                }
+            }
+            Expression::Exists { .. } | Expression::QuantifiedComparison { .. } => {
+                VisitResult::Skip
+            }
             Expression::ColumnRef(col) if self.in_cte_values => {
                 let name = col.column_canonical();
                 if name != "*"
