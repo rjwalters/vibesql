@@ -146,6 +146,11 @@ impl ExpressionHasher {
                 Self::is_deterministic_impl(value, allow_column_refs)
             }
 
+            // `x IN ()` / `x NOT IN ()` folds to a constant before the left
+            // operand is resolved (SQLite does the same), so even a subquery
+            // left operand is irrelevant (altertab3-20.10).
+            vibesql_ast::Expression::InList { values, .. } if values.is_empty() => true,
+
             vibesql_ast::Expression::InList { expr, values, .. } => {
                 Self::is_deterministic_impl(expr, allow_column_refs)
                     && values.iter().all(|v| Self::is_deterministic_impl(v, allow_column_refs))

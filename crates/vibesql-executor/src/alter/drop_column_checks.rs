@@ -235,7 +235,61 @@ fn check_schema_objects(
         }
     }
 
+    // Expression indexes on the altered table are re-parsed too: an index
+    // expression holding a subquery with a FROM-less `SELECT *` aborts with
+    // `error in index <name>: no tables specified` (altertab3.test 20.10).
+    for (index_name, metadata) in database.get_expression_indexes_for_table(table_name) {
+        for column in &metadata.columns {
+            if let Some(expr) = column.get_expression() {
+                let mut finder = FromlessWildcardSubqueryFinder { found: false };
+                let _ = walk_expression(&mut finder, expr);
+                if finder.found {
+                    return Err(ExecutorError::Other(format!(
+                        "error in index {}{}: no tables specified",
+                        index_name, suffix
+                    )));
+                }
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Finds an expression subquery containing a FROM-less `SELECT *`.
+struct FromlessWildcardSubqueryFinder {
+    found: bool,
+}
+
+impl ExpressionVisitor for FromlessWildcardSubqueryFinder {
+    fn pre_visit_expression(&mut self, expr: &Expression) -> VisitResult {
+        if self.found {
+            return VisitResult::Stop;
+        }
+        if let Expression::ScalarSubquery(subquery)
+        | Expression::In { subquery, .. }
+        | Expression::Exists { subquery, .. }
+        | Expression::QuantifiedComparison { subquery, .. } = expr
+        {
+            let mut selects: Vec<&SelectStmt> = Vec::new();
+            push_uncorrelated_select(subquery, &mut selects);
+            self.found = selects.into_iter().any(|select| {
+                select.from.is_none()
+                    && select.set_operation.is_none()
+                    && select.values.is_none()
+                    && select.select_list.iter().any(|item| {
+                        matches!(
+                            item,
+                            SelectItem::Wildcard { .. } | SelectItem::QualifiedWildcard { .. }
+                        )
+                    })
+            });
+            if self.found {
+                return VisitResult::Stop;
+            }
+        }
+        VisitResult::Continue
+    }
 }
 
 /// A view or trigger taking part in [`check_schema_objects`]' creation-order
