@@ -69,6 +69,7 @@ mod aggregate_percentile_tests;
 mod aggregate_random_patterns;
 mod aggregate_without_from;
 mod alter_add_column_restrictions;
+mod alter_precheck_index_fromless_wildcard;
 mod alter_precheck_trigger_missing_table_qualifier;
 mod alter_precheck_trigger_nested_refs;
 mod alter_rename_circular_view_precheck;

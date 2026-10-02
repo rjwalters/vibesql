@@ -516,12 +516,27 @@ impl Parser {
                 // 2. A prefix length on the previous column: name(10)
                 //
                 // Since we're at the start of a new column spec, it must be an expression
+                let paren_start = self.position;
                 self.advance(); // consume LParen
 
-                // Parse the expression
-                let expr = self.parse_expression()?;
-
-                self.expect_token(Token::RParen)?;
+                // Parse `( expr )`. If that fails (e.g.
+                // `((WITH s AS (SELECT *) VALUES(2)) IN ())`, where the leading
+                // paren opens a sub-expression rather than wrapping the whole
+                // index expression), backtrack and parse the entire element as
+                // one expression (altertab3-20.10).
+                let primary = self
+                    .parse_expression()
+                    .and_then(|e| self.expect_token(Token::RParen).map(|_| e));
+                let expr = match primary {
+                    Ok(e) => e,
+                    Err(first_err) => {
+                        self.position = paren_start;
+                        match self.parse_expression() {
+                            Ok(e) => e,
+                            Err(_) => return Err(first_err),
+                        }
+                    }
+                };
 
                 // Check for optional ASC/DESC
                 let direction = if self.peek_keyword(crate::keywords::Keyword::Asc) {
