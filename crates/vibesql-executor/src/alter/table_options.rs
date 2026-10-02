@@ -7,7 +7,7 @@ use vibesql_storage::Database;
 use crate::{
     errors::ExecutorError,
     trigger_rename::{
-        rewrite_column_refs_in_trigger_sql, rewrite_table_refs_in_trigger_sql,
+        rewrite_column_refs_in_trigger_sql_with_quote, rewrite_table_refs_in_trigger_sql,
         rewrite_table_refs_in_view_sql,
     },
 };
@@ -923,6 +923,7 @@ pub(super) fn rewrite_triggers_for_column_rename(
     table: &str,
     old_column: &str,
     new_column: &str,
+    force_quote: bool,
 ) -> Result<(), ExecutorError> {
     // Snapshot table -> column-name set so the rewrite resolver can attribute
     // unqualified columns to their owning table without borrowing the database
@@ -985,26 +986,28 @@ pub(super) fn rewrite_triggers_for_column_rename(
                 name, col
             ))
         };
-        let new_body = rewrite_column_refs_in_trigger_sql(
+        let new_body = rewrite_column_refs_in_trigger_sql_with_quote(
             &body_text,
             table,
             old_column,
             new_column,
             &table_has_column,
             subject_is_renamed,
+            force_quote,
         )
         .map_err(ambiguity_error)?;
         let new_sql_definition = existing
             .sql_definition
             .as_ref()
             .map(|sql| {
-                rewrite_column_refs_in_trigger_sql(
+                rewrite_column_refs_in_trigger_sql_with_quote(
                     sql,
                     table,
                     old_column,
                     new_column,
                     &table_has_column,
                     subject_is_renamed,
+                    force_quote,
                 )
             })
             .transpose()
@@ -1139,6 +1142,7 @@ pub(super) fn rewrite_child_foreign_keys_for_column_rename(
     parent_table: &str,
     old_column: &str,
     new_column: &str,
+    force_quote: bool,
 ) {
     for tbl in database.list_tables() {
         let updated_schema = {
@@ -1165,11 +1169,12 @@ pub(super) fn rewrite_child_foreign_keys_for_column_rename(
             // reconstructed from the (already-updated) FK metadata — never left
             // naming the old column.
             let rewritten = table.schema.sql_source.as_deref().and_then(|sql| {
-                crate::alter_rewrite::rename_references_column(
+                crate::alter_rewrite::rename_references_column_with_quote(
                     sql,
                     parent_table,
                     old_column,
                     new_column,
+                    force_quote,
                 )
             });
             match rewritten {
@@ -1194,7 +1199,7 @@ pub(super) fn rewrite_child_foreign_keys_for_column_rename(
 /// text) so the view keeps working after the rename.
 ///
 /// Reuses the trigger-body column resolver
-/// ([`rewrite_column_refs_in_trigger_sql`]), which is table-name-aware and
+/// ([`rewrite_column_refs_in_trigger_sql_with_quote`]), which is table-name-aware and
 /// aborts on a genuinely ambiguous unqualified reference during the rewrite
 /// itself. That check alone is not sufficient: SQLite re-resolves the *entire*
 /// rewritten view against the (already-renamed) schema, and a reference that
@@ -1211,6 +1216,7 @@ pub(super) fn rewrite_views_for_column_rename(
     table: &str,
     old_column: &str,
     new_column: &str,
+    force_quote: bool,
 ) -> Result<(), ExecutorError> {
     // Snapshot table -> column-name set for the resolver (same pattern as the
     // trigger rewrite). Reflects the post-rename schema, so the renamed table's
@@ -1260,7 +1266,7 @@ pub(super) fn rewrite_views_for_column_rename(
                 view.columns.as_ref().map(|c| format!("({})", c.join(", "))).unwrap_or_default();
             format!("CREATE VIEW {}{} AS {}", view.name, cols, view.query.to_sql())
         });
-        let new_text = rewrite_column_refs_in_trigger_sql(
+        let new_text = rewrite_column_refs_in_trigger_sql_with_quote(
             &old_text,
             table,
             old_column,
@@ -1268,6 +1274,7 @@ pub(super) fn rewrite_views_for_column_rename(
             &table_has_column,
             // A view has no NEW/OLD pseudo-tables.
             false,
+            force_quote,
         )
         .map_err(|col| {
             ExecutorError::Other(format!("error in view {}: ambiguous column name: {}", name, col))

@@ -351,6 +351,64 @@ pub fn strip_schema_qualifier(create_sql: &str) -> Option<String> {
     Some(out)
 }
 
+/// Canonicalize the header of a verbatim `CREATE TABLE` / `CREATE VIEW` /
+/// `CREATE TRIGGER` statement the way SQLite records it in `sqlite_master.sql`.
+///
+/// SQLite never stores the statement's original header: it rebuilds the text as
+/// the literal `"CREATE TABLE "` / `"CREATE VIEW "` / `"CREATE TRIGGER "`
+/// followed by the original text starting at the (unqualified) object-name
+/// token (`sqlite3EndTable` prints `"CREATE %s %.*s"` from `sNameToken`;
+/// `sqlite3FinishTrigger` prints `"CREATE TRIGGER %q"` from the trigger-name
+/// token). So the `TEMP`/`TEMPORARY` keyword, `IF NOT EXISTS`, the
+/// `<schema>.` qualifier, the keyword spelling (`create table` ->
+/// `CREATE TABLE`) and any whitespace/comments between those header tokens
+/// all disappear, while everything from the name onward is byte-for-byte
+/// verbatim. Verified against sqlite3 3.54.0: `CREATE TEMP TRIGGER IF NOT
+/// EXISTS tr2 AFTER INSERT ON m BEGIN SELECT 1; END` is stored as `CREATE
+/// TRIGGER tr2 AFTER INSERT ON m BEGIN SELECT 1; END`, `create   table t(a)`
+/// as `CREATE TABLE t(a)` (alterqf.test 2.1's temp trigger).
+///
+/// The name token is taken positionally (the first token after the optional
+/// `IF NOT EXISTS`), so a keyword-spelled name such as the `AFTER` in SQLite's
+/// `CREATE TEMP TRIGGER AFTER INSERT ON x1 ...` (a trigger literally *named*
+/// `AFTER`) is handled like any other name. Returns `None` when `sql` does not
+/// start with such a header (e.g. `CREATE VIRTUAL TABLE`, or text that cannot
+/// be tokenized), so the caller keeps the original text.
+pub(crate) fn canonical_schema_sql(sql: &str) -> Option<String> {
+    let tokens = tokenize(sql)?;
+    let mut i = 0;
+    if !matches!(tokens.get(i), Some((Token::Keyword { keyword: Keyword::Create, .. }, _))) {
+        return None;
+    }
+    i += 1;
+    if matches!(
+        tokens.get(i),
+        Some((Token::Keyword { keyword: Keyword::Temp | Keyword::Temporary, .. }, _))
+    ) {
+        i += 1;
+    }
+    let kind = match tokens.get(i) {
+        Some((Token::Keyword { keyword: Keyword::Table, .. }, _)) => "TABLE",
+        Some((Token::Keyword { keyword: Keyword::View, .. }, _)) => "VIEW",
+        Some((Token::Keyword { keyword: Keyword::Trigger, .. }, _)) => "TRIGGER",
+        _ => return None,
+    };
+    i += 1;
+    if matches!(tokens.get(i), Some((Token::Keyword { keyword: Keyword::If, .. }, _)))
+        && matches!(tokens.get(i + 1), Some((Token::Keyword { keyword: Keyword::Not, .. }, _)))
+        && matches!(tokens.get(i + 2), Some((Token::Keyword { keyword: Keyword::Exists, .. }, _)))
+    {
+        i += 3;
+    }
+    // Skip a `<schema> .` qualifier: the real name follows the dot.
+    tokens.get(i)?;
+    if matches!(tokens.get(i + 1), Some((Token::Symbol('.'), _))) {
+        i += 2;
+    }
+    let name_start = tokens.get(i)?.1.start;
+    Some(format!("CREATE {} {}", kind, &sql[name_start..]))
+}
+
 /// Rewrite every `REFERENCES <old_parent>` clause in the verbatim `CREATE TABLE`
 /// text of a *child* table to `REFERENCES "<new_parent>"`, matching SQLite's
 /// `sqlite_rename_parent` (invoked when the referenced parent table is renamed
@@ -410,12 +468,28 @@ pub fn rename_references_parent(
 /// 3.51.0 (altercol.test 1.2/1.9 — a quoted `"b"`/`"B"` becomes quoted `"d"`
 /// even though `d` is a safe bare name; 4.4 — a quoted `"silly name"` becomes
 /// quoted `"reasonable"`).
+///
+/// SQLite's full rule also quotes every replacement when the *new name itself*
+/// was a quoted token in the `ALTER` statement (`bQuote =
+/// sqlite3Isquote(pNew->z[0])`, `RenameColumnStmt::new_column_quoted`). Callers
+/// fold that flag into `replaced_was_quoted` (`was_quoted || force_quote`).
 pub(crate) fn emit_renamed_ident(new_col: &str, replaced_was_quoted: bool) -> String {
     if replaced_was_quoted || !is_safe_bare_identifier(new_col) {
         quote_ident(new_col)
     } else {
         new_col.to_string()
     }
+}
+
+/// Test convenience: [`rename_column_with_quote`] with `force_quote = false`.
+#[cfg(test)]
+pub fn rename_column(
+    create_sql: &str,
+    table_name: &str,
+    old_col: &str,
+    new_col: &str,
+) -> Option<String> {
+    rename_column_with_quote(create_sql, table_name, old_col, new_col, false)
 }
 
 /// Rewrite *every* reference to `old_col` that resolves to `table_name`'s column
@@ -434,17 +508,23 @@ pub(crate) fn emit_renamed_ident(new_col: &str, replaced_was_quoted: bool) -> St
 /// Column references inside a `REFERENCES <other>(<col_list>)` parent column list
 /// are left untouched when `<other>` is a *different* table — those names resolve
 /// to the parent and are rewritten from the parent side (see
-/// [`rename_references_column`]). A self-referential `REFERENCES <table>(...)`
+/// [`rename_references_column_with_quote`]). A self-referential `REFERENCES <table>(...)`
 /// list *is* rewritten, since those columns resolve to the renamed table.
 ///
 /// Quoting follows SQLite's `bQuote` rule via [`emit_renamed_ident`]. Returns
 /// `None` when `old_col` is not referenced (the caller then falls back to
 /// invalidate-and-reconstruct), preserving the re-parseable-on-reload invariant.
-pub fn rename_column(
+///
+/// `force_quote` is SQLite's `bQuote` flag (`RenameColumnStmt::new_column_quoted`):
+/// when the new name was a quoted token in the `ALTER` statement, every rewritten
+/// reference is emitted double-quoted, not only those replacing a quoted token
+/// (alterqf.test 2.1).
+pub fn rename_column_with_quote(
     create_sql: &str,
     table_name: &str,
     old_col: &str,
     new_col: &str,
+    force_quote: bool,
 ) -> Option<String> {
     let tokens = tokenize(create_sql)?;
     let (open, close) = column_list_parens(&tokens)?;
@@ -635,7 +715,7 @@ pub fn rename_column(
     // Rewrite from the last span backward so earlier byte offsets stay valid.
     let mut out = create_sql.to_string();
     for (span, was_quoted) in targets.iter().rev() {
-        let mut replacement = emit_renamed_ident(new_col, *was_quoted);
+        let mut replacement = emit_renamed_ident(new_col, *was_quoted || force_quote);
         // Guard against token-gluing (altercol.test 23.0): a double-quoted
         // replacement immediately followed — with no separating whitespace in
         // the original text — by another `"`-delimited token (e.g. the
@@ -656,6 +736,17 @@ pub fn rename_column(
     Some(out)
 }
 
+/// Test convenience: [`rename_references_column_with_quote`] with `force_quote = false`.
+#[cfg(test)]
+pub fn rename_references_column(
+    create_sql: &str,
+    parent_table: &str,
+    old_col: &str,
+    new_col: &str,
+) -> Option<String> {
+    rename_references_column_with_quote(create_sql, parent_table, old_col, new_col, false)
+}
+
 /// Rewrite the column name `old_col` -> `new_col` inside every
 /// `REFERENCES <parent_table>(<col_list>)` clause of a *child* table's verbatim
 /// `CREATE TABLE` text, matching SQLite's `sqlite_rename_column` propagation to
@@ -670,11 +761,17 @@ pub fn rename_column(
 /// follows SQLite's `bQuote` rule via [`emit_renamed_ident`]. Returns `None` when
 /// no matching `REFERENCES <parent_table>(...)` column is present (the caller
 /// then invalidates and reconstructs).
-pub fn rename_references_column(
+///
+/// `force_quote` is SQLite's `bQuote` flag (`RenameColumnStmt::new_column_quoted`):
+/// when the new name was a quoted token in the `ALTER` statement, every rewritten
+/// reference is emitted double-quoted, not only those replacing a quoted token
+/// (alterqf.test 2.1).
+pub fn rename_references_column_with_quote(
     create_sql: &str,
     parent_table: &str,
     old_col: &str,
     new_col: &str,
+    force_quote: bool,
 ) -> Option<String> {
     let tokens = tokenize(create_sql)?;
 
@@ -720,7 +817,10 @@ pub fn rename_references_column(
 
     let mut out = create_sql.to_string();
     for (span, was_quoted) in targets.iter().rev() {
-        out.replace_range(span.start..span.end, &emit_renamed_ident(new_col, *was_quoted));
+        out.replace_range(
+            span.start..span.end,
+            &emit_renamed_ident(new_col, *was_quoted || force_quote),
+        );
     }
     Some(out)
 }
@@ -978,6 +1078,56 @@ mod tests {
     #[test]
     fn strip_schema_qualifier_none_when_unqualified() {
         assert!(strip_schema_qualifier("CREATE TABLE t1(a, b)").is_none());
+    }
+
+    #[test]
+    fn canonical_schema_sql_rebuilds_header_like_sqlite() {
+        // Verified against sqlite3 3.54.0.
+        let cases = [
+            ("create   table t(a)", "CREATE TABLE t(a)"),
+            ("CREATE TEMP TABLE IF NOT EXISTS temp.tt(x)", "CREATE TABLE tt(x)"),
+            ("CREATE TEMPORARY VIEW IF NOT EXISTS v AS SELECT 1", "CREATE VIEW v AS SELECT 1"),
+            ("CREATE VIEW IF NOT EXISTS main.\"vv\" AS SELECT 2", "CREATE VIEW \"vv\" AS SELECT 2"),
+            (
+                "CREATE TEMP TRIGGER IF NOT EXISTS tr2 AFTER INSERT ON m BEGIN SELECT 1; END",
+                "CREATE TRIGGER tr2 AFTER INSERT ON m BEGIN SELECT 1; END",
+            ),
+            (
+                "create trigger  main.tr after insert on t begin select 1; end",
+                "CREATE TRIGGER tr after insert on t begin select 1; end",
+            ),
+            // A trigger literally named `AFTER` (alterqf.test 2.0).
+            (
+                "CREATE TEMP TRIGGER AFTER INSERT ON x1 BEGIN SELECT 1; END",
+                "CREATE TRIGGER AFTER INSERT ON x1 BEGIN SELECT 1; END",
+            ),
+            // Already canonical: unchanged.
+            ("CREATE TABLE t1(a, b)", "CREATE TABLE t1(a, b)"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(canonical_schema_sql(input).as_deref(), Some(expected), "{input}");
+        }
+    }
+
+    #[test]
+    fn canonical_schema_sql_leaves_other_statements_alone() {
+        assert!(canonical_schema_sql("CREATE INDEX i ON t(a)").is_none());
+        assert!(canonical_schema_sql("CREATE VIRTUAL TABLE v USING fts5(a)").is_none());
+        assert!(canonical_schema_sql("SELECT 1").is_none());
+    }
+
+    #[test]
+    fn rename_column_force_quote_quotes_bare_references() {
+        // SQLite's bQuote: `RENAME b TO 'bb'` quotes every replacement.
+        let sql = "CREATE TABLE t(a, b, CHECK(b > a), UNIQUE(b))";
+        assert_eq!(
+            rename_column_with_quote(sql, "t", "b", "bb", true).as_deref(),
+            Some("CREATE TABLE t(a, \"bb\", CHECK(\"bb\" > a), UNIQUE(\"bb\"))")
+        );
+        assert_eq!(
+            rename_column_with_quote(sql, "t", "b", "bb", false).as_deref(),
+            Some("CREATE TABLE t(a, bb, CHECK(bb > a), UNIQUE(bb))")
+        );
     }
 
     #[test]

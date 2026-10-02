@@ -230,6 +230,18 @@ fn matches_metadata(
     columns_match && where_match
 }
 
+/// Test convenience: [`rename_index_column_with_quote`] with `force_quote = false`.
+#[cfg(test)]
+pub(crate) fn rename_index_column(
+    index_sql: &str,
+    table_name: &str,
+    old_col: &str,
+    new_col: &str,
+    renamed_metadata: &vibesql_catalog::IndexMetadata,
+) -> Option<String> {
+    rename_index_column_with_quote(index_sql, table_name, old_col, new_col, renamed_metadata, false)
+}
+
 /// Rewrite every reference to column `old_col` in a verbatim `CREATE INDEX`
 /// text to `new_col`, matching SQLite's `ALTER TABLE ... RENAME COLUMN`
 /// (`CREATE INDEX i2 ON t2((LIKELIHOOD(c0, 1.0) IN ()))` becomes
@@ -254,12 +266,18 @@ fn matches_metadata(
 /// scan could not classify, e.g. a string-literal column name), `None` is
 /// returned and the caller invalidates the stored source instead of keeping a
 /// text that disagrees with the index's real shape.
-pub(crate) fn rename_index_column(
+///
+/// `force_quote` is SQLite's `bQuote` flag (`RenameColumnStmt::new_column_quoted`):
+/// when the new name was a quoted token in the `ALTER` statement, every rewritten
+/// reference is emitted double-quoted, not only those replacing a quoted token
+/// (alterqf.test 2.1).
+pub(crate) fn rename_index_column_with_quote(
     index_sql: &str,
     table_name: &str,
     old_col: &str,
     new_col: &str,
     renamed_metadata: &vibesql_catalog::IndexMetadata,
+    force_quote: bool,
 ) -> Option<String> {
     let tokens = tokenize(index_sql)?;
     let (_, _, table_idx) = index_header(&tokens)?;
@@ -300,7 +318,7 @@ pub(crate) fn rename_index_column(
 
     let mut out = index_sql.to_string();
     for (span, was_quoted) in targets.iter().rev() {
-        let mut replacement = emit_renamed_ident(new_col, *was_quoted);
+        let mut replacement = emit_renamed_ident(new_col, *was_quoted || force_quote);
         // Token-gluing guard, as in `alter_rewrite::rename_column`: a quoted
         // replacement directly followed by another `"` would lex as one token.
         if replacement.ends_with('"') && index_sql.as_bytes().get(span.end) == Some(&b'"') {

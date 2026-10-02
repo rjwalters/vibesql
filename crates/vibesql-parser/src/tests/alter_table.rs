@@ -802,3 +802,27 @@ fn test_parse_alter_table_rename_to_string_literal() {
         other => panic!("Expected ALTER TABLE RENAME TO, got: {other:?}"),
     }
 }
+
+#[test]
+fn test_parse_rename_column_records_whether_new_name_was_quoted() {
+    // SQLite's `bQuote` (`sqlite3Isquote(pNew->z[0])`): any quoted spelling of
+    // the new name, including the `'x'` string-as-name form, sets the flag.
+    for (sql, quoted) in [
+        ("ALTER TABLE t RENAME a TO b", false),
+        ("ALTER TABLE t RENAME COLUMN a TO m", false),
+        ("ALTER TABLE t RENAME a TO 'b'", true),
+        ("ALTER TABLE t RENAME a TO \"b\"", true),
+        ("ALTER TABLE t RENAME COLUMN a TO [b]", true),
+        ("ALTER TABLE t RENAME COLUMN \"a\" TO `b`", true),
+        ("ALTER TABLE t RENAME COLUMN \"a\" TO b", false),
+    ] {
+        match Parser::parse_sql(sql) {
+            Ok(vibesql_ast::Statement::AlterTable(vibesql_ast::AlterTableStmt::RenameColumn(
+                rename,
+            ))) => {
+                assert_eq!(rename.new_column_quoted, quoted, "{sql}");
+            }
+            other => panic!("`{sql}`: expected RENAME COLUMN, got {other:?}"),
+        }
+    }
+}

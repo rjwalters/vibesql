@@ -632,8 +632,12 @@ fn generate_create_table_sql(table: &TableSchema) -> String {
     // rather than reconstructing a normalized form from the parsed schema. We
     // only reconstruct when the verbatim text is unavailable (e.g. schemas built
     // programmatically, or after ALTER TABLE invalidated the stale source).
+    //
+    // The header is canonicalized the way SQLite rebuilds it (`CREATE TABLE `
+    // + text from the unqualified name: no TEMP / IF NOT EXISTS / schema
+    // qualifier, uppercase keywords) — see `alter_rewrite::canonical_schema_sql`.
     if let Some(ref src) = table.sql_source {
-        return src.clone();
+        return crate::alter_rewrite::canonical_schema_sql(src).unwrap_or_else(|| src.clone());
     }
 
     let mut sql = format!("CREATE TABLE {} (\n", table.name);
@@ -801,10 +805,15 @@ fn generate_create_view_sql(view: &vibesql_catalog::ViewDefinition) -> String {
     // without a trailing `;` in `sqlite_master.sql`, so strip one if the captured
     // verbatim text carried it (mirrors `generate_create_trigger_sql`; verified
     // against sqlite3 3.51.0, altercol.test group 8).
+    //
+    // The header is canonicalized the way SQLite rebuilds it (`CREATE VIEW ` +
+    // text from the unqualified name) — see
+    // `alter_rewrite::canonical_schema_sql`.
     if let Some(ref sql) = view.sql_definition {
         let trimmed = sql.trim_end();
-        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed);
-        return trimmed.trim_end().to_string();
+        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+        return crate::alter_rewrite::canonical_schema_sql(trimmed)
+            .unwrap_or_else(|| trimmed.to_string());
     }
 
     // Otherwise generate from the view definition
@@ -826,10 +835,16 @@ fn generate_create_trigger_sql(trigger: &vibesql_catalog::TriggerDefinition) -> 
     // form kept consistent by `crate::trigger_rename` across ALTER TABLE RENAME.
     // SQLite stores the statement text without the trailing `;`, so strip one if
     // present.
+    //
+    // The header is canonicalized the way SQLite rebuilds it (`CREATE TRIGGER `
+    // + text from the unqualified trigger name: a TEMP trigger's stored text
+    // carries no TEMP keyword, alterqf.test 2.1) — see
+    // `alter_rewrite::canonical_schema_sql`.
     if let Some(ref sql) = trigger.sql_definition {
         let trimmed = sql.trim_end();
-        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed);
-        return trimmed.trim_end().to_string();
+        let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
+        return crate::alter_rewrite::canonical_schema_sql(trimmed)
+            .unwrap_or_else(|| trimmed.to_string());
     }
 
     let timing = match trigger.timing {

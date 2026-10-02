@@ -321,13 +321,36 @@ fn ident_name(tok: &Token) -> Option<&str> {
     }
 }
 
+/// Test convenience: [`rewrite_column_refs_in_trigger_sql_with_quote`] with `force_quote = false`.
+#[cfg(test)]
+pub fn rewrite_column_refs_in_trigger_sql(
+    sql: &str,
+    renamed_table: &str,
+    old_column: &str,
+    new_column: &str,
+    table_has_column: &dyn Fn(&str, &str) -> bool,
+    new_old_refer_to_renamed_table: bool,
+) -> Result<String, String> {
+    rewrite_column_refs_in_trigger_sql_with_quote(
+        sql,
+        renamed_table,
+        old_column,
+        new_column,
+        table_has_column,
+        new_old_refer_to_renamed_table,
+        false,
+    )
+}
+
 /// Rewrite references to a renamed *column* inside a `CREATE TRIGGER` SQL text.
 ///
 /// When `ALTER TABLE <renamed_table> RENAME <old_column> TO <new_column>` runs,
 /// SQLite (with `legacy_alter_table=OFF`) rewrites every reference inside trigger
 /// bodies that resolves to `<renamed_table>.<old_column>`, while preserving the
 /// rest of the `CREATE TRIGGER` text verbatim. Unlike table renames, the new
-/// column name is emitted *unquoted* (e.g. `t2.c` -> `t2.abc`, `e` -> `abc`).
+/// column name is emitted *unquoted* when replacing a bare token (e.g. `t2.c`
+/// -> `t2.abc`, `e` -> `abc`), and double-quoted when replacing a quoted one
+/// (`new."c"` -> `new."abc"`) — see `apply_column_edits`.
 ///
 /// `table_has_column(table, column)` is used to resolve which FROM-clause table
 /// an unqualified column belongs to (and to confirm the renamed table actually
@@ -352,13 +375,19 @@ fn ident_name(tok: &Token) -> Option<&str> {
 /// (the `NEW`/`OLD` pseudo-tables always alias the trigger's subject table), so
 /// the caller must gate it on that. Views and triggers on other tables pass
 /// `false` and leave `new.`/`old.` references untouched.
-pub fn rewrite_column_refs_in_trigger_sql(
+///
+/// `force_quote` is SQLite's `bQuote` flag (`RenameColumnStmt::new_column_quoted`):
+/// when the new name was a quoted token in the `ALTER` statement, every rewritten
+/// reference is emitted double-quoted, not only those replacing a quoted token
+/// (alterqf.test 2.1).
+pub fn rewrite_column_refs_in_trigger_sql_with_quote(
     sql: &str,
     renamed_table: &str,
     old_column: &str,
     new_column: &str,
     table_has_column: &dyn Fn(&str, &str) -> bool,
     new_old_refer_to_renamed_table: bool,
+    force_quote: bool,
 ) -> Result<String, String> {
     let tokens = match Lexer::new(sql).tokenize_with_spans() {
         Ok(t) => t,
@@ -477,7 +506,7 @@ pub fn rewrite_column_refs_in_trigger_sql(
     if edits.is_empty() {
         return Ok(sql.to_string());
     }
-    Ok(apply_column_edits(sql, &edits, new_column))
+    Ok(apply_column_edits(sql, &edits, new_column, force_quote))
 }
 
 /// Outcome of resolving an unqualified column reference against the renamed
@@ -505,25 +534,35 @@ struct TableRef {
 /// Apply replacement edits, replacing each span with the new column name.
 /// Spans are sorted defensively before application.
 ///
-/// The replacement is double-quoted whenever `new_column` is not a safe bare
-/// identifier (mirrors SQLite's `bQuote` rule for `RENAME COLUMN`, see
-/// `crate::alter_rewrite::emit_renamed_ident`) — e.g. renaming a column to a
-/// name containing a semicolon must quote every rewritten reference inside a
-/// trigger/view body, not just the `CREATE TABLE` column definition itself
-/// (altercol.test 8.4.1).
-fn apply_column_edits(sql: &str, edits: &[Span], new_column: &str) -> String {
-    let replacement = if crate::alter_rewrite::is_safe_bare_identifier(new_column) {
-        new_column.to_string()
-    } else {
-        crate::alter_rewrite::quote_ident(new_column)
-    };
+/// Replacement quoting follows SQLite's `renameEditSql` rule (see
+/// `crate::alter_rewrite::emit_renamed_ident`): a replacement is emitted
+/// double-quoted when the *replaced* token was itself quoted (its first byte is
+/// not an identifier character — `"b"`, `[b]`, `` `b` `` all become `"d"`, so
+/// `new."b"` renames to `new."d"`, not `new.d`), when `force_quote` is set
+/// (the new name was a quoted token in the `ALTER` statement, SQLite's
+/// `bQuote`), or when `new_column` is not a safe bare identifier — e.g.
+/// renaming a column to a name containing a semicolon must quote every
+/// rewritten reference inside a trigger/view body, not just the `CREATE TABLE`
+/// column definition itself (altercol.test 8.4.1).
+fn apply_column_edits(sql: &str, edits: &[Span], new_column: &str, force_quote: bool) -> String {
     let mut sorted = edits.to_vec();
     sorted.sort_by_key(|s| s.start);
-    let mut out = String::with_capacity(sql.len() + sorted.len() * replacement.len());
+    let mut out = String::with_capacity(sql.len() + sorted.len() * (new_column.len() + 3));
     let mut cursor = 0usize;
     for span in sorted {
         if span.start < cursor {
             continue;
+        }
+        let replaced_was_quoted =
+            matches!(sql.as_bytes().get(span.start), Some(b'"' | b'[' | b'`'));
+        let mut replacement = crate::alter_rewrite::emit_renamed_ident(
+            new_column,
+            replaced_was_quoted || force_quote,
+        );
+        // Token-gluing guard (as in `alter_rewrite::rename_column`): a quoted
+        // replacement directly followed by another `"` would lex as one token.
+        if replacement.ends_with('"') && sql.as_bytes().get(span.end) == Some(&b'"') {
+            replacement.push(' ');
         }
         out.push_str(&sql[cursor..span.start]);
         out.push_str(&replacement);
@@ -965,7 +1004,9 @@ mod tests {
         let got =
             rewrite_column_refs_in_trigger_sql(sql, "t1", "big c", "reallybigc", &has_big_c, false)
                 .expect("rewrite should not be ambiguous in this fixture");
-        assert_eq!(got, "CREATE VIEW v5 AS SELECT reallybigc FROM t1");
+        // The replaced token was quoted, so the new name is re-emitted quoted
+        // (sqlite3 3.54.0: `SELECT "reallybigc" FROM t1`).
+        assert_eq!(got, "CREATE VIEW v5 AS SELECT \"reallybigc\" FROM t1");
     }
 
     /// Same as above but the delimited identifier is table-qualified
@@ -979,7 +1020,7 @@ mod tests {
         let got =
             rewrite_column_refs_in_trigger_sql(sql, "t1", "big c", "reallybigc", &has_big_c, false)
                 .expect("rewrite should not be ambiguous in this fixture");
-        assert_eq!(got, "CREATE VIEW v5 AS SELECT t1.reallybigc FROM t1");
+        assert_eq!(got, "CREATE VIEW v5 AS SELECT t1.\"reallybigc\" FROM t1");
     }
 
     #[test]

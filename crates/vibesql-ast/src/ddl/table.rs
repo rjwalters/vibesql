@@ -419,6 +419,14 @@ pub struct RenameColumnStmt {
     pub table_name: String,
     pub old_column_name: String,
     pub new_column_name: String,
+    /// True when the new name was written as a *quoted* token in the ALTER
+    /// statement (`"x"`, `[x]`, `` `x` ``, or the `'x'` string-as-name form).
+    /// Mirrors SQLite's `bQuote` flag (`sqlite3Isquote(pNew->z[0])` in
+    /// `alter.c`): when set, every reference rewritten by the rename is emitted
+    /// double-quoted (`"x"`), even where the replaced token was a bare
+    /// identifier — e.g. `RENAME two TO 'four'` turns `CHECK (two != 1)` into
+    /// `CHECK ("four" != 1)` (alterqf.test 2.1).
+    pub new_column_quoted: bool,
 }
 
 /// MODIFY COLUMN operation (MySQL-style)
