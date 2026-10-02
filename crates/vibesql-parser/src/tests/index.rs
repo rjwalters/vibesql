@@ -999,3 +999,79 @@ fn test_create_index_single_quoted_schema_qualifier() {
         _ => panic!("Expected CreateIndex statement"),
     }
 }
+
+#[test]
+fn test_create_index_paren_led_expression_element_backtracks() {
+    // altertab3-20.10: the leading `(` opens a sub-expression (the CTE
+    // subquery) rather than wrapping the whole index element, so the
+    // `( expr )` fast path fails at `IN` and the parser must backtrack and
+    // parse the entire element `(<subquery>) IN ()` as one expression.
+    let sql = "CREATE INDEX k ON s( (WITH s AS( SELECT * ) VALUES(2) ) IN () )";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.index_name, "k");
+            assert_eq!(stmt.table_name, "s");
+            assert_eq!(stmt.columns.len(), 1, "must be ONE expression element");
+            match stmt.columns[0].get_expression() {
+                Some(vibesql_ast::Expression::InList { values, negated, expr }) => {
+                    assert!(values.is_empty());
+                    assert!(!negated);
+                    assert!(
+                        matches!(expr.as_ref(), vibesql_ast::Expression::ScalarSubquery(_)),
+                        "left operand should be the parenthesized subquery, got: {:?}",
+                        expr
+                    );
+                }
+                other => panic!("Expected InList expression element, got: {:?}", other),
+            }
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_parenthesized_expression_elements_keep_fast_path() {
+    // The ordinary `( expr )` path (taken before any backtrack) must keep
+    // working: a doubly-parenthesized expression and a parenthesized
+    // expression followed by a direction keyword.
+    let sql = "CREATE INDEX i ON t( ((a + b)), (a) DESC )";
+    let result = Parser::parse_sql(sql);
+    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    match result.unwrap() {
+        Statement::CreateIndex(stmt) => {
+            assert_eq!(stmt.columns.len(), 2);
+            assert!(
+                matches!(
+                    stmt.columns[0].get_expression(),
+                    Some(vibesql_ast::Expression::BinaryOp {
+                        op: vibesql_ast::BinaryOperator::Plus,
+                        ..
+                    })
+                ),
+                "first element should be `a + b`, got: {:?}",
+                stmt.columns[0]
+            );
+            assert_eq!(stmt.columns[0].direction(), vibesql_ast::OrderDirection::Asc);
+            assert!(
+                matches!(
+                    stmt.columns[1].get_expression(),
+                    Some(vibesql_ast::Expression::ColumnRef(_))
+                ),
+                "second element should be the column ref `a`, got: {:?}",
+                stmt.columns[1]
+            );
+            assert_eq!(stmt.columns[1].direction(), vibesql_ast::OrderDirection::Desc);
+        }
+        other => panic!("Expected CreateIndex, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_create_index_unparseable_paren_element_still_errors() {
+    // When both the `( expr )` path and the whole-element re-parse fail, the
+    // statement is still rejected.
+    assert!(Parser::parse_sql("CREATE INDEX i ON t( (a + ) )").is_err());
+}

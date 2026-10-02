@@ -655,4 +655,55 @@ mod tests {
         };
         assert!(ExpressionHasher::is_deterministic(&expr));
     }
+
+    fn parse_expr(sql: &str) -> vibesql_ast::Expression {
+        vibesql_parser::Parser::parse_expression_sql(sql).expect("parse expression")
+    }
+
+    #[test]
+    fn test_empty_in_list_is_deterministic_regardless_of_operand() {
+        // `x IN ()` / `x NOT IN ()` folds to a constant, so even a subquery or
+        // non-deterministic left operand is irrelevant (altertab3-20.10).
+        for sql in
+            ["(WITH s AS (SELECT *) VALUES(2)) IN ()", "(SELECT 1) NOT IN ()", "random() IN ()"]
+        {
+            let expr = parse_expr(sql);
+            assert!(
+                matches!(&expr, vibesql_ast::Expression::InList { values, .. } if values.is_empty()),
+                "{sql} should parse as an empty InList, got {expr:?}"
+            );
+            assert!(ExpressionHasher::is_deterministic(&expr), "{sql} should be deterministic");
+            assert!(
+                ExpressionHasher::is_deterministic_for_index(&expr),
+                "{sql} should be deterministic for an index"
+            );
+        }
+    }
+
+    #[test]
+    fn test_non_empty_in_list_with_non_deterministic_operand_is_not_deterministic() {
+        // The empty-list fold must not leak to non-empty lists: the left
+        // operand (or any list value) still decides determinism.
+        for sql in [
+            "random() IN (1, 2)",
+            "(SELECT 1) IN (1)",
+            "1 IN (random())",
+            "(WITH s AS (SELECT *) VALUES(2)) NOT IN (2)",
+        ] {
+            let expr = parse_expr(sql);
+            assert!(
+                matches!(&expr, vibesql_ast::Expression::InList { values, .. } if !values.is_empty()),
+                "{sql} should parse as a non-empty InList, got {expr:?}"
+            );
+            assert!(!ExpressionHasher::is_deterministic(&expr), "{sql} must not be deterministic");
+            assert!(
+                !ExpressionHasher::is_deterministic_for_index(&expr),
+                "{sql} must not be deterministic for an index"
+            );
+        }
+
+        // Sanity: a non-empty list with only deterministic parts stays
+        // deterministic.
+        assert!(ExpressionHasher::is_deterministic(&parse_expr("1 IN (1, 2)")));
+    }
 }
