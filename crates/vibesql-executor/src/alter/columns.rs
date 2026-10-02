@@ -756,6 +756,7 @@ pub(super) fn execute_rename_column(
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
+        stmt.new_column_quoted,
     ) {
         return Err(rollback(database, err));
     }
@@ -768,6 +769,7 @@ pub(super) fn execute_rename_column(
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
+        stmt.new_column_quoted,
     ) {
         return Err(rollback(database, err));
     }
@@ -825,6 +827,7 @@ pub(super) fn execute_rename_column(
         &stmt.table_name,
         &stmt.old_column_name,
         &stmt.new_column_name,
+        stmt.new_column_quoted,
     );
 
     // Propagate the rename into dependent index metadata, in BOTH copies:
@@ -848,12 +851,13 @@ pub(super) fn execute_rename_column(
         &stmt.old_column_name,
         &stmt.new_column_name,
         &|renamed_meta, src| {
-            crate::index_rename::rename_index_column(
+            crate::index_rename::rename_index_column_with_quote(
                 src,
                 &renamed_meta.table_name,
                 &stmt.old_column_name,
                 &stmt.new_column_name,
                 renamed_meta,
+                stmt.new_column_quoted,
             )
         },
     );

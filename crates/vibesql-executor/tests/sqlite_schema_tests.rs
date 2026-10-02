@@ -272,7 +272,10 @@ fn test_sqlite_master_sql_strips_trailing_semicolon() {
     execute_create_table_with_source(&mut db, "CREATE TABLE   t  (  a   INT ,  b  TEXT ) ;");
 
     let stored = single_text(&db, "SELECT sql FROM sqlite_master WHERE type='table'");
-    assert_eq!(stored, "CREATE TABLE   t  (  a   INT ,  b  TEXT )");
+    // SQLite rebuilds the header as `CREATE TABLE ` + text from the table name,
+    // so the run of spaces between `TABLE` and `t` collapses to one; everything
+    // from the name on stays verbatim (sqlite3 3.54.0).
+    assert_eq!(stored, "CREATE TABLE t  (  a   INT ,  b  TEXT )");
 }
 
 /// Issue #5634: `ALTER TABLE ... RENAME TO` edits the verbatim CREATE TABLE

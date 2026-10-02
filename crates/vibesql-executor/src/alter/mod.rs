@@ -213,11 +213,12 @@ fn update_sql_source_after_alter(
         AlterTableStmt::AddColumn(_) => alter_sql
             .and_then(crate::alter_rewrite::extract_add_column_text)
             .and_then(|coldef| crate::alter_rewrite::append_column(&current, &coldef)),
-        AlterTableStmt::RenameColumn(rename) => crate::alter_rewrite::rename_column(
+        AlterTableStmt::RenameColumn(rename) => crate::alter_rewrite::rename_column_with_quote(
             &current,
             table_name,
             &rename.old_column_name,
             &rename.new_column_name,
+            rename.new_column_quoted,
         ),
         AlterTableStmt::DropColumn(drop) => {
             crate::alter_rewrite::drop_column(&current, &drop.column_name)

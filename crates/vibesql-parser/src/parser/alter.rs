@@ -466,12 +466,17 @@ fn parse_rename_column(
 ) -> Result<AlterTableStmt, ParseError> {
     let old_column_name = parser.parse_column_name()?;
     parser.expect_keyword(Keyword::To)?;
+    // SQLite's `bQuote`: remember whether the new name was a quoted token so
+    // the executor can emit every rewritten reference double-quoted.
+    let new_column_quoted =
+        matches!(parser.peek(), Token::DelimitedIdentifier(_) | Token::String(_));
     let new_column_name = parser.parse_column_name()?;
 
     Ok(AlterTableStmt::RenameColumn(RenameColumnStmt {
         table_name,
         old_column_name,
         new_column_name,
+        new_column_quoted,
     }))
 }
 
