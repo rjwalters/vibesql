@@ -195,3 +195,23 @@ fn temp_qualified_trigger_target_and_rename() {
     let rows = query(&db, "SELECT tbl_name FROM sqlite_master WHERE name='m9t'");
     assert_eq!(rows, vec![vec![SqlValue::Varchar("t9".into())]]);
 }
+
+/// altertab.test 33.1: a dangling bare column only inside the derived table of an
+/// expression subquery is caught by the post-rename re-parse, so the error carries
+/// the `after rename` suffix and the schema is left untouched.
+#[test]
+fn rename_column_trigger_expr_subquery_derived_table_after_rename() {
+    let mut db = Database::new();
+    exec(&mut db, "CREATE TABLE t1(a TEXT)");
+    exec(&mut db, "CREATE TABLE t2(b TEXT)");
+    exec(
+        &mut db,
+        "CREATE TRIGGER r3 AFTER INSERT ON t1 BEGIN \
+         UPDATE t2 SET (b,a)=(SELECT 1) FROM t1 JOIN t2 ON (SELECT * FROM (SELECT a)); END",
+    );
+    let err = try_exec(&mut db, "ALTER TABLE t1 RENAME COLUMN a TO b").unwrap_err();
+    assert!(
+        err.to_string().contains("error in trigger r3 after rename: no such column: a"),
+        "got: {err}"
+    );
+}

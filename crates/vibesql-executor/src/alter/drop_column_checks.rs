@@ -237,6 +237,18 @@ fn check_schema_objects(
             }
             SchemaObject::Trigger(trigger) => {
                 if let Some(inner) = find_trigger_resolution_error(trigger, &sim) {
+                    // A dangling bare column found only inside the derived table of an
+                    // expression subquery (altertab.test 33.1: `... ON (SELECT * FROM (SELECT
+                    // a))`) is missed by SQLite's pre-rename walk and only surfaces in the
+                    // post-rename schema re-parse: `error in trigger <n> after rename: ...`.
+                    let suffix = if dropped.is_none()
+                        && inner.starts_with("no such column: ")
+                        && trigger_column_error_only_in_expr_subquery(trigger)
+                    {
+                        " after rename"
+                    } else {
+                        suffix
+                    };
                     return Err(ExecutorError::Other(format!(
                         "error in trigger {}{}: {}",
                         trigger.name, suffix, inner
@@ -1617,6 +1629,31 @@ fn statements_have_fromless_wildcard_select(statements: &[Statement]) -> bool {
                     )
                 })
         })
+    })
+}
+
+/// True when the trigger's only unresolvable bare column lives inside an expression
+/// subquery's FROM-derived table (see the `after rename` handling at the call site).
+fn trigger_column_error_only_in_expr_subquery(trigger: &TriggerDefinition) -> bool {
+    let TriggerAction::RawSql(sql) = &trigger.triggered_action;
+    let Ok(statements) = crate::trigger_execution::TriggerFirer::parse_trigger_sql(sql) else {
+        return false;
+    };
+    let mut direct = false;
+    for stmt in &statements {
+        let mut selects: Vec<&SelectStmt> = Vec::new();
+        collect_uncorrelated_selects_in_statement(stmt, &mut selects);
+        if selects.into_iter().any(|s| first_unresolvable_column_in_fromless_select(s).is_some()) {
+            direct = true;
+        }
+    }
+    if direct {
+        return false;
+    }
+    statements.iter().any(|stmt| {
+        let mut checker = ExprSubqueryFromlessColumnChecker { found: None };
+        walk_statement(&mut checker, stmt);
+        checker.found.is_some()
     })
 }
 
