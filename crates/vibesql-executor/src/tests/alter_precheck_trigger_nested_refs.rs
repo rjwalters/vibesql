@@ -349,3 +349,47 @@ fn resolvable_trigger_select_allows_rename() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Dangling columns in trigger-body UPDATE / DELETE / upsert (altercol.test 13.2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dangling_column_in_trigger_dml_blocks_rename() {
+    for (body, col) in [
+        ("UPDATE data SET x=x+1 WHERE zzz=new.i", "zzz"),
+        ("DELETE FROM data WHERE zzz=new.i", "zzz"),
+        ("INSERT INTO data(x, y) VALUES(new.i, new.t) ON CONFLICT (x) DO UPDATE SET z=zz+1", "zz"),
+        (
+            "INSERT INTO x1(i, t) VALUES(new.i+1, new.t||'1') \
+             ON CONFLICT (tttttt) DO UPDATE SET t=i+1",
+            "tttttt",
+        ),
+    ] {
+        let err = rename_err(
+            &[
+                "CREATE TABLE x1(i INTEGER, t TEXT UNIQUE)",
+                "CREATE TABLE data(x UNIQUE, y, z)",
+                &format!("CREATE TRIGGER tr1 AFTER INSERT ON x1 BEGIN {}; END", body),
+            ],
+            "ALTER TABLE x1 RENAME COLUMN t TO ttt",
+        );
+        assert_eq!(err, format!("error in trigger tr1: no such column: {col}"), "body: {body}");
+    }
+}
+
+#[test]
+fn resolvable_trigger_dml_allows_rename() {
+    rename_ok(
+        &[
+            "CREATE TABLE x1(i INTEGER, t TEXT UNIQUE)",
+            "CREATE TABLE data(x UNIQUE, y, z)",
+            "CREATE TRIGGER tr1 AFTER INSERT ON x1 BEGIN \
+             UPDATE data SET x=x+1 WHERE y=new.i AND rowid>0; \
+             DELETE FROM data WHERE z=old.t; \
+             INSERT INTO data(x, y) VALUES(new.i, new.t) \
+               ON CONFLICT (x) DO UPDATE SET z=excluded.y+z; END",
+        ],
+        "ALTER TABLE x1 RENAME COLUMN t TO ttt",
+    );
+}
