@@ -24,9 +24,9 @@ use std::collections::HashSet;
 
 use vibesql_ast::{
     visitor::{walk_expression, walk_statement, ExpressionVisitor, StatementVisitor, VisitResult},
-    ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, Expression, FrameBound, FromClause,
-    InsertSource, PseudoTable, SelectItem, SelectStmt, Statement, TableConstraintKind,
-    TriggerAction, WindowFunctionSpec, WindowSpec,
+    ColumnConstraintKind, ColumnIdentifier, CommonTableExpr, ConflictTargetItem, Expression,
+    FrameBound, FromClause, InsertSource, OnConflictAction, PseudoTable, SelectItem, SelectStmt,
+    Statement, TableConstraintKind, TriggerAction, WhereClause, WindowFunctionSpec, WindowSpec,
 };
 use vibesql_catalog::{TableSchema, TriggerDefinition, ViewDefinition};
 use vibesql_storage::Database;
@@ -1431,6 +1431,13 @@ fn find_trigger_resolution_error(
         return Some(format!("no such column: {}", column));
     }
 
+    // 3d) A column reference in a simple trigger-body `UPDATE` / `DELETE` / upsert `INSERT` that
+    //    resolves against nothing but the statement's own target table (altercol.test
+    // 13.2.1-13.2.3).
+    if let Some(column) = find_missing_column_in_trigger_dml(&statements, sim) {
+        return Some(format!("no such column: {}", column));
+    }
+
     // 4) A `JOIN ... USING (c)` naming a column that is not present in both sides of the join
     //    (altertab3.test 24.2).
     if let Some(column) = find_unjoinable_using_column_in_trigger(trigger, &statements, sim) {
@@ -1441,6 +1448,69 @@ fn find_trigger_resolution_error(
     }
 
     None
+}
+
+/// First unresolvable column reference in a trigger body's simple DML statements, resolved
+/// against the statement's single target table: `UPDATE` SET values / WHERE, `DELETE` WHERE,
+/// and an `INSERT ... ON CONFLICT` target column list and `DO UPDATE` SET values / WHERE.
+/// Statements with CTEs, `UPDATE ... FROM`, or a target whose columns are unknown are skipped
+/// (qualifiers such as `new` / `old` / `excluded` are unknown to the scope and never judged).
+fn find_missing_column_in_trigger_dml(
+    statements: &[Statement],
+    sim: &DropSimulation,
+) -> Option<String> {
+    statements.iter().find_map(|stmt| {
+        let (table, alias) = match stmt {
+            Statement::Update(u) if u.with_clause.is_none() && u.from_clause.is_none() => {
+                (&u.table_name, u.alias.as_ref())
+            }
+            Statement::Delete(d) if d.with_clause.is_none() => (&d.table_name, d.alias.as_ref()),
+            Statement::Insert(i) if i.with_clause.is_none() && !i.on_conflict.is_empty() => {
+                (&i.table_name, None)
+            }
+            _ => return None,
+        };
+        let columns = sim.columns_of_relation(table)?;
+        let key = alias
+            .cloned()
+            .unwrap_or_else(|| table.rsplit('.').next().unwrap_or(table).to_string())
+            .to_ascii_lowercase();
+        let sources = [FromSource { key, columns: columns.clone() }];
+        let scope = ViewScope { sources: &sources, aliases: &[], qualified_ambiguity: false };
+        let check = |e: &Expression| first_missing_in_expr(e, &scope);
+        let check_where = |w: &Option<WhereClause>| match w {
+            Some(WhereClause::Condition(e)) => check(e),
+            _ => None,
+        };
+        match stmt {
+            Statement::Update(u) => u
+                .assignments
+                .iter()
+                .find_map(|a| check(&a.value))
+                .or_else(|| check_where(&u.where_clause)),
+            Statement::Delete(d) => check_where(&d.where_clause),
+            Statement::Insert(i) => i.on_conflict.iter().find_map(|oc| {
+                let target_missing =
+                    oc.conflict_target.iter().flatten().find_map(|item| match item {
+                        ConflictTargetItem::Column { name, .. }
+                            if !columns.iter().any(|c| c.eq_ignore_ascii_case(name))
+                                && !is_unjudged_column_name(&name.to_ascii_lowercase()) =>
+                        {
+                            Some(name.clone())
+                        }
+                        _ => None,
+                    });
+                target_missing.or_else(|| match &oc.action {
+                    OnConflictAction::DoUpdate { assignments, where_clause } => assignments
+                        .iter()
+                        .find_map(|a| check(&a.value))
+                        .or_else(|| where_clause.as_ref().and_then(check)),
+                    OnConflictAction::DoNothing => None,
+                })
+            }),
+            _ => None,
+        }
+    })
 }
 
 /// First unresolvable column reference in a trigger body's top-level `SELECT`
