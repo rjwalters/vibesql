@@ -575,6 +575,10 @@ set ::SQLITE_MAX_ATTACHED 10
 set ::SQLITE_MAX_LIKE_PATTERN_LENGTH 50000
 set ::SQLITE_MAX_VARIABLE_NUMBER 999
 set ::SQLITE_MAX_TRIGGER_DEPTH 1000
+# Compile-time default database file format (SQLite's own default is 4). alter2.test
+# line 291 reads $SQLITE_DEFAULT_FILE_FORMAT at FILE scope; leaving it unset made the
+# whole line (plus two cascaded successors) report as alter2-filescope-err.1/.2/.3 (#6174).
+set ::SQLITE_DEFAULT_FILE_FORMAT 4
 set ::tcl_platform(wordSize) 8  ;# 64-bit platform
 
 # SQLite internal performance counters (stubbed for compatibility)
@@ -7644,6 +7648,7 @@ array set vibesql_skip_tests {
     alter2-3.6 "Part of #6595: cascades from the same alter_table/writable_schema mechanism as alter2-1.2 above (alter2-3.3 widens table abc3, hitting the same hexio_render_int32 harness limitation) — UPDATE abc3 SET c=a*2 fails with 'no such column: c'. NOTE: alter2-3.3/3.4, though caused by the identical mechanism, are deliberately left OFF this skip-list (and still report FAILED): alter2-3.3's two INSERT statements and alter2-3.4's UPDATE (which fires trigger abc3_t into table blog) execute successfully before/despite each do_test's own assertion failing, and alter2-3.5 (currently PASSING, not part of this issue) depends on those exact row-level side effects to populate blog. Skip-listing 3.3/3.4 would skip their script bodies entirely (omit_test never executes the script), silently dropping those side effects and regressing alter2-3.5 from PASS to FAIL — verified locally. Zero-regression takes priority over a fully-consistent skip-list here."
     alter2-4.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
     alter2-5.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
+    alter2-5.3 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844): get_file_format reads the database header cookie via hexio_read. Pure read, no downstream dependents. Newly reachable once SQLITE_DEFAULT_FILE_FORMAT is defined (the alter2-filescope-err.* markers previously masked it). Part of #6174."
     alter2-6.1 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
     alter2-7.2 "Same set_file_format/hexio raw-file-format harness limitation as alter2-1.2 above (#5844). Part of #6574 (Bucket 3)."
     alter2-7.3 "Part of #6595: cascades from alter2-7.2 — SELECT ..., b, ... FROM t1 fails with 'no such column: b' since t1's live schema was never widened to include the DEFAULT-valued columns."
@@ -7826,6 +7831,8 @@ array set vibesql_skip_tests {
 #     and 11.6 failed). Same cascade-avoidance reasoning as alter2-3.3/3.4
 #     above. alter-11.9/11.10 ARE skip-listed (pure SELECTs over t11c, a
 #     table auto-skipped 11.7 never creates; nothing downstream reads them).
+#   * (RESOLVED #6174: shim now defines ::SQLITE_DEFAULT_FILE_FORMAT=4, so the
+#     markers below no longer appear; kept for history.)
 #   * alter2-filescope-err.1/.2/.3 — the file-scope
 #     `set default_file_format [expr $SQLITE_DEFAULT_FILE_FORMAT==4 ? 4 : 1]`
 #     at alter2.test line 291 plus its two cascaded successors. These markers
