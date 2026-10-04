@@ -36,6 +36,25 @@ use vibesql_storage::Database;
 
 use crate::errors::ExecutorError;
 
+/// Build the WAL index definition for a non-B-tree (spatial / vector) index
+/// so crash recovery can rebuild it (issue #6758).
+pub(crate) fn wal_definition(
+    stmt: &vibesql_ast::CreateIndexStmt,
+    table_name: &str,
+    qualified_table_name: &str,
+    kind: vibesql_storage::wal::WalIndexKind,
+) -> vibesql_storage::wal::WalIndexDefinition {
+    vibesql_storage::wal::WalIndexDefinition {
+        table_name: table_name.to_string(),
+        qualified_table_name: qualified_table_name.to_string(),
+        schema: schema_of_qualified(qualified_table_name).to_string(),
+        columns: stmt.columns.clone(),
+        where_clause: None,
+        sql_source: None,
+        kind,
+    }
+}
+
 /// Extract the schema part of a `schema.table` qualified name.
 ///
 /// CREATE INDEX builds `qualified_table_name` as `schema.table` after resolving

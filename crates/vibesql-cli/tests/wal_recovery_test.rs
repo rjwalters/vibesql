@@ -886,3 +886,106 @@ fn test_drop_index_survives_crash_replay() {
         String::from_utf8_lossy(&recreate.stderr)
     );
 }
+
+/// Run `sql` as a script against `db` and report whether it exited cleanly.
+#[cfg(unix)]
+fn script_succeeds(binary: &str, db: &Path, home: &Path, sql: &str) -> bool {
+    run_script_output(binary, db, home, sql).status.success()
+}
+
+/// End-to-end regression for issue #6758: spatial, IVFFlat and HNSW indexes
+/// created AFTER the last checkpoint and only logged to the WAL must be
+/// recreated by crash recovery (they used to be skipped because their
+/// `CreateIndex` op carried no definition).
+///
+/// Existence is proven by re-issuing the same `CREATE ... INDEX`: recovery
+/// must have rebuilt both the catalog entry and the storage body, so the
+/// duplicate create is rejected (script exits non-zero). An index created
+/// then dropped within the unreplayed segment must stay dropped (the
+/// re-create succeeds).
+///
+/// Note: only the WAL-replay half of #6758 is covered here. Persisting these
+/// index kinds in the binary *checkpoint* is a separate gap (#6786): the clean
+/// exit after a probe checkpoints the database, which drops a spatial index
+/// and downgrades a vector index to B-tree, so each probe below runs against
+/// a fresh crash state.
+#[cfg(unix)]
+#[test]
+fn test_spatial_and_vector_indexes_survive_crash_replay() {
+    let bin = vibesql_binary();
+
+    // Builds a crashed state: checkpointed tables, then `session2` lands only
+    // in the WAL. Returns (tempdir guard, db path) with permissions restored.
+    let crash_state = |session2: &str| -> Option<(tempfile::TempDir, std::path::PathBuf)> {
+        let home = tempfile::tempdir().unwrap();
+        let db_path = home.path().join("vec_crash.vbsql");
+        let (wal_path, checkpoint_dir) = wal_paths(&db_path);
+        run_script(
+            bin,
+            &db_path,
+            home.path(),
+            "CREATE TABLE v(id INTEGER, e VECTOR(3));\n\
+             CREATE TABLE g(id INTEGER, geom TEXT);\n\
+             INSERT INTO g VALUES(1, 'POINT(1 2)');\n\
+             INSERT INTO g VALUES(2, 'POINT(3 4)');\n",
+        );
+        assert!(checkpoint_dir.is_dir(), "checkpoint dir should exist after session 1");
+        let orig_perms = inject_checkpoint_failure(&checkpoint_dir)?;
+        let output = run_script_output(bin, &db_path, home.path(), session2);
+        assert!(
+            !output.status.success(),
+            "session 2 must exit non-zero on checkpoint failure (WAL-only state)"
+        );
+        assert!(wal_path.exists(), "the WAL must hold the un-checkpointed CreateIndex ops");
+        fs::set_permissions(&checkpoint_dir, orig_perms).unwrap();
+        Some((home, db_path))
+    };
+
+    // Probes: each re-creates one index after recovery; it must be rejected
+    // because the recovered index already exists.
+    let probes = [
+        ("CREATE SPATIAL INDEX g_geo ON g(geom);\n", "CREATE SPATIAL INDEX g_geo ON g(geom);\n"),
+        (
+            "CREATE INDEX v_ivf ON v USING ivfflat (e vector_cosine_ops) WITH (lists = 2);\n",
+            "CREATE INDEX v_ivf ON v USING ivfflat (e vector_cosine_ops) WITH (lists = 2);\n",
+        ),
+        (
+            "CREATE INDEX v_hnsw ON v USING hnsw (e) WITH (m = 8, ef_construction = 32);\n",
+            "CREATE INDEX v_hnsw ON v USING hnsw (e) WITH (m = 8, ef_construction = 32);\n",
+        ),
+    ];
+    for (create, recreate) in probes {
+        let Some((home, db_path)) = crash_state(create) else { return };
+
+        // Recovery rebuilt the index: a duplicate create is rejected with
+        // "already exists" (not some unrelated open/recovery failure).
+        let out = run_script_output(bin, &db_path, home.path(), recreate);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !out.status.success() && text.contains("already exists"),
+            "index from `{create}` must exist after crash replay (duplicate create must be \
+             rejected as already existing); got:\n{text}"
+        );
+    }
+
+    // CREATE then DROP in the same WAL segment: net absent, re-create works.
+    let Some((home, db_path)) = crash_state(
+        "CREATE SPATIAL INDEX g_gone ON g(geom);\nDROP INDEX g_gone;\n\
+         CREATE INDEX v_gone ON v USING hnsw (e);\nDROP INDEX v_gone;\n",
+    ) else {
+        return;
+    };
+    assert!(
+        script_succeeds(
+            bin,
+            &db_path,
+            home.path(),
+            "CREATE SPATIAL INDEX g_gone ON g(geom);\nCREATE INDEX v_gone ON v USING hnsw (e);\n"
+        ),
+        "indexes dropped before the crash must not be resurrected by recovery"
+    );
+}

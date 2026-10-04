@@ -64,6 +64,7 @@ pub fn create_btree_index(
         columns: stmt.columns.clone(),
         where_clause: stmt.where_clause.as_ref().map(|expr| (**expr).clone()),
         sql_source: sql_source.clone(),
+        kind: vibesql_storage::wal::WalIndexKind::BTree,
     };
 
     // Add to catalog first (use unqualified table name as stored in catalog).
