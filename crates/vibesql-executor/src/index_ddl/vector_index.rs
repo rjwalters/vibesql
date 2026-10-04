@@ -93,12 +93,17 @@ pub fn create_ivfflat_index(
     )?;
 
     // Emit WAL entry for persistence (IVFFlat indexes are never unique)
-    database.emit_wal_create_index(
+    database.emit_wal_create_index_with_definition(
         index_name_to_id(index_name),
         index_name,
-        qualified_table_name,
         vec![col_idx as u32],
         false,
+        super::wal_definition(
+            stmt,
+            table_name,
+            qualified_table_name,
+            vibesql_storage::wal::WalIndexKind::IVFFlat { metric, lists },
+        ),
     );
 
     Ok(format!(
@@ -190,12 +195,17 @@ pub fn create_hnsw_index(
     )?;
 
     // Emit WAL entry for persistence (HNSW indexes are never unique)
-    database.emit_wal_create_index(
+    database.emit_wal_create_index_with_definition(
         index_name_to_id(index_name),
         index_name,
-        qualified_table_name,
         vec![col_idx as u32],
         false,
+        super::wal_definition(
+            stmt,
+            table_name,
+            qualified_table_name,
+            vibesql_storage::wal::WalIndexKind::Hnsw { metric, m, ef_construction },
+        ),
     );
 
     Ok(format!(

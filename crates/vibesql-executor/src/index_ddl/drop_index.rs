@@ -84,16 +84,40 @@ impl DropIndexExecutor {
         // Fallback: check storage without catalog metadata (for legacy indexes)
         // Check if it's a spatial index first
         if database.spatial_index_exists(index_name) {
-            // Emit WAL entry for persistence BEFORE dropping
-            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+            // Emit WAL entry for persistence BEFORE dropping, naming the owner
+            // from the storage-side metadata so recovery drops exactly this
+            // index and it cannot return after a crash (issue #6758).
+            let owner = database
+                .get_spatial_index_metadata(index_name)
+                .map(|m| (m.schema.clone(), m.table_name.clone()));
+            match owner {
+                Some((schema, table_name)) => database.emit_wal_drop_index_in_schema(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &schema,
+                    &table_name,
+                ),
+                None => database.emit_wal_drop_index(index_name_to_id(index_name), index_name),
+            }
             database.drop_spatial_index(index_name)?;
             return Ok(format!("Spatial index '{}' dropped successfully", index_name));
         }
 
         // Otherwise check if it's a B-tree index
         if database.index_exists(index_name) {
-            // Emit WAL entry for persistence BEFORE dropping
-            database.emit_wal_drop_index(index_name_to_id(index_name), index_name);
+            // Emit WAL entry for persistence BEFORE dropping, naming the owner
+            // from the storage-side metadata (issue #6758).
+            let owner =
+                database.get_index(index_name).map(|m| (m.schema.clone(), m.table_name.clone()));
+            match owner {
+                Some((schema, table_name)) => database.emit_wal_drop_index_in_schema(
+                    index_name_to_id(index_name),
+                    index_name,
+                    &schema,
+                    &table_name,
+                ),
+                None => database.emit_wal_drop_index(index_name_to_id(index_name), index_name),
+            }
             database.drop_index(index_name)?;
             return Ok(format!("Index '{}' dropped successfully", index_name));
         }

@@ -88,7 +88,9 @@ pub enum WalOp {
     /// rebuild the index. It is `None` when parsed from a v5-or-earlier log
     /// (the thin `column_indices` payload alone cannot reconstruct an index,
     /// so such entries keep their historical log-only replay behavior) and for
-    /// index kinds recovery does not rebuild (spatial / vector indexes).
+    /// thin ops from callers that cannot describe the index. As of v7 (issue
+    /// #6758) spatial / IVFFlat / HNSW indexes carry a definition too (see
+    /// [`WalIndexKind`]).
     CreateIndex {
         index_id: u32,
         index_name: String,
@@ -200,6 +202,24 @@ pub struct WalIndexDefinition {
     pub where_clause: Option<vibesql_ast::Expression>,
     /// Verbatim `CREATE INDEX` text for `sqlite_master.sql` (issue #6734).
     pub sql_source: Option<String>,
+    /// Which kind of index this is, plus its kind-specific parameters (WAL
+    /// format v7, issue #6758). Logs older than v7 only ever carried B-tree
+    /// definitions, so they decode as [`WalIndexKind::BTree`].
+    pub kind: WalIndexKind,
+}
+
+/// Kind of index described by a [`WalIndexDefinition`] (WAL format v7, issue
+/// #6758), with the per-kind build parameters recovery needs to rebuild it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalIndexKind {
+    /// Ordinary B-tree index (also every definition from a v6 log).
+    BTree,
+    /// Spatial (R-tree) index over one geometry column.
+    Spatial,
+    /// IVFFlat vector index.
+    IVFFlat { metric: vibesql_ast::VectorDistanceMetric, lists: u32 },
+    /// HNSW vector index.
+    Hnsw { metric: vibesql_ast::VectorDistanceMetric, m: u32, ef_construction: u32 },
 }
 
 /// Owning schema + table of a dropped index, carried by [`WalOp::DropIndex`]
@@ -534,7 +554,7 @@ impl WalOp {
                 // Absent in v5-and-earlier logs — such entries decode as the
                 // thin op and keep their historical (log-only) replay.
                 let definition = if version >= 6 && read_bool(reader)? {
-                    Some(read_index_definition(reader)?)
+                    Some(read_index_definition(reader, version)?)
                 } else {
                     None
                 };
@@ -730,11 +750,56 @@ fn write_index_definition<W: Write>(
     let where_sql = def.where_clause.as_ref().map(|expr| expr.to_sql());
     write_optional_string(writer, where_sql.as_deref())?;
     write_optional_string(writer, def.sql_source.as_deref())?;
+    // WAL format v7 (issue #6758): index-kind discriminator + parameters.
+    match def.kind {
+        WalIndexKind::BTree => write_u8(writer, 0)?,
+        WalIndexKind::Spatial => write_u8(writer, 1)?,
+        WalIndexKind::IVFFlat { metric, lists } => {
+            write_u8(writer, 2)?;
+            write_metric(writer, metric)?;
+            write_u32(writer, lists)?;
+        }
+        WalIndexKind::Hnsw { metric, m, ef_construction } => {
+            write_u8(writer, 3)?;
+            write_metric(writer, metric)?;
+            write_u32(writer, m)?;
+            write_u32(writer, ef_construction)?;
+        }
+    }
     Ok(())
 }
 
+fn write_metric<W: Write>(
+    writer: &mut W,
+    metric: vibesql_ast::VectorDistanceMetric,
+) -> Result<(), StorageError> {
+    write_u8(
+        writer,
+        match metric {
+            vibesql_ast::VectorDistanceMetric::L2 => 0,
+            vibesql_ast::VectorDistanceMetric::Cosine => 1,
+            vibesql_ast::VectorDistanceMetric::InnerProduct => 2,
+        },
+    )
+}
+
+fn read_metric<R: Read>(reader: &mut R) -> Result<vibesql_ast::VectorDistanceMetric, StorageError> {
+    match read_u8(reader)? {
+        0 => Ok(vibesql_ast::VectorDistanceMetric::L2),
+        1 => Ok(vibesql_ast::VectorDistanceMetric::Cosine),
+        2 => Ok(vibesql_ast::VectorDistanceMetric::InnerProduct),
+        other => Err(StorageError::IoError(format!(
+            "Invalid vector distance metric in WAL CreateIndex: {}",
+            other
+        ))),
+    }
+}
+
 /// Deserialize a [`WalIndexDefinition`] written by [`write_index_definition`].
-fn read_index_definition<R: Read>(reader: &mut R) -> Result<WalIndexDefinition, StorageError> {
+fn read_index_definition<R: Read>(
+    reader: &mut R,
+    version: u32,
+) -> Result<WalIndexDefinition, StorageError> {
     let table_name = read_string(reader)?;
     let qualified_table_name = read_string(reader)?;
     let schema = read_string(reader)?;
@@ -776,6 +841,30 @@ fn read_index_definition<R: Read>(reader: &mut R) -> Result<WalIndexDefinition, 
         None => None,
     };
     let sql_source = read_optional_string(reader)?;
+    // v6 logs carry only B-tree definitions; v7+ adds the kind discriminator.
+    let kind = if version >= 7 {
+        match read_u8(reader)? {
+            0 => WalIndexKind::BTree,
+            1 => WalIndexKind::Spatial,
+            2 => {
+                let metric = read_metric(reader)?;
+                WalIndexKind::IVFFlat { metric, lists: read_u32(reader)? }
+            }
+            3 => {
+                let metric = read_metric(reader)?;
+                let m = read_u32(reader)?;
+                WalIndexKind::Hnsw { metric, m, ef_construction: read_u32(reader)? }
+            }
+            other => {
+                return Err(StorageError::IoError(format!(
+                    "Invalid index kind in WAL CreateIndex: {}",
+                    other
+                )))
+            }
+        }
+    } else {
+        WalIndexKind::BTree
+    };
     Ok(WalIndexDefinition {
         table_name,
         qualified_table_name,
@@ -783,6 +872,7 @@ fn read_index_definition<R: Read>(reader: &mut R) -> Result<WalIndexDefinition, 
         columns,
         where_clause,
         sql_source,
+        kind,
     })
 }
 
@@ -958,6 +1048,7 @@ mod tests {
                  lower(name) || 'x') WHERE age > 18 AND name IS NOT NULL"
                     .to_string(),
             ),
+            kind: WalIndexKind::BTree,
         };
         let entry = WalEntry::new(
             6,
@@ -1140,5 +1231,65 @@ mod tests {
         assert_eq!(WalOpTag::from_u8(0x03).unwrap(), WalOpTag::Delete);
         assert_eq!(WalOpTag::from_u8(0x10).unwrap(), WalOpTag::CreateTable);
         assert!(WalOpTag::from_u8(0xFF).is_err());
+    }
+    fn kind_entry(kind: WalIndexKind) -> WalEntry {
+        WalEntry::new(
+            7,
+            1234567896,
+            WalOp::CreateIndex {
+                index_id: 12,
+                index_name: "idx_v".to_string(),
+                table_id: 1,
+                column_indices: vec![1],
+                is_unique: false,
+                definition: Some(WalIndexDefinition {
+                    table_name: "docs".to_string(),
+                    qualified_table_name: "main.docs".to_string(),
+                    schema: "main".to_string(),
+                    columns: vec![vibesql_ast::IndexColumn::Column {
+                        column_name: "emb".to_string(),
+                        direction: vibesql_ast::OrderDirection::Asc,
+                        prefix_length: None,
+                        collation: None,
+                        is_quoted: false,
+                    }],
+                    where_clause: None,
+                    sql_source: None,
+                    kind,
+                }),
+            },
+        )
+    }
+
+    /// Spatial / IVFFlat / HNSW definitions round-trip with their parameters
+    /// (WAL format v7, issue #6758).
+    #[test]
+    fn test_wal_entry_roundtrip_spatial_and_vector_index_kinds() {
+        use vibesql_ast::VectorDistanceMetric as M;
+        for kind in [
+            WalIndexKind::Spatial,
+            WalIndexKind::IVFFlat { metric: M::Cosine, lists: 7 },
+            WalIndexKind::Hnsw { metric: M::InnerProduct, m: 12, ef_construction: 80 },
+        ] {
+            let entry = kind_entry(kind);
+            let mut buf = Vec::new();
+            entry.serialize(&mut buf).unwrap();
+            let decoded = WalEntry::deserialize(&mut &buf[..]).unwrap();
+            assert_eq!(entry, decoded);
+        }
+    }
+
+    /// A v6 log's definition has no kind trailer: it must still decode, as a
+    /// B-tree (issue #6758 backward compatibility).
+    #[test]
+    fn test_v6_create_index_definition_decodes_as_btree() {
+        let entry = kind_entry(WalIndexKind::BTree);
+        let mut buf = Vec::new();
+        entry.serialize(&mut buf).unwrap();
+        // Strip the v7 trailer (a single kind byte for B-tree) to produce the
+        // exact v6 layout.
+        buf.pop();
+        let decoded = WalEntry::deserialize_versioned(&mut &buf[..], 6).unwrap();
+        assert_eq!(entry, decoded);
     }
 }

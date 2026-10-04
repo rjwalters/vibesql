@@ -102,12 +102,17 @@ pub fn create_spatial_index(
     database.create_spatial_index(metadata, spatial_index)?;
 
     // Emit WAL entry for persistence (spatial indexes are never unique)
-    database.emit_wal_create_index(
+    database.emit_wal_create_index_with_definition(
         index_name_to_id(index_name),
         index_name,
-        qualified_table_name,
         vec![col_idx as u32],
         false,
+        super::wal_definition(
+            stmt,
+            table_name,
+            qualified_table_name,
+            vibesql_storage::wal::WalIndexKind::Spatial,
+        ),
     );
 
     Ok(format!(

@@ -61,7 +61,11 @@ pub const WAL_MAGIC: &[u8; 4] = b"VWAL";
 ///   instead of merely logging it (issue #6741). Older v1-v5 logs are still readable: their
 ///   `CreateIndex`/`DropIndex` entries decode without the trailer and keep the historical log-only
 ///   replay behavior.
-pub const WAL_VERSION: u32 = 6;
+/// - v7: `WalIndexDefinition` gains a trailing index-kind discriminator (B-tree / spatial / IVFFlat
+///   / HNSW) plus per-kind parameters (metric, lists, m, ef_construction), so crash recovery can
+///   rebuild spatial and vector indexes (issue #6758). v6 definitions decode as B-tree; v1-v5 logs
+///   are unchanged.
+pub const WAL_VERSION: u32 = 7;
 
 /// Size of the WAL header in bytes
 pub const WAL_HEADER_SIZE: usize = 32;

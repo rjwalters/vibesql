@@ -45,7 +45,7 @@ use crate::{
     },
     wal::{
         checkpoint::{read_checkpoint_data, CheckpointInfo, CheckpointWriter},
-        entry::{Lsn, WalIndexDefinition, WalIndexOwner, WalOp},
+        entry::{Lsn, WalIndexDefinition, WalIndexKind, WalIndexOwner, WalOp},
         reader::{ReadResult, WalReader},
     },
     Database, StorageError,
@@ -359,6 +359,9 @@ impl RecoveryManager {
         if let Some(ref wal_path) = self.wal_path {
             if wal_path.exists() {
                 self.replay_wal(&mut db, wal_path, checkpoint_lsn, &mut stats)?;
+                // Spatial / vector index bodies are built once, from the final
+                // replayed rows (issue #6758).
+                build_deferred_spatial_and_vector_indexes(&mut db);
             }
         }
 
@@ -921,17 +924,27 @@ impl RecoveryManager {
                     }
                 }
                 None => {
-                    // Thin op: a v5-or-earlier log entry, or an index kind
-                    // recovery does not rebuild (spatial/vector). The
+                    // Thin op: a v5-or-earlier log entry, or a spatial /
+                    // vector index logged by a pre-v7 binary. The
                     // `column_indices` payload alone cannot reconstruct the
                     // index (no table name, expressions, predicate or
                     // schema), so keep the historical log-only behavior.
                     log::warn!(
                         "Skipping CreateIndex {} during recovery: WAL entry carries no index \
-                         definition (pre-v6 log or non-B-tree index); columns={:?}, unique={}",
+                         definition (pre-v6 log, or a spatial/vector index from a pre-v7 log); \
+                         columns={:?}, unique={}",
                         index_name,
                         column_indices,
                         is_unique
+                    );
+                    // Loud, non-log-level surfacing (issue #6758): an index
+                    // that cannot be replayed is silently missing afterwards.
+                    eprintln!(
+                        "warning: WAL recovery could not replay CREATE INDEX '{}': the log \
+                         entry carries no index definition (written by an older VibeSQL \
+                         version). The index is NOT restored; re-create it with CREATE INDEX \
+                         (or REINDEX).",
+                        index_name
                     );
                 }
             },
@@ -1002,6 +1015,7 @@ fn replay_create_index(
         columns,
         where_clause,
         sql_source,
+        kind,
     } = definition;
 
     if db.get_table(&qualified_table_name).is_none() {
@@ -1020,6 +1034,20 @@ fn replay_create_index(
             schema
         );
         return Ok(false);
+    }
+
+    // Spatial / vector indexes (WAL format v7, issue #6758) have their own
+    // storage bodies and catalog index types.
+    if !matches!(kind, WalIndexKind::BTree) {
+        return Ok(replay_create_spatial_or_vector_index(
+            db,
+            index_name,
+            &table_name,
+            &qualified_table_name,
+            &schema,
+            &columns,
+            kind,
+        ));
     }
 
     // Storage-side index (manages the index body; never touches the catalog).
@@ -1072,6 +1100,230 @@ fn replay_create_index(
     Ok(true)
 }
 
+/// Replay a spatial / IVFFlat / HNSW `CreateIndex` (WAL format v7, issue
+/// #6758) by registering its catalog entry only. The index **body** is built
+/// later, once, by [`build_deferred_spatial_and_vector_indexes`] after the
+/// whole WAL has been replayed: WAL row replay writes straight to the
+/// `Table` (it does not run index maintenance), so a body built here would
+/// miss every row inserted/updated after the `CREATE INDEX` in the same
+/// segment. Deferring also means an index created and dropped within the
+/// segment is never built at all.
+///
+/// Returns `false` (logged and skipped, mirroring B-tree replay) when the
+/// definition cannot describe a valid index on the current table.
+fn replay_create_spatial_or_vector_index(
+    db: &mut Database,
+    index_name: &str,
+    table_name: &str,
+    qualified_table_name: &str,
+    schema: &str,
+    columns: &[vibesql_ast::IndexColumn],
+    kind: WalIndexKind,
+) -> bool {
+    use vibesql_catalog::{IndexType, IndexedColumn, SortOrder};
+
+    let skip = |why: String| {
+        log::warn!("Skipping CreateIndex {} during recovery: {}", index_name, why);
+        eprintln!(
+            "warning: WAL recovery could not replay CREATE INDEX '{}': {}. The index is NOT \
+             restored; re-create it with CREATE INDEX.",
+            index_name, why
+        );
+        false
+    };
+
+    let [vibesql_ast::IndexColumn::Column { column_name, .. }] = columns else {
+        return skip("spatial/vector index definition must name exactly one column".to_string());
+    };
+    let Some(table) = db.get_table(qualified_table_name) else {
+        return skip(format!("table {} not found", qualified_table_name));
+    };
+    let Some(col_idx) = table.schema.get_column_index(column_name) else {
+        return skip(format!("column {} not found in {}", column_name, qualified_table_name));
+    };
+    let is_vector =
+        matches!(table.schema.columns[col_idx].data_type, vibesql_types::DataType::Vector { .. });
+
+    let index_type = match kind {
+        WalIndexKind::BTree => unreachable!("B-tree replay is handled by the caller"),
+        WalIndexKind::Spatial => IndexType::RTree,
+        WalIndexKind::IVFFlat { metric, lists } => {
+            if !is_vector {
+                return skip(format!("column {} is not a VECTOR column", column_name));
+            }
+            IndexType::IVFFlat { metric: catalog_metric(metric), lists }
+        }
+        WalIndexKind::Hnsw { metric, m, ef_construction } => {
+            if !is_vector {
+                return skip(format!("column {} is not a VECTOR column", column_name));
+            }
+            IndexType::Hnsw { metric: catalog_metric(metric), m, ef_construction }
+        }
+    };
+
+    let catalog_meta = vibesql_catalog::IndexMetadata::new(
+        index_name.to_string(),
+        table_name.to_string(),
+        index_type,
+        vec![IndexedColumn::new_column(column_name.clone(), SortOrder::Ascending)],
+        false,
+    )
+    .with_schema(schema.to_string());
+    if let Err(e) = db.catalog.add_index(catalog_meta) {
+        return skip(format!("catalog metadata rejected: {}", e));
+    }
+    true
+}
+
+fn catalog_metric(m: vibesql_ast::VectorDistanceMetric) -> vibesql_catalog::VectorDistanceMetric {
+    match m {
+        vibesql_ast::VectorDistanceMetric::L2 => vibesql_catalog::VectorDistanceMetric::L2,
+        vibesql_ast::VectorDistanceMetric::Cosine => vibesql_catalog::VectorDistanceMetric::Cosine,
+        vibesql_ast::VectorDistanceMetric::InnerProduct => {
+            vibesql_catalog::VectorDistanceMetric::InnerProduct
+        }
+    }
+}
+
+fn ast_metric(m: &vibesql_catalog::VectorDistanceMetric) -> vibesql_ast::VectorDistanceMetric {
+    match m {
+        vibesql_catalog::VectorDistanceMetric::L2 => vibesql_ast::VectorDistanceMetric::L2,
+        vibesql_catalog::VectorDistanceMetric::Cosine => vibesql_ast::VectorDistanceMetric::Cosine,
+        vibesql_catalog::VectorDistanceMetric::InnerProduct => {
+            vibesql_ast::VectorDistanceMetric::InnerProduct
+        }
+    }
+}
+
+/// Build the storage bodies of spatial / IVFFlat / HNSW indexes whose catalog
+/// entry exists but whose body does not — i.e. those registered by
+/// [`replay_create_spatial_or_vector_index`] during WAL replay (issue #6758).
+///
+/// Runs once after the whole WAL has been applied, so each body is built from
+/// the table's final recovered rows with the same storage APIs the live
+/// `CREATE INDEX` executor uses. A body that cannot be built is reported
+/// loudly on stderr and its catalog entry is removed, so the catalog never
+/// advertises an index the planner cannot use. Returns the number of bodies
+/// built.
+fn build_deferred_spatial_and_vector_indexes(db: &mut Database) -> u64 {
+    use vibesql_catalog::IndexType;
+
+    let pending: Vec<vibesql_catalog::IndexMetadata> = db
+        .catalog
+        .list_all_indexes()
+        .into_iter()
+        .filter(|m| {
+            matches!(
+                m.index_type,
+                IndexType::RTree | IndexType::IVFFlat { .. } | IndexType::Hnsw { .. }
+            )
+        })
+        .cloned()
+        .collect();
+
+    let mut built = 0;
+    for meta in pending {
+        let qualified_index = format!("{}.{}", meta.schema, meta.name);
+        let has_body = match meta.index_type {
+            IndexType::RTree => db.spatial_index_exists(&qualified_index),
+            _ => db.index_exists(&qualified_index),
+        };
+        if has_body {
+            continue;
+        }
+        let qualified_table = format!("{}.{}", meta.schema, meta.table_name);
+        match build_spatial_or_vector_body(db, &meta, &qualified_table) {
+            Ok(()) => built += 1,
+            Err(why) => {
+                log::warn!("Failed to rebuild index {} during recovery: {}", meta.name, why);
+                eprintln!(
+                    "warning: WAL recovery could not rebuild index '{}' on {}: {}. The index \
+                     is NOT restored; re-create it with CREATE INDEX.",
+                    meta.name, qualified_table, why
+                );
+                let _ = db.catalog.drop_index(&qualified_table, &meta.name);
+            }
+        }
+    }
+    built
+}
+
+/// Build one spatial / vector index body from the table's current rows.
+fn build_spatial_or_vector_body(
+    db: &mut Database,
+    meta: &vibesql_catalog::IndexMetadata,
+    qualified_table: &str,
+) -> Result<(), String> {
+    use vibesql_catalog::IndexType;
+
+    let column_name = match meta.columns.as_slice() {
+        [col] => col.column_name().ok_or("index column is not a plain column")?.to_string(),
+        _ => return Err("index must name exactly one column".to_string()),
+    };
+    let table =
+        db.get_table(qualified_table).ok_or(format!("table {qualified_table} not found"))?;
+    let col_idx = table
+        .schema
+        .get_column_index(&column_name)
+        .ok_or(format!("column {column_name} not found in {qualified_table}"))?;
+    let dimensions = match table.schema.columns[col_idx].data_type {
+        vibesql_types::DataType::Vector { dimensions } => Some(dimensions as usize),
+        _ => None,
+    };
+    let vector_dims =
+        || dimensions.ok_or_else(|| format!("column {column_name} is not a VECTOR column"));
+
+    let result = match &meta.index_type {
+        IndexType::RTree => {
+            let entries: Vec<_> = table
+                .scan_live()
+                .filter_map(|(row_idx, row)| {
+                    crate::index::extract_mbr_from_sql_value(&row.values[col_idx])
+                        .map(|mbr| crate::index::SpatialIndexEntry { row_id: row_idx, mbr })
+                })
+                .collect();
+            let spatial = crate::index::SpatialIndex::bulk_load(column_name.clone(), entries);
+            let metadata = crate::SpatialIndexMetadata {
+                index_name: meta.name.clone(),
+                table_name: meta.table_name.clone(),
+                column_name,
+                schema: meta.schema.clone(),
+                created_at: Some(chrono::Utc::now()),
+            };
+            db.create_spatial_index(metadata, spatial)
+        }
+        IndexType::IVFFlat { metric, lists } => {
+            let dims = vector_dims()?;
+            db.create_ivfflat_index(
+                meta.name.clone(),
+                meta.table_name.clone(),
+                qualified_table,
+                column_name,
+                col_idx,
+                dims,
+                *lists as usize,
+                ast_metric(metric),
+            )
+        }
+        IndexType::Hnsw { metric, m, ef_construction } => {
+            let dims = vector_dims()?;
+            db.create_hnsw_index(
+                meta.name.clone(),
+                meta.table_name.clone(),
+                qualified_table,
+                column_name,
+                col_idx,
+                dims,
+                *m,
+                *ef_construction,
+                ast_metric(metric),
+            )
+        }
+        other => return Err(format!("unsupported index type {other:?}")),
+    };
+    result.map_err(|e| e.to_string())
+}
+
 /// Replay a WAL format v6+ `DropIndex` naming its owning schema and table
 /// (issue #6741): drop exactly that index from the catalog and the storage
 /// index manager, mirroring `DropIndexExecutor`. An index that is already
@@ -1086,6 +1338,12 @@ fn replay_drop_index(db: &mut Database, index_name: &str, owner: &WalIndexOwner)
     if db.index_exists(&qualified_index) {
         if let Err(e) = db.drop_index(&qualified_index) {
             log::warn!("Failed to drop index {} during recovery: {}", index_name, e);
+        }
+    }
+    // Spatial indexes live in their own storage map (issue #6758).
+    if db.spatial_index_exists(&qualified_index) {
+        if let Err(e) = db.drop_spatial_index(&qualified_index) {
+            log::warn!("Failed to drop spatial index {} during recovery: {}", index_name, e);
         }
     }
 }
@@ -3018,6 +3276,7 @@ mod tests {
             columns,
             where_clause,
             sql_source: Some(sql.to_string()),
+            kind: crate::wal::WalIndexKind::BTree,
         }
     }
 
@@ -3135,6 +3394,143 @@ mod tests {
             db.get_index("people_part").unwrap().where_clause.is_some(),
             "storage-side partial predicate must be set so DML maintenance treats it as partial"
         );
+    }
+
+    /// Ops creating `docs(id, emb VECTOR(2), geom TEXT)` with three rows.
+    fn docs_rows_ops() -> Vec<WalOp> {
+        let schema = TableSchema::new(
+            "docs".to_string(),
+            vec![
+                ColumnSchema::new("id".to_string(), DataType::Integer, false),
+                ColumnSchema::new("emb".to_string(), DataType::Vector { dimensions: 2 }, true),
+                ColumnSchema::new(
+                    "geom".to_string(),
+                    DataType::Varchar { max_length: Some(100) },
+                    true,
+                ),
+            ],
+        );
+        let schema_data = crate::database::serialize_table_schema(&schema);
+        let mut ops =
+            vec![WalOp::CreateTable { table_id: 0, table_name: "main.docs".into(), schema_data }];
+        for i in 0..3u64 {
+            ops.push(WalOp::Insert {
+                table_id: 0,
+                table_name: "main.docs".into(),
+                row_id: i,
+                values: vec![
+                    SqlValue::Integer(i as i64),
+                    SqlValue::Vector(vec![i as f32, 1.0]),
+                    SqlValue::Varchar(arcstr::ArcStr::from(format!("POINT({} {})", i, i))),
+                ],
+                rowid: Some(i + 1),
+            });
+        }
+        ops
+    }
+
+    fn docs_index_op(name: &str, col: &str, kind: crate::wal::WalIndexKind) -> WalOp {
+        create_index_op(
+            name,
+            false,
+            WalIndexDefinition {
+                table_name: "docs".to_string(),
+                qualified_table_name: "main.docs".to_string(),
+                schema: "main".to_string(),
+                columns: vec![vibesql_ast::IndexColumn::new_column(
+                    col.to_string(),
+                    vibesql_ast::OrderDirection::Asc,
+                )],
+                where_clause: None,
+                sql_source: None,
+                kind,
+            },
+        )
+    }
+
+    /// Spatial, IVFFlat and HNSW `CreateIndex` ops carrying a v7 definition
+    /// are rebuilt from the replayed rows (issue #6758): storage body +
+    /// catalog entry with the right index type and parameters.
+    #[test]
+    fn test_spatial_and_vector_index_replay_rebuilds_all_kinds() {
+        use vibesql_ast::VectorDistanceMetric as M;
+
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let mut ops = docs_rows_ops();
+        ops.push(docs_index_op("docs_geo", "geom", crate::wal::WalIndexKind::Spatial));
+        ops.push(docs_index_op(
+            "docs_ivf",
+            "emb",
+            crate::wal::WalIndexKind::IVFFlat { metric: M::Cosine, lists: 2 },
+        ));
+        ops.push(docs_index_op(
+            "docs_hnsw",
+            "emb",
+            crate::wal::WalIndexKind::Hnsw { metric: M::L2, m: 8, ef_construction: 40 },
+        ));
+        // A row inserted AFTER the CREATE INDEX ops in the same segment: WAL
+        // row replay does not run index maintenance, so the bodies must be
+        // built from the final rows (deferred build), not at CreateIndex time.
+        ops.push(WalOp::Insert {
+            table_id: 0,
+            table_name: "main.docs".into(),
+            row_id: 3,
+            values: vec![
+                SqlValue::Integer(3),
+                SqlValue::Vector(vec![3.0, 1.0]),
+                SqlValue::Varchar(arcstr::ArcStr::from("POINT(3 3)")),
+            ],
+            rowid: Some(4),
+        });
+        write_current_wal(&wal_path, ops);
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, stats) = manager.recover().unwrap();
+        assert_eq!(stats.indexes_created, 3);
+
+        let spatial = db.get_spatial_index("docs_geo").expect("spatial index rebuilt");
+        assert_eq!(spatial.len(), 4, "spatial body built from the final replayed rows");
+        let ivf = db.get_ivfflat_indexes_for_table("docs");
+        assert_eq!(ivf.len(), 1);
+        assert_eq!(ivf[0].1.len(), 4, "IVFFlat body includes the post-CREATE INDEX row");
+        let hnsw = db.get_hnsw_indexes_for_table("docs");
+        assert_eq!(hnsw.len(), 1);
+        assert_eq!(hnsw[0].1.len(), 4, "HNSW body includes the post-CREATE INDEX row");
+
+        use vibesql_catalog::IndexType;
+        let kind_of = |n: &str| db.catalog.find_index_by_name(n).expect(n).index_type.clone();
+        assert!(matches!(kind_of("docs_geo"), IndexType::RTree));
+        assert!(matches!(kind_of("docs_ivf"), IndexType::IVFFlat { lists: 2, .. }));
+        assert!(matches!(kind_of("docs_hnsw"), IndexType::Hnsw { m: 8, ef_construction: 40, .. }));
+    }
+
+    /// A spatial index created then dropped in the same WAL segment stays
+    /// dropped (issue #6758).
+    #[test]
+    fn test_spatial_index_drop_replay_removes_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let checkpoint_dir = temp_dir.path().join("checkpoints");
+        let wal_path = temp_dir.path().join("test.wal");
+
+        let mut ops = docs_rows_ops();
+        ops.push(docs_index_op("docs_geo", "geom", crate::wal::WalIndexKind::Spatial));
+        ops.push(WalOp::DropIndex {
+            index_id: 0,
+            index_name: "docs_geo".to_string(),
+            owner: Some(WalIndexOwner {
+                schema: "main".to_string(),
+                table_name: "docs".to_string(),
+            }),
+        });
+        write_current_wal(&wal_path, ops);
+
+        let manager = RecoveryManager::new(&checkpoint_dir).with_wal(&wal_path);
+        let (db, _stats) = manager.recover().unwrap();
+        assert!(db.catalog.find_index_by_name("docs_geo").is_none());
+        assert!(!db.spatial_index_exists("docs_geo"));
     }
 
     /// A v6 `DropIndex` naming its owner drops the index from both halves;
