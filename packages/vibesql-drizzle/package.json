@@ -30,16 +30,16 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.3"
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.1",
-    "vitest": "^5.0.1"
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
   },
   "peerDependencies": {
     "@vibesql/client": "workspace:*",
