@@ -40,8 +40,10 @@
 #     --jq-not  a jq boolean expression that is TRUE when an issue carries
 #               none of the labels, for use inside a `gh issue list --jq`
 #               `select(...)`, e.g.
-#                 ([.labels[].name] | contains(["external"]) | not)
-#               Multiple labels are ANDed.
+#                 (any(.labels[].name; . == "external") | not)
+#               Multiple labels are ANDed. Membership is exact (#11366): jq
+#               `contains` on strings is a substring test, so `loom:epic`
+#               would also have hidden `loom:epic-phase`.
 #     --search  gh/forge search qualifiers excluding the labels, e.g.
 #                 -label:"external"
 #
@@ -51,12 +53,28 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# THE LIST. Keep it in sync with `HARD_EXCLUSION_LABELS` in
-# loom-daemon/src/hard_exclusion.rs (a unit test there enforces this).
+# THE LIST. The source of truth is the label registry (`defaults/labels.json`,
+# #10013): the `hard_exclusion` property, queried through
+# `loom-daemon labels list --property hard_exclusion`. The array below is only
+# the offline fallback for a host with no (or an older) loom-daemon; it is kept
+# in lockstep with `HARD_EXCLUSION_LABELS` in loom-daemon/src/hard_exclusion.rs
+# (derived from the registry) by a unit test there.
 # ---------------------------------------------------------------------------
 HARD_EXCLUSION_LABELS=(
+  loom:frozen
   external
 )
+
+_daemon="${LOOM_DAEMON_BIN:-}"
+[[ -n "$_daemon" && -x "$_daemon" ]] || _daemon="$(command -v loom-daemon 2>/dev/null || true)"
+if [[ -n "$_daemon" ]]; then
+  # requires-daemon: labels optional   a missing or older binary (pre-#10013 slice 1) falls back to the HARD_EXCLUSION_LABELS array above
+  _queried=()
+  if _q="$("$_daemon" labels list --property hard_exclusion 2>/dev/null)" && [[ -n "$_q" ]]; then
+    while IFS= read -r _l; do [[ -n "$_l" ]] && _queried+=("$_l"); done <<<"$_q"
+    ((${#_queried[@]})) && HARD_EXCLUSION_LABELS=("${_queried[@]}")
+  fi
+fi
 
 _usage() {
   echo "Usage: hard-exclusion-labels.sh [--lines|--json|--jq-not|--search]" >&2
@@ -91,7 +109,7 @@ case "$MODE" in
     _out=""
     for _l in "${HARD_EXCLUSION_LABELS[@]}"; do
       [[ -n "$_out" ]] && _out+=" and "
-      _out+="([.labels[].name] | contains([\"${_l}\"]) | not)"
+      _out+="(any(.labels[].name; . == \"${_l}\") | not)"
     done
     printf '%s\n' "$_out"
     ;;

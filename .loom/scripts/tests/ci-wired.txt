@@ -28,6 +28,7 @@
 
 test-agent-destroy.sh
 test-app-permission-fallback.sh
+test-approval-history-per-issue-events.sh
 test-archive-transcripts.sh
 test-blame-issue.sh
 test-branch-landed.sh
@@ -38,20 +39,34 @@ test-build-gate-timeout.sh
 test-build-rs-watchset.sh
 test-build-slot.sh
 test-cargo-test-daemon-guard.sh
+test-champion-capped-hold-routing.sh
 test-champion-ci-checks-no-checks-signal.sh
 test-champion-critical-file-check.sh
+test-champion-evaluating-reclaim-trust.sh
+test-champion-epic-child-discovery.sh
+test-champion-epic-escalation-evaluations.sh
 test-champion-epic-escalation-respects-human-hold.sh
 test-champion-epic-phase-marker-normalization.sh
 test-champion-epic-verdict-marker-scope.sh
+test-champion-followon-out-of-scope.sh
 test-champion-held-pr-health-pass.sh
 test-champion-issue-promo-escalation-respects-human-hold.sh
+test-champion-markerless-park.sh
+test-champion-merge-queue-step-no-fallthrough.sh
+test-champion-pr-merge-hold-release.sh
 test-champion-pr-merge-negation-guard.sh
+test-champion-post-claim-recheck.sh
 test-champion-premise-false-close.sh
+test-champion-promotion-throughput.sh
 test-champion-standing-authorization.sh
+test-champion-targeted-modes.sh
+test-champion-terminal-verdicts.sh
+test-champion-tracker-marker-skip.sh
+test-check-cas-recheck-consistency.sh
 test-check-ci-status.sh
+test-ci-suite-manifest-installed-layout.sh
 test-check-config-no-host-paths.sh
 test-check-conflict-markers.sh
-test-check-dependabot-labels.sh
 test-check-evaluating-staleness.sh
 test-check-git-identity.sh
 test-check-guards-installed.sh
@@ -59,9 +74,7 @@ test-check-merge-config.sh
 test-check-host-sleep.sh
 test-check-defaults-version-bump.sh
 test-check-ingest-key-file.sh
-test-check-main-clean.sh
 test-check-main-freshness.sh
-test-check-pipefail-early-exit.sh
 test-check-promotion-landed.sh
 test-check-quarantine-stashes.sh
 test-check-runtime-capabilities.sh
@@ -75,10 +88,13 @@ test-clean-stale-building-labels.sh
 test-config-resolver.sh
 test-config-tiers-cli-migration.sh
 test-cpu-budget.sh
-test-create-pr-provenance.sh
+test-create-issue-refuse-labels.sh
+test-create-pr-priority-labels.sh
+test-create-pr-rate-limit-fallback.sh
 test-create-pr-review-gate.sh
 test-create-pr-superseded-issue.sh
 test-create-pr-version-check.sh
+test-critical-file-hold-tick.sh
 test-curator-rightsizing.sh
 test-default-branch.sh
 test-dependency-parse.sh
@@ -103,10 +119,12 @@ test-guide-docs-pr-exclude-refresh.sh
 test-guide-docs-pr-race.sh
 test-guide-docs-telemetry.sh
 test-guide-operator-attention-fold.sh
-test-guide-operator-only-exclude.sh
+test-guide-blocked-unblock-limit.sh
+test-guide-operator-hold-exclude.sh
 test-guide-plan-body-stable-sort.sh
 test-guide-pool-pressure-defer.sh
 test-guide-superseding-block-merge-state.sh
+test-guide-unblock-merged-blocker.sh
 test-guide-work-log-debounce.sh
 test-guide-work-log-issue-out-of-order.sh
 test-guide-work-log-issue-pagination.sh
@@ -115,11 +133,10 @@ test-guide-work-log-pr-pagination.sh
 test-guide-work-log-self-loop.sh
 test-guide-work-plan-approved-review-label-fidelity.sh
 test-guide-work-plan-debounce.sh
-test-guide-work-plan-operator-only-exclude.sh
+test-guide-work-plan-operator-hold-exclude.sh
 test-guide-work-plan-ready-open-pr-exclude.sh
 test-hard-exclusion-labels.sh
 test-host-sleep-config.sh
-test-inbox-mail.sh
 test-install-active-session.sh
 test-install-agents-md-reapply.sh
 test-install-full-reinstall-no-target-mutation.sh
@@ -132,6 +149,7 @@ test-jq-reserved-word-args.sh
 test-judge-fallback-cap.sh
 test-judge-fanout-experiment.sh
 test-judge-payload-drop-guard.sh
+test-judge-spec-reconcile.sh
 test-judge-tdd-merge-base.sh
 test-land-resync-commit.sh
 test-live-state-sandbox.sh
@@ -146,13 +164,16 @@ test-merge-admission-telemetry.sh
 test-merge-pr-app-permission-fallback.sh
 test-merge-pr-auto-merge-disabled-fallback.sh
 test-merge-pr-auto-queued-stacked-children.sh
+test-merge-pr-expected-head.sh
+test-merge-pr-pr-state.sh
 test-merge-pr-check-runs-404-fallback.sh
 test-merge-pr-daemon-version-floor.sh
-test-merge-pr-help.sh
-test-merge-pr-merge-method.sh
 test-merge-pr-rate-limit-fallback.sh
+test-merge-pr-stacked-child-branch-delete.sh
+test-merge-pr-tree-checks.sh
+test-merge-pr-required-checks.sh
 test-nextest-daemon-guard.sh
-test-operator-only-subkind.sh
+test-operator-hold-routing.sh
 test-post-verdict.sh
 test-pr-worktree-isolation.sh
 test-probe-tokens-fallback.sh
@@ -163,18 +184,22 @@ test-rebase-stacked-children.sh
 test-record-noop-release.sh
 test-recover-orphaned-shepherds-diagnostics.sh
 test-repo-mismatch-fallback.sh
-test-require-complexity-marker.sh
 test-require-daemon-bin.sh
-test-resolve-tier-model.sh
+test-require-daemon-bin-provenance.sh
 test-resync-installed-agent-skills-guard.sh
+test-resync-installed-agents-hooks.sh
 test-resync-installed-gh-config-guard.sh
 test-resync-installed-guard-check.sh
+test-resync-installed-host-optout.sh
+test-resync-installed-labels-block.sh
 test-resync-installed-local-fix-guard.sh
 test-resync-installed-retired-dry-run.sh
+test-resync-installed-retired-migrate.sh
 test-resync-installed-dogfood-symlink.sh
 test-resync-installed-stamp.sh
 test-resync-installed-output-staging.sh
 test-resync-installed.sh
+test-resync-installed-payload-fallback.sh
 test-review-feedback-reconciliation.sh
 test-run-ci-suites-daemon-guard.sh
 test-run-ci-suites-failure-excerpt.sh
@@ -188,6 +213,7 @@ test-safehoused-service.sh
 test-script-helper-version-floor.sh
 test-session-mode.sh
 test-spawn-codex-sandbox-noop.sh
+test-spawn-codex-session-down.sh
 test-stale-claim-standdown-suppression.sh
 test-stop-hook-subcommand-skew.sh
 test-sweep-auto-stack.sh
@@ -197,12 +223,16 @@ test-sweep-lease-fence.sh
 test-sweep-lease-fence-race.sh
 test-sweep-lease-publish.sh
 test-sweep-lease-renew.sh
+test-sweep-lease-renew-lifecycle.sh
 test-sweep-pr-mode.sh
 test-sweep-run-registry.sh
+test-sweep-wave-judge-done-staleness.sh
 test-sync-labels-check.sh
+test-sync-labels-migrate-retired.sh
 test-token-cache-affinity.sh
 test-claude-wrapper-proxy-rotation.sh
 test-sync-labels-repo-flag.sh
+test-sync-labels-write-failures.sh
 test-verdict-staleness-guard.sh
 test-verify-install-scope.sh
 test-version-bump-workflow-identity.sh
@@ -213,6 +243,7 @@ test-warn-out-of-set-deps.sh
 test-write-scope.sh
 test-worktree-forge-pr-check.sh
 test-worktree-hookspath.sh
+test-worktree-refused-claim-no-lease.sh
 test-worktree-root-override.sh
 test-worktree-sentinel.sh
 
@@ -231,6 +262,7 @@ tests/hooks/test-guard-destructive-mkdir-confinement.sh
 tests/hooks/test-guard-destructive-mktemp-canon.sh
 tests/hooks/test-guard-destructive-readonly-fastpath.sh
 tests/hooks/test-guard-destructive-rm-scope.sh
+tests/hooks/test-guard-destructive-sed-operands.sh
 tests/hooks/test-guard-destructive-session-scratch.sh
 tests/hooks/test-guard-destructive-stash-scope.sh
 tests/hooks/test-guard-destructive-write-confinement.sh
@@ -247,6 +279,7 @@ tests/hooks/test-pre-commit-missing-formatter.sh
 
 # defaults/hooks/tests/ — remaining unwired guard-hook suites, wired since #4451.
 defaults/hooks/tests/test-guard-background-subagents.sh
+defaults/hooks/tests/test-roll-pause.sh
 defaults/hooks/tests/test-guard-installed-file-writes.sh
 defaults/hooks/tests/test-guard-loom-workspace.sh
 defaults/hooks/tests/test-guard-secret-scan.sh
@@ -259,6 +292,7 @@ defaults/hooks/tests/test-skill-router.sh
 # previously orphaned entirely — appeared in ci.yml only as a paths-filter
 # trigger, never as an invoked job step). All confirmed hermetic (no live
 # network/forge calls, fake/stub binaries only) and ubuntu-portable.
+tests/install/test-daemon-build-otlp-probe.sh
 tests/install/test-daemon-build-shortcut.sh
 tests/install/test-dry-run-preview-manifest.sh
 tests/install/test-forge-detect.sh
@@ -286,3 +320,20 @@ tests/hermit/test-stateless-ceremony.sh
 # scripts/ — repo-root tooling suites. Hermetic: builds a disposable git
 # repo under mktemp -d with its own identity, no network, no gh.
 scripts/test-changelog.sh
+
+# #11790: spawn-claude.sh's container gh credentials and
+# `gh-shim container-mount` sink mount. Hermetic: stub docker + stub daemon
+# under mktemp -d; no network, forge or real daemon binary.
+test-spawn-claude-container-gh.sh
+
+# #11076: spawn-claude.sh's systemd scope carries OOMPolicy=continue. Hermetic:
+# systemd-run/systemctl/claude stubs under mktemp -d, no daemon, forge or network.
+test-spawn-claude-oom-policy.sh
+
+# #11094: spawn-claude.sh's systemd scope gets MemoryMax from `loom-daemon
+# ram-scope-limit`. Hermetic: daemon/systemd-run/systemctl/claude stubs under
+# mktemp -d; no real daemon, forge or network.
+test-spawn-claude-memory-max.sh
+# #11863: prompt-lint that targeted Judge/Curator/Builder invocations repeat
+# discovery gates before the first write. Hermetic: reads files only.
+test-targeted-role-invocation.sh

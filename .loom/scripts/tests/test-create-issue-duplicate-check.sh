@@ -61,13 +61,11 @@ SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 # shellcheck source=lib/require-daemon-bin.sh
 source "$TEST_DIR/lib/require-daemon-bin.sh"
 loom_test_require_daemon_bin "$SCRIPTS_DIR" "duplicate-scan"
-# #9548: filing vets its repo first (`forge may-write`); that decision is not
-# what this suite tests (test-write-scope.sh does), so the fixture repos are
-# allowed and every other verb still reaches the pinned binary.
-WS_STUB_DIR="$(mktemp -d)"
-# shellcheck source=lib/write-scope-stub.sh
-source "$TEST_DIR/lib/write-scope-stub.sh"
-write_scope_allow_all "$WS_STUB_DIR"
+# #9548: filing vets its repo first (`loom_write_repo`, answered by the pinned
+# daemon). The fixture checkouts are registered below (write-scope-fixture.sh)
+# so the real gate admits them.
+# shellcheck source=lib/write-scope-fixture.sh
+source "$TEST_DIR/lib/write-scope-fixture.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -221,18 +219,32 @@ exit 1
 STUB
 chmod +x "$FAKE_BIN/loom-daemon"
 
+# Write-scope fixtures (#9548). Every filing runs from $FIXTURE_WS, a checkout
+# registered as example/repo (the repo the stub gh files into). Case 8 files
+# across repos (--repo example/other), which the real gate admits only when
+# example/other is the origin of a REGISTERED WORKSPACE: $FIXTURE_OTHER is that
+# workspace, in an isolated registry (never the host's ~/.loom/workspaces.json).
+# The second registration chains onto the first, so the one LOOM_GH_BIN answers
+# the permission probe for both repos and hands everything else to the stub gh.
+FIXTURE_WS="$WORK/ws"
+FIXTURE_OTHER="$WORK/other"
+WRITE_SCOPE_INNER_GH="$FAKE_BIN/gh" write_scope_register "$FIXTURE_WS" example/repo
+write_scope_register "$FIXTURE_OTHER" example/other
+write_scope_workspaces "$WORK/workspaces.json" "$FIXTURE_OTHER"
+
 DUP_CALLS="$WORK/dup-calls.log"
 GH_CREATES="$WORK/gh-creates.log"
 DAEMON_ARGS="$WORK/daemon-args.log"
 
 # run_create [env assignments handled by caller] <args...>
-# Always: github forge forced, filing lock disabled (covered by
+# Always: run from $FIXTURE_WS, github forge forced, filing lock disabled (covered by
 # test-filing-lock.sh), stub gh first on PATH, logs reset.
 run_create() {
     : > "$DUP_CALLS"
     : > "$GH_CREATES"
     : > "$DAEMON_ARGS"
     OUT="$(
+        cd "$FIXTURE_WS" &&
         PATH="$FAKE_BIN:$PATH" \
         LOOM_FORGE_TYPE=github \
         LOOM_FILING_LOCK=0 \
@@ -499,6 +511,7 @@ echo "--- no exit path is silent ---"
 run_create_split() {
     : > "$GH_CREATES"
     STDOUT="$(
+        cd "$FIXTURE_WS" &&
         PATH="$FAKE_BIN:$PATH" \
         LOOM_FORGE_TYPE=github \
         LOOM_FILING_LOCK=0 \
@@ -553,6 +566,82 @@ STUB_DAEMON_FOOTER=ok run_create_split --title "Something new" --body "Body."
 assert_eq "$RC" "0" "a succeeding footer step exits 0"
 assert_eq "$STDOUT" "https://github.com/example/repo/issues/9999" "…stdout is exactly the URL"
 assert_not_contains "$STDERR" "dashboard footer" "…and no footer note is printed"
+
+# --- 14. Single intake state (#10041) ---------------------------------------
+echo "--- no loom:* label -> loom:triage; an explicit loom:* label wins ---"
+run_create --title "Intake default" --body "Body."
+assert_contains "$(cat "$GH_CREATES")" "loom:triage" "no --label files with loom:triage"
+run_create --title "Intake bug only" --body "Body." --label bug
+assert_contains "$(cat "$GH_CREATES")" "loom:triage" "a non-loom label still gets loom:triage"
+run_create --title "Intake explicit" --body "Body." --label loom:building
+assert_not_contains "$(cat "$GH_CREATES")" "loom:triage" "--label loom:building does not add loom:triage"
+
+# --- 15. --parent glue (#10012) ---------------------------------------------
+# A stub loom-daemon (first on PATH) stands in for `forge parent body|link`.
+# No --repo is passed: the empty --repo array is the shape that aborts under
+# `set -u` on bash < 4.4, so the default invocation must file cleanly.
+echo "--- --parent: marker lands in the filed body; a missing daemon files nothing ---"
+PARENT_BIN="$WORK/parent-bin"
+mkdir -p "$PARENT_BIN"
+cat > "$PARENT_BIN/loom-daemon" << 'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "forge" && "${2:-}" == "parent" && "${3:-}" == "body" ]]; then
+    printf '%s\n' "$*" >> "${STUB_DAEMON_ARGS:-/dev/null}"
+    cat
+    printf '\n<!-- loom:parent #7 -->\n'
+    exit 0
+fi
+if [[ "${1:-}" == "forge" && "${2:-}" == "parent" && "${3:-}" == "link" ]]; then
+    printf '%s\n' "$*" >> "${STUB_DAEMON_ARGS:-/dev/null}"
+    exit 0
+fi
+[[ "${1:-}" == "forge" && "${2:-}" == "comment" ]] && exit 0
+exit 1
+STUB
+chmod +x "$PARENT_BIN/loom-daemon"
+OLD_FAKE_BIN="$FAKE_BIN"
+FAKE_BIN="$PARENT_BIN:$FAKE_BIN"
+run_create --title "Child of seven" --body "Body." --parent 7
+FAKE_BIN="$OLD_FAKE_BIN"
+assert_eq "$RC" "0" "--parent without --repo files cleanly (empty repo array is set -u safe)"
+assert_contains "$(cat "$GH_CREATES")" "loom:parent #7" "the parent marker is in the filed body"
+assert_contains "$(cat "$DAEMON_ARGS")" "forge parent body --parent 7" "forge parent body ran with the parent number"
+assert_contains "$(cat "$DAEMON_ARGS")" "forge parent link --parent 7" "forge parent link ran after filing"
+
+# No daemon on PATH: the shell reports it (127), nothing filed.
+NODAEMON_BIN="$WORK/nodaemon-bin"
+mkdir -p "$NODAEMON_BIN"
+cp "$FAKE_BIN/gh" "$NODAEMON_BIN/gh"
+OLD_FAKE_BIN="$FAKE_BIN"
+FAKE_BIN="$NODAEMON_BIN"
+: > "$GH_CREATES"
+OUT="$(PATH="$NODAEMON_BIN:/usr/bin:/bin" LOOM_FORGE_TYPE=github LOOM_FILING_LOCK=0 \
+    STUB_GH_CREATES="$GH_CREATES" bash "$CREATE_ISSUE" --title "Orphan" --body "Body." --parent 7 2>&1)"
+RC=$?
+FAKE_BIN="$OLD_FAKE_BIN"
+assert_eq "$RC" "127" "--parent with no loom-daemon exits 127 (command not found)"
+assert_contains "$OUT" "loom-daemon" "…and names the missing binary"
+assert_eq "$(cat "$GH_CREATES")" "" "…and nothing was filed"
+
+# An explicitly empty or non-numeric --parent is an argument error, not "absent":
+# the daemon (clap's u32) rejects it with exit 2 and the script propagates that
+# before filing. The stub mimics clap's rejection of a non-number.
+cat > "$PARENT_BIN/loom-daemon" << 'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "forge" && "${2:-}" == "parent" && "${3:-}" == "body" ]]; then
+    [[ "${5:-}" =~ ^[0-9]+$ ]] || { echo "error: invalid value '${5:-}' for '--parent <PARENT>'" >&2; exit 2; }
+fi
+exit 0
+STUB
+OLD_FAKE_BIN="$FAKE_BIN"
+FAKE_BIN="$PARENT_BIN:$FAKE_BIN"
+for BAD_PARENT in "" "abc"; do
+    run_create --title "Bad parent" --body "Body." --parent "$BAD_PARENT"
+    assert_eq "$RC" "2" "--parent '$BAD_PARENT' exits 2"
+    assert_contains "$OUT" "invalid value" "…and says why"
+    assert_eq "$(cat "$GH_CREATES")" "" "…and nothing was filed"
+done
+FAKE_BIN="$OLD_FAKE_BIN"
 
 echo
 echo "=== $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed ==="

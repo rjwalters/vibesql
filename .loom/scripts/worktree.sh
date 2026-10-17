@@ -1136,8 +1136,8 @@ Monorepo / Generated-Artifact Symlinks:
   Each created symlink is added to the worktree's .git/info/exclude so 'git add -A'
   never stages it; linking is best-effort and never aborts worktree creation. Repos
   with no nested node_modules and no worktree.linkPaths config see no change.
-  NEITHER node_modules family runs on a pnpm workspace — pnpm purges THROUGH the alias
-  into the main clone (#8944). Override: worktree.linkNodeModules true|false|"auto".
+  NEITHER node_modules family runs on a pnpm workspace (#8944; override: worktree.linkNodeModules
+  true|false|"auto"). Pre-#8944 aliases: loom-daemon worktree-link --retire-aliases (#9152).
 
 Resuming Abandoned Work:
   If an agent abandoned work on issue #42, a new agent can resume:
@@ -1553,48 +1553,30 @@ WORKTREE_ROOT_DIR="$(loom_worktree_root "$WORKTREE_REPO_ROOT")"
 mkdir -p "$WORKTREE_ROOT_DIR" 2>/dev/null || true
 WORKTREE_PATH="$WORKTREE_ROOT_DIR/issue-$ISSUE_NUMBER"
 
-# --- Lease this claim's liveness (#8193) -------------------------------------
-# An in-session Task-tool Builder claims `loom:building` and then publishes no
-# liveness record of any kind: `SweepRegistry::dispatch` never ran for it, so
-# there is no journal entry and no `write_lease_comment` (#6179), and the
-# in-session publish step lives in the SWEEP orchestrator's prompt, not the
-# builder's. `claim_reconciliation`'s Phase-2 gate (#6286) then reads
-# `lease_evidence=absent` and reclaims a claim that is actively being worked --
-# three such reclaims on one six-builder wave, 2026-09-17.
-#
-# Here, rather than in `builder.md`, for the reason #7672 established: a
-# prose-mandated lease step was skipped by exactly one session and cost ~2.5h of
-# fleet claim/yield thrash. Every builder already runs this script immediately
-# after claiming, so this is the one call site that cannot be forgotten. It sits
-# at pre-flight (before the create/reuse branch below) so it covers every way
-# this script can conclude, which is also `sweep-lease-publish.sh`'s own
-# documented publish-at-pre-flight semantics.
-#
-# `--watch-pid` is `${CLAUDE_PID:-$PPID}` and NEVER `$$`: `$$` is the one-shot
-# tool-call subshell, which exits the instant the call returns, so the renewal
-# loop would self-terminate on its first wake-up. The remaining policy -- the
-# no-op when the daemon already published (#7672), the refusal outside an agent
-# session, the 4h renewal cap -- lives in `loom-daemon lease ensure`, per
-# ADR-0018 and because this file's `contract` category admits no growth.
-#
-# $_WT_DAEMON_BIN is resolved at the top of the create path (above), not here.
-[[ -z "$_WT_DAEMON_BIN" ]] || "$_WT_DAEMON_BIN" lease ensure "$ISSUE_NUMBER" --watch-pid "${CLAUDE_PID:-$PPID}" > /dev/null 2>&1 || true
+# --- Lease this claim's liveness (#8193, #10204) -----------------------------
+# An in-session builder otherwise publishes no liveness record, and
+# `claim_reconciliation` reclaims an actively worked claim (#6286, #7672). Here,
+# not in `builder.md`, so the one call site that cannot be forgotten covers it.
+# #10204: it is called only once each arm's own operation has SUCCEEDED --
+# `_worktree_sparse reconfigure`, `_worktree_existing`, `git worktree add` --
+# never before a gate that can still refuse (claim-lock, co-occupancy,
+# `forge check-claim`, #8280 branch reuse, #7765/#9083 origin-branch reuse) or
+# an add that can still fail, so no nonzero exit before a real worktree exists
+# leaves a lease comment and renewer behind. `--watch-pid` is
+# `${LOOM_AGENT_SESSION_PID:-${CLAUDE_PID:-$PPID}}` (#10570: the same chain as the
+# CLAUDE.md claim recipe), NEVER `$$` (the one-shot tool-call subshell). stderr is
+# left attached: `lease ensure` prints exactly one outcome line there, and a
+# declined/failed publish must stay visible, not be swallowed (#10570). The
+# remaining policy lives in `loom-daemon lease ensure` (ADR-0018; this file's
+# `contract` category admits no growth). $_WT_DAEMON_BIN: resolved above.
+# `3>&-` (#10203): fd 3 is the caller's saved stdout (`exec 3>&1`); the up-to-4h
+# renewer must not inherit it and hold a `worktree.sh N | tail` pipe open.
+_wt_lease_claim() { [[ -z "$_WT_DAEMON_BIN" ]] || "$_WT_DAEMON_BIN" lease ensure "$ISSUE_NUMBER" --watch-pid "${LOOM_AGENT_SESSION_PID:-${CLAUDE_PID:-$PPID}}" > /dev/null 3>&- || true; }
 
 # --- Issue claim-lock cross-check (#8553) ------------------------------------
-# `.loom/locks/issue-<N>/owner.json` is the DAEMON's per-issue sweep-claim
-# lock (sweep_registry::locks::acquire_lock), held for a dispatched sweep's
-# ENTIRE lifetime -- a different, longer-lived lock than the repo-global
-# worktree-add mutex above. This script never acquires or releases it; it
-# only reads it here, unconditionally, before every create/reuse path below
-# (including the --sparse/--full apply-to-existing branch), so the check
-# applies regardless of whether the worktree or the lock was created first.
-# All decision logic and message formatting lives in the daemon subcommand
-# (this file is frozen by the file-size ratchet, so new logic goes there, not
-# here) -- exit 1 refuses (its message went to stderr, or to stdout/&3 per the
-# documented --json contract when the caller asked for it); exit 0 means free,
-# or a live conflict downgraded to a warning by --force. Only exit code 1 (not
-# ANY nonzero, e.g. an installed daemon too old for `check-issue`) refuses --
-# an undetermined verdict must fail OPEN, matching every other guard here.
+# Reads (never acquires) the daemon's per-issue sweep-claim lock before every
+# create/reuse path below. Only exit 1 refuses; any other nonzero (e.g. a daemon
+# predating `check-issue`) fails OPEN, matching every other guard here.
 # shellcheck disable=SC2086  # $_ijson is intentionally unquoted: omits the flag when empty
 # requires-daemon: worktree-lock optional   #8553 fails open on a daemon predating check-issue (no lock cross-check performed)
 [[ -z "$_WT_DAEMON_BIN" ]] || { _ijson=""; _irc=0; [[ "$JSON_OUTPUT" == "true" ]] && _ijson="--json"; "$_WT_DAEMON_BIN" worktree-lock check-issue --issue "$ISSUE_NUMBER" --repo "$WORKTREE_REPO_ROOT" $_ijson ${FORCE_CLAIM_LOCK:+--force} >&3 || _irc=$?; [[ "$_irc" -eq 1 ]] && exit 1; }
@@ -1610,7 +1592,7 @@ if [[ -d "$WORKTREE_PATH" ]]; then
     # propagates with its code intact.
     if [[ "$SPARSE_MODE" == "true" || "$FULL_MODE" == "true" ]]; then
         _worktree_sparse reconfigure "$WORKTREE_PATH" >&3
-        exit 0
+        _wt_lease_claim; exit 0
     fi
 
     print_warning "Worktree already exists at: $WORKTREE_PATH"
@@ -1641,25 +1623,8 @@ if [[ -d "$WORKTREE_PATH" ]]; then
     # as the --sparse/--full fast path (sparse.rs JSON_TEMPLATE), which already
     # exited, so $SPARSE_MODE/$CONE_JSON are their not-sparse defaults.
     [[ "$JSON_OUTPUT" != "true" ]] || echo '{"success": true, "worktreePath": "'"$(cd "$WORKTREE_PATH" && pwd)"'", "branchName": "'"$BRANCH_NAME"'", "issueNumber": '"$ISSUE_NUMBER"', "sparse": '"$SPARSE_MODE"', "cone": '"$CONE_JSON"'}' >&3
-    exit 0
+    _wt_lease_claim; exit 0
 fi
-
-# --- Pre-creation claim probe (#9453 Phase 1) ----------------------------
-# Reached only on the CREATE path (the reuse arm above already exited),
-# before `git worktree add` below. `loom-daemon forge check-claim
-# --force-claim` aggregates the four claim signals; --force-claim because
-# this script's caller has ALWAYS already claimed by the time it runs
-# (builder.md: claim, then create worktree), so the issue legitimately
-# carries the caller's own `loom:building` label, lease, and possibly
-# branch -- the only leg that still means "do not build a duplicate" is
-# OPEN_PR, the one leg --force-claim can never override. Only exit 0
-# (blocked; its reason token went to >&3, its explanation to stderr)
-# refuses; a read failure, an old daemon, or any other code fails OPEN,
-# exactly like the #8553/#5783 guards above. A caller refused here adopts
-# the existing PR (create-pr.sh) or stands down -- never a suffix branch.
-# requires-daemon: forge optional   #9453 — `forge check-claim` at worktree creation; without it (absent or pre-#9453 binary) no pre-create OPEN_PR gate is performed and creation proceeds as before
-# shellcheck disable=SC2015  # the trailing `|| true` IS the fail-open path: only exit 0 (blocked) refuses
-[[ -n "$_WT_DAEMON_BIN" ]] && "$_WT_DAEMON_BIN" forge check-claim "$ISSUE_NUMBER" --force-claim >&3 && exit 1 || true
 
 # Check if branch already exists
 if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
@@ -1703,11 +1668,25 @@ else
         fi
         CREATE_ARGS=("$WORKTREE_PATH" "-b" "$BRANCH_NAME" "origin/$BRANCH_NAME")
     else
+        # --- Pre-creation claim probe (#9453 Phase 1; fresh-branch only, #9828) ---
+        # Guards fresh-branch creation ONLY: a caller reusing a local or origin
+        # feature/issue-<N> branch (above) is continuing that open PR -- a Doctor
+        # (#9828) -- so OPEN_PR there is expected, and the reuse resolver already
+        # refuses to shadow a real PR. Here we would branch fresh off BASE_REF, so
+        # an open linked PR (e.g. on another branch name) means a duplicate build.
+        # --force-claim: the caller has already claimed (builder.md), so its own
+        # `loom:building`/lease are expected; OPEN_PR, TARGET_IS_PR (#9929, the
+        # number is a PR), CLOSED (#11863, nothing left to build) and FROZEN
+        # (#11743, `loom:frozen`) are the legs it never overrides. Only exit 0
+        # (blocked; reason token to >&3, explanation to stderr) refuses; a read failure, an old daemon, or any other code fails
+        # OPEN, like the #8553/#5783 guards. A refused caller adopts the existing
+        # PR (create-pr.sh) or stands down -- never a suffix branch.
+        # requires-daemon: forge optional   #9453 — `forge check-claim` at worktree creation; without it (absent or pre-#9453 binary) no pre-create OPEN_PR gate is performed and creation proceeds as before
+        # shellcheck disable=SC2015  # the trailing `|| true` IS the fail-open path: only exit 0 (blocked) refuses
+        [[ -n "$_WT_DAEMON_BIN" ]] && "$_WT_DAEMON_BIN" forge check-claim "$ISSUE_NUMBER" --force-claim >&3 && exit 1 || true
         # Create new branch from the base ref (origin/$DEFAULT_BRANCH by default, or
         # the --base override for a stacked child — #3729).
-        if [[ "$JSON_OUTPUT" != "true" ]]; then
-            print_info "Creating new branch from $BASE_DISPLAY"
-        fi
+        [[ "$JSON_OUTPUT" == "true" ]] || print_info "Creating new branch from $BASE_DISPLAY"
         CREATE_ARGS=("$WORKTREE_PATH" "-b" "$BRANCH_NAME" "$BASE_REF")
     fi
 fi
@@ -1828,6 +1807,8 @@ if _try_worktree_add; then
     # for other issues (issue #6014). release_worktree_lock clears
     # WORKTREE_LOCK_TOKEN itself, which makes the EXIT trap's later call a no-op.
     release_worktree_lock "$ISSUE_NUMBER" "$WORKTREE_LOCK_TOKEN"
+    # The worktree now exists, so every refusal gate is behind us (#10204).
+    _wt_lease_claim
 
     # Get absolute path to worktree
     ABS_WORKTREE_PATH=$(cd "$WORKTREE_PATH" && pwd)

@@ -480,6 +480,18 @@ done
 # Codex's hook-trust waiver comes only from Loom's sealed-registration vetting (#10102), never from a caller.
 [[ " ${PASSTHROUGH_ARGS[*]-} " != *" --dangerously-bypass-hook-trust"* ]] || { log_error "A caller may not pass Codex's hook-trust waiver; spawn-codex.sh adds it only for a vetted sealed registration (issue #10102)."; exit 78; }
 
+# --- Roll resume (issue #10830) ---
+# A daemon roll resumes a paused session with `codex exec resume <id> <prompt>`
+# (docs/design/daemon-roll-pause-resume.md). The caller passes
+# LOOM_RESUME_SESSION_ID + LOOM_RESUME_PROMPT and pins the session's account
+# with LOOM_CODEX_HOME, because the rollout lives in that account's CODEX_HOME
+# (and, session-managed, in that account's container). `loom-daemon
+# agent-resume codex-prompt` checks all three and prints the prompt.
+if [[ -n "${LOOM_RESUME_SESSION_ID:-}" ]]; then
+    PROMPT="$("$(loom_resolve_self_daemon_bin)" agent-resume codex-prompt)" || { log_error "spawn-codex: cannot build the resume launch (loom-daemon agent-resume codex-prompt, #10830)"; exit 78; }
+    HAS_PROMPT=true
+fi
+
 # --- Model selection (mirrors spawn-claude.sh's #3477 precedence) ---
 # Precedence: explicit -m/--model > LOOM_MODEL > LOOM_CODEX_MODEL (the adapter's
 # static default, unset by default) > nothing (Codex CLI/profile default).
@@ -487,26 +499,31 @@ done
 #
 # Phase-2 minimalism (issue #4468): there is NO logical-tier -> model-ID table
 # here. Loom's logical tiers (`opus`, `sonnet`, `fable`) are Claude names; the
-# `sweep.modelAliases`/`sweep.tierModels` indirection that would map them onto
+# `sweep.modelAliases` indirection that would map them onto
 # OpenAI model IDs is epic #4167 Phase 4. Until then LOOM_MODEL is forwarded
 # verbatim and the adapter's static default is "whatever the profile already
 # chose", which is the operator's own selection.
-CODEX_DEFAULT_MODEL="${LOOM_CODEX_MODEL:-}"
+#
+# `model@effort` rung grammar (#8387): split on the first `@`. Only the base is
+# ever forwarded as `-m`; the suffix is the LOWEST-priority effort source,
+# routed below as `-c model_reasoning_effort=` (explicit -c > --effort >
+# LOOM_EFFORT > suffix). Empty base -> falls through to the next source;
+# empty suffix -> no effort. An explicit `-m foo@high` in args is left unchanged.
+MODEL_SUFFIX_EFFORT=""; _m_base=""
+[[ "$HAS_MODEL_ARG" == "true" ]] || for _m_src in LOOM_MODEL LOOM_CODEX_MODEL; do
+    _m_val="${!_m_src:-}"; _m_base="${_m_val%%@*}"; MODEL_SUFFIX_EFFORT="${_m_base:+${_m_val:${#_m_base}+1}}"
+    [[ "$_m_val" != *@* ]] || log_info "spawn-codex: split $_m_src='$_m_val' -> model=${_m_base:-<empty; ignored, falls through to the default-model path>} effort=${MODEL_SUFFIX_EFFORT:-none} (lowest-precedence effort source)"
+    [[ -z "$_m_base" ]] || break
+done
 EFFECTIVE_MODEL=""
 if [[ "$HAS_MODEL_ARG" == "true" ]]; then
-    if [[ -n "${LOOM_MODEL:-}" ]]; then
-        log_info "spawn-codex: explicit -m/--model in args wins over LOOM_MODEL='$LOOM_MODEL'"
-    fi
+    [[ -z "${LOOM_MODEL:-}" ]] || log_info "spawn-codex: explicit -m/--model in args wins over LOOM_MODEL='$LOOM_MODEL'"
     EFFECTIVE_MODEL="$EXPLICIT_MODEL"
     log_info "spawn-codex: model=${EXPLICIT_MODEL:-default} (from -m/--model arg)"
-elif [[ -n "${LOOM_MODEL:-}" ]]; then
-    EFFECTIVE_MODEL="$LOOM_MODEL"
-    PASSTHROUGH_ARGS+=(-m "$LOOM_MODEL")
-    log_info "spawn-codex: model=$LOOM_MODEL (from LOOM_MODEL)"
-elif [[ -n "$CODEX_DEFAULT_MODEL" ]]; then
-    EFFECTIVE_MODEL="$CODEX_DEFAULT_MODEL"
-    PASSTHROUGH_ARGS+=(-m "$CODEX_DEFAULT_MODEL")
-    log_info "spawn-codex: model=$CODEX_DEFAULT_MODEL (from LOOM_CODEX_MODEL adapter default)"
+elif [[ -n "$_m_base" ]]; then
+    EFFECTIVE_MODEL="$_m_base"
+    PASSTHROUGH_ARGS+=(-m "$_m_base")
+    log_info "spawn-codex: model=$_m_base (from $_m_src)"
 else
     log_info "spawn-codex: model=default"
 fi
@@ -545,18 +562,20 @@ fi
 # --- Effort selection ---
 # `codex exec` has no `--effort` flag; the equivalent knob is the
 # `model_reasoning_effort` config key. Mirrors the model precedence: an explicit
-# `-c model_reasoning_effort=` in the passthrough args wins, then LOOM_EFFORT,
-# then nothing (no override emitted, CLI default preserved).
+# `-c model_reasoning_effort=` in the passthrough args wins, then --effort, then
+# LOOM_EFFORT, then a `model@effort` suffix (#8387), then nothing (no override
+# emitted, CLI default preserved).
 if [[ "$HAS_EFFORT_OVERRIDE" == "true" ]]; then
-    if [[ -n "${LOOM_EFFORT:-}" ]]; then
-        log_info "spawn-codex: explicit -c model_reasoning_effort= wins over LOOM_EFFORT='$LOOM_EFFORT'"
-    fi
+    [[ -z "${LOOM_EFFORT:-}" ]] || log_info "spawn-codex: explicit -c model_reasoning_effort= wins over LOOM_EFFORT='$LOOM_EFFORT'"
 elif [[ -n "$GENERIC_EFFORT" ]]; then
     PASSTHROUGH_ARGS+=(-c "model_reasoning_effort=$GENERIC_EFFORT")
     log_info "spawn-codex: effort=$GENERIC_EFFORT (from --effort)"
 elif [[ -n "${LOOM_EFFORT:-}" ]]; then
     PASSTHROUGH_ARGS+=(-c "model_reasoning_effort=$LOOM_EFFORT")
     log_info "spawn-codex: effort=$LOOM_EFFORT (from LOOM_EFFORT)"
+elif [[ -n "$MODEL_SUFFIX_EFFORT" ]]; then
+    PASSTHROUGH_ARGS+=(-c "model_reasoning_effort=$MODEL_SUFFIX_EFFORT")
+    log_info "spawn-codex: effort=$MODEL_SUFFIX_EFFORT (from model@effort suffix)"
 fi
 
 # --- Sandbox mapping (SAFETY-CRITICAL; see header + guardrail-parity-codex.md) ---
@@ -851,6 +870,8 @@ if [[ "$CODEX_SESSION_EXEC" == "true" ]]; then
     fi
     [[ "$_posture_gh" != "gh=forward" || -z "${GH_CONFIG_DIR:-}" ]] || SESSION_EXTRA_ENV=(--env GH_CONFIG_DIR)
 fi
+# `codex exec resume` takes no -s/--sandbox: the same mode rides on -c (#10830).
+[[ -z "${LOOM_RESUME_SESSION_ID:-}" || "${SANDBOX_ARGS[0]:-}" == --dangerously-bypass-approvals-and-sandbox ]] || SANDBOX_ARGS=(-c "sandbox_mode=\"$SANDBOX_MODE\"")
 PASSTHROUGH_ARGS+=(${SANDBOX_ARGS[@]+"${SANDBOX_ARGS[@]}"})
 
 # --- ChatGPT-plan auth-mode guard for a pinned model (issue #5499) ---
@@ -1063,9 +1084,8 @@ fi
 # Non-interactive (prompt present): `codex exec [flags] "<prompt>"`.
 # Interactive (no prompt):          `codex [flags]`.
 CODEX_ARGS=()
-if [[ "$HAS_PROMPT" == "true" ]]; then
-    CODEX_ARGS+=(exec)
-fi
+# Resume (#10830): `codex exec resume [flags] <session-id> <prompt>`.
+[[ "$HAS_PROMPT" != "true" ]] || CODEX_ARGS+=(exec ${LOOM_RESUME_SESSION_ID:+resume})
 # Only for a sealed registration whose every hook source was vetted above (#10102).
 [[ "$_hook_trust_bypass" != "sealed" ]] || CODEX_ARGS+=(--dangerously-bypass-hook-trust -c features.plugins=false)
 if [[ "$CODEX_DROP_PINNED_MODEL" == "true" ]]; then
@@ -1097,9 +1117,9 @@ if [[ "$CODEX_DROP_PINNED_MODEL" == "true" ]]; then
 else
     CODEX_ARGS+=(${PASSTHROUGH_ARGS[@]+"${PASSTHROUGH_ARGS[@]}"})
 fi
-if [[ "$HAS_PROMPT" == "true" ]]; then
-    CODEX_ARGS+=("$PROMPT")
-fi
+[[ "$HAS_PROMPT" != "true" ]] || CODEX_ARGS+=(${LOOM_RESUME_SESSION_ID:+"$LOOM_RESUME_SESSION_ID"} "$PROMPT")
+# The resume identity is consumed (argv above); a nested spawn must not inherit it (#10830).
+unset LOOM_RESUME_SESSION_ID LOOM_RESUME_PROMPT
 
 # --- Session-exec invocation assembly (issue #6926) ---
 # Bare-metal: `codex <CODEX_ARGS...>`. Session-exec: `docker exec <container>
@@ -1127,7 +1147,7 @@ if [[ "$CODEX_SESSION_EXEC" == "true" ]]; then
     # provider credentials are deliberately NOT forwarded — the container
     # owns its own CODEX_HOME (ADR-0017 Decision 1).
     CODEX_INVOKE=("${LOOM_DAEMON_SELF_BIN:-loom-daemon}" session-exec host --container "$CODEX_SESSION_CONTAINER" --workdir "$PWD" --env "LOOM_WORKSPACE=$WORKSPACE" --env CARGO_INCREMENTAL=0 ${SESSION_EXTRA_ENV[@]+"${SESSION_EXTRA_ENV[@]}"} --owner-pid "$PPID")
-    for _v in LOOM_ROLE LOOM_RUNTIME LOOM_TERMINAL_ID LOOM_SWEEP_ID LOOM_WORKTREE_PATH LOOM_WORKTREE_ROOT LOOM_PROJECT_ROOT LOOM_SWEEP_CLAIM_OWNED LOOM_ACCOUNT_NAME LOOM_ACCOUNT_PROVIDER; do [[ -n "${!_v:-}" ]] && CODEX_INVOKE+=(--env "$_v=${!_v}"); done
+    for _v in LOOM_ROLE LOOM_RUNTIME LOOM_TERMINAL_ID LOOM_SWEEP_ID LOOM_WORKTREE_PATH LOOM_WORKTREE_ROOT LOOM_PROJECT_ROOT LOOM_SWEEP_CLAIM_OWNED LOOM_ACCOUNT_NAME LOOM_ACCOUNT_PROVIDER LOOM_DAEMON_ITEM_ID LOOM_HOST_ID LOOM_LEASE_HOST_ID LOOM_ROLE_PR_LEASE_FILE LOOM_PICK_JOURNAL LOOM_ROLL_PAUSE_DIR LOOM_ROLL_PAUSE_BIN CARGO_PROFILE_DEV_DEBUG CARGO_PROFILE_TEST_DEBUG; do [[ -n "${!_v:-}" ]] && CODEX_INVOKE+=(--env "$_v=${!_v}"); done
     CODEX_INVOKE+=(--)
 fi
 CODEX_INVOKE+=(codex ${CODEX_ARGS[@]+"${CODEX_ARGS[@]}"})
@@ -1156,9 +1176,10 @@ fi
 # --- Dispatch ---
 # Interactive runs (no prompt) and an explicit LOOM_CODEX_NO_CAPTURE keep a
 # plain pid-preserving `exec`. Note stdin is NOT redirected in the interactive
-# case — an operator at the keyboard needs it.
+# case — an operator at the keyboard needs it. A prompt run with
+# LOOM_CODEX_NO_CAPTURE is headless, so it gets /dev/null like the capture path.
 if [[ "$HAS_PROMPT" != "true" || -n "${LOOM_CODEX_NO_CAPTURE:-}" ]]; then
-    echo "# LOOM_CLI_START runtime=codex" >&2
+    echo "# LOOM_CLI_START runtime=codex" >&2; [[ "$HAS_PROMPT" == "true" ]] && exec </dev/null
     exec "${CODEX_INVOKE[@]}"
 fi
 
@@ -1176,6 +1197,21 @@ _stderr_file="$(mktemp -t loom-spawn-codex.XXXXXX 2>/dev/null || mktemp)"
 # shellcheck disable=SC2064  # expand $_stderr_file now, at trap-install time.
 trap "rm -f '$_stderr_file' '$_stderr_file.cancel'" EXIT
 
+# Live session-id capture (#10830): a roll needs the id while the session is
+# still running, not after it exits. `loom-daemon agent-resume capture-codex`
+# watches the capture below and writes LOOM_RESUME_HANDLE_FILE as soon as the
+# `session id:` line lands; it ends with this script ($$). It can outlive this
+# script by one poll, so nothing it leaves running may hold a private account's
+# lease (LOOM_PRIVATE_LEASE_FD), or the next dispatch on that account is refused:
+#   * `exec`, so the backgrounded subshell BECOMES the watcher. Without it bash
+#     keeps that subshell waiting on the watcher, and the subshell holds the
+#     lease whatever the watcher's own redirections say.
+#   * The watcher closes the descriptor LOOM_PRIVATE_LEASE_FD names as its first
+#     act. Do not add `N>&-` here instead: on an `exec`, bash 3.2 keeps a saved
+#     copy of the descriptor open in the new process.
+# The handle path is consumed once the watcher is forked, so it is unset on the
+# same line: a nested spawn's watcher would overwrite this session's handle.
+[[ -z "${LOOM_RESUME_HANDLE_FILE:-}" ]] || LOOM_CODEX_SANDBOX_MODE="${SANDBOX_MODE:-}" exec "$(loom_resolve_self_daemon_bin)" agent-resume capture-codex --stderr-file "$_stderr_file" --handle-file "$LOOM_RESUME_HANDLE_FILE" --watch-pid $$ --codex-home "${CODEX_HOME:-}" --account "${CODEX_PROFILE_NAME:-}" --container "${CODEX_SESSION_CONTAINER:-}" </dev/null >/dev/null 2>&1 & unset LOOM_RESUME_HANDLE_FILE
 set +e
 echo "# LOOM_CLI_START runtime=codex" >&2
 if [[ "$CODEX_SESSION_EXEC" == "true" ]]; then

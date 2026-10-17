@@ -28,7 +28,10 @@ sit on top of.
   rendered issue/PR, and a **sentinel** that distinguishes a declaration from
   prose that merely *mentions* a blocker elsewhere in the body. Same pattern,
   same reason, as the lease record (`<!-- loom:lease host=… sweep=… -->`,
-  `lease-record.md`) and the verdict-SHA / `loom:ac-verified` markers.
+  `lease-record.md`) and the verdict-SHA / `loom:ac-verified` markers. A
+  marker quoted inside a fenced code block or an inline code span renders as
+  visible text, so it is **not** a record: the parser ignores it and a re-park
+  never edits it (#10837, where quoted evidence released an unrecorded hold).
 - `Blocked by: #N` — **deliberately the existing vocabulary**, not a new one.
   `guide.md`'s `parse_dependencies`, `dep_recheck::extract`'s
   `DEPENDENCY_PHRASES`, `warn-operator-gated.sh` and
@@ -64,6 +67,15 @@ reference) — the one-line-per-blocker rule binds the *writer*, not the parser.
 
 ## Who writes one, and when — `park-record apply` (#10152)
 
+**Cross-repo blockers (#10443).** A blocker in another repository is written
+`OWNER/REPO#N` (`Blocked by: example-org/tool-repo#202`). `--blocked-by` accepts `N`,
+`#N` (this repo) and `OWNER/REPO#N`, mixed and comma-separated; still one record
+per blocker. A qualified reference is **never** resolved against the local repo:
+`check-stale-blocked` reads its state in its own repo, `apply` refuses a closed
+one by looking it up there, and it is a self-block only when it names this very
+repo and number. `#9` and `o/r#9` are two distinct blockers. Records written
+with a bare number parse exactly as before (`repo` is `None`).
+
 **Every** role applying `loom:blocked` writes one, through one command — never
 a bare label edit:
 
@@ -78,8 +90,7 @@ loom-daemon park-record apply --issue 8440 --reason operator --by human   # no b
 
 1. **Refuses** (exit 1, nothing changed) when there is neither `--blocked-by`
    nor an explicit `--reason`. A park with no named blocker reads as
-   `blocked-unnamed` to star-liveness and UNDOCUMENTED to
-   `check-stale-blocked`, and is never released automatically — so it must be
+   UNDOCUMENTED to `check-stale-blocked`, and is never released automatically — so it must be
    a written choice (`--reason operator`, a quarantine/scope ruling …), which
    renders an attributable `Blocked by: (unstated)` record, never an omission.
 2. **Refuses** a blocker that is already closed (#9102) — the unblock sweep
@@ -102,14 +113,107 @@ loom-daemon park-record render --blocked-by 8322 --by doctor \
 # <!-- loom:park Blocked by: #8322 by=doctor at=2026-09-19T18:04:11Z reason="needs an architecture ruling" -->
 ```
 
+### The daemon's own holds (#10161)
+
+Two `loom:blocked` writers live inside `loom-daemon`, not in a role prompt: the
+insta-crash quarantine (#3939) and the PR-less retry hold (#7972/#9239). Each
+writes a reason-only record **before** its label edit:
+
+```text
+<!-- loom:park Blocked by: (unstated) by=daemon at=2026-10-06T12:00:00Z reason="insta-crash quarantine" -->
+<!-- loom:park Blocked by: (unstated) by=daemon at=2026-10-06T12:00:00Z reason="pr-less hold" -->
+```
+
+`loom_daemon::sweep_registry::park_hold` owns the format: `DAEMON_HOLD_BY`,
+`QUARANTINE_HOLD_REASON`, `PRLESS_HOLD_REASON`, and `is_daemon_hold(&record)`.
+A reader that needs to tell a deliberate daemon hold from an undocumented park
+should key on `is_daemon_hold`, not on comment prose.
+
+These writers differ from `apply` in two documented ways:
+
+- **A refused body write still applies the label.** For the PR-less hold, the
+  label is the deliverable (#9239), and an unparked re-claim loop costs more
+  than a park without a name. The fallback is logged at `warn`. A body read or
+  write that **times out** stops the writer before its label edit, so a wedged
+  `gh` costs one timeout on the `reap_once` read path (#3973).
+- **Re-applying a hold replaces that hold's earlier record**, so `at=` dates
+  the current park. Releases (`quarantine clear`, the TTL, reconciliation, a
+  hand flip back to `loom:issue`) change only labels and leave the record in
+  the body. Readers key on `loom:blocked` first, so a leftover record on an
+  unblocked issue declares nothing.
+
+### Champion's PR holds (#11861)
+
+Champion's merge-risk and critical-file holds write a reason-only record on
+the PR (`reason="champion merge-risk hold"` / `"champion critical-file hold"`,
+`by=champion`, `loom_daemon::champion_hold`), keep `loom:pr`, and add
+`loom:blocked`. Only Champion or a human releases it. A dependency-only promotion finding writes one record per
+open blocker (`park-record apply --blocked-by --by champion`, #11860; or
+`classify-dependency-block.sh --check-defer --apply`). Nothing lifts it
+automatically when the blockers close: the daemon's release pass was retired
+(#11301), so a role or a human clears it.
+
+**A hold is a human evidence gate, not a dependency wait (#10937).** When the
+hold's concern names an open issue/PR ("pending real-PDK verification in
+#N"), Champion writes one more record beside the reason-only one so
+`check-stale-blocked` and the pipeline view show what the PR waits on:
+
+```bash
+loom-daemon park-record apply --pr "$PR_NUMBER" --blocked-by "$N" --by champion \
+  --reason "champion merge-risk hold: human evidence gate"
+```
+
+The reason-only record stays (`body_declares_hold` reads it); `apply` refuses a
+closed blocker (#9102), so a hold that names none, or only closed ones, is
+unchanged. The extra record is inert: `check_and_unblock_prs` skips a PR whose
+`loom-daemon champion-hold classify` says `state=champion-hold` before it reads
+a `Blocked by`, so closing #N never lifts the hold. Worked example, PR 8314
+holds with `Blocked by: #8301` recorded, #8301 closes:
+
+```
+check_and_unblock_prs → PR 8314: state=champion-hold → skipped (no unblock, no comment)
+```
+
+Release stays Champion's (a release signal, `champion-pr-merge.md` "Sticky
+holds") or a human's; nothing auto-releases.
+
 ## Who reads one
 
 - `loom-daemon check-stale-blocked` (`defaults/scripts/check-stale-blocked.sh`,
-  #8927/#8925) — the pre-wave advisory. Reads `park_record::blockers` from an
+  #8927/#8925) — the pre-wave advisory, **per-repository**: one invocation
+  examines the one repository `--repo` / `--repo-root` resolves (#9191). Reads `park_record::blockers` from an
   artifact's body to populate `Evidence::declared`; an artifact whose only
   blocker reference is NOT inside a park record is reported as **PROSE-ONLY**
   (`stale_blocked::undeclared`), separate from **UNDOCUMENTED** (no blocker
-  reference anywhere).
+  reference anywhere). Its forge reads are batched (#10480: one REST + ETag
+  listing, REST blocker reads, one GraphQL query per 100 issues) and run under
+  a **budget floor**: after the listing it reads the free `/rate_limit` probe,
+  and if the run's projected cost would leave fewer than
+  `--min-graphql-remaining` GraphQL points or `--min-core-remaining` core
+  requests (default 1000 each; `0` disables) it gathers nothing and reports
+  every artifact **NOT EVALUATED**, still exit 0. The same floors are
+  re-checked between reads from the forge's own rate-limit answers, so a run
+  stops part-way rather than draining the bucket. `--json` adds a
+  `forge_cost` object (`graphql_queries`, `graphql_points` from
+  `rateLimit.cost`, `rest_requests`, `rest_not_modified`, `budget_before`,
+  `projected`, `floor`, `budget_refused`, `budget_stopped`). It first reads
+  the repository's `archived` flag (#10562, one REST + ETag read shared with
+  the role runner): an archived repository is
+  read-only, so nothing is listed, `--json` reports `archived: true` and the
+  human report is one line. A probe that fails is NOT EVALUATED, never
+  archived and never clear (`archived: null`). Champion's merge-risk hold
+  digest issue (exact title, or body starting with its marker) is exempt from
+  this pass and the notifier: it is `loom:blocked` only to
+  stay out of curation and has no blocker to cite (#9397).
+  **Do not loop it over many repositories by hand.** The budget floor reads
+  the hourly buckets, which a secondary rate limit never shows in, and a
+  one-shot CLI invocation has no rate-limit breaker (it exists only in the
+  running daemon), so nothing carries a refusal from one invocation to the
+  next. A caller that needs several repositories must pace
+  the invocations and stop at the first one that reports a rate-limit refusal
+  (it still exits 0, so read the report, not the exit code). Why, and what to
+  check instead: [github-authentication.md → Secondary rate limits and
+  hand-rolled loops](github-authentication.md#secondary-rate-limits-and-hand-rolled-loops-9191).
 - `guide.md`'s `check_and_unblock` / `check_and_unblock_prs` — the active
   unblock sweep. A rendered park record's `Blocked by: #N` line already
   matches `parse_dependencies`'s existing pattern, so no separate parser is
@@ -152,6 +256,15 @@ check_and_unblock_prs() {
     local body=$(printf '%s\n' "$pr_row" | jq -r '.body')
     local title=$(printf '%s\n' "$pr_row" | jq -r '.title')
 
+    [ "$(has_permanent_block "$number")" = "true" ] && continue  # #8742, guide.md
+
+    # A standing Champion hold is a human evidence gate, not a dependency wait
+    # (#10937): closing a `Blocked by` number it records never releases it.
+    # Unreadable (exit 3) fails safe; foreign-park/clear/exit 2 go on.
+    local hc hrc
+    hc=$(loom-daemon champion-hold classify --pr "$number" 2>/dev/null); hrc=$?
+    case "$hrc $hc" in "0 "*" state=champion-hold "*|"3 "*) continue ;; esac
+
     local deps=$(parse_dependencies "$body")
 
     if [ -z "$deps" ]; then
@@ -167,15 +280,16 @@ check_and_unblock_prs() {
 
     for dep in $deps; do
       # A declared blocker can itself be an issue or a PR — try both reads.
+      local dn="${dep##*#}" dr=""; [[ "$dep" == */* ]] && dr="${dep%#*}"  # OWNER/REPO#N: own repo (#10443)
       local state
-      state=$(gh issue view "$dep" --json state --jq '.state' 2>/dev/null) \
-        || state=$(gh pr view "$dep" --json state --jq '.state' 2>/dev/null) \
+      state=$(gh issue view "$dn" ${dr:+--repo "$dr"} --json state --jq '.state' 2>/dev/null) \
+        || state=$(gh pr view "$dn" ${dr:+--repo "$dr"} --json state --jq '.state' 2>/dev/null) \
         || state="UNKNOWN"
       if [ "$state" != "CLOSED" ] && [ "$state" != "MERGED" ]; then
         all_resolved=false
         break
       fi
-      resolved_deps="$resolved_deps #$dep"
+      resolved_deps="$resolved_deps $dr#$dn"
     done
 
     if [ "$all_resolved" = true ]; then
@@ -217,7 +331,7 @@ pr_has_superseding_block() {
   fi
 
   local pr_hold=$(printf '%s\n' "$pr_json" | jq -r \
-    '[.labels[].name] | any(. == "loom:operator" or . == "loom:operator-only")')
+    '[.labels[].name] | any(. == "loom:operator" or . == "loom:frozen")')
   if [ "$pr_hold" = "true" ]; then
     echo "true"
     return
@@ -248,9 +362,9 @@ itself.
 previous_review_label() {
   local number="$1"
   local label
-  label=$(gh api "repos/{owner}/{repo}/issues/${number}/events" --jq \
-    'map(select(.event == "labeled" and (.label.name == "loom:review-requested" or .label.name == "loom:changes-requested"))) | last | .label.name' \
-    2>/dev/null)
+  label=$(gh api --paginate "repos/{owner}/{repo}/issues/${number}/events?per_page=100" --jq \
+    ".[] | select(.event == \"labeled\" and (.label.name == \"loom:review-requested\" or .label.name == \"loom:changes-requested\")) | .label.name" \
+    2>/dev/null | tail -1)  # per-issue + --paginate (#8742 review; repo-wide walk: ~300 calls on a miss, ~6-day horizon); events ascend oldest-first, so the LAST match is the latest; paging runs to the end (accepted cost)
   if [ "$label" = "loom:changes-requested" ]; then
     echo "loom:changes-requested"
   else
@@ -285,6 +399,6 @@ job (issues) and `check-stale-blocked`'s advisory report (both issues and
 PRs) — this document defines the wire format both sit on top of, nothing more.
 
 See also: [`label-state-machine.md`](label-state-machine.md) for where
-`loom:blocked` sits relative to `loom:operator`/`loom:operator-only`, and
+`loom:blocked` sits relative to `loom:operator`/`loom:frozen`, and
 [`lease-record.md`](lease-record.md) for the sibling HTML-comment-marker
 convention this format's shape was co-designed with.

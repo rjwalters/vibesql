@@ -40,13 +40,24 @@ FORGE_HELPERS="$SCRIPTS_DIR/lib/forge-helpers.sh"
 # shellcheck source=lib/require-daemon-bin.sh
 source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
 loom_test_require_daemon_bin "$SCRIPTS_DIR" "merge-pr issue-close-gate" "merge-pr worktree-preserve" "merge-pr worktree-contains"
-# #9548: merge-pr.sh vets its repo first (`forge may-write`); that decision is
-# not what this suite tests (test-write-scope.sh does), so the fixture repo is
-# allowed and every other verb still reaches the pinned binary.
-WS_STUB_DIR="$(mktemp -d)"
-# shellcheck source=lib/write-scope-stub.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/write-scope-stub.sh"
-write_scope_allow_all "$WS_STUB_DIR"
+# #9548: merge-pr.sh vets its repo (`loom_write_repo`) before it parses a
+# single flag, so the cases that run it (Tests 1 and 3) run it from a scratch
+# checkout registered as owner/repo (write-scope-fixture.sh), never from this
+# checkout, with an offline stub `gh` first on PATH. The scratch checkout's own
+# linked worktree is Test 3's registered --worktree-path.
+# shellcheck source=lib/write-scope-fixture.sh
+source "$SCRIPT_DIR/lib/write-scope-fixture.sh"
+MP_FIX="$(mktemp -d)"; MP_FIX="$(cd "$MP_FIX" && pwd -P)"
+trap 'rm -rf "$MP_FIX"' EXIT
+mkdir -p "$MP_FIX/bin"
+printf '#!/usr/bin/env bash\necho "stub gh: offline ($*)" >&2\nexit 1\n' > "$MP_FIX/bin/gh"
+chmod +x "$MP_FIX/bin/gh"
+git init -q "$MP_FIX/repo"
+git -C "$MP_FIX/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+WRITE_SCOPE_INNER_GH="$MP_FIX/bin/gh" write_scope_register "$MP_FIX/repo" owner/repo
+git -C "$MP_FIX/repo" worktree add -q -b feature/issue-1 "$MP_FIX/wt" 2>/dev/null
+# merge_pr <args...>: the real merge-pr.sh, run from the registered checkout.
+merge_pr() { (cd "$MP_FIX/repo" && PATH="$MP_FIX/bin:$PATH" "$MERGE_PR" "$@"); }
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -84,7 +95,7 @@ echo "Test 1: CLI rejects bad --worktree-path input"
 
 # Missing value
 set +e
-out=$("$MERGE_PR" 1 --worktree-path 2>&1)
+out=$(merge_pr 1 --worktree-path 2>&1)
 rc=$?
 set -e
 if [[ $rc -ne 0 ]] && [[ "$out" == *"--worktree-path requires a value"* ]]; then
@@ -95,7 +106,7 @@ fi
 
 # Nonexistent path
 set +e
-out=$("$MERGE_PR" --worktree-path /nonexistent-loom-test-path 1 2>&1)
+out=$(merge_pr --worktree-path /nonexistent-loom-test-path 1 2>&1)
 rc=$?
 set -e
 if [[ $rc -ne 0 ]] && [[ "$out" == *"does not exist"* ]]; then
@@ -106,7 +117,7 @@ fi
 
 # Path exists but is not a registered worktree of this repo
 set +e
-out=$("$MERGE_PR" --worktree-path /tmp 1 2>&1)
+out=$(merge_pr --worktree-path /tmp 1 2>&1)
 rc=$?
 set -e
 if [[ $rc -ne 0 ]] && [[ "$out" == *"not a registered worktree"* ]]; then
@@ -131,12 +142,16 @@ assert_grep "git branch -d" "$MERGE_PR" \
     "merge-pr.sh uses git branch -d (safe delete, not -D)"
 assert_grep "allow_unmanaged" "$MERGE_PR" \
     "_remove_loom_worktree takes allow_unmanaged second arg"
-assert_grep "Bypassing sentinel guard" "$MERGE_PR" \
-    "explicit --worktree-path logs the sentinel-bypass action"
-assert_grep "Discovered worktree for branch" "$MERGE_PR" \
-    "discovery fallback emits a hint about the discovered path"
-assert_grep "re-run with: --worktree-path" "$MERGE_PR" \
-    "discovery fallback suggests --worktree-path in the hint"
+retired "the grep for the in-shell 'Bypassing sentinel guard' text" \
+    "explicit --worktree-path logs the sentinel-bypass action" \
+    "the sentinel test and its message left merge-pr.sh in the #8191 remove-gate slice; they are Rust in loom-daemon/src/merge_pr/remove_gate.rs, so no grep of this file can pass" \
+    "loom-daemon/tests/merge_pr_remove_gate_differential.rs (frozen retired block vs the verb, allow=true/sentinel=absent) and an_unmarked_worktree_is_refused_unless_opted_in in src/merge_pr/remove_gate/tests.rs"
+retired "the grep for the in-shell 'Discovered worktree for branch' / 're-run with: --worktree-path' text" \
+    "the discovery fallback emits a hint naming the discovered path and suggesting --worktree-path for a user-owned worktree" \
+    "the user-owned advice moved out of merge-pr.sh in the #8191 discovered-worktree slice; it is Rust in loom-daemon/src/merge_pr/discovered_worktree.rs, so no grep of this file can pass" \
+    "loom-daemon/tests/merge_pr_discovered_worktree_differential.rs (frozen retired block vs the verb, user-owned case byte for byte) and a_user_owned_worktree_is_never_decided_and_gets_four_warnings in src/merge_pr/discovered_worktree/tests.rs"
+assert_grep "_mp_worktree discovered-worktree" "$MERGE_PR" \
+    "discovery fallback delegates its classification to 'merge-pr discovered-worktree'"
 
 # --- Test 2b: async-close-race guard (#4186) source surface ---
 assert_grep "_issue_is_closed_for_cleanup" "$MERGE_PR" \
@@ -199,21 +214,16 @@ retired \
 echo ""
 echo "Test 3: --no-cleanup-worktree wins over --worktree-path"
 
-# This requires a registered worktree path. Use the script's own repo root
-# (the worktree this test is running inside).
-SELF_WT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
-# Resolve the worktree's actual recorded path via porcelain — git's worktree
-# list uses the canonical recorded path which may differ from $PWD if there
-# are symlinks.
-ACTUAL_WT="$(cd "$SELF_WT" && git rev-parse --show-toplevel 2>/dev/null || echo "")"
+# This requires a registered worktree path: the registered scratch checkout's
+# own linked worktree (resolved via porcelain, git's canonical recorded path).
+ACTUAL_WT="$(cd "$MP_FIX/wt" && git rev-parse --show-toplevel 2>/dev/null || echo "")"
 
 if [[ -n "$ACTUAL_WT" ]] && git -C "$ACTUAL_WT" worktree list --porcelain 2>/dev/null | \
    awk -v p="$ACTUAL_WT" '/^worktree / { if ($2 == p) { found=1; exit } } END { exit !found }'; then
-    # We're in a worktree; we can use ACTUAL_WT as a valid --worktree-path value.
-    # Run with --dry-run so the merge itself short-circuits (we only want to see
+    # ACTUAL_WT is a valid --worktree-path value. Run with --dry-run so the merge itself short-circuits (we only want to see
     # the validation + warning).
     set +e
-    out=$("$MERGE_PR" --no-cleanup-worktree --worktree-path "$ACTUAL_WT" 1 --dry-run 2>&1)
+    out=$(merge_pr --no-cleanup-worktree --worktree-path "$ACTUAL_WT" 1 --dry-run 2>&1)
     rc=$?
     set -e
     if [[ "$out" == *"--no-cleanup-worktree wins"* ]]; then
@@ -222,7 +232,7 @@ if [[ -n "$ACTUAL_WT" ]] && git -C "$ACTUAL_WT" worktree list --porcelain 2>/dev
         fail "expected '--no-cleanup-worktree wins' warning; got: $out"
     fi
 else
-    echo "  SKIP: not running inside a registered worktree, skipping precedence test"
+    fail "the scratch checkout's linked worktree is not registered: $MP_FIX/wt"
 fi
 
 # --- Test 4: Inline simulation of the cleanup decision tree ---
@@ -811,6 +821,9 @@ else
     cat > "$CP_TMP/no-verb-daemon" <<'FAKEDAEMON'
 #!/usr/bin/env bash
 cat >/dev/null
+# Answers ONLY discovered-worktree (DECIDE), so T9b's ungated control can still
+# reach a removal and prove the cleanup-paths gate is what stops it (#8191).
+[[ "$2" != "discovered-worktree" ]] || { echo "LOOM-DISCOVERED DECIDE"; exit 0; }
 echo "error: unrecognized subcommand 'cleanup-paths'" >&2
 exit 2
 FAKEDAEMON
@@ -840,6 +853,7 @@ FAKEDAEMON
         # must stop the fail-open path from reaching a removal.
         _find_worktree_by_branch() { echo "$CP_WT"; }
         _is_primary_worktree_path() { return 1; }
+        _mp_worktree() { "$LOOM_DAEMON_BIN" merge-pr "$@"; }
         _maybe_delete_local_branch() { echo "INFO: branch-delete considered for $1"; }
         eval "${2:-$WTC_CLEANUP}"
     )

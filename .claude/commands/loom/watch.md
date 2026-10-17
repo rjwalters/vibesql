@@ -160,7 +160,7 @@ branching:
 | Section | Fallback probe |
 |---------|----------------|
 | Trusted liveness | `pgrep -f '[l]oom-daemon'` **and** the pid file (`.loom/.daemon.pid`, or `$HOME/.loom/.daemon.pid` in machine mode) — both, cross-checked |
-| Dispatch state | `loom-daemon status --json` (in-flight sweeps, dynamic cap + which term binds, health-gate halt state) |
+| Dispatch state | `loom-daemon status --json` (in-flight sweeps, the configured cap, health-gate halt state) |
 | Token pool | `loom-daemon tokens check --ranking --json` (or, to stay cheap, the mtime + contents of `.loom/tokens/.ranking`) |
 | Role ticks | tail `~/.loom/daemon.log` for the window; count *persistent* failures only (a failure that self-recovered on the same root's next tick is transient — ignore it) |
 | Queue depth | `gh issue list --label 'loom:issue' --state open` per managed root |
@@ -289,12 +289,12 @@ that the obvious trigger has, in production, been wrong.
   actually enabled (`status` shows it on — a FLAGS-OFF daemon is *supposed* to be
   idle, and "fixing" that by promoting issues is wrong), and the curated issues
   are genuinely unpromoted — **filter out** anything already carrying
-  `loom:issue`, `loom:building`, `loom:blocked`, or `loom:operator-only`. That
+  `loom:issue`, `loom:building`, or a hold label. That
   queue is mostly already-promoted noise.
 - **Action**: promote a **small** batch (≤3 per tick) of clearly-ready curated
   issues to `loom:issue` using Champion's promotion criteria
   (`champion-issue-promo.md`), with a one-line rationale comment on each. Never
-  invent labels; never promote something a human parked (`loom:operator-only`,
+  invent labels; never promote something a human parked (`loom:operator`,
   or an issue whose last comment defers it).
 - **Stop condition**: ≤3 per tick, ≤10 per window. If the backlog is empty too,
   the fleet is *done*, not starving — say so in the summary and stop promoting.

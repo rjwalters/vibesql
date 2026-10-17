@@ -61,28 +61,10 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 MERGE_PR_SRC="$HELPERS_DIR/merge-pr.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 YELLOW='\033[1;33m'
-NC='\033[0m'
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
 
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
@@ -118,7 +100,7 @@ loom_test_require_daemon_bin "$HELPERS_DIR" "merge-pr" "merge-pr loom-pr-overrid
 
 # --- Extract the functions under test from the real merge-pr.sh -------------
 FUNCS_FILE="$(mktemp)"
-trap 'rm -f "$FUNCS_FILE" "${CHECK_RUNS_COUNTER:-}" "${COMMENT_CALLS:-}" 2>/dev/null || true' EXIT
+trap 'rm -f "$FUNCS_FILE" "${CHECK_RUNS_COUNTER:-}" "${COMMENT_CALLS:-}" "${DAEMON_STUB:-}" 2>/dev/null || true' EXIT
 
 _extract_block() {
     awk -v start="$1" '
@@ -162,6 +144,30 @@ PR_HEAD_SHA="490b79f1d"
 MERGE_PRECONDITION_SHA="490b79f1d"
 PR_LABELS="loom:pr"
 PR_JSON='{"number":8220,"head":{"sha":"490b79f1d","ref":"feature/issue-8199"},"base":{"ref":"main"},"merged":false}'
+
+# The daemon is stubbed through LOOM_DAEMON_BIN (see the stub below).
+FORGE_TYPE="github"
+AUTO_MERGE="true"
+DEFAULT_BRANCH_NAME="main"
+REPO_ROOT="."
+# Only `merge-pr revalidate-head` is intercepted,
+# but ONLY when REVALIDATE_HEAD_STUB_RC is set: it then plays a daemon that
+# predates the verb, clap's unknown-subcommand rc 2 or a missing binary's 127);
+# every other subcommand goes to the real daemon the helper resolved above,
+# which the other scenarios rely on.
+DAEMON_STUB="$(mktemp)"
+export STUB_REAL_DAEMON="${LOOM_DAEMON_BIN:-loom-daemon}"
+cat > "$DAEMON_STUB" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "merge-pr" && "$2" == "revalidate-head" && -n "${REVALIDATE_HEAD_STUB_RC:-}" ]]; then
+    echo "error: unrecognized subcommand 'revalidate-head'" >&2
+    exit "$REVALIDATE_HEAD_STUB_RC"
+fi
+exec "$STUB_REAL_DAEMON" "$@"
+STUB
+chmod +x "$DAEMON_STUB"
+export LOOM_DAEMON_BIN="$DAEMON_STUB"
+unset REVALIDATE_HEAD_STUB_RC
 
 # Speed: no real sleeping, and a deadline the tests set explicitly.
 LOOM_AUTO_MERGE_POLL_INTERVAL=0
@@ -232,6 +238,7 @@ _reset() {
     MERGE_PRECONDITION_SHA="490b79f1d"
     ALLOW_UNAPPROVED=false
     LOOM_AUTO_MERGE_TIMEOUT=1
+    unset REVALIDATE_HEAD_STUB_RC
 }
 
 # Run one of the extracted functions in a subshell, capturing output + rc.
@@ -341,6 +348,31 @@ assert_eq "5" "$LAST_RC" \
   "#8896: an unfetchable check-runs API at the deadline exits 5 too (same not-a-failure shape)"
 assert_contains "$LAST_OUT" "fetchable" \
   "#8896: that refusal names the unreadable check-runs API, not a failed check"
+
+# #8191 poll-wait slice (PR #10908 review): exit 5 is ONLY the timeout. Each
+# poll arm sleeps AFTER `_mp_poll_wait ... || exit 5`, never inside it — errexit
+# is off in an `||` operand, so a failing sleep there would leak out as exit 5
+# ("re-queue, not a failure"). A bogus LOOM_AUTO_MERGE_POLL_INTERVAL must keep
+# the pre-port exit 1. run_fn's own `|| LAST_RC=$?` would switch errexit off
+# too, so this runs the function under a plain `set -e`, like merge-pr.sh's
+# bare call site.
+_bogus_interval_case() { # <arm>
+    set +e
+    LAST_OUT="$(set -e; LOOM_AUTO_MERGE_POLL_INTERVAL=bogus; _wait_for_checks_then_sync_merge 2>&1)"
+    LAST_RC=$?
+    set -e
+    assert_eq "1" "$LAST_RC" \
+      "#8191: an invalid poll interval on the $1 arm fails as exit 1 (the pre-port shape), NOT exit 5 (rc=$LAST_RC)"
+}
+_reset
+LOOM_AUTO_MERGE_TIMEOUT=30
+CHECK_RUNS_SCRIPT=("$(_runs 5 "$GATES_DONE,$SUITES_RUNNING")")
+_bogus_interval_case pending
+_reset
+LOOM_AUTO_MERGE_TIMEOUT=30
+forge_get_check_runs() { return 1; }
+_bogus_interval_case unfetchable
+eval "$_SAVED_GET_CHECK_RUNS"
 
 # The contrast that gives exit 5 its meaning: a genuinely failed REQUIRED check
 # is NOT a timeout and must stay exit 1 — evidence about this head, not timing.
@@ -501,6 +533,55 @@ else
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "  ${GREEN}PASS${NC}: #8896: an unreadable re-read does NOT reuse the genuine-absence \`loom:pr\` wording"
 fi
+
+# ===========================================================================
+# Old daemon — a loom-daemon predating `merge-pr revalidate-head` (#8191 slice).
+# The floor test classifies the verb `open` (degrades, never raises the
+# requires-daemon floor), so such a host must reach the SAME verdicts through
+# the retired jq predicate — not refuse every --auto merge as a "forge read
+# failure" (the #8967 class: a floor the host satisfies, then every merge
+# refused).
+# ===========================================================================
+echo ""
+echo "Old daemon: no revalidate-head verb -> the retired jq predicate decides, same verdicts..."
+
+_old_daemon_case() { # <stub-rc> <payload> <expected-rc> <msg>
+    _reset
+    FRESH_PR_JSON="$2"
+    REVALIDATE_HEAD_STUB_RC="$1" run_fn _revalidate_merge_guards
+    assert_eq "$3" "$LAST_RC" "old daemon (verb exits $1): $4"
+}
+
+for _rc in 2 127; do
+    _old_daemon_case "$_rc" '{"number":8220,"head":{"sha":"490b79f1d"},"merged":false,"labels":[{"name":"loom:pr"}]}' 0 \
+      "an unchanged, still-approved head re-validates cleanly (the merge is NOT refused)"
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if grep -qF 'could not re-read' <<<"$LAST_OUT"; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: old daemon (verb exits $_rc): a readable payload must not be reported as a forge read failure"
+        echo "    In: '$LAST_OUT'"
+    else
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: old daemon (verb exits $_rc): a readable payload is not reported as a forge read failure"
+    fi
+done
+
+_old_daemon_case 2 '{"number":8220,"head":{"sha":"490b79f1d"},"merged":false,"labels":[{"name":"loom:review-requested"}]}' 1 \
+  "a loom:pr revoked during the wait still blocks (labels re-read by jq)"
+assert_contains "$LAST_OUT" "does not carry the \`loom:pr\` label" \
+  "old daemon: the block is the genuine-absence wording, from the label set jq read"
+_old_daemon_case 2 '{"number":8220,"head":{"sha":"490b79f1d"},"merged":false,"labels":[{"name":"loom:pr"},{"name":"loom:changes-requested"}]}' 1 \
+  "a contradicting verdict label still blocks (#8112)"
+_old_daemon_case 2 '{"number":8220,"head":{"sha":"ab58dd87d"},"merged":false,"labels":[{"name":"loom:pr"}]}' 3 \
+  "a moved head is still the exit-3 re-queue (#8410 AC3)"
+assert_contains "$LAST_OUT" "ab58dd87d" \
+  "old daemon: the moved-head diagnostic names the new head"
+_old_daemon_case 2 '{"number":8220,"head":{"sha":"490b79f1d"},"merged":true,"labels":[]}' 0 \
+  "a concurrently-merged PR still short-circuits"
+_old_daemon_case 2 '{}' 1 \
+  "an unreadable re-read still refuses (fails closed, #8896)"
+assert_contains "$LAST_OUT" "could not re-read PR #8220" \
+  "old daemon: and still names the failed re-read as the reason"
 
 # --- Summary ---
 echo ""

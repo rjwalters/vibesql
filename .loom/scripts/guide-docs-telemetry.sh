@@ -64,11 +64,9 @@ set -euo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
 print_error() { echo -e "${RED}ERROR: $1${NC}" >&2; }
-print_info() { echo -e "${BLUE}ℹ $1${NC}" >&2; }
 print_success() { echo -e "${GREEN}✓ $1${NC}" >&2; }
 
 show_help() {
@@ -105,7 +103,15 @@ GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null) || {
 REPO_ROOT=$(cd "$(dirname "$GIT_COMMON_DIR")" && pwd -P)
 LOG_FILE="${LOOM_GUIDE_DOCS_TELEMETRY_LOG:-$REPO_ROOT/.loom/logs/guide-docs-telemetry.jsonl}"
 
-HOST_ID="${LOOM_HOST_ID:-${HOSTNAME:-$(hostname 2>/dev/null || echo unknown-host)}}"
+# Host id comes from `loom-daemon host-id` (#10023) so these records land under
+# the same SigNoz host.id as the daemon's. A daemon that is not installed keeps
+# the prior chain; a daemon that finds no identity yields the unknown-host literal.
+if command -v "${LOOM_DAEMON_BIN:-loom-daemon}" >/dev/null 2>&1; then
+    HOST_ID="$("${LOOM_DAEMON_BIN:-loom-daemon}" host-id 2>/dev/null)" || HOST_ID=""
+    HOST_ID="${HOST_ID:-unknown-host}"
+else
+    HOST_ID="${LOOM_HOST_ID:-${HOSTNAME:-$(hostname 2>/dev/null || echo unknown-host)}}"
+fi
 
 # --- Portable duration-string -> seconds -------------------------------------
 # Accepts a bare integer (seconds) or an integer with a single trailing unit
@@ -179,7 +185,7 @@ case "$CMD" in
 
         mkdir -p "$(dirname "$LOG_FILE")"
 
-        jq -nc \
+        LINE="$(jq -nc \
             --arg emitted_at "$EMITTED_AT" \
             --argjson emitted_at_epoch "$EMITTED_AT_EPOCH" \
             --arg host_id "$HOST_ID" \
@@ -199,7 +205,10 @@ case "$CMD" in
                     duration_sec: $duration_sec,
                     files_changed: $files_changed
                 }
-            }' >> "$LOG_FILE"
+            }')"
+        printf '%s\n' "$LINE" >> "$LOG_FILE"
+        # requires-daemon: telemetry optional   J2 shadow only (#11348): an absent or pre-#11348 binary fails the append, which `|| true` discards -- the legacy log line above is already written.
+        printf '%s\n' "$LINE" | "${LOOM_DAEMON_BIN:-loom-daemon}" telemetry append --stream shell --workspace "$REPO_ROOT" >/dev/null 2>&1 || true  # J2 shadow, after legacy (#11348)
 
         print_success "recorded doc-maintenance telemetry for PR #${PR_NUMBER} -> $LOG_FILE"
         exit 0

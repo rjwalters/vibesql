@@ -58,6 +58,10 @@ precedence, so verify effective configuration rather than promising that a
 machine default overrides every project. An ignored repository override may
 reference an external credential, but must never contain the credential itself.
 
+A second PAT of the same GitHub user is **not** a second rate-limit pool, so
+never export a token globally or `launchctl setenv` it; see
+[Rate-limit pools: what actually splits the bucket](github-authentication.md#rate-limit-pools-what-actually-splits-the-bucket-9872).
+
 ## Persistent telemetry credentials
 
 Keep cloud credentials separate from the local Collector ingress credential.

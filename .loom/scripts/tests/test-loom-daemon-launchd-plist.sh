@@ -146,6 +146,12 @@ trap 'rm -rf "$WORKDIR"' EXIT
 trap 'rm -rf "$WORKDIR"; exit 1' INT TERM
 mkdir -p "$WORKDIR/.loom/logs"
 
+# #11934: daemon-start reads the resolved config's autonomous.workFinder.enabled.
+# Pin the machine tier to an absent file so a host whose
+# ~/.local/share/loom/config/defaults.json enables the work finder (a fleet
+# dispatcher) renders this suite's plain-start previews hermetically.
+export LOOM_CONFIG_DEFAULTS_FILE="$WORKDIR/no-machine-config-defaults.json"
+
 FAKE_BIN="$WORKDIR/fake-loom-daemon"
 cat > "$FAKE_BIN" <<'EOF'
 #!/usr/bin/env bash
@@ -179,7 +185,13 @@ assert_eq "$before_count" "$after_count" "--print-plist never writes to ~/Librar
 assert_contains "$plist_out" "<key>RunAtLoad</key>" "plist declares RunAtLoad"
 assert_contains "$plist_out" $'<key>RunAtLoad</key>\n    <true/>' "RunAtLoad is true (mirrors the validated incident-fix plist; survives reboot/re-login)"
 assert_contains "$plist_out" $'<key>KeepAlive</key>\n    <dict>' "KeepAlive is a dict (SuccessfulExit form, #4054)"
-assert_contains "$plist_out" $'<key>SuccessfulExit</key>\n        <true/>' "KeepAlive.SuccessfulExit is true (relaunch only on the restart primitive's clean exit 0)"
+assert_contains "$plist_out" $'<key>SuccessfulExit</key>\n        <true/>' "KeepAlive.SuccessfulExit is true (relaunch on the restart primitive's clean exit 0)"
+# #11058: KeepAlive.Crashed relaunches a crash-signal death (SIGSEGV/SIGABRT/...).
+# The stay-down exits (1, 79, 130, 143 -- incl. restart --drain --then-exit) are
+# plain non-zero exit()s, which launchd counts as neither, so they stay down;
+# an unconditional <true/> KeepAlive would relaunch them all.
+assert_contains "$plist_out" $'<key>SuccessfulExit</key>\n        <true/>\n        <key>Crashed</key>\n        <true/>\n    </dict>' "KeepAlive.Crashed is true inside the same dict (relaunch a crashed daemon, #11058)"
+assert_not_contains "$plist_out" $'<key>KeepAlive</key>\n    <true/>' "KeepAlive is never unconditional (a then-exit / fleet-stopped exit must stay down)"
 assert_not_contains "$plist_out" $'<key>KeepAlive</key>\n    <false/>' "KeepAlive is no longer the bare <false/> form"
 assert_contains "$plist_out" $'<key>LOOM_DAEMON_SUPERVISOR</key>\n        <string>launchd</string>' "plist bakes in LOOM_DAEMON_SUPERVISOR=launchd (daemon proves supervision before a restart, #4054)"
 assert_contains "$plist_out" "<key>LOOM_WORK_FINDER</key>" "plain start forwards LOOM_WORK_FINDER"
@@ -468,8 +480,15 @@ assert_no_supervisor_side_effects "--print-plist with a live pid file"
 # 16. --print-unit gets the IDENTICAL treatment (same guard, same fix).
 : > "$LIVE_CALL_LOG"
 live_unit_out="$(live_run --print-unit)"
-assert_contains "$live_unit_out" "Restart=on-success" "--print-unit still prints the unit when a daemon is already running (#6387)"
+assert_contains "$live_unit_out" "Restart=always" "--print-unit still prints the unit when a daemon is already running (#6387)"
 assert_contains "$live_unit_out" "Environment=LOOM_DAEMON_SUPERVISOR=systemd" "--print-unit renders the real unit body, not the already-running guard's message"
+# #11058: a child's OOM kill must not stop the unit, a failure must be
+# relaunched after a pause, and a crash loop is bounded by a [Unit] start limit
+# (systemd ignores StartLimit* under [Service]).
+assert_contains "$live_unit_out" $'\nOOMPolicy=continue\n' "--print-unit renders OOMPolicy=continue (#11058)"
+assert_contains "$live_unit_out" $'\nRestartSec=5\n' "--print-unit renders RestartSec=5 (#11058)"
+assert_contains "${live_unit_out%%\[Service\]*}" $'\nStartLimitIntervalSec=600\nStartLimitBurst=5\n' "--print-unit renders the start-rate limit in [Unit] (#11058)"
+assert_not_contains "$live_unit_out" "Restart=on-success" "--print-unit no longer renders Restart=on-success (#11058)"
 assert_no_supervisor_side_effects "--print-unit with a live pid file"
 
 # 17. Neither inspection mode is decided from anything but argv: --print-plist
@@ -582,10 +601,11 @@ assert_contains "$sess_render_out" "$SESSION_TEST_LABEL" "#6568: an explicit LOO
 # 22b. Identical strip on the systemd tier -- the incident's mechanism is
 #      per-platform but the laundering is not.
 sess_unit_out=$( cd "$WORKDIR" && HOME="$SESSION_HOME" \
-    env -u LOOM_MAIN_HEALTH_GATE "${session_env[@]}" LOOM_WORK_FINDER=1 \
+    env -u LOOM_MAIN_HEALTH_GATE "${session_env[@]}" LOOM_WORK_FINDER=1 LOOM_SAFEHOUSE_ENABLED=1 \
     LOOM_SYSTEMD_UNIT="loom-daemon-session-test.service" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-unit 2>/dev/null )
-assert_contains "$sess_unit_out" "Environment=LOOM_WORK_FINDER=1" "#6568 control: the systemd unit still forwards a legitimate exported LOOM_* var"
+assert_contains "$sess_unit_out" "Environment=LOOM_SAFEHOUSE_ENABLED=1" "#6568 control: the systemd unit still forwards a legitimate exported LOOM_* var"
+assert_not_contains "$sess_unit_out" "Environment=LOOM_WORK_FINDER=" "#11951: the systemd unit leaves autonomy env to the host's supervisor env"
 assert_not_contains "$sess_unit_out" "Environment=LOOM_SWEEP_CLAIM_OWNED=" "#6568: LOOM_SWEEP_CLAIM_OWNED never reaches the rendered systemd unit"
 assert_not_contains "$sess_unit_out" "Environment=LOOM_TERMINAL_ID=" "#6568: LOOM_TERMINAL_ID never reaches the rendered systemd unit"
 assert_not_contains "$sess_unit_out" "Environment=LOOM_ROLE=" "#6568: LOOM_ROLE never reaches the rendered systemd unit"

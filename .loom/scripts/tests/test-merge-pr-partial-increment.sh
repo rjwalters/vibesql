@@ -62,33 +62,17 @@ source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
 # pre-merge conflict guard's is `merge-pr partial-conflict`, and the pass's two
 # audit-comment BODIES are `merge-pr partial-comment` (#8191 slices), so the
 # same binary must carry all three verbs too.
-loom_test_require_daemon_bin "$HELPERS_DIR" merge-pr-refs "merge-pr partial-reset" "merge-pr partial-conflict" "merge-pr partial-comment"
+# #9502 (via #11167): the guard also calls `merge-pr-refs
+# loom-issue-trailer-warnings` (#9465), so the pinned binary must carry it.
+loom_test_require_daemon_bin "$HELPERS_DIR" merge-pr-refs "merge-pr partial-reset" "merge-pr partial-conflict" "merge-pr partial-comment" "merge-pr-refs loom-issue-trailer-warnings"
 # shellcheck source=lib/write-scope-fixture.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 YELLOW='\033[0;33m'  # retired() below
-NC='\033[0m'
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
 
 # An assertion that CANNOT survive the port to Rust, retired under the
 # three-part test in defaults/docs/verification-recipes.md §6. Printed, not
@@ -184,6 +168,7 @@ FUNCS_FILE="$(mktemp)"
 trap 'rm -rf "$FUNCS_FILE" "$STUB_DIR" 2>/dev/null || true' EXIT
 awk '
   /^# requires-daemon:/                                  { print; next }
+  /^# daemon-verb-hint:/                                 { print; next }
   /^_mp_daemon_roll_hint\(\) \{/                         { print; next }
   /^_mp_refs\(\) \{/                                     { capture=1 }
   /^_check_partial_increment_close_conflict \|\| true/   { capture=0 }
@@ -245,14 +230,14 @@ if [[ "$1" == "api" ]]; then
       exit 0
       ;;
     */comments)
-      # #9774: a POST to the comments endpoint is the daemon chokepoint's
-      # shape (forge comment -> gh api --input -). This suite's subject is
-      # the partial-increment flow over the gh ladder, and LOOM_DAEMON_SELF_BIN
-      # is pinned to the real binary above — so fail the daemon's POST here
-      # and let forge_gh_comment_rl_safe fall back to the recorded `issue
-      # comment` shape. A silent exit 0 would succeed without recording
-      # anything, which is exactly what the assertions below must not allow.
-      exit 1
+      # #9774/#9865: a POST to the comments endpoint is the daemon chokepoint's
+      # shape (forge comment -> gh api --input FILE), and it is the ONLY comment
+      # path now. Record it in the `issue comment` shape the assertions below
+      # read, so a comment that never lands still fails them.
+      _rest="${path#repos/}"; _repo="${_rest%%/issues/*}"
+      _num="${_rest#*/issues/}"; _num="${_num%%/*}"
+      echo "issue comment $_num --repo $_repo --body $(jq -r .body "$3" 2>/dev/null)" >> "$LOG"
+      exit 0
       ;;
   esac
 
@@ -692,6 +677,116 @@ assert_eq "" "$(read_log)" \
   "#8897: the skip is advisory only -- no forge mutation results from it"
 
 echo ""
+echo "Testing Loom-Issue trailer warning wiring (#9502, via #11167)..."
+
+# The detector itself (backticked / slug-less `Loom-Issue:` trailers, #9465)
+# is loom-daemon's `merge-pr-refs loom-issue-trailer-warnings`, unit-tested in
+# loom-daemon/src/merge_pr/refs. These are CALL-SITE pins, mirroring BT1-BT4
+# above: merge-pr.sh's pre-merge guard must invoke it, forward --dry-run,
+# surface its finding, stay silent when there is none, and degrade to an
+# advisory skip on a daemon that predates the verb.
+
+# LT1: whole-line backticked trailer under --dry-run -> warning, [dry-run]-prefixed.
+lt_backticked_body='## Summary
+
+Implements the first slice.
+
+`Loom-Issue: rjwalters/loom#9465`'
+reset_log
+PR_JSON="$(jq -n --arg body "$lt_backticked_body" '{body: $body}')"
+DRY_RUN=true
+run_capturing_stderr _check_partial_increment_close_conflict
+unset DRY_RUN
+lt_err="$(read_stderr)"
+assert_contains "$lt_err" "[dry-run] Unparseable Loom-Issue trailer (#9465)" \
+  "LT1: backticked Loom-Issue trailer under --dry-run -> warning carries the [dry-run] prefix"
+assert_contains "$lt_err" '"`Loom-Issue: rjwalters/loom#9465`"' \
+  "LT1: warning quotes the offending line verbatim"
+assert_eq "" "$(read_log)" \
+  "LT1: the warning is advisory only -- no forge mutation"
+
+# LT1b: same body without --dry-run -> warning, no prefix.
+reset_log
+PR_JSON="$(jq -n --arg body "$lt_backticked_body" '{body: $body}')"
+run_capturing_stderr _check_partial_increment_close_conflict
+lt_err="$(read_stderr)"
+assert_contains "$lt_err" "Unparseable Loom-Issue trailer (#9465)" \
+  "LT1b: backticked Loom-Issue trailer (real run) -> warning emitted"
+assert_not_contains "$lt_err" "[dry-run]" \
+  "LT1b: a real run's warning carries no [dry-run] prefix"
+
+# LT2: the same trailer as PLAIN TEXT -> parses, so nothing to warn about.
+reset_log
+PR_JSON='{"body":"Implements the first slice.\n\nLoom-Issue: rjwalters/loom#9465"}'
+run_capturing_stderr _check_partial_increment_close_conflict
+assert_not_contains "$(read_stderr)" "Loom-Issue trailer" \
+  "LT2: plain-text 'Loom-Issue: owner/repo#N' trailer -> no warning (no false positive)"
+
+# LT3: BOTH shapes for the same issue -> the plain one already carries the link.
+reset_log
+PR_JSON='{"body":"Implements the first slice.\n\n`Loom-Issue: rjwalters/loom#9465`\nLoom-Issue: rjwalters/loom#9465"}'
+run_capturing_stderr _check_partial_increment_close_conflict
+assert_not_contains "$(read_stderr)" "Loom-Issue trailer" \
+  "LT3: backticked + plain trailer for the same issue -> no warning"
+
+# LT4: slug-less `Loom-Issue: #123` -> warns, naming the missing owner/repo.
+reset_log
+PR_JSON='{"body":"Implements the first slice.\n\nLoom-Issue: #123"}'
+run_capturing_stderr _check_partial_increment_close_conflict
+lt_err="$(read_stderr)"
+assert_contains "$lt_err" "Unparseable Loom-Issue trailer (#9465)" \
+  "LT4: slug-less 'Loom-Issue: #123' -> warning emitted"
+assert_contains "$lt_err" '"Loom-Issue: #123"' \
+  "LT4: warning quotes the slug-less line"
+assert_contains "$lt_err" "owner/repo" \
+  "LT4: warning names the missing owner/repo slug"
+
+# LT5: a daemon that REJECTS loom-issue-trailer-warnings (predates #9465) ->
+# an advisory "skipped" warning that names the too-old daemon and the verb's
+# own landing version (#9377 daemon-verb-hint), never a refusal; the guard
+# returns 0 and the rest of the pre-merge pass still runs.
+fake_daemon_lt="$STUB_DIR/fake-loom-daemon-no-lt-mode"
+cat > "$fake_daemon_lt" <<'FAKEDAEMON'
+#!/usr/bin/env bash
+# Simulates a loom-daemon predating #9465: answers every merge-pr-refs mode
+# EXCEPT loom-issue-trailer-warnings, which it rejects the way clap rejects an
+# unknown subcommand. Every other mode delegates to the real pinned binary so
+# the rest of the guard behaves normally.
+if [[ "$1" == "--version" ]]; then echo "loom-daemon 0.19.500 (fake)"; exit 0; fi
+if [[ "$1" == "merge-pr-refs" && "$2" == "loom-issue-trailer-warnings" ]]; then
+  echo "error: unrecognized subcommand 'loom-issue-trailer-warnings'" >&2
+  exit 2
+fi
+exec "$LOOM_TEST_REAL_DAEMON_BIN" "$@"
+FAKEDAEMON
+chmod +x "$fake_daemon_lt"
+
+reset_log
+PR_JSON='{"body":"Implements a slice.\n\nPart of #123\n\n`Loom-Issue: rjwalters/loom#9465`"}'
+saved_self_bin="${LOOM_DAEMON_SELF_BIN:-}"
+export LOOM_TEST_REAL_DAEMON_BIN="${LOOM_DAEMON_SELF_BIN:-${LOOM_DAEMON_BIN:-$(command -v loom-daemon)}}"
+export LOOM_DAEMON_SELF_BIN="$fake_daemon_lt"
+lt5_rc=0
+# Called directly, not via run_capturing_stderr (which swallows the status).
+_check_partial_increment_close_conflict 2>"$STUB_DIR/stderr.log" || lt5_rc=$?
+no_lt_mode_err="$(read_stderr)"
+export LOOM_DAEMON_SELF_BIN="$saved_self_bin"
+assert_eq "0" "$lt5_rc" \
+  "LT5: daemon rejecting loom-issue-trailer-warnings -> guard still returns 0 (merge proceeds)"
+assert_contains "$no_lt_mode_err" "Skipped Loom-Issue trailer advisory warning check" \
+  "LT5: daemon rejecting loom-issue-trailer-warnings -> skipped-advisory warning printed (never silent)"
+assert_contains "$no_lt_mode_err" "advisory-only" \
+  "LT5: the skip says it is advisory-only"
+assert_not_contains "$no_lt_mode_err" "Refusing" \
+  "LT5: no 'Refusing' wording -- a missing advisory verb never refuses the merge"
+assert_contains "$no_lt_mode_err" "loom-daemon >= 0.19.512 for 'merge-pr-refs loom-issue-trailer-warnings'" \
+  "LT5: roll hint names the verb's own landing version (daemon-verb-hint), not the merge-pr-refs family floor"
+assert_contains "$no_lt_mode_err" "0.19.500 (fake)" \
+  "LT5: roll hint reports what the resolved (too-old) binary actually is"
+assert_eq "123" "$PARTIAL_OPEN_BEFORE_MERGE" \
+  "LT5: the rest of the pre-merge pass still ran past the skipped check (#123 tracked)"
+
+echo ""
 echo "Testing _check_partial_increment_close_conflict (pre-merge guard)..."
 
 # T11: reproduces the censusapi#5 -> censusapi#2 incident shape — a deliberate
@@ -1047,6 +1142,31 @@ assert_not_contains "$no_comment_log" "issue comment 123" \
 assert_contains "$no_comment_err" "was NOT posted" \
   "#8191: the skipped audit comment is reported, not swallowed"
 
+# T31b (#9264): a daemon answering `SWAP<TAB>loom:operator` (a held remainder)
+# makes the swap add loom:operator and NOT loom:issue.
+reset_log
+fake_held="$STUB_DIR/fake-loom-daemon-held"
+cat > "$fake_held" <<'FAKEDAEMON'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "merge-pr" && "${2:-}" == "partial-reset" ]]; then
+  printf 'INFO\theld\nSWAP\tloom:operator\n'
+  exit 0
+fi
+exec "$LOOM_TEST_REAL_DAEMON" "$@"
+FAKEDAEMON
+chmod +x "$fake_held"
+export LOOM_DAEMON_BIN="$fake_held"
+PARTIAL_OPEN_BEFORE_MERGE=""
+PARTIAL_CONFLICT_ISSUES=""
+PR_JSON='{"body":"Part of #123"}'
+_reset_partial_increment_labels 2>/dev/null
+held_log="$(read_log)"
+export LOOM_DAEMON_BIN="$saved_bin"
+assert_contains "$held_log" "issue edit 123 --repo owner/repo --remove-label loom:building --add-label loom:operator" \
+  "#9264: a held SWAP target adds loom:operator"
+assert_not_contains "$held_log" "--add-label loom:issue" \
+  "#9264: ...and does not return the issue to the ready queue"
+
 # T32 (#8191): on the happy path the posted body is the one the daemon
 # rendered, in both arms of its single conditional -- the plain swap, and the
 # swap that follows a #4569 reopen.
@@ -1106,9 +1226,9 @@ retired "merge-pr.sh's source contains the (Part of|Contributes to) alternation"
 # reopen ...` literals, which no longer appear in merge-pr.sh. The intent is
 # unchanged: fail loudly if a refactor drops the loom:building -> loom:issue
 # swap, the premature-auto-close revert, or the REPO_NWO scoping.
-assert_contains "$src" 'forge_gh_swap_label_rl_safe "$REPO_NWO" "$issue_num" "loom:building" "loom:issue"' \
+assert_contains "$src" 'forge_gh_swap_label_rl_safe "$REPO_NWO" "$issue_num" "loom:building" "${text:-loom:issue}"' \
   "merge-pr.sh swaps loom:building -> loom:issue via the rate-limit-safe wrapper (#4856)"
-assert_contains "$src" '"loom:building" "loom:issue"' \
+assert_contains "$src" '"loom:building" "${text:-loom:issue}"' \
   "merge-pr.sh restores loom:issue as the swap's add-label argument"
 assert_contains "$src" "--repo \"\$REPO_NWO\"" \
   "merge-pr.sh scopes the partial-increment mutations to REPO_NWO"

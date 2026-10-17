@@ -75,6 +75,16 @@ fi
 #
 # Declaring it is optional (unset ⇒ no containment, byte-identical behaviour)
 # so an unrelated suite can source this file without adopting the discipline.
+
+# #11044: loom-daemon-update.sh asks before it moves a fleet host off the fleet
+# floor, and refuses without a terminal. Whether this is a fleet host comes from
+# the HOST (its config, and ~/.loom/fleet-sync-status.json), so on a fleet
+# developer machine every non-interactive fixture run would be refused. These
+# suites are non-interactive Loom tooling, which is what this marker declares;
+# the check itself is covered by test-loom-daemon-update-floor-confirm.sh, which
+# clears it.
+export LOOM_DAEMON_UPDATE_INVOKER="${LOOM_DAEMON_UPDATE_INVOKER:-test-fixture}"
+
 loom_fixture_scratch_root() {
     LOOM_FIXTURE_SCRATCH_ROOT="$(cd "$1" 2>/dev/null && pwd -P)" || {
         echo "loom_fixture_scratch_root: '$1' does not exist" >&2
@@ -282,6 +292,16 @@ if [[ "\${1:-}" == "--version" ]]; then
 fi
 if [[ "\${1:-}" == "calibrate" ]]; then
     exit 1
+fi
+if [[ "\${1:-}" == "telemetry-capabilities" ]]; then
+    # Answer the post-build OTLP probe (#10700) like a real daemon. Set
+    # FAKE_DAEMON_OTLP_PROBE_EXIT=1 to simulate a binary lacking the exporter.
+    if [[ "\${FAKE_DAEMON_OTLP_PROBE_EXIT:-0}" != "0" ]]; then
+        echo '{"otlp":false}'
+        exit "\${FAKE_DAEMON_OTLP_PROBE_EXIT}"
+    fi
+    echo '{"otlp":true}'
+    exit 0
 fi
 if [[ -n "\${1:-}" && "\${1:-}" != -* ]]; then
     echo "fake loom-daemon: unsupported subcommand: \$*" >&2
@@ -516,6 +536,16 @@ if [[ "\${1:-}" == "--version" ]]; then
 fi
 if [[ "\${1:-}" == "calibrate" ]]; then
     exit 1
+fi
+if [[ "\${1:-}" == "telemetry-capabilities" ]]; then
+    # Answer the post-build OTLP probe (#10700) like a real daemon. Set
+    # FAKE_DAEMON_OTLP_PROBE_EXIT=1 to simulate a binary lacking the exporter.
+    if [[ "\${FAKE_DAEMON_OTLP_PROBE_EXIT:-0}" != "0" ]]; then
+        echo '{"otlp":false}'
+        exit "\${FAKE_DAEMON_OTLP_PROBE_EXIT}"
+    fi
+    echo '{"otlp":true}'
+    exit 0
 fi
 if [[ -n "\${1:-}" && "\${1:-}" != -* ]]; then
     echo "fake loom-daemon: unsupported subcommand: \$*" >&2

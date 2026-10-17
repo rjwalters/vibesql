@@ -21,7 +21,11 @@
 #                         re-authorization): "organization has disabled
 #                         [Claude subscription access]" and "Failed to
 #                         authenticate ... socket connection was closed
-#                         unexpectedly".
+#                         unexpectedly". Issue #11205 adds Claude Code's own
+#                         "Failed to authenticate. API Error: 401 …" opening
+#                         (any 401 message), "Failed to authenticate: OAuth
+#                         session expired …" and "API Error: 401 Invalid API
+#                         key".
 #       TOKEN_EXHAUSTED — quota/weekly/per-model limit hit (rotate). Covers
 #                         both the "hit your … limit" family (#3738) and the
 #                         per-model "reached your <model> limit" ceiling the
@@ -29,7 +33,10 @@
 #                         over-approximation (the account may still have
 #                         headroom on a cheaper model) chosen over a new
 #                         model-dimensioned category so no downstream consumer
-#                         has to learn a new enum value.
+#                         has to learn a new enum value. Issue #11205 adds
+#                         "You've hit your team's shared budget", "Your org is
+#                         out of usage", the legacy "Claude AI usage limit
+#                         reached|<epoch>".
 #       MODEL_CREDITS_EXHAUSTED
 #                       — per-model-TIER usage credits ran out (issue #5687):
 #                         "You're out of usage credits". Distinct from
@@ -140,406 +147,82 @@
 # commit predates upstream's SESSION_LIMIT (#3947) and MODEL_REFUSAL
 # categories, so it is used here only as a design reference for the
 # selector/table shape — all six Claude-specific categories, in their
-# current documented order, are carried into the `claude` table below.
+# current documented order, are carried into the native `claude` table.
 #
-# Test vectors: the `claude` table's live in
-# `defaults/scripts/tests/test-spawn-claude.sh`; the `codex` table's (plus the
-# cross-provider isolation checks that prove the claude vectors are unchanged)
-# live in `defaults/scripts/tests/test-spawn-codex.sh`.
+# Test vectors: `defaults/scripts/tests/test-classify-error.sh`, `test-spawn-claude.sh`,
+# `test-spawn-codex.sh` and the shared fixtures under
+# `defaults/scripts/tests/fixtures/classify_error/`.
+#
+# Native implementation (issues #11208, #11219): the engine, both provider
+# tables and the deny-list live ONLY in `loom-daemon classify-error`
+# (loom-daemon/src/classify_error.rs); this file is a thin wrapper. The design
+# notes above describe the native classifier's behavior. The two public
+# functions delegate to it whenever a daemon binary resolves — see
+# `classify_error` below for the exact delegation contract. Nothing here
+# carries a pattern table any more (the shell copy was deleted by #11219 to
+# end the drift surface); the shared fixtures
+# `defaults/scripts/tests/fixtures/classify_error/{vectors,conformance}.tsv`
+# drive the Rust tests.
+#
+# Degraded answer with NO capable daemon (none on PATH, or one predating the
+# subcommand), fail-safe by design:
+#   classify_error                 -> SUCCESS for exit 0 and TIMEOUT for exit
+#                                     124/137 (exit-code short-circuits, still
+#                                     in shell); RECOVERABLE for any other
+#                                     non-zero exit.
+#   classification_is_transient    -> exit 0 (retry, bounded by the caller's
+#                                     cap) for every category, matching the
+#                                     deny-list's retry-by-default policy
+#                                     (#4501).
+# External consumers that vendor only this file (miniset's E2B shim) must
+# ship a `loom-daemon` with `classify-error` to keep real classification.
 
 # shellcheck disable=SC2120  # OK that callers pass the args; we don't default.
 
-# --- Provider pattern tables -------------------------------------------
-
-# _classify_error_claude <output> -> echoes a category, or nothing if no
-# Claude-specific pattern matched (caller falls through to the generic
-# table). Only called when exit_code != 0.
-_classify_error_claude() {
-    local output="$1"
-
-    # Working directory deleted (worktree cleaned up while CLI ran)
-    if echo "$output" | grep -qi "current working directory was deleted"; then
-        echo "CWD_DELETED"
-        return
-    fi
-
-    # Model refusal (safety classifier declined the turn) — a `stop_reason`
-    # of "refusal" on a non-zero-exit run. This is a routing error, not a
-    # transport failure or a quality signal: the sweep orchestrator responds
-    # by dropping one ladder rung (e.g. fable→opus) WITHOUT consuming a Doctor
-    # cycle (see sweep.md, "Refusal-aware fallback"). Matched only on a genuine
-    # failure (exit_code != 0, guaranteed by the caller) so the exit-code-first
-    # #3233 guarantee holds — a clean exit whose output merely mentions
-    # "refusal" stays SUCCESS in the shared engine above.
-    if echo "$output" | grep -qiE '"?stop_reason"?[[:space:]]*[:=][[:space:]]*"?refusal'; then
-        echo "MODEL_REFUSAL"
-        return
-    fi
-
-    # Token expired (401 auth error) — this specific token is bad.
-    #
-    # Issue #6030: "invalid bearer token" was OBSERVED end-to-end on a live
-    # fleet host as the wrapper's `log_permanent_death` tail: "Failed to
-    # authenticate. API Error: 401 Invalid bearer token". None of the prior
-    # patterns matched it (it says neither "authentication_error" nor
-    # "expired"), so it fell all the way through the claude table and the
-    # generic table's rate-limit/5xx/network checks into the generic
-    # RECOVERABLE catch-all — the wrapper retried the same dead credential
-    # with backoff until MAX_RETRIES, then died with classification=RECOVERABLE
-    # instead of TOKEN_EXPIRED, and the account was never marked bad. The next
-    # spawn could select the SAME auth-dead account again with no memory of
-    # the failure — this is the mechanism behind the issue's "most died within
-    # minutes" observation on a wave dispatch.
-    #
-    # Issue #6424: two more account-level death phrasings hit the same gap.
-    # "Your organization has disabled Claude subscription access for Claude
-    # Code" (a billing/authorization fault, resolved by the operator) and
-    # "Failed to authenticate. API Error: 403 The socket connection was closed
-    # unexpectedly" (observed as the sibling death-tail on the same incident)
-    # both matched none of the patterns above and fell through to the generic
-    # RECOVERABLE catch-all — measured on one host's logs, 37 of 43 permanent
-    # deaths carried the first phrase and the remaining 6 carried the second.
-    # Folded into TOKEN_EXPIRED rather than a new distinct category: the
-    # remedy is identical in kind (mark this account bad, rotate, needs human
-    # re-authorization, never blind-retried), and `claude-wrapper.sh`'s
-    # `is_account_auth_dead()` already dispatches on exactly this
-    # classification, so no daemon-side enum change is required. Only the
-    # substring "organization has disabled" is matched (not the full sentence)
-    # so minor wording drift in the CLI's own phrasing still classifies. The
-    # socket-closed phrase is deliberately anchored to "failed to
-    # authenticate ... socket connection was closed unexpectedly" (not a bare
-    # "socket connection was closed") so an unrelated transient network drop
-    # mid-session — which legitimately belongs in the generic RECOVERABLE
-    # table — is not swept into this terminal, account-marked-bad branch.
-    # Issue #6614: a token REVOKED mid-flight (an operator running `/login` on
-    # the host invalidates the pooled OAuth credential the fleet is riding on)
-    # produced a third variant this pattern missed, verbatim:
-    #   Failed to authenticate. API Error: 401 {"type":"authentication_error",
-    #   "message":"OAuth access token has been revoked."}
-    # Two independent gaps let it through:
-    #   * `401[^a-z]*authentication_error` cannot bridge the JSON envelope. The
-    #     `[^a-z]*` gap between "401" and "authentication_error" excludes
-    #     LETTERS, and the real payload puts `{"type":"` (and, in the nested
-    #     `{"type":"error","error":{...}}` form the API also serves, the word
-    #     "error" too) in between — so the alternation dies before it reaches
-    #     "authentication_error".
-    #   * Neither "revoked" nor "access token" appeared anywhere in this file.
-    # So the death fell through to the generic RECOVERABLE catch-all and
-    # `claude-wrapper.sh` retried the SAME revoked credential MAX_RETRIES (5)
-    # times before dying — a revoked token cannot recover, so every one of
-    # those retries was pure latency plus a duplicated 401 in the logs.
-    #
-    # Both gaps are closed with anchored phrases rather than a blanket
-    # `401.*authentication_error`: marking an account bad carries reason `auth`
-    # (persists until a manual `loom-daemon tokens unblock`), so the
-    # false-positive direction is the expensive one, and a bare `.*` would let
-    # any non-zero-exit output that merely MENTIONS both tokens on one line
-    # (an agent quoting this very incident, say) condemn a healthy account.
-    #   * `"type":"authentication_error"` — the JSON field itself, whitespace-
-    #     tolerant. Unambiguous, and matches the nested envelope too, which no
-    #     "401-then-gap" pattern can.
-    #   * `token (has been|was) revoked` — requires the word "token" directly
-    #     before the revocation verb, so an unrelated "revoked" (a revoked
-    #     approval, a revoked branch ruleset) cannot fire it. Covers "OAuth
-    #     access token has been revoked" as a substring, so no separate
-    #     "access token" alternation is needed.
-    # Kept in TOKEN_EXPIRED (not a new category) for the #6424 reason: the
-    # remedy is identical in kind — mark this account bad, rotate, never
-    # blind-retry — and `claude-wrapper.sh::is_account_auth_dead` already
-    # dispatches on exactly this classification.
-    if echo "$output" | grep -qiE "401[^a-z]*authentication_error|\"type\"[[:space:]]*:[[:space:]]*\"?authentication_error|token (has been|was) revoked|invalid bearer token|OAuth token has expired|token has expired|organization has disabled|failed to authenticate.*socket connection was closed unexpectedly"; then
-        echo "TOKEN_EXPIRED"
-        return
-    fi
-
-    # Concurrent-session-limit fault (issue #3947) — the account is healthy but
-    # cannot start another SIMULTANEOUS session right now. This is a capacity
-    # signal from per-token session stacking, NOT quota exhaustion, so it is
-    # classified distinctly and callers must NOT mark the token bad. Checked
-    # BEFORE TOKEN_EXHAUSTED because "concurrent session limit" contains the
-    # substring "session limit" that the exhaustion regex below also matches;
-    # the concurrency-specific wording ("concurrent", "simultaneous", "already
-    # running") disambiguates a capacity fault from a weekly/usage limit.
-    if echo "$output" | grep -qiE "concurrent (session|sessions|request)|maximum number of concurrent|too many concurrent|simultaneous session|another session is (already )?(active|running)"; then
-        echo "SESSION_LIMIT"
-        return
-    fi
-
-    # Token exhausted (quota / session / weekly / usage limit) — rotate to a
-    # different token. The phrase set is widened (issue #3738) to cover the
-    # multi-word-gap variants the Claude CLI actually emits — "hit your
-    # session limit", "hit your weekly limit", an org's "monthly usage limit",
-    # and "out of extra usage". A naive `hit.your.limit` pattern misses the
-    # "session"/multi-word forms (there is filler between "your" and "limit").
-    # This regex is kept in lockstep with claude-wrapper.sh, which sources this
-    # file rather than duplicating the pattern (issue #3738) — moving the
-    # pattern into this table preserves that single-source property; the
-    # wrapper still reaches it only via `classify_error`, never a copy.
-    #
-    # Issue #4501 adds the "reached your <model> limit" family: the CLI now
-    # emits a PER-MODEL ceiling — "You've reached your Fable 5 limit. Run
-    # /usage-credits to continue or switch models with /model." — where the
-    # model name sits between "your" and "limit", so none of the "hit your …"
-    # phrasings above fired and every daemon-dispatched child died permanently
-    # at CLI start instead of rotating. `([^[:space:]]+[[:space:]]+){0,3}`
-    # bounds the filler to at most three words so the pattern cannot swallow a
-    # whole unrelated sentence that merely ends in "limit". Ordered AFTER the
-    # SESSION_LIMIT branch above so "reached your concurrent session limit"
-    # keeps its distinct capacity classification (#3947).
-    #
-    # Deliberately reuses TOKEN_EXHAUSTED rather than introducing a
-    # model-dimensioned MODEL_LIMIT category: a Fable-only ceiling does not
-    # exhaust `sonnet` on the same account, so marking the whole account
-    # exhausted is a *safe over-approximation* (correct rotation, slightly
-    # pessimistic pool) that needs no change in any downstream consumer
-    # (`spawn-codex.sh`'s terminal-result allowlist,
-    # `loom-daemon/src/tokens_pool/health.rs`'s `TerminalClassification`,
-    # `bad_tokens.rs`/`failure_counts.rs`). Per-model account state is tracked
-    # as an explicit follow-up, not smuggled in here.
-    #
-    # Issue #5631: "hit your (limit|session limit|weekly limit)" was a fixed
-    # alternation that missed "You've hit your monthly spend limit" (a
-    # billing cap, distinct from "monthly usage limit"), so a spend-capped
-    # account fell through to RECOVERABLE and was retried with backoff
-    # instead of rotated away from. Widened to the same bounded-filler shape
-    # already used for "reached your <model> limit" above, so the next
-    # "hit your <N-word> limit" variant is caught without another round trip.
-    if echo "$output" | grep -qiE "hit your ([^[:space:]]+[[:space:]]+){0,3}limit|hit\.your\.limit|monthly usage limit|out of extra usage|reached your ([^[:space:]]+[[:space:]]+){0,3}limit"; then
-        echo "TOKEN_EXHAUSTED"
-        return
-    fi
-
-    # Per-model-TIER credit exhaustion (issue #5687) — "You're out of usage
-    # credits". Observed 2026-08-08 during a `/loom:sweep all` run: all six
-    # in-session wave builders were dispatched on the session-default model and
-    # died within minutes of each other when the account's credits for THAT
-    # MODEL TIER ran out. None of the TOKEN_EXHAUSTED phrasings above fires on
-    # this wording (there is no "limit" token and no "extra usage"), so before
-    # this branch it fell through to the RECOVERABLE catch-all and the wrapper
-    # retried the same model with backoff instead of rotating or downgrading.
-    #
-    # Why this is a DISTINCT category rather than another TOKEN_EXHAUSTED
-    # phrase (the #4501 precedent went the other way):
-    #   * The remedy differs in kind. Credits are model-tier-scoped, so
-    #     re-running the SAME work on a cheaper model under the SAME account
-    #     clears it. On a single-account host — and on the in-session Task
-    #     dispatch path, which has no account pool at all — that is the ONLY
-    #     remedy; "rotate the account" is not applicable there.
-    #   * The consumer that needs it is not this classifier's caller. The
-    #     `/loom:sweep` orchestrator dispatches wave builders via the Task
-    #     tool, so no subprocess exists for this file to classify; it reads
-    #     the failure text itself and needs a named signature to key its
-    #     one-rung-down model fallback on (sweep.md, "Credit-exhaustion
-    #     fallback"). Folding the phrase into TOKEN_EXHAUSTED would have made
-    #     that signature unnameable.
-    # Behaviourally it is a SYNONYM of TOKEN_EXHAUSTED for every account-pool
-    # consumer: `claude-wrapper.sh::is_account_exhaustion` accepts it (rotate +
-    # mark bad), `classification_is_transient` retries it, and
-    # `tokens_pool::health` gives it the identical PlanExhausted cooldown. So
-    # the daemon/wrapper path behaves as it would have under TOKEN_EXHAUSTED —
-    # only the reported name (and therefore the telemetry + the orchestrator's
-    # remedy choice) is finer-grained.
-    #
-    # Ordered AFTER TOKEN_EXHAUSTED deliberately: #4501's live message
-    # ("You've reached your Fable 5 limit. Run /usage-credits to continue or
-    # switch models with /model.") also mentions credits, and must keep its
-    # existing classification. The regex is anchored on the word "credits"
-    # preceded by an exhaustion verb so an unrelated mention ("credit card
-    # declined", "credit the original author") cannot false-positive.
-    if echo "$output" | grep -qiE "(ran |run )?out of (usage |extra |plan )?credits|no (usage |extra |plan )?credits (remaining|left)|insufficient (usage |plan )?credits"; then
-        echo "MODEL_CREDITS_EXHAUSTED"
-        return
-    fi
-
-    # "No messages returned" — transient API issue specific to the Claude CLI's
-    # own wording (only reached when exit_code != 0, per the caller contract)
-    if echo "$output" | grep -q "No messages returned"; then
-        echo "RECOVERABLE"
-        return
-    fi
-
-    # No Claude-specific pattern matched — fall through to the generic table.
-}
-
-# _classify_error_codex <output> -> echoes a category, or nothing if no
-# Codex-specific pattern matched (caller falls through to the generic table).
-# Only called when exit_code != 0.
+# --- Native delegation (issue #11208) -------------------------------------
 #
-# Provider table for the OpenAI Codex CLI adapter (`spawn-codex.sh`, epic #4167
-# Phase 2 / issue #4468). Ported from the gpeyton/loom fork's codex table by
-# Graham Peyton, then re-grounded against the real CLI: every phrase below was
-# either OBSERVED in `codex exec` output on codex-cli 0.146.0 (2026-07-29) or
-# extracted verbatim from that binary's own message strings. Nothing here is
-# guessed — where a category has no defensible Codex signature it is left
-# unimplemented and documented as such rather than filled with Claude wording.
+# requires-daemon: classify-error optional   #11208 — a missing binary, one predating the subcommand, or any "could not ask" answer (non-0/1 exit, empty stdout) degrades to the fail-safe answer documented in the header (RECOVERABLE / retry); never a wrong terminal verdict.
 #
-# Match order and why:
-#   1. FATAL config faults    unambiguous, and they must not be retried.
-#   2. TOKEN_EXHAUSTED        BEFORE TOKEN_EXPIRED: OpenAI has served
-#                             `insufficient_quota` with a 401 status as well as
-#                             429, and mis-classifying a quota fault as an auth
-#                             fault is the expensive direction — TOKEN_EXPIRED
-#                             marks an account bad with reason `auth` (persists
-#                             until a manual `loom-daemon tokens unblock`), whereas
-#                             TOKEN_EXHAUSTED uses reason `exhausted` (TTL-
-#                             expires on its own). Quota wording is also the
-#                             more specific signal, so letting it win is both
-#                             safer and more precise.
-#   3. TOKEN_EXPIRED          401 / not-signed-in / refresh-token failures.
+# The resolved `loom-daemon` that IMPLEMENTS classify-error, in
+# $_CLASSIFY_DAEMON_BIN — resolved ONCE, when this file is sourced
+# (classify_error runs in retry loops; a fork per call is fine, a resolution
+# walk — which may itself fork a `--version` probe — per call is not). At
+# source time, not lazily, because callers almost always invoke
+# `classification=$(classify_error …)`: a cache filled inside that command
+# substitution would die with the subshell. Empty means "no capable daemon": the degraded answer.
 #
-# Deliberately NOT implemented for codex (documented, not forgotten):
-#   CWD_DELETED    No Codex-specific signature for "the workspace vanished
-#                  mid-run" is known. Claude's "current working directory was
-#                  deleted" phrasing is Claude-CLI-specific and is NOT reused.
-#   SESSION_LIMIT  Codex exposes no concurrent-session-cap error wording. A
-#                  bare 429 stays RECOVERABLE via the generic table, which is
-#                  the correct conservative behavior (retry, don't mark bad).
-#   MODEL_REFUSAL  The Responses API can emit a refusal content part, but the
-#                  Codex CLI has no stable surfaced wording for it, and a
-#                  refusal does not reliably produce a non-zero exit.
+# This is `loom_resolve_self_daemon_bin`'s chain — the binary that IMPLEMENTS
+# ported logic, NOT $LOOM_DAEMON_BIN (the install this wrapper DRIVES, which
+# may predate the subcommand — #7977's category error). locate-daemon-bin.sh
+# sits beside this file in every tree that ships the pair, so it is sourced
+# when present; a consumer that vendored ONLY this file (miniset's E2B shim)
+# gets the two-tier inline chain instead: the explicit $LOOM_DAEMON_SELF_BIN
+# seam, then `loom-daemon` on PATH. The variable is assigned straight from
+# the resolver so scripts/check-daemon-subcommand-versions.sh sees the calls
+# below as daemon calls and holds them to the marker above.
 #
-# Sandbox denials are deliberately absent — and that is a FINDING, not an
-# omission. A Codex sandbox denial is an in-session tool failure, not a process
-# failure: verified on 0.146.0 with `-s read-only`, a blocked `touch` returns
-# `Operation not permitted` to the model and the `codex exec` process still
-# exits **0**. Exit-code-first classification therefore never reaches this
-# table for a denial, and adding an "Operation not permitted" pattern here
-# would be dead code that could only ever fire as a false positive on some
-# unrelated non-zero exit. What IS classified below is a sandbox/trust fault
-# that genuinely aborts the run: the trusted-directory refusal, and Codex
-# failing to construct its sandbox at all. See
-# `defaults/docs/guardrail-parity-codex.md` for the full trust-boundary map.
-_classify_error_codex() {
-    local output="$1"
-
-    # --- FATAL: configuration faults that no retry can fix -----------------
-    # Observed verbatim on 0.146.0 when `codex exec` runs outside a git work
-    # tree: "Not inside a trusted directory and --skip-git-repo-check was not
-    # specified." (exit 1, on stderr). `spawn-codex.sh` injects
-    # --skip-git-repo-check when the cwd is genuinely not a work tree, so
-    # reaching this means something upstream mis-set the cwd — a retry loops.
-    #
-    # "unknown configuration field" is the CLI's own rejection of a bad
-    # `-c key=value` override (observed with --strict-config); also
-    # non-retryable.
-    #
-    # `landlock_sandbox_executable_not_provided` is Codex's internal error code
-    # (string present in the 0.146.0 binary) for being unable to construct its
-    # Linux sandbox — a host/config problem, not a transient one. Classifying
-    # it FATAL is the safe direction: a worker that cannot establish its
-    # sandbox must NOT be silently retried into running unsandboxed.
-    if echo "$output" | grep -qiE "not inside a trusted directory|unknown configuration field|landlock_sandbox_executable_not_provided"; then
-        echo "FATAL"
-        return
-    fi
-
-    # Model unsupported for this account's auth mode (issue #5499). Observed
-    # verbatim as a 400 `invalid_request_error` when an explicitly-pinned
-    # model (even a Codex-family one, e.g. `gpt-5-codex`) is forwarded to a
-    # ChatGPT-plan-authenticated profile: "The 'gpt-5-codex' model is not
-    # supported when using Codex with a ChatGPT account." Retrying the
-    # identical invocation can never succeed — the fault is the model/auth-mode
-    # pairing, not the transport or the account's quota — so this must NOT
-    # fall through to the generic RECOVERABLE catch-all below (the pre-#5499
-    # behavior, which retried this identically forever, burning an invocation
-    # every cadence tick). `spawn-codex.sh` independently guards against this
-    # by dropping a pinned model before launch when it detects a ChatGPT-plan
-    # profile (issue #5499); this classification is the backstop for every
-    # OTHER path that can still reach the CLI with a bad pin (the guard's own
-    # escape hatch `LOOM_CODEX_AUTH_MODE_CHECK=0`, a pre-existing/ambient
-    # `CODEX_HOME` the guard could not resolve in time, or a future caller
-    # that bypasses spawn-codex.sh entirely).
-    if echo "$output" | grep -qiE "is not supported when using codex with a chatgpt account"; then
-        echo "FATAL"
-        return
-    fi
-
-    # --- TOKEN_EXHAUSTED: plan/quota exhaustion — rotate, mark `exhausted` ---
-    # Strings taken verbatim from the 0.146.0 binary: "You've hit your usage
-    # limit.", "You've reached your usage limit.", "You've reached your
-    # workspace credit limit", "Your workspace is out of credits". Plus the
-    # documented OpenAI API error codes the CLI relays (`rate_limit_exceeded`,
-    # `insufficient_quota`, "exceeded your current quota").
-    # A BARE 429 with no quota wording is intentionally NOT matched here — it
-    # is a transient throttle and belongs to the generic RECOVERABLE table.
-    if echo "$output" | grep -qiE "hit your usage limit|reached your usage limit|usage limit reached|workspace credit limit|out of credits|insufficient_quota|rate_limit_exceeded|exceeded your current quota|quota exceeded"; then
-        echo "TOKEN_EXHAUSTED"
-        return
-    fi
-
-    # --- TOKEN_EXPIRED: this credential is bad — skip/re-auth this profile ---
-    # `401 Unauthorized` was OBSERVED end-to-end: pointing CODEX_HOME at an
-    # unauthenticated profile makes 0.146.0 emit
-    #   "failed to connect to websocket: HTTP error: 401 Unauthorized"
-    # and exit 1. The remaining phrases are verbatim binary strings for the
-    # ChatGPT-login/refresh-token failure modes a rotated `CODEX_HOME` profile
-    # actually hits: "Not signed in. Please run 'codex login'", "...refresh
-    # token has expired. Please log out and sign in again", "Your session has
-    # expired. Please reauthenticate.", "Failed to refresh token", "ChatGPT
-    # auth is missing a refresh token". `invalid_api_key` / "incorrect api key"
-    # cover the API-key (OPENAI_API_KEY) side.
-    if echo "$output" | grep -qiE "401[^a-z]*unauthorized|invalid_api_key|invalid api key|incorrect api key|not signed in|please run .?codex login|refresh token has expired|refresh token was (already used|revoked)|missing a refresh token|no refresh token available|failed to refresh token|session has expired|please reauthenticate"; then
-        echo "TOKEN_EXPIRED"
-        return
-    fi
-
-    # No Codex-specific pattern matched — fall through to the generic table
-    # (rate-limit/429, 5xx, network, catch-all RECOVERABLE).
-}
-
-# _classify_error_provider <output> <provider> -> dispatches to the matching
-# provider table via ordered case dispatch (deterministic; no associative-
-# array iteration). Unknown providers intentionally match nothing here and
-# fall through to the generic table in classify_error.
-_classify_error_provider() {
-    local output="$1"
-    local provider="$2"
-
-    case "$provider" in
-        claude)
-            _classify_error_claude "$output"
-            ;;
-        codex)
-            _classify_error_codex "$output"
-            ;;
-        *)
-            # Unknown provider: no provider-specific table, no error — the
-            # generic fallback in classify_error covers it.
-            ;;
-    esac
-}
-
-# --- Generic (provider-independent) transient table ---------------------
-
-# _classify_error_generic <output> -> always echoes a category (never empty).
-# Applies to every provider, including unknown ones, so an unrecognized
-# `provider` value never fails to classify.
-_classify_error_generic() {
-    local output="$1"
-
-    # Rate limit (429) — transient, retry with backoff
-    if echo "$output" | grep -qiE "rate.limit|too.many.requests|429"; then
-        echo "RECOVERABLE"
-        return
-    fi
-
-    # Server errors (5xx) — transient
-    if echo "$output" | grep -qiE "500|502|503|504|internal.server.error|service.unavailable"; then
-        echo "RECOVERABLE"
-        return
-    fi
-
-    # Network errors — transient
-    if echo "$output" | grep -qiE "ECONNREFUSED|ETIMEDOUT|network.error"; then
-        echo "RECOVERABLE"
-        return
-    fi
-
-    # Catch-all: unknown non-zero exit, treat as recoverable in daemon mode
-    echo "RECOVERABLE"
-}
-
-# --- Shared classification engine ----------------------------------------
+# Then ONE capability probe: RECOVERABLE is retryable, so a binary that
+# implements the subcommand exits 0. An older daemon (clap's exit 2) or
+# anything else that cannot answer is dropped here, once — so it neither
+# costs a doomed fork per call nor has an exit 1 misread as `--transient`'s
+# "terminal" verdict. Nothing here can turn a version skew into a wrong answer.
+_CLASSIFY_ERROR_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_CLASSIFY_ERROR_LIB_DIR}/locate-daemon-bin.sh" ]]; then
+    # shellcheck source=lib/locate-daemon-bin.sh
+    # shellcheck disable=SC1091
+    source "${_CLASSIFY_ERROR_LIB_DIR}/locate-daemon-bin.sh"
+fi
+if declare -F loom_resolve_self_daemon_bin >/dev/null 2>&1; then
+    _CLASSIFY_DAEMON_BIN="$(loom_resolve_self_daemon_bin)"
+elif [[ -x "${LOOM_DAEMON_SELF_BIN:-}" ]]; then
+    _CLASSIFY_DAEMON_BIN="${LOOM_DAEMON_SELF_BIN}"
+else
+    _CLASSIFY_DAEMON_BIN="$(command -v loom-daemon 2>/dev/null || true)"
+fi
+if [[ ! -x "${_CLASSIFY_DAEMON_BIN}" ]] \
+    || ! "${_CLASSIFY_DAEMON_BIN}" classify-error --transient RECOVERABLE </dev/null >/dev/null 2>&1; then
+    _CLASSIFY_DAEMON_BIN=""
+fi
 
 classify_error() {
     local output="$1"
@@ -551,6 +234,8 @@ classify_error() {
 
     # 1. Timeout from the `timeout(1)` command — productive cycle, not error.
     #    Provider-independent: a timeout is a timeout regardless of runtime.
+    #    Kept in shell (not delegated): no fork needed for an exit-code answer,
+    #    and these two short-circuits are engine-level, not table-level.
     if [[ "$exit_code" -eq 124 || "$exit_code" -eq 137 ]]; then
         echo "TIMEOUT"
         return
@@ -567,16 +252,27 @@ classify_error() {
 
     # --- Below here, exit_code != 0 (genuine failure). Inspect output. ---
 
-    # 3. Provider-specific table first (e.g. the six Claude categories).
-    local provider_result
-    provider_result="$(_classify_error_provider "$output" "$provider")"
-    if [[ -n "$provider_result" ]]; then
-        echo "$provider_result"
-        return
+    # 3. Delegate to `loom-daemon classify-error` (#11208; optional — see the
+    #    requires-daemon marker above): a missing or
+    #    older binary, a failed pipe, or any non-0 exit degrades to the
+    #    fail-safe RECOVERABLE below, never to a wrong answer. stdout must be one
+    #    uppercase category token: classify mode always prints exactly one,
+    #    so anything else (empty included) means "could not ask".
+    if [[ -n "$_CLASSIFY_DAEMON_BIN" ]]; then
+        local native_result=""
+        if native_result="$(printf '%s' "$output" \
+                | "$_CLASSIFY_DAEMON_BIN" classify-error --exit-code "$exit_code" --provider "$provider" 2>/dev/null)" \
+           && [[ "$native_result" =~ ^[A-Z_]+$ ]]; then
+            printf '%s\n' "$native_result"
+            return
+        fi
     fi
 
-    # 4. Generic, provider-independent transients (always resolves).
-    _classify_error_generic "$output"
+    # 4. Degraded answer (no capable daemon, #11219): the pattern tables live
+    #    only in `loom-daemon classify-error`, so with nothing to ask, report
+    #    the fail-safe RECOVERABLE for a genuine failure (retried, bounded by
+    #    the caller's cap) rather than guess a terminal category.
+    echo "RECOVERABLE"
 }
 
 # Convenience predicate matching legacy callers in claude-wrapper.sh.
@@ -612,39 +308,28 @@ is_recoverable_error() {
 # transient phrasings has twice turned a new CLI wording into an instant
 # permanent death (#4255's bare `Execution error`, #4501's "reached your
 # <model> limit"), while an over-retry costs only a bounded backoff. It also
-# matches the documented contract of the catch-all in
-# `_classify_error_generic` ("unknown non-zero exit, treat as recoverable in
-# daemon mode").
+# matches the documented contract of the native classifier's catch-all ("unknown non-zero exit, treat as recoverable
+# in daemon mode").
+#
+# Delegates to `loom-daemon classify-error --transient` (#11208) when a
+# binary resolves — the SAME deny-list the native classifier enforces, so
+# there is one policy with two pinned renderings, not two policies. The exit
+# code IS the answer (0 transient, 1 terminal); only a binary that passed
+# the capability probe above is asked at all, and any
+# other code (2 = "could not ask") must NOT travel — it falls through to the
+# degraded answer below (retry).
 classification_is_transient() {
-    case "$1" in
-        # Terminal — retrying the same invocation cannot succeed:
-        #   SUCCESS       nothing to retry.
-        #   TIMEOUT       the wall-clock budget was already spent, and a 137 is
-        #                 normally an external kill (daemon reaper / OOM) —
-        #                 surface it rather than re-spending the budget.
-        #   TOKEN_EXPIRED this token needs re-auth, not another attempt.
-        #   CWD_DELETED   the working directory is gone.
-        #   MODEL_REFUSAL the same model refuses the same turn again; the sweep
-        #                 orchestrator drops a ladder rung instead (see
-        #                 sweep.md, "Refusal-aware fallback").
-        #   FATAL         a configuration fault (the `codex` table's category).
-        SUCCESS|TIMEOUT|TOKEN_EXPIRED|CWD_DELETED|MODEL_REFUSAL|FATAL)
-            return 1
-            ;;
-        # Retryable: RECOVERABLE (including the unknown-non-zero-exit
-        # catch-all), plus TOKEN_EXHAUSTED, MODEL_CREDITS_EXHAUSTED and
-        # SESSION_LIMIT. Those three are
-        # normally consumed by a caller's account-rotation / re-selection path
-        # BEFORE this predicate is reached; they land here only when that path
-        # is capped or found no alternate account, where a bounded
-        # backoff-and-retry (rather than a permanent death) is exactly what
-        # claude-wrapper.sh's own comments already promise.
-        # MODEL_CREDITS_EXHAUSTED (#5687) is deliberately in the SAME arm as
-        # TOKEN_EXHAUSTED: it is a distinct NAME, not a distinct retry policy.
-        *)
-            return 0
-            ;;
-    esac
+    if [[ -n "$_CLASSIFY_DAEMON_BIN" ]]; then
+        # `loom-daemon classify-error --transient`: 0 retry, 1 terminal.
+        local rc=0
+        "$_CLASSIFY_DAEMON_BIN" classify-error --transient "$1" </dev/null 2>/dev/null || rc=$?
+        [[ "$rc" -gt 1 ]] || return "$rc"
+    fi
+    # Degraded answer (no capable daemon, #11219): retry. Retry-by-default is
+    # the deny-list's own fail-safe direction (#4501); the caller's retry cap
+    # bounds it. The terminal categories are enumerated only in the native
+    # classifier, so a daemon-less host cannot tell them apart.
+    return 0
 }
 
 # `loom_model_class_marker` -- how NARROW a `.bad_tokens` mark may be (#8058) --
@@ -657,8 +342,8 @@ classification_is_transient() {
 # `retry-classify`, and this is the remedy-shaping half of one of them
 # (is_account_exhaustion decides to rotate and mark; model-class decides how
 # much of the account the mark takes out). The classifier it consults --
-# `classify_error` / `classification_is_transient`, above -- deliberately did
-# NOT move, for the reason in #4501: it is the fleet's single source of truth
-# for what a failure IS, and a second copy of it in Rust could disagree with
-# this one. Shell still says what the failure is; the daemon owns what the
-# wrapper does about it.
+# `classify_error` / `classification_is_transient`, above -- is now a
+# thin wrapper over `loom-daemon classify-error` (#11208, #11219), which was
+# the one half of the #4501 boundary still living only in this file. The #4501
+# invariant survives the move in a stronger form: there is exactly ONE policy,
+# and it lives in the native classifier.

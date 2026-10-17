@@ -65,9 +65,9 @@
 #   --label LABEL            Claim label: loom:reviewing | loom:treating |
 #                            loom:curating (or any loom:* claim label).
 #   --stale-minutes M        Idle/age threshold. Default per label:
-#                            reviewing $LOOM_STALE_REVIEWING_MINUTES (30),
+#                            reviewing $LOOM_STALE_REVIEWING_MINUTES (45),
 #                            treating  $LOOM_STALE_TREATING_MINUTES  (60),
-#                            curating  $LOOM_STALE_CURATING_MINUTES  (30).
+#                            curating  $LOOM_STALE_CURATING_MINUTES  (45).
 #   --max-standdown-streak K Bounded-fallback cap. Default
 #                            $LOOM_MAX_STANDDOWN_STREAK (3).
 #   --role NAME              Role name used in the stand-down comment text
@@ -82,6 +82,7 @@
 #   stale                  Idle >= threshold with no claimant activity -> reclaim.
 #   stale-bounded-fallback Stand-down streak >= cap AND claim age >= threshold
 #                          -> force-reclaim (livelock breaker).
+#   (Either stale state becomes `fresh` while the role's PR lease is live: #11947.)
 #   unknown                Timeline unavailable/unparseable -> FAIL SAFE, treat
 #                          exactly like `fresh`. Never stomp a claim on missing
 #                          data.
@@ -104,8 +105,8 @@ ACTIVITY_PREFIX="<!-- loom:claim-activity claim="
 
 _usage() {
     # Keep this range in sync with the header comment block above
-    # (currently lines 50-96: "Usage:" through the gh-cached caveat).
-    sed -n '50,96p' "$0" | sed 's/^# \{0,1\}//'
+    # (currently lines 50-97: "Usage:" through the gh-cached caveat).
+    sed -n '50,97p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 _die() {
@@ -184,9 +185,9 @@ command -v jq >/dev/null 2>&1 || _die "jq not found on PATH" 3
 
 if [[ -z "$STALE_MINUTES" ]]; then
     case "$LABEL" in
-        loom:reviewing) STALE_MINUTES="${LOOM_STALE_REVIEWING_MINUTES:-30}" ;;
+        loom:reviewing) STALE_MINUTES="${LOOM_STALE_REVIEWING_MINUTES:-45}" ;;
         loom:treating) STALE_MINUTES="${LOOM_STALE_TREATING_MINUTES:-60}" ;;
-        loom:curating) STALE_MINUTES="${LOOM_STALE_CURATING_MINUTES:-30}" ;;
+        loom:curating) STALE_MINUTES="${LOOM_STALE_CURATING_MINUTES:-45}" ;;
         *) STALE_MINUTES="${LOOM_STALE_CLAIM_MINUTES:-30}" ;;
     esac
 fi
@@ -301,8 +302,10 @@ if [[ -z "$CLAIM_STATE" ]]; then
     # Claimant activity: ONLY comments carrying this claim's activity marker.
     ACTIVITY_COUNT="$(jq --arg m "${ACTIVITY_PREFIX}${CLAIMED_AT} -->" \
         '[.[] | select(.body | contains($m))] | length' <<<"$AFTER_JSON")"
+    # requires-daemon: forge optional   Without `claim-liveness` (absent or older binary) only the marker counts: the daemon's Judge-progress / claimant force-push signals (#10235) are then not folded in.
     LAST_ACTIVITY_AT="$(jq -r --arg m "${ACTIVITY_PREFIX}${CLAIMED_AT} -->" --arg c "$CLAIMED_AT" \
-        '([.[] | select(.body | contains($m)) | .created_at] + [$c]) | max' <<<"$AFTER_JSON")"
+        --arg x "$("${LOOM_DAEMON_BIN:-loom-daemon}" forge claim-liveness --number "$NUMBER" --label "$LABEL" --claimed-at "$CLAIMED_AT" ${REPO_ARG:+--repo "$REPO_ARG"} 2>/dev/null || true)" \
+        '([.[] | select(.body | contains($m)) | .created_at] + [$c] + ([$x | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))])) | max' <<<"$AFTER_JSON")"
 
     # Stand-down comments for THIS claim (prefix match covers both the legacy
     # `claim=<ts> -->` form and the `claim=<ts> seq=N -->` form).
@@ -339,6 +342,15 @@ if [[ -z "$CLAIM_STATE" ]]; then
         CLAIM_STATE="stale"
     else
         CLAIM_STATE="fresh"
+    fi
+
+    # #11947: a live PR lease outranks the idle/streak clocks (a holder waiting on CI
+    # renews it without activity markers). Only held-self/held-peer downgrades.
+    case "$LABEL" in loom:reviewing) LEASE_ROLE=judge ;; loom:treating) LEASE_ROLE=doctor ;; loom:curating) LEASE_ROLE=curator ;; *) LEASE_ROLE="" ;; esac
+    if [[ "$CLAIM_STATE" == stale* && -n "$LEASE_ROLE" ]]; then
+        # requires-daemon: lease optional   Without `lease pr check` (absent or older binary) the output has no PR_LEASE_STATE and the computed state stands.
+        LEASE_OUT="$("${LOOM_DAEMON_BIN:-loom-daemon}" lease pr check "$NUMBER" --role "$LEASE_ROLE" 2>/dev/null || true)"
+        grep -Eq '^PR_LEASE_STATE=held-(self|peer)([[:space:]]|$)' <<<"$LEASE_OUT" && CLAIM_STATE="fresh"
     fi
 fi
 
@@ -414,7 +426,7 @@ fi
 NEXT_SEQ=$((STANDDOWN_COUNT + 1))
 BODY="$ROLE pass: still carries a fresh \`$LABEL\` claim (claimed $CLAIMED_AT, idle ${IDLE_MINUTES}m) — standing down without reclaiming. Not stomping.
 
-Stand-down passes against this claim: $NEXT_SEQ of $MAX_STREAK before the bounded fallback force-reclaims it. This comment is edited in place on each pass rather than reposted (#5123, #6514).
+Stand-down passes against this claim: $NEXT_SEQ of $MAX_STREAK (streak cap $( ((NEXT_SEQ >= MAX_STREAK)) && echo met || echo "NOT met")); claim age ${CLAIM_AGE_MINUTES}m of ${STALE_MINUTES}m (age floor $( ((CLAIM_AGE_MINUTES >= STALE_MINUTES)) && echo met || echo "NOT met")). The bounded fallback force-reclaims only once BOTH are met (#9927). This comment is edited in place on each pass rather than reposted (#5123, #6514).
 ${STANDDOWN_PREFIX}${CLAIMED_AT} seq=${NEXT_SEQ} -->"
 
 if [[ "$DRY_RUN" == true ]]; then

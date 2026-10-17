@@ -18,7 +18,7 @@
 #
 # Usage:
 #   create-issue.sh --title TITLE (--body BODY | --body-file PATH) \
-#                   [--label LABEL]... [--repo OWNER/REPO] [--force]
+#                   [--label LABEL]... [--repo OWNER/REPO] [--parent N] [--force]
 #   create-issue.sh --help
 #
 # Flags are a subset of `gh issue create`'s, chosen so a role prompt's
@@ -29,7 +29,9 @@
 #                         exclusive with --body.
 #   --label, -l LABEL     Label to apply at creation. Repeatable. A single
 #                         comma-separated value is also accepted, matching
-#                         `gh issue create --label "a,b"`.
+#                         `gh issue create --label "a,b"`. `loom:issue` and
+#                         `loom:curated` are REFUSED (exit 2, no forge call):
+#                         issues enter at `loom:triage` (#11820).
 #   --repo, -R OWNER/REPO Target repository. Omit for the current repo (the
 #                         preferred form -- the REST path then resolves the
 #                         repo from the git remote with zero API calls).
@@ -47,6 +49,12 @@
 #                         backstop WARNS (stderr) but still files (#8289).
 #                         Default 13; must stay below the block threshold or
 #                         the warn band is disabled. 0 disables it outright.
+#   --parent N            File the issue as a child of #N (#10012): the body
+#                         gets `<!-- loom:parent #N -->` (and N's red-main
+#                         marker, if it has one); after the create the child
+#                         is linked as a native sub-issue (best effort).
+#                         Logic: `loom-daemon forge parent`; needs
+#                         loom-daemon (127 if absent; a bad N exits 2).
 #
 # Output: the new issue's URL on stdout (identical to `gh issue create`).
 #
@@ -144,7 +152,7 @@ source "$SCRIPT_DIR/lib/filing-lock.sh"
 usage() {
   # Line range = the whole leading comment block (keep in sync when the header
   # grows; `--help` silently truncating its own docs is its own small #8289).
-  sed -n '2,135p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
+  sed -n '2,142p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
 }
 
 TITLE=""
@@ -199,18 +207,18 @@ while [[ $# -gt 0 ]]; do
         # Trim surrounding whitespace from "a, b".
         _l="${_l#"${_l%%[![:space:]]*}"}"
         _l="${_l%"${_l##*[![:space:]]}"}"
+        # Issues enter at loom:triage (#11820, operator ruling 2026-10-13):
+        # opening one as loom:issue or loom:curated skips Curator admission.
+        # Refused here, before any forge call.
+        [[ "$_l" =~ ^loom:(issue|curated)$ ]] && {
+          echo "create-issue.sh: refusing --label $_l: issues enter at loom:triage and reach $_l through Curator admission. Use --label loom:triage (or no --label: the default)." >&2; exit 2; }
         [[ -n "$_l" ]] && LABELS+=("$_l")
       done
       shift 2
       ;;
-    --repo | -R)
-      REPO_NWO="${2:-}"
-      shift 2
-      ;;
-    --force | --skip-duplicate-check)
-      SKIP_DUP_CHECK=true
-      shift
-      ;;
+    --repo | -R) REPO_NWO="${2:-}"; shift 2 ;;
+    --force | --skip-duplicate-check) SKIP_DUP_CHECK=true; shift ;;
+    --parent) PARENT="${2:-}"; shift 2 ;;
     --duplicate-threshold)
       DUP_THRESHOLD="${2:-}"
       if [[ ! "$DUP_THRESHOLD" =~ ^[0-9]+$ ]]; then
@@ -262,6 +270,17 @@ if [[ "$FORGE_TYPE" != "github" ]]; then
 on $FORGE_TYPE file the issue with your forge's own CLI (Gitea has no split \
 GraphQL/REST quota, so it has no equivalent failure mode)." >&2
   exit 2
+fi
+
+# --- #10012: --parent adds the machine-readable edge before anything else ----
+# The marker (and the parent's red-main marker) go into the body first, so the
+# duplicate backstop below sees "#N" as cross-referenced and the filed body
+# carries the link from its first revision. No daemon, no --parent: a silent
+# fallback would file a child with no edge.
+# The daemon validates N (clap: a non-number, or an empty `--parent ""`, exits 2
+# here, before anything is filed); `${PARENT+x}` keeps an empty value "present".
+if [[ -n "${PARENT+x}" ]]; then
+  BODY="$(printf '%s' "$BODY" | loom-daemon forge parent body --parent "$PARENT" ${REPO_NWO:+--repo "$REPO_NWO"})" || exit "$?"
 fi
 
 # Detection backstop (#6771, deferred from #6714's filing-lock): warn -- never
@@ -416,8 +435,7 @@ fi
 # to hold it across an ENTIRE burst can source lib/filing-lock.sh itself and
 # acquire once — the lock is re-entrant, so the per-call acquire here becomes a
 # no-op inside that hold.
-_filing_lock_rc=0
-loom_filing_lock_acquire "${LOOM_FILING_LOCK_LABEL:-create-issue}" || _filing_lock_rc=$?
+_filing_lock_rc=0; loom_filing_lock_acquire "${LOOM_FILING_LOCK_LABEL:-create-issue}" || _filing_lock_rc=$?
 if [[ "$_filing_lock_rc" -eq "$LOOM_FILING_LOCK_DEFER_RC" ]]; then
   # Fail-SAFE: nothing was filed. The caller retries on its next tick.
   exit "$LOOM_FILING_LOCK_DEFER_RC"
@@ -425,8 +443,29 @@ fi
 # Release on every exit path, including a failed create or an interrupt.
 trap 'loom_filing_lock_release' EXIT INT TERM
 
-ISSUE_URL="$(forge_gh_create_issue_rl_safe "$REPO_NWO" "$TITLE" "$BODY" "${LABELS[@]+"${LABELS[@]}"}")" || exit 1
+# Single intake state (#10041): no loom:* label from the caller -> loom:triage.
+case " ${LABELS[*]-} " in *" loom:"*) ;; *) LABELS+=("loom:triage") ;; esac
+# The create step is `loom-daemon forge create-issue` (#12504): same transport
+# and label guard as forge_gh_create_issue_rl_safe, with a reliable exit code.
+# requires-daemon: forge optional   A binary predating the subcommand (exit 2, "unrecognized subcommand") falls back to the shell create step below.
+_create_args=(); _create_args+=(--title "$TITLE" --body-file -)
+[[ -z "$REPO_NWO" ]] || _create_args+=(--repo "$REPO_NWO")
+for _l in "${LABELS[@]+"${LABELS[@]}"}"; do _create_args+=(--label "$_l"); done
+_create_rc=0; _create_err="$(mktemp)"
+ISSUE_URL="$(printf '%s' "$BODY" | "${LOOM_DAEMON_BIN:-loom-daemon}" forge create-issue "${_create_args[@]}" 2>"$_create_err")" || _create_rc=$?
+if [[ "$_create_rc" -ne 0 ]] && grep -qi "unrecognized subcommand" "$_create_err"; then
+  rm -f "$_create_err"
+  ISSUE_URL="$(forge_gh_create_issue_rl_safe "$REPO_NWO" "$TITLE" "$BODY" "${LABELS[@]+"${LABELS[@]}"}")" || exit 1
+else
+  cat "$_create_err" >&2; rm -f "$_create_err"
+  [[ "$_create_rc" -eq 0 && -n "$ISSUE_URL" ]] || exit 1
+fi
 echo "$ISSUE_URL"
+
+# --- #10012: native sub-issue link, best effort -----------------------------
+[[ -z "${PARENT+x}" ]] \
+  || loom-daemon forge parent link --parent "$PARENT" --child "$ISSUE_URL" ${REPO_NWO:+--repo "$REPO_NWO"} >&2 \
+  || echo "create-issue.sh: note: --parent #$PARENT follow-up (sub-issue link) incomplete; the issue itself is filed and the loom:parent marker is in its body" >&2
 
 # --- #9774: the filed body ends with the dashboard footer -------------------
 # Best-effort, via the daemon's --patch-created (fetch, footer, PATCH — the

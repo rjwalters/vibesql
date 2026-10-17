@@ -58,27 +58,6 @@ chmod 600 "$KEY_PATH"
 # Isolate the token cache from the real $HOME for the whole test run.
 export LOOM_GITHUB_APP_CACHE_DIR="$WORK_DIR/cache"
 
-# Isolate the proxied-host gate (#9988) from the host: pin the daemon that
-# answers `forge egress policy` to a stub reporting "unconfigured", so a
-# fleet host with a real machine policy cannot gate the mint tests below.
-# The gate section near the end swaps this stub for policy-bearing ones.
-STUB_DAEMON_DIR="$WORK_DIR/stub-daemon"
-mkdir -p "$STUB_DAEMON_DIR"
-cat > "$STUB_DAEMON_DIR/loom-daemon" <<'STUB'
-#!/usr/bin/env bash
-# Stub `loom-daemon forge egress policy`: the real command's JSON shape,
-# reading the document named by $LOOM_FORGE_EGRESS_POLICY (if any).
-[[ "$*" == "forge egress policy" ]] || exit 2
-if [[ -n "${LOOM_FORGE_EGRESS_POLICY:-}" ]]; then
-    jq -c --arg p "$LOOM_FORGE_EGRESS_POLICY" '{origin:"env", path:$p, ignored:[], policy:.}' "$LOOM_FORGE_EGRESS_POLICY"
-else
-    echo '{"origin":"unconfigured","path":null}'
-fi
-STUB
-chmod +x "$STUB_DAEMON_DIR/loom-daemon"
-export LOOM_DAEMON_SELF_BIN="$STUB_DAEMON_DIR/loom-daemon"
-unset LOOM_FORGE_EGRESS_POLICY 2>/dev/null || true
-
 # Source the library under test.
 # shellcheck source=../lib/github-app-token.sh
 source "$LIB_DIR/github-app-token.sh"
@@ -336,8 +315,11 @@ echo "Testing installation-id validation (#4456)..."
 # constant so no signing is required.
 STUB_INSTALL_BODY='{"id": 55}'
 STUB_INSTALL_CODE='200'
+export STUB_CURL_ARGV_LOG="$WORK_DIR/curl-argv.log"
+: > "$STUB_CURL_ARGV_LOG"
 curl() {
     local url=""
+    printf '%s\n' "$*" >> "$STUB_CURL_ARGV_LOG"
     for _a in "$@"; do url="$_a"; done
     case "$url" in
         */installation) printf '%s\n%s' "$STUB_INSTALL_BODY" "$STUB_INSTALL_CODE" ;;
@@ -349,6 +331,16 @@ github_app_jwt() { echo "fake.jwt.signature"; }
 
 export LOOM_GITHUB_APP_ID="424242"
 export LOOM_GITHUB_APP_KEY_PATH="$KEY_PATH"
+
+# Credentials must never reach curl's argv (#10463): the stub records every
+# invocation's argv; run both API helpers, then assert no Authorization header.
+_github_app_api_get_installation "acme/widgets" >/dev/null 2>&1 || true
+_github_app_api_mint_token "55" >/dev/null 2>&1 || true
+if [[ -s "$STUB_CURL_ARGV_LOG" ]] && ! grep -q 'Authorization:\|fake\.jwt' "$STUB_CURL_ARGV_LOG"; then
+    pass "curl argv carries no Authorization header or JWT (#10463)"
+else
+    fail "curl argv must not contain 'Authorization:' or the JWT" "$(cat "$STUB_CURL_ARGV_LOG")"
+fi
 
 # Valid numeric id -> echoed, success.
 STUB_INSTALL_BODY='{"id": 55}'
@@ -508,136 +500,94 @@ unset -f curl github_app_jwt
 unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH STUB_INSTALL_BODY STUB_INSTALL_CODE
 
 # ============================================================================
-# Proxied-host gate (#9988, C5 of #9983): when the resolved forge egress
-# policy names `principal.credentialRef`, minting is gateway-owned --
-# `get-token` exits non-zero with the "gateway-owned" message and makes NO
-# request. Without one, behaviour is unchanged. `curl` here is a recording
-# stub first on PATH (a real executable, not a shell function), so any
-# request the script makes -- however it spells the call -- is counted.
+# Per-owner writer selection (forge.identities.writers[], #12446)
 # ============================================================================
-echo "Testing proxied-host gate (#9988)..."
+echo "Testing per-owner writer selection..."
 
-STUB_BIN="$WORK_DIR/stub-bin"
-CURL_LOG="$WORK_DIR/curl-calls.log"
-mkdir -p "$STUB_BIN"
-cat > "$STUB_BIN/curl" <<'STUB'
-#!/usr/bin/env bash
-url=""
-for a in "$@"; do url="$a"; done
-echo "$url" >> "$CURL_LOG"
-case "$url" in
-    */installation) printf '%s\n%s' '{"id": 77}' '200' ;;
-    */access_tokens) printf '%s\n%s' '{"token":"ghs_gatevalue","expires_at":"2099-01-01T00:00:00Z"}' '200' ;;
-    *) printf '%s\n%s' '{}' '404' ;;
-esac
-STUB
-chmod +x "$STUB_BIN/curl"
-export CURL_LOG
+WRITERS_REPO="$WORK_DIR/writers-repo"
+mkdir -p "$WRITERS_REPO/.loom"
+cat > "$WRITERS_REPO/.loom/config.json" <<CFG
+{"forge":{"githubApp":{"appId":"100","privateKeyPath":"$KEY_PATH"},
+  "identities":{"writers":[
+    {"appId":"200","privateKeyPath":"$KEY_PATH","owners":["OrgTwo","org-three"]},
+    {"appId":"300","privateKeyPath":"$KEY_PATH","owners":["orgtwo"]}]}}}
+CFG
+unset LOOM_GITHUB_APP_ID LOOM_GITHUB_APP_KEY_PATH 2>/dev/null || true
 
-POLICY_PROXIED="$WORK_DIR/policy-proxied.json"
-POLICY_NO_REF="$WORK_DIR/policy-no-ref.json"
-jq -n '{schemaVersion:1, principal:{profile:"fleet-automation", credentialRef:"keychain:loom-fleet-proxy"}}' > "$POLICY_PROXIED"
-jq -n '{schemaVersion:1, principal:{profile:"fleet-automation"}}' > "$POLICY_NO_REF"
-
-# run_gate_case <policy-or-empty> <cache-dir> -> runs `get-token` as a child
-# process exactly as loom-daemon does; sets GATE_OUT / GATE_ERR / GATE_RC /
-# GATE_CALLS.
-run_gate_case() {
-    local policy="$1" cache="$2"
-    : > "$CURL_LOG"
-    GATE_RC=0
-    GATE_OUT=$(PATH="$STUB_BIN:$PATH" LOOM_GITHUB_APP_ID="515151" LOOM_GITHUB_APP_KEY_PATH="$KEY_PATH" \
-        LOOM_GITHUB_APP_CACHE_DIR="$cache" LOOM_FORGE_EGRESS_POLICY="$policy" \
-        bash "$LIB_DIR/github-app-token.sh" get-token gateowner/repo 2>"$WORK_DIR/gate.err") || GATE_RC=$?
-    GATE_ERR=$(cat "$WORK_DIR/gate.err")
-    GATE_CALLS=$(wc -l < "$CURL_LOG" | tr -d ' ')
+resolved_app_for() {
+    REPO_ROOT="$WRITERS_REPO" LOOM_CONFIG_DEFAULTS_FILE="" bash -c "
+        source '$LIB_DIR/github-app-token.sh'
+        github_app_configured '$1' && printf '%s' \"\$_GH_APP_ID\"
+      "
 }
 
-# Proxied: credentialRef set -> non-zero, gateway-owned message, zero calls.
-run_gate_case "$POLICY_PROXIED" "$WORK_DIR/gate-cache-proxied"
-if [[ "$GATE_RC" -ne 0 && "$GATE_CALLS" == "0" \
-      && "$GATE_ERR" == *"gateway-owned"* \
-      && "$(echo "$GATE_OUT" | jq -r '.status')" == "error" \
-      && "$(echo "$GATE_OUT" | jq -r '.message')" == *"proxied host: App minting is gateway-owned"* ]]; then
-    pass "proxied host (credentialRef set): get-token exits $GATE_RC with the gateway-owned message and makes zero requests"
+if [[ "$(resolved_app_for orgtwo)" == "200" && "$(resolved_app_for ORG-THREE)" == "200" ]]; then
+    pass "a listed owner resolves its writer app (case-insensitive, first match wins)"
 else
-    fail "proxied host must refuse to mint without any request" "rc=$GATE_RC calls=$GATE_CALLS out=$GATE_OUT err=$GATE_ERR"
+    fail "listed owner should resolve writers[0]" "orgtwo=$(resolved_app_for orgtwo) org-three=$(resolved_app_for ORG-THREE)"
+fi
+if [[ "$(resolved_app_for someone-else)" == "100" && "$(resolved_app_for '')" == "100" ]]; then
+    pass "an unlisted owner (or none) falls back to forge.githubApp"
+else
+    fail "unlisted owner should fall back to forge.githubApp"
+fi
+if [[ "$(LOOM_GITHUB_APP_ID=999 LOOM_GITHUB_APP_KEY_PATH="$KEY_PATH" resolved_app_for orgtwo)" == "999" ]]; then
+    pass "env LOOM_GITHUB_APP_ID still beats a per-owner writer"
+else
+    fail "env override should beat writers[]"
 fi
 
-# Proxied, with a still-valid cached installation token on disk: a cache hit
-# is no exception -- the gate runs before the cache is consulted.
-mkdir -p "$WORK_DIR/gate-cache-warm"
-chmod 700 "$WORK_DIR/gate-cache-warm"
-printf '%s' "77" > "$WORK_DIR/gate-cache-warm/owner-gateowner-app-515151.installation"
-jq -cn '{token:"ghs_cachedvalue", expires_at:"2099-01-01T00:00:00Z", installation_id:"77"}' \
-    > "$WORK_DIR/gate-cache-warm/installation-77.json"
-run_gate_case "$POLICY_PROXIED" "$WORK_DIR/gate-cache-warm"
-if [[ "$GATE_RC" -ne 0 && "$GATE_CALLS" == "0" && "$GATE_OUT" != *"ghs_cachedvalue"* ]]; then
-    pass "proxied host: a warm token cache is not served either"
+# The shell filter must agree with `forge_identity::writer_for_owner` on
+# malformed entries (Rust drops one bad element / skips one bad entry; it never
+# turns the whole `writers[]` off).
+WRITERS_REPO_ORIG="$WRITERS_REPO"
+WRITERS_REPO="$WORK_DIR/writers-repo-edge"
+mkdir -p "$WRITERS_REPO/.loom"
+cat > "$WRITERS_REPO/.loom/config.json" <<CFG
+{"forge":{"githubApp":{"appId":"100","privateKeyPath":"$KEY_PATH"},
+  "identities":{"writers":[
+    {"appId":"  ","privateKeyPath":"$KEY_PATH","owners":["emptyid"]},
+    {"appId":"400","privateKeyPath":"   ","owners":["emptykey"]},
+    {"appId":"500","privateKeyPath":"$KEY_PATH","owners":[7,null," Spaced ","mixed","bad_name","-lead"]},
+    {"appId":600,"privateKeyPath":"$KEY_PATH","owners":["emptyid","emptykey","numid"]}]}}}
+CFG
+if [[ "$(resolved_app_for spaced)" == "500" && "$(resolved_app_for mixed)" == "500" ]]; then
+    pass "a non-string owners element is dropped alone; surrounding whitespace is trimmed"
 else
-    fail "proxied host must not hand out a cached direct-minted token" "rc=$GATE_RC out=$GATE_OUT"
+    fail "bad owners element must not hide the list" "spaced=$(resolved_app_for spaced) mixed=$(resolved_app_for mixed)"
 fi
-
-# Sourced callers: both network functions refuse before curl.
-if (
-    export PATH="$STUB_BIN:$PATH" LOOM_FORGE_EGRESS_POLICY="$POLICY_PROXIED"
-    export LOOM_GITHUB_APP_ID="515151" LOOM_GITHUB_APP_KEY_PATH="$KEY_PATH"
-    : > "$CURL_LOG"
-    _GH_APP_EGRESS_GATE=""
-    _github_app_api_get_installation "gateowner/repo" >/dev/null 2>&1 && exit 1
-    [[ "$_GH_APP_LAST_ERROR" == *"gateway-owned"* ]] || exit 1
-    _github_app_api_mint_token "77" >/dev/null 2>&1 && exit 1
-    [[ "$_GH_APP_LAST_ERROR" == *"gateway-owned"* ]] || exit 1
-    [[ ! -s "$CURL_LOG" ]]
-); then
-    pass "proxied host: _github_app_api_get_installation / _github_app_api_mint_token refuse with zero requests"
+if [[ "$(resolved_app_for emptyid)" == "600" && "$(resolved_app_for emptykey)" == "600" && "$(resolved_app_for numid)" == "600" ]]; then
+    pass "an entry with an empty appId / privateKeyPath is skipped; numeric appId accepted"
 else
-    fail "sourced network functions must refuse on a proxied host" "curl log: $(cat "$CURL_LOG")"
+    fail "invalid entries should be skipped" "emptyid=$(resolved_app_for emptyid) emptykey=$(resolved_app_for emptykey) numid=$(resolved_app_for numid)"
 fi
+if [[ "$(resolved_app_for bad_name)" == "100" && "$(resolved_app_for -lead)" == "100" ]]; then
+    pass "an owner that is not a valid GitHub login is dropped, as valid_owner drops it"
+else
+    fail "invalid owner names should not match a writer" "bad_name=$(resolved_app_for bad_name) -lead=$(resolved_app_for -lead)"
+fi
+WRITERS_REPO="$WRITERS_REPO_ORIG"
 
-# Unchanged: no policy at all, and a policy without credentialRef.
-for gate_case in "" "$POLICY_NO_REF"; do
-    gate_label="${gate_case:+policy without credentialRef}"
-    gate_label="${gate_label:-no policy}"
-    run_gate_case "$gate_case" "$WORK_DIR/gate-cache-open-${#gate_case}"
-    if [[ "$GATE_RC" -eq 0 && "$GATE_CALLS" == "2" \
-          && "$(echo "$GATE_OUT" | jq -r '.status')" == "ok" \
-          && "$(echo "$GATE_OUT" | jq -r '.token')" == "ghs_gatevalue" ]]; then
-        pass "$gate_label: get-token unchanged (exit 0, both requests made, token minted)"
+# Two owners mint with two different app ids through the CLI envelope.
+export LOOM_GITHUB_APP_CACHE_DIR="$WORK_DIR/cache-writers"
+curl() {
+    local url="" arg
+    for arg in "$@"; do [[ "$arg" == https://* ]] && url="$arg"; done
+    if [[ "$url" == */installation ]]; then
+        printf '{"id": 77}\n200'
     else
-        fail "$gate_label: get-token behaviour must be unchanged" "rc=$GATE_RC calls=$GATE_CALLS out=$GATE_OUT err=$GATE_ERR"
+        printf '{"token":"ghs_stub","expires_at":"2099-01-01T00:00:00Z"}\n201'
     fi
-done
-
-# A daemon that cannot answer (older build without `forge egress`, or none
-# resolvable) is "no policy": unchanged, never a refusal.
-cat > "$STUB_DAEMON_DIR/old-loom-daemon" <<'STUB'
-#!/usr/bin/env bash
-echo "error: unrecognized subcommand 'egress'" >&2
-exit 2
-STUB
-chmod +x "$STUB_DAEMON_DIR/old-loom-daemon"
-LOOM_DAEMON_SELF_BIN="$STUB_DAEMON_DIR/old-loom-daemon" run_gate_case "$POLICY_PROXIED" "$WORK_DIR/gate-cache-old"
-if [[ "$GATE_RC" -eq 0 && "$GATE_CALLS" == "2" && "$(echo "$GATE_OUT" | jq -r '.status')" == "ok" ]]; then
-    pass "daemon without \`forge egress\`: treated as no policy, get-token unchanged"
+}
+export -f curl
+listed_out=$(REPO_ROOT="$WRITERS_REPO" LOOM_CONFIG_DEFAULTS_FILE="" bash "$LIB_DIR/github-app-token.sh" get-token "orgtwo/repo")
+other_out=$(REPO_ROOT="$WRITERS_REPO" LOOM_CONFIG_DEFAULTS_FILE="" bash "$LIB_DIR/github-app-token.sh" get-token "someone-else/repo")
+if [[ "$(echo "$listed_out" | jq -r '.app_id')" == "200" && "$(echo "$other_out" | jq -r '.app_id')" == "100" ]]; then
+    pass "get-token mints with a different app id per owner"
 else
-    fail "an older daemon must not turn into a refusal" "rc=$GATE_RC calls=$GATE_CALLS out=$GATE_OUT"
+    fail "get-token should report per-owner app ids" "listed=$listed_out other=$other_out"
 fi
-
-# Contract leg: the REAL `forge egress policy` output shape, when this host
-# has a daemon build that supports it (skipped otherwise -- the stub above
-# mirrors that shape for hermetic CI).
-REAL_DAEMON="$(LOOM_DAEMON_SELF_BIN="" loom_resolve_self_daemon_bin 2>/dev/null || true)"
-if [[ -n "$REAL_DAEMON" ]] && LOOM_FORGE_EGRESS_POLICY="$POLICY_PROXIED" "$REAL_DAEMON" forge egress policy >/dev/null 2>&1; then
-    LOOM_DAEMON_SELF_BIN="$REAL_DAEMON" run_gate_case "$POLICY_PROXIED" "$WORK_DIR/gate-cache-real"
-    if [[ "$GATE_RC" -ne 0 && "$GATE_CALLS" == "0" && "$GATE_ERR" == *"gateway-owned"* ]]; then
-        pass "real \`loom-daemon forge egress policy\` ($REAL_DAEMON): proxied policy gates minting with zero requests"
-    else
-        fail "real daemon's policy output must drive the gate" "rc=$GATE_RC calls=$GATE_CALLS out=$GATE_OUT err=$GATE_ERR"
-    fi
-else
-    echo "  SKIP: no loom-daemon build with \`forge egress policy\` -- real-binary contract leg not run"
-fi
+unset -f curl
 
 # --- Summary ---
 echo ""

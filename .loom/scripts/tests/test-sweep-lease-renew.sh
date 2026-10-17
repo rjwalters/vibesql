@@ -24,7 +24,7 @@
 #       "sweep exits -> renewal naturally stops" contract, entirely via a
 #       real background process against the real script (no `gh` needed
 #       for the termination half; the PATCH stub records call count too)
-#   (h) stop kills a given PID
+#   (h) stop refuses a non-renewer PID (fail closed)
 #   (i) renew-once's own-yield guard (#6485): a candidate lease whose own
 #       (host, sweep) has a matching `loom:lease-yield` comment is NOT
 #       PATCHed and exits 4 — both the miss (no matching yield) and hit
@@ -108,45 +108,10 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 SCRIPT="$SCRIPTS_DIR/sweep-lease-renew.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
 
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
-
-# assert_contains/assert_not_contains use a pure-bash substring match (no
-# forked printf|grep pipeline) so a transient fork/exec failure under
-# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
-# content mismatch (#7819, #7874).
-assert_contains() {
-    local haystack="$1" needle="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$haystack" == *"$needle"* ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected substring: '$needle'"
-        echo "    In: '$haystack'"
-    fi
-}
 
 assert_true() {
     local cond="$1" msg="$2"
@@ -159,6 +124,12 @@ assert_true() {
         echo -e "  ${RED}FAIL${NC}: $msg"
     fi
 }
+
+# wait_until <cmd...> -- poll (max ~5s) until the command succeeds. A cycle
+# also pays the state read and the App-credential probe (#10229), so a fixed
+# sleep sized for one cycle is a race on a loaded host.
+wait_until() { local w=0; until "$@" || ((w >= 25)); do sleep 0.2; w=$((w + 1)); done; }
+not_alive() { ! kill -0 "$1" 2> /dev/null; }
 
 if [[ ! -x "$SCRIPT" ]]; then
     echo -e "${RED}FATAL${NC}: $SCRIPT not found or not executable" >&2
@@ -281,6 +252,10 @@ if [[ "$1" == "api" ]]; then
     echo '{}'
     exit 0
   fi
+  # #10229: the loop's explicit issue-state read (comments carry no state).
+  if [[ "$method" == "GET" && "$path" == repos/*/issues/[0-9]* && "$path" != */comments* ]]; then
+    echo '{"state":"open"}'; exit 0
+  fi
   echo "stub gh: unhandled api args: method=$method path=$path" >&2
   exit 3
 fi
@@ -309,6 +284,7 @@ MINT
 chmod +x "$STUB_DIR/github-app-token.sh"
 
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
+export LOOM_LEASE_RENEW_STATE_DIR="$STUB_DIR/renew-state"
 export PATH="$STUB_DIR:$PATH"
 # #9548: the subject filters lease markers through `forge trusted-comments`.
 # shellcheck source=lib/trust-stub.sh
@@ -327,7 +303,7 @@ reset_state() {
     rm -f "$STUB_DIR"/patch-403-once "$STUB_DIR"/patch-403-always
     rm -f "$STUB_DIR"/patch-*.body "$STUB_DIR"/patch-count-* "$STUB_DIR"/patch-calls.log
     rm -f "$STUB_DIR"/comments-window.json "$STUB_DIR"/patch-404-* "$STUB_DIR"/list-calls.log
-    rm -f "$STUB_DIR"/attr.log
+    rm -f "$STUB_DIR"/attr.log "$STUB_DIR"/renew-state/*.owner # #10229: per-test renewer ownership
     echo "not-configured" > "$STUB_DIR/mint-mode"
     # Ensure rung 3 (personal-token / personal-ambient) has nothing of ITS
     # OWN to escalate to beyond whatever the real ambient host credential
@@ -477,14 +453,18 @@ fi
 # Defensive cleanup in case the assertion above failed the self-termination.
 kill "$LOOP_PID" 2>/dev/null || true
 
-# --- (h) stop kills a given PID -------------------------------------------
+# --- (h) stop refuses a non-renewer PID, failing closed (#11086) ------------
+# Non-zero exits are asserted only with a real binary (LEASE_RENEWER_DAEMON);
+# the default stub daemon answers every `lease renewer` verb with 0. Positive
+# stop cases live in test-sweep-lease-renew-lifecycle.sh.
 sleep 30 &
 BG_PID=$!
-"$SCRIPT" stop "$BG_PID" > /dev/null 2>&1
+H_RC=0
+"$SCRIPT" stop "$BG_PID" > /dev/null 2>&1 || H_RC=$?
+LOOM_DAEMON_BIN=/nonexistent/loom-daemon "$SCRIPT" stop "$BG_PID" > /dev/null 2>&1 || true
 sleep 0.3
-STILL_ALIVE="false"
-kill -0 "$BG_PID" 2>/dev/null && STILL_ALIVE="true"
-assert_true "$([[ "$STILL_ALIVE" == "false" ]] && echo true || echo false)" "(h) stop kills the given PID"
+assert_true "$(kill -0 "$BG_PID" 2>/dev/null && echo true || echo false)" "(h) stop leaves an unrelated PID alive (also with no loom-daemon)"
+[[ -z "${LEASE_RENEWER_DAEMON:-}" ]] || assert_true "$([[ "$H_RC" -ne 0 ]] && echo true || echo false)" "(h) stop of an unrelated PID exits non-zero"
 kill "$BG_PID" 2>/dev/null || true
 
 # --- (i) own-yield guard (#6485) -------------------------------------------
@@ -596,7 +576,7 @@ export LOOM_HOST_ID="$OWN_RAW_HOST"
 export LOOM_TERMINAL_ID="daemon-sweep-mine-1000"
 LOOP_PID_J="$("$SCRIPT" start 6485 --interval 1 --watch-pid "$WATCH_PID_J" 2> "$STUB_DIR/start-j-stderr.log")"
 unset LOOM_HOST_ID LOOM_TERMINAL_ID
-sleep 1.8
+wait_until test -f "$STUB_DIR/patch-10-1.body"
 kill "$WATCH_PID_J" 2> /dev/null || true
 wait "$WATCH_PID_J" 2> /dev/null || true
 sleep 0.5
@@ -618,7 +598,7 @@ JSON
 sleep 8 &
 WATCH_PID_K=$!
 LOOP_PID_K="$("$SCRIPT" start 6485 --interval 1 --watch-pid "$WATCH_PID_K" --host k-host --sweep-id k-sweep 2> "$STUB_DIR/start-k-stderr.log")"
-sleep 1.8
+wait_until not_alive "$LOOP_PID_K"
 LOOP_ALIVE_AFTER_YIELD="false"
 kill -0 "$LOOP_PID_K" 2> /dev/null && LOOP_ALIVE_AFTER_YIELD="true"
 assert_true "$([[ "$LOOP_ALIVE_AFTER_YIELD" == "false" ]] && echo true || echo false)" "(k) loop has already self-terminated shortly after its own-yield guard fires, without waiting for the watched PID to die"
@@ -748,7 +728,7 @@ JSON
 sleep 8 &
 WATCH_PID_M3=$!
 LOOP_PID_M3="$("$SCRIPT" start 6485 --interval 1 --watch-pid "$WATCH_PID_M3" --host m3-host --sweep-id m3-sweep 2> "$STUB_DIR/start-m3-stderr.log")"
-sleep 1.8
+wait_until not_alive "$LOOP_PID_M3"
 LOOP_ALIVE_M3="false"
 kill -0 "$LOOP_PID_M3" 2> /dev/null && LOOP_ALIVE_M3="true"
 assert_true "$([[ "$LOOP_ALIVE_M3" == "false" ]] && echo true || echo false)" "(m3) the #6485 own-yield-guard exit-4 path still self-terminates the loop immediately (unchanged)"

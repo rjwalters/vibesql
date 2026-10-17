@@ -17,30 +17,30 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 SRC="$SCRIPTS_DIR/lib/classify-error.sh"
 
+# The suite's heredoc tables assert the DEFAULT provider chain (2-arg
+# `classify_error` calls, explicit provider only where noted). A host that
+# exports LOOM_RUNTIME for its own dispatch (every Loom worker does) would
+# otherwise select that provider for every 2-arg call and fail the whole
+# table — the env var is the caller's knob, not the suite's.
+unset LOOM_RUNTIME
+
 # shellcheck source=../lib/classify-error.sh
 source "$SRC"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
+# The pattern tables live only in `loom-daemon classify-error` (#11219), so the
+# vector sections below run through the library's native delegation and are
+# exercisable only when a capable binary resolved. With none, they are a
+# counted skip and the degraded-answer section at the bottom still runs.
+if [[ -z "${_CLASSIFY_DAEMON_BIN:-}" ]]; then
     TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: no loom-daemon with classify-error resolved; pattern vectors skipped (degraded answers asserted below)"
+    echo "mode: degraded"
+else
+echo "mode: native delegation via $_CLASSIFY_DAEMON_BIN"
 
 echo "--- classify_error: TOKEN_EXHAUSTED phrase family (#5631) ---"
 
@@ -127,9 +127,11 @@ done <<'EOF'
 the verbatim incident wording (#6614)|Failed to authenticate. API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}|TOKEN_EXPIRED
 nested error envelope the API also serves|API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token has been revoked."}}|TOKEN_EXPIRED
 prose form, no JSON at all|Failed to authenticate. API Error: 401 OAuth access token has been revoked|TOKEN_EXPIRED
+exact #10294 message, no auxiliary verb|Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.|TOKEN_EXPIRED
 past-tense variant|Your access token was revoked|TOKEN_EXPIRED
 JSON authentication_error with some OTHER message|{"type":"authentication_error","message":"Invalid API key"}|TOKEN_EXPIRED
 pre-#6614 plain form still classifies|API Error: 401 authentication_error|TOKEN_EXPIRED
+negative: unrelated revoked word without token|Your session was revoked by the admin|RECOVERABLE
 negative: a revoked thing that is not a token|The reviewer revoked their approval and the ruleset was revoked|RECOVERABLE
 EOF
 
@@ -138,6 +140,10 @@ EOF
 assert_eq "SUCCESS" \
     "$(classify_error 'API Error: 401 {"type":"authentication_error","message":"OAuth access token has been revoked."}' 0)" \
     "a CLEAN exit whose output quotes the revoked-token 401 stays SUCCESS (#3233)"
+
+assert_eq "SUCCESS" \
+    "$(classify_error 'Failed to authenticate: OAuth token revoked.' 0)" \
+    "zero exit quoting the no-verb revoked text stays SUCCESS (#10294)"
 
 # TOKEN_EXPIRED must be FATAL, not transient: that is what makes
 # claude-wrapper.sh mark the account bad and rotate instead of retrying the
@@ -179,7 +185,7 @@ unrecognised Kimi config fault falls through to the daemon-mode catch-all|error:
 EOF
 
 # An unknown provider selector must never make classification FAIL — "kimi"
-# matches no table in _classify_error_provider by design, and the exit-code-first
+# matches no provider table by design, and the exit-code-first
 # rules still apply ahead of any output inspection.
 assert_eq "SUCCESS" "$(classify_error 'provider.rate_limit: 429 rate limit exceeded' 0 kimi)" \
     "a CLEAN Kimi exit stays SUCCESS even when its stream quoted a 429 (#3233)"
@@ -207,6 +213,127 @@ for _category in TOKEN_EXHAUSTED MODEL_CREDITS_EXHAUSTED; do
         echo -e "  ${RED}FAIL${NC}: $_category is transient (retry/rotate, not fatal)"
     fi
 done
+
+echo
+echo "--- classify_error: verbatim Claude Code messages (#11205), from fixtures/classify_error/vectors.tsv ---"
+
+# A TSV file, not a heredoc table: several of these strings contain `|`.
+VECTORS="$TEST_DIR/fixtures/classify_error/vectors.tsv"
+vectors_run=0
+while IFS=$'\t' read -r expected exit_code provider desc output; do
+    [[ -z "$expected" || "$expected" == \#* ]] && continue
+    vectors_run=$((vectors_run + 1))
+    assert_eq "$expected" "$(classify_error "$output" "$exit_code" "$provider")" "$desc"
+done < "$VECTORS"
+TESTS_RUN=$((TESTS_RUN + 1))
+if [[ "$vectors_run" -gt 0 ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${GREEN}PASS${NC}: read $vectors_run vectors from $VECTORS"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: no vectors read from $VECTORS"
+fi
+
+echo
+echo '--- native `loom-daemon classify-error` direct checks (#11208) ---'
+
+# The fixture-driven vectors above already ran through the library's native
+# delegation. This section drives the subcommand itself: engine short-circuits,
+# the --transient exit-code contract, $LOOM_RUNTIME, --stdout-tail and usage
+# errors. The shell tables it used to be diffed against were deleted (#11219).
+parity_bin="$_CLASSIFY_DAEMON_BIN"
+{
+    native_classify() {
+        printf '%s' "$1" | "$parity_bin" classify-error --exit-code "$2" --provider "$3" 2>/dev/null
+    }
+
+    # Engine short-circuits, straight through the subcommand.
+    assert_eq "TIMEOUT" "$(native_classify "hit your weekly limit" 124 claude)" \
+        "native: exit 124 is TIMEOUT before any pattern (#3233 engine)"
+    assert_eq "TIMEOUT" "$(native_classify "" 137 codex)" "native: exit 137 is TIMEOUT"
+    assert_eq "SUCCESS" "$(native_classify "API Error: 429 rate limit exceeded" 0 claude)" \
+        "native: a clean exit quoting a 429 stays SUCCESS (#3233)"
+
+    # The --transient deny-list travels in the exit code.
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if "$parity_bin" classify-error --transient TOKEN_EXPIRED >/dev/null 2>&1; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: native --transient TOKEN_EXPIRED must be terminal (exit 1)"
+    else
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: native --transient TOKEN_EXPIRED is terminal (exit 1)"
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
+    if "$parity_bin" classify-error --transient RECOVERABLE >/dev/null 2>&1 \
+        && "$parity_bin" classify-error --transient TOKEN_EXHAUSTED >/dev/null 2>&1 \
+        && "$parity_bin" classify-error --transient MODEL_CREDITS_EXHAUSTED >/dev/null 2>&1 \
+        && "$parity_bin" classify-error --transient SESSION_LIMIT >/dev/null 2>&1 \
+        && "$parity_bin" classify-error --transient ANYTHING_ELSE >/dev/null 2>&1; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: native --transient retries RECOVERABLE/exhaustion/session-limit/unknown (exit 0)"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: native --transient deny-list is not retry-by-default"
+    fi
+
+    # The $LOOM_RUNTIME default chain, native side (explicit --provider was
+    # already exercised by every call above).
+    rt_ans="$(printf '%s' 'Youve hit your usage limit.' | LOOM_RUNTIME=codex "$parity_bin" classify-error --exit-code 1 2>/dev/null)"
+    assert_eq "TOKEN_EXHAUSTED" "$rt_ans" "native: provider defaults to \$LOOM_RUNTIME then claude"
+
+    # File-input mode: the same text as a --stdout-tail file classifies
+    # identically to stdin.
+    tail_file="$(mktemp "${TMPDIR:-/tmp}/classify-parity.XXXXXX")"
+    printf '%s' 'Failed to authenticate. API Error: 401 OAuth access token is invalid.' > "$tail_file"
+    tail_ans="$("$parity_bin" classify-error --exit-code 1 --provider claude --stdout-tail "$tail_file" 2>/dev/null)"
+    assert_eq "TOKEN_EXPIRED" "$tail_ans" "native: --stdout-tail file input classifies like stdin"
+    rm -f "$tail_file"
+
+    # Usage errors keep stdout EMPTY (the shell delegation reads that as
+    # "could not ask" and degrades) and exit 2.
+    TESTS_RUN=$((TESTS_RUN + 1))
+    usage_out="$(printf '%s' 'x' | "$parity_bin" classify-error --provider claude 2>/dev/null)"
+    usage_rc=0
+    "$parity_bin" classify-error --provider claude </dev/null >/dev/null 2>&1 || usage_rc=$?
+    if [[ "$usage_rc" -eq 2 && -z "$usage_out" ]]; then
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        echo -e "  ${GREEN}PASS${NC}: native: missing --exit-code is a usage error (exit 2, empty stdout)"
+    else
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        echo -e "  ${RED}FAIL${NC}: native: missing --exit-code: rc=$usage_rc stdout='$usage_out' (want rc 2, empty stdout)"
+    fi
+}
+fi
+
+echo
+echo "--- delegation safety: a binary that cannot answer is never asked ---"
+
+# A resolved binary that fails the library's one-time capability probe (here
+# a stub that exits 1 to everything, the same code `--transient` uses for
+# "terminal"; /bin/false is not portable to macOS) must be dropped at
+# source time. Were it asked, every retryable
+# category would read as terminal. With no binary the documented fail-safe
+# degraded answer applies (#11219): exit-code short-circuits stay exact,
+# any other non-zero exit is RECOVERABLE, and every category is retryable.
+# Runs in a subshell so the re-source does not disturb the mode of the rest.
+NOCAP_STUB="$(mktemp)"
+printf '#!/bin/sh\nexit 1\n' > "$NOCAP_STUB"
+chmod +x "$NOCAP_STUB"
+degraded_out="$(
+    LOOM_DAEMON_SELF_BIN="$NOCAP_STUB"
+    export LOOM_DAEMON_SELF_BIN
+    # shellcheck source=../lib/classify-error.sh
+    source "$SRC"
+    printf 'bin=%s ' "${_CLASSIFY_DAEMON_BIN:-none}"
+    classification_is_transient TOKEN_EXHAUSTED && printf 'exhausted=retry ' || printf 'exhausted=terminal '
+    classification_is_transient TOKEN_EXPIRED && printf 'expired=retry ' || printf 'expired=terminal '
+    printf 'class=%s ' "$(classify_error "You've hit your weekly limit" 1 claude)"
+    printf 'ok=%s ' "$(classify_error "You've hit your weekly limit" 0 claude)"
+    printf 'timeout=%s' "$(classify_error "" 124 claude)"
+)"
+assert_eq "bin=none exhausted=retry expired=retry class=RECOVERABLE ok=SUCCESS timeout=TIMEOUT" "$degraded_out" \
+    "no capable binary: documented degraded answer (RECOVERABLE / retry; exit-code short-circuits exact)"
+rm -f "$NOCAP_STUB"
 
 echo
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"

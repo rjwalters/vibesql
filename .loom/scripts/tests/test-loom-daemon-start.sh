@@ -501,39 +501,37 @@ SD_UNIT="loom-daemon-test-$$.service"
 
 # S1. --print-unit renders the unit with NO side effects (no systemctl, no file
 #     write). Assert the six load-bearing fields from the issue's test plan:
-#     Restart=on-success, KillMode=mixed (#4862), TimeoutStopSec=20 (#4950),
+#     Restart=always (#11058), KillMode=mixed (#4862), TimeoutStopSec=20 (#4950),
 #     WantedBy=default.target, the baked Environment=LOOM_DAEMON_SUPERVISOR=systemd,
 #     and WorkingDirectory=<repo>.
 unit_out=$( ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     LOOM_DAEMON_BIN="$FAKE_BIN" bash "$START_SCRIPT" --print-unit 2>/dev/null ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if grep -qx 'Restart=on-success' <<<"$unit_out" \
+if grep -qx 'Restart=always' <<<"$unit_out" && grep -qx 'OOMPolicy=continue' <<<"$unit_out" \
     && grep -qx 'KillMode=mixed' <<<"$unit_out" \
     && grep -qx 'TimeoutStopSec=20' <<<"$unit_out" \
     && grep -qx 'WantedBy=default.target' <<<"$unit_out" \
     && grep -qx 'Environment=LOOM_DAEMON_SUPERVISOR=systemd' <<<"$unit_out" \
     && grep -qx "WorkingDirectory=$WORKDIR" <<<"$unit_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} --print-unit renders Restart=on-success, KillMode=mixed, TimeoutStopSec=20, WantedBy=default.target, LOOM_DAEMON_SUPERVISOR=systemd, WorkingDirectory=<repo>"
+    echo -e "${GREEN}✓${NC} --print-unit renders Restart=always, OOMPolicy=continue, KillMode=mixed, TimeoutStopSec=20, WantedBy=default.target, LOOM_DAEMON_SUPERVISOR=systemd, WorkingDirectory=<repo>"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} --print-unit renders the expected unit fields"
     echo "$unit_out" | sed 's/^/    /'
 fi
 
-# S1b (#6129): a clean operator stop (SIGTERM->143, SIGINT->130) must land the
-# unit in `inactive`, not `failed` -- SuccessExitStatus= reclassifies both
-# codes as a clean exit; RestartPreventExitStatus= is the belt-and-braces
-# guard against a raw (non-systemctl) `kill -TERM` newly tripping
-# Restart=on-success now that those codes count as "success".
+# S1b (#6129, #11058): SuccessExitStatus= lands a clean operator stop (143/130)
+# in `inactive`, not `failed`; under Restart=always, RestartPreventExitStatus=
+# keeps every stay-down exit down (1, 79 fleet-stopped, 130, 143 then-exit).
 TESTS_RUN=$((TESTS_RUN + 1))
 if grep -qx 'SuccessExitStatus=143 130' <<<"$unit_out" \
-    && grep -qx 'RestartPreventExitStatus=143 130' <<<"$unit_out"; then
+    && grep -qx 'RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT' <<<"$unit_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${GREEN}✓${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT (#6129, #11058)"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${RED}✗${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT (#6129, #11058)"
     echo "$unit_out" | sed 's/^/    /'
 fi
 
@@ -596,16 +594,16 @@ fi
 rm -f "$WORKDIR/.loom/.daemon.pid"
 TESTS_RUN=$((TESTS_RUN + 1))
 if [[ -f "$SD_HOME/.config/systemd/user/$SD_UNIT" ]] \
-    && grep -qx 'Restart=on-success' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
+    && grep -qx 'Restart=always' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'KillMode=mixed' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'TimeoutStopSec=20' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'SuccessExitStatus=143 130' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
-    && grep -qx 'RestartPreventExitStatus=143 130' "$SD_HOME/.config/systemd/user/$SD_UNIT"; then
+    && grep -qx 'RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT' "$SD_HOME/.config/systemd/user/$SD_UNIT"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=on-success + KillMode=mixed (#4862) + TimeoutStopSec=20 (#4950) + SuccessExitStatus/RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${GREEN}✓${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=always (#11058) + KillMode=mixed (#4862) + TimeoutStopSec=20 (#4950) + SuccessExitStatus=143 130 (#6129) + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=on-success + KillMode=mixed + TimeoutStopSec=20"
+    echo -e "${RED}✗${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=always + KillMode=mixed + TimeoutStopSec=20"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
 if grep -qi 'enable-linger' <<<"$sd_out"; then
@@ -968,7 +966,7 @@ EOF
         kill "$(cat "$SH3_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH3: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH3: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH3_HOME"
 
@@ -1007,7 +1005,7 @@ EOF
         kill "$(cat "$SH4_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH4: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH4: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH4_HOME"
 
@@ -1206,7 +1204,7 @@ bg_proc_track "$DEK_SD_PID1"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$DEK_SD_BIN:$PATH" HOME="$DEK_SD_HOME" \
     LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$DEK_SD_UNIT" \
-    LOOM_SAFEHOUSE_ENABLED=1 LOOM_WORK_FINDER=1 \
+    LOOM_SAFEHOUSE_ENABLED=1 \
     LOOM_DAEMON_BIN="$FAKE_BIN" \
     LOOM_SOCKET_PATH="$DEK_SD_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$DEK_SD_HOME/.loom/autonomy-desired" \
@@ -1268,7 +1266,7 @@ bg_proc_track "$DEK_SD_PID3"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$DEK_SD_BIN:$PATH" HOME="$DEK_SD_HOME" \
     LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$DEK_SD_UNIT" \
-    LOOM_SAFEHOUSE_ENABLED=1 LOOM_WORK_FINDER=1 \
+    LOOM_SAFEHOUSE_ENABLED=1 \
     LOOM_DAEMON_BIN="$FAKE_BIN" \
     LOOM_SOCKET_PATH="$DEK_SD_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$DEK_SD_HOME/.loom/autonomy-desired" \
@@ -1360,7 +1358,7 @@ EOF
         kill "$(cat "$SH5_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH5: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH5: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH5_HOME"
 
@@ -1562,16 +1560,18 @@ AD_SD_UNIT="loom-daemon-ad-test-$$.service"
 AD8_HOME="$(mktemp -d)"; mkdir -p "$AD8_HOME/.loom/logs"
 AD8_LOG="$WORKDIR/ad8-install.log"; : > "$AD8_LOG"
 
-# Install the "prior" unit with LOOM_WORK_FINDER=1.
+# Install the "prior" unit, then give it a pre-#11951 LOOM_WORK_FINDER=1 line
+# (the start script no longer renders one).
 sleep 30 & AD8_SLEEP_PID1=$!
 bg_proc_track "$AD8_SLEEP_PID1"
 make_sd_stub "$AD8_LOG" "$AD8_SLEEP_PID1"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$SD_BIN:$PATH" HOME="$AD8_HOME" LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$AD_SD_UNIT" \
-    LOOM_WORK_FINDER=1 LOOM_DAEMON_BIN="$FAKE_BIN" \
-    LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
+    LOOM_DAEMON_BIN="$FAKE_BIN" LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$AD8_HOME/.loom/autonomy-desired" \
     bash "$START_SCRIPT" --no-launchd >/dev/null 2>&1 )
+AD8_UNIT_DIR="$AD8_HOME/.config/systemd/user"
+printf '%s\n' '[Service]' 'Environment=LOOM_WORK_FINDER=1' >> "$AD8_UNIT_DIR/$AD_SD_UNIT"
 # Kill AND reap the decoy synchronously (`wait`, not just `kill`) before the
 # very next invocation runs its already-running guard: a killed-but-not-yet-
 # reaped child is still a ZOMBIE in the process table, and `kill -0` on a
@@ -1644,30 +1644,24 @@ else
     echo "  enable-now count: $ad8_enable_count; systemctl calls: $(cat "$AD8_LOG" 2>/dev/null)"
 fi
 
-# AD9. The escape hatch: the SAME detected downgrade, but with an explicit
-#      --work-finder this invocation -- proceeds normally (exit 0), proving
-#      the refusal is only for the SILENT case, not a hard block on ever
-#      re-installing over a prior autonomous unit.
+# AD9. The way out on systemd (#11951): the unit no longer carries autonomy
+#      env, so the host's drop-in owns it. With one setting the work finder
+#      on, the SAME plain start proceeds (exit 0) and purges the base line.
 sleep 30 & AD9_SLEEP_PID=$!
 bg_proc_track "$AD9_SLEEP_PID"
 make_sd_stub "$AD8_LOG" "$AD9_SLEEP_PID"
+mkdir -p "$AD8_UNIT_DIR/$AD_SD_UNIT.d"
+printf '%s\n' '[Service]' 'Environment=LOOM_WORK_FINDER=1' > "$AD8_UNIT_DIR/$AD_SD_UNIT.d/15-autonomy.conf"
 ad9_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$SD_BIN:$PATH" HOME="$AD8_HOME" LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$AD_SD_UNIT" \
-    LOOM_DAEMON_BIN="$FAKE_BIN" \
-    LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
+    LOOM_DAEMON_BIN="$FAKE_BIN" LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$AD8_HOME/.loom/autonomy-desired" \
-    bash "$START_SCRIPT" --no-launchd --work-finder 2>&1 )
+    bash "$START_SCRIPT" --no-launchd 2>&1 )
 ad9_rc=$?
-assert_eq "0" "$ad9_rc" "autonomy downgrade (systemd): an explicit --work-finder on the SAME detected-downgrade host proceeds normally (#5409 AC1 escape hatch)"
-TESTS_RUN=$((TESTS_RUN + 1))
-if ! grep -qi 'autonomy downgrade' <<<"$ad9_out"; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} autonomy downgrade (systemd): an explicit --work-finder is not silent -- no warning, no refusal (#5409)"
-else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} autonomy downgrade (systemd): an explicit --work-finder is not silent -- no warning, no refusal"
-    echo "  output: $ad9_out"
-fi
+assert_eq "0" "$ad9_rc" "autonomy downgrade (systemd): a drop-in that sets the work finder lets the SAME plain start proceed (#11951)"
+assert_not_contains "$ad9_out" "autonomy downgrade" "autonomy downgrade (systemd): a drop-in-owned work finder is out of the start's reach -- no warning (#11951)"
+assert_not_contains "$(cat "$AD8_UNIT_DIR/$AD_SD_UNIT")" "LOOM_WORK_FINDER" "autonomy downgrade (systemd): the re-render purges the base unit's autonomy line (#11951)"
+assert_contains "$(cat "$AD8_HOME/.loom/autonomy-desired")" "work_finder=1" "autonomy downgrade (systemd): the marker records the drop-in's effective value (#11951)"
 kill "$AD9_SLEEP_PID" 2>/dev/null || true
 wait "$AD9_SLEEP_PID" 2>/dev/null || true
 # Same real-path fix as the AD8 setup above -- AD9's successful start writes
@@ -1793,7 +1787,7 @@ rm -rf "$WORKDIR/ad11"
 
 # ---------- KillMode=mixed real-systemd regression (#4862) ----------
 # The stub-based systemd tests above assert the RENDERED TEXT of the unit
-# (Restart=on-success, KillMode=mixed present) but never exercise a real
+# (Restart=always, KillMode=mixed present) but never exercise a real
 # `systemd --user` manager, so they cannot catch a regression in what those
 # fields actually DO. This block drives the ACTUAL production-rendered unit
 # (via --print-unit, only ExecStart/WorkingDirectory substituted) against a
@@ -1801,9 +1795,9 @@ rm -rf "$WORKDIR/ad11"
 # issue's acceptance criteria in one shot:
 #   MX1. a clean exit(0) with a SIGTERM-ignoring lingering child (standing in
 #        for an in-flight claude/tee/sleep sweep worker) still causes
-#        Restart=on-success to fire — the #4862 fix.
-#   MX2. a crash exit(1) does NOT get restarted — the #4054 no-crash-loop
-#        property must survive the #4862 change (KillMode=mixed touches only
+#        the relaunch to fire — the #4862 fix.
+#   MX2. a startup-refusal exit(1) does NOT get restarted (#4054; #11058 keeps
+#        1 in RestartPreventExitStatus) (KillMode=mixed touches only
 #        HOW leftover cgroup members are reaped, never the crash/on-success
 #        exit-code contract).
 # Skips cleanly (not a failure) when no reachable `systemd --user` manager
@@ -1880,11 +1874,11 @@ MXEOF
     mx_render "$MX_SCRIPT_DIR/mx-crash.sh" > "$MX_UNIT_DIR/$MX_UNIT_CRASH"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
 
-    # MX1. Clean exit + lingering child -> Restart=on-success fires (NRestarts
-    # climbs above 0 within a few restart cycles). Poll up to ~8s.
+    # MX1. Clean exit + lingering child -> the relaunch fires (NRestarts climbs
+    # above 0). Poll up to ~15s: the 1s fixture plus RestartSec=5 (#11058).
     systemctl --user start "$MX_UNIT_MIXED" >/dev/null 2>&1
     mx1_restarts=0
-    for _ in 1 2 3 4 5 6 7 8; do
+    for _ in $(seq 1 15); do
         mx1_restarts="$(systemctl --user show -p NRestarts --value "$MX_UNIT_MIXED" 2>/dev/null)"
         [[ "$mx1_restarts" =~ ^[0-9]+$ ]] && (( mx1_restarts > 0 )) && break
         sleep 1
@@ -1892,21 +1886,21 @@ MXEOF
     TESTS_RUN=$((TESTS_RUN + 1))
     if [[ "$mx1_restarts" =~ ^[0-9]+$ ]] && (( mx1_restarts > 0 )); then
         TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "${GREEN}✓${NC} real systemd (#4862): clean exit + lingering child -> Restart=on-success fires (NRestarts=$mx1_restarts)"
+        echo -e "${GREEN}✓${NC} real systemd (#4862): clean exit + lingering child -> relaunch fires (NRestarts=$mx1_restarts)"
     else
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "${RED}✗${NC} real systemd (#4862): clean exit + lingering child -> Restart=on-success fires"
+        echo -e "${RED}✗${NC} real systemd (#4862): clean exit + lingering child -> relaunch fires"
         echo "  systemctl --user status ${MX_UNIT_MIXED}:"
         systemctl --user status "$MX_UNIT_MIXED" --no-pager -l 2>&1 | sed 's/^/    /'
     fi
     systemctl --user stop "$MX_UNIT_MIXED" >/dev/null 2>&1 || true
 
     # MX2. Crash exit(1) -> stays down (the #4054 no-crash-loop property).
-    # Wait past the fixture's own 1s sleep + a restart-cycle margin, then
+    # Wait past the fixture's 1s sleep + RestartSec=5 + a margin, then
     # assert BOTH that it never restarted and that it is in a failed/inactive
     # (not activating/running) state.
     systemctl --user start "$MX_UNIT_CRASH" >/dev/null 2>&1
-    sleep 3
+    sleep 9
     mx2_restarts="$(systemctl --user show -p NRestarts --value "$MX_UNIT_CRASH" 2>/dev/null)"
     mx2_active="$(systemctl --user show -p ActiveState --value "$MX_UNIT_CRASH" 2>/dev/null)"
     TESTS_RUN=$((TESTS_RUN + 1))
@@ -2883,5 +2877,5 @@ fi
 
 # ---------- summary ----------
 echo
-echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $TESTS_FAILED failed"
+echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $TESTS_FAILED failed, ${TESTS_SKIPPED:-0} skipped"
 [[ "$TESTS_FAILED" -eq 0 ]]

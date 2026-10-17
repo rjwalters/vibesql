@@ -7,15 +7,19 @@
 # test-check-quarantine-stashes.sh's, because the subject's inputs are forge
 # reads, not local git state. What it pins:
 #
-#   (a) a STALE block   — the cited blocker has since closed/merged, in each of
-#                         the three shapes dep-recheck-fingerprint.sh reads:
-#                         a prose `Blocked by #N`, a `## Dependencies` checklist
-#                         item, and a linked closing PR;
+#   (a) a STALE block   — the cited blocker has since closed/merged, as a prose
+#                         `Blocked by #N` or a fully ticked `## Dependencies`
+#                         checklist. An unticked box whose refs resolved is its
+#                         own "BOXES UNTICKED" finding, and a linked closing PR
+#                         is no blocker reference at all (#9274);
 #   (b) an UNDOCUMENTED block — `loom:blocked` with no parseable blocker
 #                         reference anywhere in body or comments (#8927's #180
 #                         evidence row);
 #   (c) a GENUINELY still-blocked issue — reports nothing, which is the whole
 #                         reason this advisory can run on every sweep;
+#   (d) an ARCHIVED repository (#10562) — skipped and reported as archived,
+#                         never as clear; a probe that does not answer is
+#                         UNKNOWN, and nothing is read after either;
 #   plus the advisory contract itself: always exit 0 (including with no
 #   loom-daemon, no `gh`, and a forge read that fails), `--quiet` suppresses the
 #   stdout one-liner, and the script never mutates a label.
@@ -142,44 +146,155 @@ mkdir -p "$STUB_DIR"
 
 cat >"$STUB_DIR/gh" <<'STUB'
 #!/usr/bin/env bash
+# The check reads the forge in bulk (#10480): one REST `repos/{owner}/{repo}`
+# archived probe first (#10562), one REST `loom:blocked` listing (issues AND
+# PRs), REST comment / single-issue / pull reads, and one aliased GraphQL
+# query per 100 issues for the closing PRs. This stub answers each of
+# those from the SAME fixture files the per-artifact `gh issue|pr view` shape
+# used, so every case below keeps its meaning. Any `gh issue|pr view|list` is
+# unhandled on purpose: the batch path must never make one.
 set -uo pipefail
 D="${LOOM_TEST_STUB_DIR:?stub gh: LOOM_TEST_STUB_DIR not set}"
-kind="${1:-}"; sub="${2:-}"
-shift 2 2>/dev/null || true
+printf '%s\n' "$*" >>"$D/calls.log"
 
-# The check enumerates BOTH populations (#8925): `gh issue list --label
-# loom:blocked` and `gh pr list --label loom:blocked`. Both must be answerable
-# or the PR arm's read failure is reported as "could not enumerate", masking the
-# issue arm's real verdict — the shape that made 5 cases here fail once the PR
-# enumeration landed. An absent fixture file answers `[]` (the empty
-# population), which is what every issue-only case below wants.
-if [[ ( "$kind" == "issue" || "$kind" == "pr" ) && "$sub" == "list" ]]; then
-  f="$D/$kind-list.json"
-  if [[ -f "$f" ]]; then cat "$f"; else printf '[]'; fi
-  exit 0
-fi
+http() { # <status line> <body>
+  printf 'HTTP/2.0 %s\r\nContent-Type: application/json\r\n\r\n%s' "$1" "$2"
+}
+not_found() { http "404 Not Found" '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
 
-if [[ ( "$kind" == "issue" || "$kind" == "pr" ) && "$sub" == "view" ]]; then
-  num=""
+# label_objs: normalise a fixture's labels (objects or names) to REST objects.
+LABELS='(.labels // []) | map({name: (if type == "object" then .name else . end)})'
+
+if [[ "${1:-}" == "api" ]]; then
+  shift
+  url="" query=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --json|--repo|--jq|--limit|--state|--label) shift 2 ;;
-      -*) shift ;;
-      *) [[ -z "$num" ]] && num="$1"; shift ;;
+      --include|-i) shift ;;
+      -H|--hostname|--method|-X) shift 2 ;;
+      -f|-F|--raw-field|--field) [[ "${2:-}" == query=* ]] && query="${2#query=}"; shift 2 ;;
+      *) [[ -z "$url" ]] && url="$1"; shift ;;
     esac
   done
-  f="$D/$kind-$num.json"
-  [[ -f "$f" ]] || { echo "stub gh: no fixture for $kind #$num" >&2; exit 1; }
-  cat "$f"
-  exit 0
+
+  # The free budget probe (#10480): one `api rate_limit` (body only), its
+  # `.resources.core` and `.resources.graphql` both answered from
+  # `rate_limit.json` ({"core":N,"graphql":N}) and unhandled without it, so
+  # every case that does not set one sees a probe that did not answer. Since
+  # #12204 there is no standalone GraphQL `rateLimit` query; one fails loudly.
+  RL="$D/rate_limit.json"
+  if [[ "$url" == "rate_limit" ]]; then
+    [[ -f "$RL" ]] || { echo "stub gh: no rate_limit fixture" >&2; exit 3; }
+    jq -c '{resources: {core: {limit: 5000, used: (5000 - .core), remaining: .core, reset: 4102444800},
+      graphql: {limit: 5000, used: (5000 - .graphql), remaining: .graphql, reset: 4102444800}}}' "$RL"
+    exit 0
+  fi
+  if [[ "$url" == "graphql" && "$query" == *"rateLimit{limit"* ]]; then
+    echo "stub gh: standalone rateLimit query (#12204)" >&2; exit 4
+  fi
+
+  if [[ "$url" == "graphql" ]]; then
+    repo='{}'
+    for n in $(grep -oE 'i[0-9]+: issue' <<<"$query" | tr -dc '0-9\n'); do
+      f="$D/issue-$n.json"
+      if [[ ! -f "$f" ]]; then
+        repo="$(jq -c --arg k "i$n" '. + {($k): null}' <<<"$repo")"
+        continue
+      fi
+      nodes='[]'
+      for m in $(jq -r '(.closedByPullRequestsReferences // [])[].number' "$f"); do
+        st="$(jq -r '.state // "OPEN"' "$D/pr-$m.json" 2>/dev/null || echo OPEN)"
+        nodes="$(jq -c --argjson m "$m" --arg s "$st" '. + [{number: $m, state: $s}]' <<<"$nodes")"
+      done
+      repo="$(jq -c --arg k "i$n" --argjson nodes "$nodes" \
+        '. + {($k): {closedByPullRequestsReferences: {totalCount: ($nodes|length), nodes: $nodes}}}' <<<"$repo")"
+    done
+    left="$(jq -r '.graphql // 4999' "$RL" 2>/dev/null)"
+    [[ "$left" =~ ^[0-9]+$ ]] || left=4999
+    jq -c -n --argjson r "$repo" --argjson left "$left" \
+      '{data: {rateLimit: {cost: 1, remaining: $left}, repository: $r}}'
+    exit 0
+  fi
+
+  path="${url%%\?*}"
+
+  # The archived-repository probe (#10562): `GET repos/{owner}/{repo}`, sent
+  # before anything is listed. A live repository by default; `repo.json`
+  # overrides the answer body, and `repo.fail` makes the read fail outright.
+  # Matched exactly (two segments), never as a prefix of the paths below.
+  if [[ "$path" =~ ^repos/[^/]+/[^/]+$ ]]; then
+    [[ -f "$D/repo.fail" ]] && { echo "stub gh: HTTP 502 Bad Gateway" >&2; exit 1; }
+    if [[ -f "$D/repo.json" ]]; then
+      http "200 OK" "$(cat "$D/repo.json")"
+    else
+      http "200 OK" "{\"full_name\":\"${path#repos/}\",\"archived\":false}"
+    fi
+    exit 0
+  fi
+
+  case "$path" in
+    repos/*/*/issues)
+      [[ "$url" == *"&page="* ]] && { http "200 OK" '[]'; exit 0; }
+      out='[]'
+      for kind in issue pr; do
+        lf="$D/$kind-list.json"
+        [[ -f "$lf" ]] || continue
+        for n in $(jq -r '.[].number' "$lf"); do
+          title="$(jq -r --argjson n "$n" '.[] | select(.number == $n) | .title' "$lf")"
+          fx='{}'
+          [[ -f "$D/$kind-$n.json" ]] && fx="$(cat "$D/$kind-$n.json")"
+          out="$(jq -c --argjson n "$n" --arg t "$title" --arg k "$kind" --argjson fx "$fx" \
+            ". + [{number: \$n, title: \$t, state: \"open\", user: {login: \"someone\"},
+                   body: (\$fx.body // \"\"), comments: ((\$fx.comments // []) | length),
+                   labels: ([{name: \"loom:blocked\"}] + (\$fx | $LABELS))}
+                  + (if \$k == \"pr\" then {pull_request: {url: \"x\"}} else {} end)]" <<<"$out")"
+        done
+      done
+      http "200 OK" "$out"
+      exit 0
+      ;;
+    repos/*/*/issues/*/comments)
+      n="$(cut -d/ -f5 <<<"$path")"
+      [[ "$url" == *"&page=1"* ]] || { http "200 OK" '[]'; exit 0; }
+      f="$D/issue-$n.json"; [[ -f "$f" ]] || f="$D/pr-$n.json"
+      [[ -f "$f" ]] || not_found
+      http "200 OK" "$(jq -c '(.comments // []) | map({user: {login: .author.login}, body})' "$f")"
+      exit 0
+      ;;
+    repos/*/*/issues/*)
+      n="${path##*/}"
+      for kind in issue pr; do
+        f="$D/$kind-$n.json"
+        [[ -f "$f" ]] && jq -e 'has("state")' "$f" >/dev/null || continue
+        http "200 OK" "$(jq -c --arg k "$kind" \
+          "{number, state: (if .state == \"OPEN\" then \"open\" else \"closed\" end),
+            labels: ($LABELS)}
+           + (if \$k == \"pr\" then {pull_request: {merged_at:
+               (if .state == \"MERGED\" then \"2026-01-01T00:00:00Z\" else null end)}} else {} end)" "$f")"
+        exit 0
+      done
+      not_found
+      ;;
+    repos/*/*/pulls/*)
+      f="$D/pr-${path##*/}.json"
+      [[ -f "$f" ]] || not_found
+      http "200 OK" "$(jq -c '{number, state: (.state | ascii_downcase),
+        mergeable: (if .mergeable == "MERGEABLE" then true elif .mergeable == "CONFLICTING" then false else null end),
+        mergeable_state: ((.mergeStateStatus // "unknown") | ascii_downcase)}' "$f")"
+      exit 0
+      ;;
+  esac
 fi
 
-echo "stub gh: unhandled args: $kind $sub $*" >&2
+echo "stub gh: unhandled args: $*" >&2
 exit 3
 STUB
 chmod +x "$STUB_DIR/gh"
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# The batch path's ETag store must never touch the user's real cache (the stub
+# sends no ETag, so nothing is stored, but keep it out of the real dir anyway).
+export LOOM_LISTING_CACHE_DIR="$WORKDIR/etag-cache"
 
 # run_check [extra args...] — invoke the subject against the stub fixtures.
 # Stdout and stderr are captured separately, because which stream a message
@@ -190,15 +305,16 @@ LAST_STDERR=""
 LAST_RC=0
 run_check() {
     LAST_RC=0
+    : >"$STUB_DIR/calls.log"
     LAST_STDOUT="$("$SCRIPT" --repo owner/repo --repo-root "$STUB_DIR" "$@" \
         2>"$STUB_DIR/stderr.txt")" || LAST_RC=$?
     LAST_STDERR="$(cat "$STUB_DIR/stderr.txt")"
 }
 
-# set_population <jq-array-json> — what `gh issue list` answers.
+# set_population <jq-array-json> — the issue rows of the REST listing.
 set_population() { printf '%s' "$1" >"$STUB_DIR/issue-list.json"; }
 
-# set_pr_population <jq-array-json> — what `gh pr list` answers (#8925's PR arm).
+# set_pr_population <jq-array-json> — the PR rows of the REST listing (#8925).
 set_pr_population() { printf '%s' "$1" >"$STUB_DIR/pr-list.json"; }
 
 # issue_fixture <number> <body> [comments-json] [closing-prs-json]
@@ -233,7 +349,10 @@ assert_contains "$LAST_STDOUT" "WARNING" "T1e: the stdout one-liner reports the 
 assert_not_contains "$LAST_STDERR" "UNDOCUMENTED BLOCK" \
     "T1f: a documented-but-stale block is not also reported as undocumented"
 
-# 1b. #8927's #179 row: a `## Dependencies` checklist whose entries all closed.
+# 1b. #8927's #179 row: a `## Dependencies` checklist whose refs all closed
+# but whose boxes are still UNTICKED. #9274: an unchecked box is unmet until a
+# human confirms its whole condition, so this is the "boxes unticked" finding,
+# never a stale block.
 set_population '[{"number":179,"title":"Reputation weighting"}]'
 issue_fixture 179 "## Dependencies
 
@@ -243,17 +362,83 @@ issue_fixture 179 "## Dependencies
 state_fixture issue 176 "CLOSED"
 state_fixture issue 177 "CLOSED"
 run_check
-assert_eq "0" "$LAST_RC" "T1g: a stale checklist block still exits 0"
-assert_contains "$LAST_STDERR" "STALE BLOCK" "T1h: an all-resolved checklist is reported as a stale block"
-assert_contains "$LAST_STDERR" "checklist" "T1i: names the checklist as the signal that fired"
+assert_eq "0" "$LAST_RC" "T1g: a resolved-but-unticked checklist still exits 0"
+assert_contains "$LAST_STDERR" "CHECKLIST REFS RESOLVED, BOXES UNTICKED" \
+    "T1h: unticked boxes with every ref closed are reported under BOXES UNTICKED"
+assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T1i: unticked boxes with every ref closed are NOT reported as a stale block"
+assert_contains "$LAST_STDERR" "refs resolved: #176, #177" \
+    "T1i2: names the resolved checklist refs"
 
-# 1c. A linked closing PR that has merged.
+run_check --quiet
+assert_contains "$LAST_STDERR" "CHECKLIST REFS RESOLVED, BOXES UNTICKED" \
+    "T1i3: --quiet still lists the unticked section"
+
+run_check --json
+assert_eq "179" "$(jq -r '.unticked[0].number' <<<"$LAST_STDOUT")" \
+    "T1i4: --json carries the unticked bucket"
+assert_eq "#176,#177" "$(jq -r '.unticked[0].resolved_refs | join(",")' <<<"$LAST_STDOUT")" \
+    "T1i5: --json carries the resolved refs"
+assert_eq "0" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" \
+    "T1i6: --json does not list an unticked checklist as stale"
+
+# 1b'. The same checklist with every box TICKED and every ref closed: still a
+# stale block, and the checklist is the signal that fired.
+set_population '[{"number":183,"title":"Every box ticked"}]'
+issue_fixture 183 "## Dependencies
+
+- [x] #176: rating infrastructure
+- [x] #177: vote plumbing
+"
+run_check
+assert_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T1h7: a fully ticked checklist with every ref closed is a stale block"
+assert_contains "$LAST_STDERR" "checklist" "T1h8: names the checklist as the signal that fired"
+assert_not_contains "$LAST_STDERR" "BOXES UNTICKED" \
+    "T1h9: a fully ticked checklist is not reported as unticked"
+
+# 1b''. A checklist whose only unchecked line carries no readable ref: the empty
+# parseable set is vacuously resolved, so it is unticked with N unparsed lines.
+set_population '[{"number":184,"title":"Unreadable condition"}]'
+issue_fixture 184 "## Dependencies
+
+- [ ] upstream vendor signs off on the pinout
+"
+run_check
+assert_contains "$LAST_STDERR" "CHECKLIST REFS RESOLVED, BOXES UNTICKED" \
+    "T1h10: an all-unparseable unchecked checklist is reported under BOXES UNTICKED"
+assert_contains "$LAST_STDERR" "1 unchecked line(s) carry no readable ref" \
+    "T1h11: counts the unparseable unchecked line"
+assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T1h12: an all-unparseable unchecked checklist is not a stale block"
+
+# 1b-phrase. A dependency phrase after the box (`- [ ] Blocked by #N`) is a
+# checklist entry, never also prose: its merged ref leaves the box unticked.
+set_population '[{"number":185,"title":"Phrase after the box"}]'
+issue_fixture 185 "## Dependencies
+
+- [ ] Blocked by #176: ratification remains pending
+"
+run_check
+assert_contains "$LAST_STDERR" "CHECKLIST REFS RESOLVED, BOXES UNTICKED" \
+    "T1h13: an unticked 'Blocked by #N' checklist line is reported under BOXES UNTICKED"
+assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T1h14: an unticked 'Blocked by #N' checklist line is not also read as stale prose"
+
+# 1c. A linked closing PR that has merged. #9274: a closing PR answers "what
+# closes this issue", not "what blocks it", so it is no blocker reference.
+# With nothing else cited the issue is undocumented, never stale.
 set_population '[{"number":190,"title":"Shipped behind a merged PR"}]'
 issue_fixture 190 "No prose blocker here." '[]' '[{"number":4743}]'
 state_fixture pr 4743 "MERGED"
 run_check
 assert_eq "0" "$LAST_RC" "T1j: a merged closing PR still exits 0"
-assert_contains "$LAST_STDERR" "closing PR" "T1k: a merged linked closing PR is reported as a stale block"
+assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T1k: a merged linked closing PR is NOT reported as a stale block"
+assert_not_contains "$LAST_STDERR" "closing PR" \
+    "T1k2: a merged linked closing PR is not cited as a stale signal"
+assert_contains "$LAST_STDERR" "UNDOCUMENTED BLOCK" \
+    "T1k3: with only a closing PR linked, the block is undocumented"
 
 # 1d. #8927's Test Plan edge case: several references, only one closed.
 set_population '[{"number":181,"title":"Partially unblocked"}]'
@@ -424,15 +609,26 @@ assert_contains "$LAST_STDERR" "PR #8314" \
 assert_not_contains "$LAST_STDERR" "PROSE-ONLY PARK" \
     "T6d: a park record in the PR body is a declaration, not a prose-only park"
 
-# The same PR, now carrying `loom:operator-only`: the #4634/#7267 superseding
+# The same PR, now carrying `loom:operator`: the #4634/#7267 superseding
 # gate downgrades the unblock to held rather than clearing it.
 pr_fixture 8314 "<!-- loom:park Blocked by: #8322 by=doctor at=2026-09-19T12:09:00Z -->" "OPEN" \
-    '[{"id":"x","name":"loom:operator-only","color":"ABCDEF"}]'
+    '[{"id":"x","name":"loom:operator","color":"ABCDEF"}]'
 run_check
 assert_contains "$LAST_STDERR" "SUPERSEDED BLOCK" \
     "T6e: a PR held by its own label is superseded, not ready to unpark"
 assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
     "T6f: a superseded PR is not also reported as a plain stale block"
+
+# Transition (#11795): an item not yet migrated still carries the retired
+# `loom:operator-only`, which the daemon reads as `loom:operator` until
+# `labels migrate` relabels it, so it supersedes the same way.
+pr_fixture 8314 "<!-- loom:park Blocked by: #8322 by=doctor at=2026-09-19T12:09:00Z -->" "OPEN" \
+    '[{"id":"x","name":"loom:operator-only","color":"ABCDEF"}]'
+run_check
+assert_contains "$LAST_STDERR" "SUPERSEDED BLOCK" \
+    "T6e2: an unmigrated loom:operator-only hold still supersedes (#11795 transition)"
+assert_not_contains "$LAST_STDERR" "STALE BLOCK" \
+    "T6f2: and is not also reported as a plain stale block"
 
 # `loom:changes-requested` is deliberately NOT in the self-block set: it is the
 # ordinary review cycle, not a pending human decision.
@@ -445,6 +641,153 @@ assert_contains "$LAST_STDERR" "STALE BLOCK" \
 # --no-prs skips the PR enumeration entirely.
 run_check --no-prs
 assert_eq "" "$LAST_STDERR" "T6h: --no-prs does not enumerate the PR population"
+
+# --- Group 7: the batched read shape (#10480) -------------------------------
+# Three issues citing the same blocker, plus a parked PR: one listing, one
+# GraphQL query for all the issues, one state read for the shared blocker, and
+# never a per-artifact `gh issue view` / `gh pr view`.
+echo "Group 7: batched reads"
+set_population '[{"number":301,"title":"a"},{"number":302,"title":"b"},{"number":303,"title":"c"}]'
+set_pr_population '[]'
+for n in 301 302 303; do issue_fixture "$n" "Blocked by #7."; done
+state_fixture issue 7 "CLOSED"
+run_check --json
+CALLS="$(cat "$STUB_DIR/calls.log")"
+assert_eq "3" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" "T7a: every citer of the closed blocker is stale"
+assert_not_contains "$CALLS" "issue view" "T7b: no per-artifact \`gh issue view\`"
+assert_not_contains "$CALLS" "pr view" "T7c: no per-artifact \`gh pr view\`"
+assert_eq "1" "$(grep -c '^api graphql' <<<"$CALLS")" "T7d: one GraphQL query for the whole issue population"
+assert_eq "1" "$(grep -cE 'repos/owner/repo/issues/7( |$)' <<<"$CALLS")" \
+    "T7e: a blocker cited three times is read once"
+assert_eq "1" "$(grep -cE 'repos/owner/repo/issues\?labels=loom:blocked' <<<"$CALLS")" \
+    "T7f: one REST listing covers both populations"
+
+# A REST bot login (`name[bot]`) is the automation's own comment, exactly as the
+# GraphQL spelling was (T2f).
+set_population '[{"number":304,"title":"Only the bot (REST spelling) mentioned a blocker"}]'
+issue_fixture 304 "Nothing cited." \
+    '[{"author":{"login":"loom-fleet-dispatch[bot]"},"body":"Blocked by #7, per the last pass."}]'
+run_check
+assert_contains "$LAST_STDERR" "UNDOCUMENTED BLOCK" \
+    "T7g: a \`[bot]\`-suffixed fleet comment does not count as documentation"
+
+# --- Group 8: the budget floor and forge_cost (#10480) ----------------------
+echo "Group 8: budget floor"
+set_population '[{"number":178,"title":"Comment moderation"}]'
+set_pr_population '[]'
+issue_fixture 178 "Blocked by #7 (user authentication)."
+state_fixture issue 7 "CLOSED"
+printf '{"core":5000,"graphql":500}' >"$STUB_DIR/rate_limit.json"
+run_check --json
+CALLS="$(cat "$STUB_DIR/calls.log")"
+assert_eq "0" "$LAST_RC" "T8a: a run refused by the budget floor still exits 0"
+assert_eq "1" "$(jq -r '.unevaluated | length' <<<"$LAST_STDOUT")" \
+    "T8b: the refused artifact is reported not evaluated, never clear"
+assert_contains "$(jq -r '.unevaluated[0].reason' <<<"$LAST_STDOUT")" \
+    "budget floor: graphql remaining 500, projected 1, floor 1000" "T8c: the reason names the floor"
+assert_contains "$(jq -r '.forge_cost.budget_refused' <<<"$LAST_STDOUT")" "budget floor" \
+    "T8d: forge_cost.budget_refused records the refusal"
+assert_eq "0" "$(grep -c '^api graphql' <<<"$CALLS")" "T8e: no closing-reference query is sent"
+assert_eq "0" "$(grep -cE 'repos/owner/repo/issues/7( |$)' <<<"$CALLS")" "T8f: no blocker is read"
+
+run_check
+assert_contains "$LAST_STDERR" "NOT EVALUATED" "T8g: the human report lists the refused artifact"
+assert_contains "$LAST_STDERR" "forge cost: graphql 0 queries" "T8h: the stderr cost line is printed"
+
+run_check --json --min-graphql-remaining 0
+assert_eq "1" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" "T8i: a floor of 0 disables the check"
+assert_eq "1" "$(jq -r '.forge_cost.graphql_queries' <<<"$LAST_STDOUT")" "T8j: forge_cost counts the query"
+assert_eq "1" "$(jq -r '.forge_cost.graphql_points' <<<"$LAST_STDOUT")" \
+    "T8k: forge_cost takes the points from rateLimit.cost"
+assert_eq "500" "$(jq -r '.forge_cost.budget_before.graphql_remaining' <<<"$LAST_STDOUT")" \
+    "T8l: forge_cost records the probe's reading"
+# Two REST reads: the archived-repository probe (#10562) and the blocker.
+assert_eq "2" "$(jq -r '.forge_cost.rest_requests' <<<"$LAST_STDOUT")" \
+    "T8m: forge_cost counts the archived probe and the REST blocker read"
+
+# Overwritten rather than removed: an empty fixture is unparseable, so both
+# probe legs fail exactly as with no fixture at all.
+: >"$STUB_DIR/rate_limit.json"
+run_check --json
+assert_eq "1" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" \
+    "T8n: a probe that does not answer never refuses the run"
+assert_eq "null" "$(jq -c '.forge_cost.budget_before' <<<"$LAST_STDOUT")" \
+    "T8o: an unanswered probe is reported as budget_before: null"
+
+HELP="$("$SCRIPT" --help 2>&1)"
+assert_contains "$HELP" "--min-graphql-remaining" "T8p: --help documents --min-graphql-remaining"
+assert_contains "$HELP" "--min-core-remaining" "T8q: --help documents --min-core-remaining"
+
+# --- Group 9: the archived-repository probe (#10562) ------------------------
+# The probe runs before anything is listed. An archived repository is
+# read-only, so it is skipped and reported as such — never as clear — and a
+# probe that does not answer is UNKNOWN, never archived and never clear. In
+# neither case is anything listed, queried or read after the probe.
+echo "Group 9: archived repositories"
+rm -f "$STUB_DIR/rate_limit.json"
+set_population '[{"number":178,"title":"Comment moderation"}]'
+set_pr_population '[]'
+issue_fixture 178 "Blocked by #7 (user authentication)."
+state_fixture issue 7 "CLOSED"
+
+# probe_calls / later_calls: the probe itself, and every read after it.
+probe_calls() { grep -cE '(^| )repos/owner/repo( |$)' "$STUB_DIR/calls.log"; }
+later_calls() {
+    grep -cE '(^| )graphql( |$)|repos/owner/repo/(issues|pulls)' "$STUB_DIR/calls.log"
+}
+
+# The live default: the probe answers `archived: false` and the run proceeds.
+run_check --json
+assert_eq "false" "$(jq -c '.archived' <<<"$LAST_STDOUT")" \
+    "T9a: a live repository reports archived: false"
+assert_eq "1" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" "T9b: a live repository is evaluated"
+assert_eq "1" "$(probe_calls)" "T9c: the repository is probed exactly once"
+
+# Archived: one stdout line, nothing on stderr, nothing read after the probe.
+printf '{"full_name":"owner/repo","archived":true}' >"$STUB_DIR/repo.json"
+run_check
+assert_eq "0" "$LAST_RC" "T9d: an archived repository exits 0"
+assert_contains "$LAST_STDOUT" "repository is archived" "T9e: an archived repository says so"
+assert_not_contains "$LAST_STDOUT" "no stale" "T9f: an archived repository is never reported clear"
+assert_eq "" "$LAST_STDERR" "T9g: an archived repository writes nothing to stderr"
+assert_eq "1" "$(probe_calls)" "T9h: the archived repository is probed once"
+assert_eq "0" "$(later_calls)" "T9i: nothing is listed, queried or read after an archived answer"
+
+run_check --json
+assert_eq "true" "$(jq -c '.archived' <<<"$LAST_STDOUT")" "T9j: --json reports archived: true"
+assert_eq "0" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" "T9k: --json lists no findings for it"
+assert_eq "null" "$(jq -c '.enumerate_error' <<<"$LAST_STDOUT")" \
+    "T9l: an archived repository is not an enumeration failure"
+assert_eq "1" "$(jq -r '.forge_cost.rest_requests' <<<"$LAST_STDOUT")" \
+    "T9m: forge_cost counts only the probe"
+
+run_check --quiet
+assert_eq "" "$LAST_STDOUT" "T9n: --quiet silences the archived line"
+assert_eq "0" "$(later_calls)" "T9o: --quiet reads nothing after an archived answer either"
+
+# A probe answer with no `archived` flag is unknown, never "not archived".
+printf '{"full_name":"owner/repo"}' >"$STUB_DIR/repo.json"
+run_check --json
+assert_eq "null" "$(jq -c '.archived' <<<"$LAST_STDOUT")" \
+    "T9p: an answer with no archived flag is archived: null"
+assert_contains "$(jq -r '.enumerate_error' <<<"$LAST_STDOUT")" "archived-repository probe failed" \
+    "T9q: an answer with no archived flag is an enumeration failure"
+assert_eq "0" "$(later_calls)" "T9r: nothing is read after a flagless answer"
+rm -f "$STUB_DIR/repo.json"
+
+# A probe that fails outright: UNKNOWN, reported on stderr, never clear.
+: >"$STUB_DIR/repo.fail"
+run_check
+assert_eq "0" "$LAST_RC" "T9s: a failed probe still exits 0"
+assert_contains "$LAST_STDERR" "archived-repository probe failed" "T9t: a failed probe names itself"
+assert_contains "$LAST_STDERR" "UNKNOWN, not clear" "T9u: a failed probe is reported unknown"
+assert_not_contains "$LAST_STDOUT" "no stale" "T9v: a failed probe is never reported clear"
+assert_not_contains "$LAST_STDOUT" "repository is archived" "T9w: a failed probe is never archived"
+assert_eq "0" "$(later_calls)" "T9x: nothing is listed, queried or read after a failed probe"
+run_check --json
+assert_eq "null" "$(jq -c '.archived' <<<"$LAST_STDOUT")" "T9y: --json reports a failed probe as archived: null"
+assert_eq "0" "$(jq -r '.stale | length' <<<"$LAST_STDOUT")" "T9z: a failed probe yields no findings"
+rm -f "$STUB_DIR/repo.fail"
 
 # --- summary ---------------------------------------------------------------
 echo ""

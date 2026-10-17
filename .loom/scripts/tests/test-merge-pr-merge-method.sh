@@ -59,6 +59,15 @@ assert_grep() {
 
 [[ -x "$MERGE_PR" ]] || { echo "ERROR: $MERGE_PR not executable" >&2; exit 1; }
 
+# #8191 slice: Test 1 reads --help, whose text is `loom-daemon merge-pr usage`
+# now. --self-only pins ONLY LOOM_DAEMON_SELF_BIN (the seam --help resolves
+# first), so Tests 5/6's PATH stub and per-invocation LOOM_DAEMON_BIN keep
+# their meaning and no assertion changes. FAILS rather than skips without a
+# binary.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin --self-only "$SCRIPTS_DIR" "merge-pr usage"
+
 # --- Test 1: --help mentions --merge-method ---
 echo "Test 1: --help documents --merge-method"
 
@@ -210,7 +219,8 @@ STUB
 chmod +x "$STUB_DIR/loom-daemon"
 
 set +e
-out=$(PATH="$STUB_DIR:$PATH" "$MERGE_PR" --merge-method merge 999999999 2>&1)
+# Pin LOOM_DAEMON_BIN to the stub (#9740): exercises the explicit-pin path, so a caller-exported LOOM_DAEMON_BIN cannot bypass the stub.
+out=$(PATH="$STUB_DIR:$PATH" LOOM_DAEMON_BIN="$STUB_DIR/loom-daemon" "$MERGE_PR" --merge-method merge 999999999 2>&1)
 rc=$?
 set -e
 if [[ $rc -ne 0 ]] && [[ "$out" == *"Merge blocked:"* ]] && [[ "$out" == *"allowed method(s): squash"* ]]; then

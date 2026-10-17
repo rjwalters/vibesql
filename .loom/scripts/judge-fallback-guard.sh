@@ -14,8 +14,8 @@
 # role prompt each time (deferred, lower-priority AC of #5455).
 #
 # Decision, in priority order (first match wins):
-#   1. BOT AUTHOR — `gh pr view --json author` -> `.author.is_bot == true`
-#      (Dependabot, Renovate, github-actions[bot], etc). Such a PR is outside
+#   1. BOT AUTHOR — REST `pulls/<N>` -> `.user.type == "Bot"` (#9340: no
+#      GraphQL; Dependabot, Renovate, github-actions[bot]). Such a PR is outside
 #      the Loom label workflow by construction: the fallback path deliberately
 #      never applies labels to it, so it can never leave the fallback query's
 #      result set through any Loom-side action. Skip permanently, independent
@@ -91,7 +91,7 @@
 # no loom: label` query) stays in judge.md — this is deliberately a single-PR
 # gate, called once per candidate in the fallback walk.
 
-# requires-daemon: forge optional   #9537 — `forge is-fleet` answers "is this PR author one of Loom's own Apps"; with no daemon, or one that predates the verb (clap exits 2), is_fleet_author falls back to the exact `app/loom-fleet-dispatch(-N)` pattern, so an old binary degrades to the pre-#9537 behaviour (plus the numbered members), never to a failure.
+# requires-daemon: forge optional   #9537 — `forge is-fleet` answers "is this PR author one of Loom's own Apps"; with no daemon, or one that predates the verb (clap exits 2), is_fleet_author falls back to the exact `loom-fleet-dispatch(-N)` family pattern (`app/` or `[bot]` spelling, #9340), so an old binary degrades to the pre-#9537 behaviour (plus the numbered members), never to a failure.
 
 set -euo pipefail
 
@@ -166,21 +166,21 @@ GH_STDERR="$(mktemp)"
 trap 'rm -f "$GH_STDERR" 2>/dev/null || true' EXIT
 
 # --- Step 1: bot-author check + current head SHA ---------------------------
-PR_JSON="$(gh pr view "$PR" --json author,headRefOid 2>"$GH_STDERR")" || {
-  echo "ERROR: 'gh pr view $PR --json author,headRefOid' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
+PR_JSON="$(gh api "repos/{owner}/{repo}/pulls/$PR" 2>"$GH_STDERR")" || {
+  echo "ERROR: 'gh api .../pulls/$PR' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   exit 1
 }
-
-IS_BOT="$(jq -r '.author.is_bot // false' <<<"$PR_JSON" 2>/dev/null || echo "false")"
-AUTHOR_LOGIN="$(jq -r '.author.login // empty' <<<"$PR_JSON" 2>/dev/null || true)"
-HEAD_SHA="$(jq -r '.headRefOid // empty' <<<"$PR_JSON" 2>/dev/null || true)"
+# REST, not `gh pr view` (GraphQL — #9340: one exhausted GraphQL pool aborted the pass).
+IS_BOT="$(jq -r '.user.type == "Bot"' <<<"$PR_JSON" 2>/dev/null || echo "false")"
+AUTHOR_LOGIN="$(jq -r '.user.login // empty' <<<"$PR_JSON" 2>/dev/null || true)"
+HEAD_SHA="$(jq -r '.head.sha // empty' <<<"$PR_JSON" 2>/dev/null || true)"
 
 if [[ -z "$HEAD_SHA" ]]; then
   echo "ERROR: could not resolve head SHA for PR #$PR from: $PR_JSON" >&2
   exit 1
 fi
 
-# Loom's own GitHub App identities are reported by GitHub as `is_bot: true`
+# Loom's own GitHub App identities are reported by GitHub as `type: Bot`
 # (same as Dependabot/Renovate/github-actions[bot]), but they are NOT external
 # bots outside the Loom label workflow — they are Loom's own PR creation path.
 # Let them through to the cap/dedup checks below like any other Loom-authored
@@ -192,8 +192,8 @@ fi
 # (`loom-daemon forge is-fleet`: the writer, each reader, legacy logins), not
 # a literal here. The old exact `app/loom-fleet-dispatch` match already missed
 # the numbered pool Apps, and broke outright when an App was renamed. With no
-# daemon, or an older one without the verb (clap exits 2), fall back to
-# Loom's default family, exact name or `-<digits>` only.
+# daemon, or an older one without the verb (clap exits 2), fall back to Loom's
+# default family, exact name or `-<digits>`, GraphQL `app/` or REST `[bot]`.
 _JFG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 is_fleet_author() {
   local login="$1" bin="" rc
@@ -208,7 +208,7 @@ is_fleet_author() {
     [[ $rc -eq 0 ]] && return 0
     [[ $rc -eq 1 ]] && return 1
   fi
-  [[ "$login" =~ ^app/loom-fleet-dispatch(-[0-9]+)?$ ]]
+  [[ "$login" =~ ^(app/)?loom-fleet-dispatch(-[0-9]+)?(\[bot\])?$ ]]
 }
 
 if [[ "$IS_BOT" == "true" ]] && ! is_fleet_author "$AUTHOR_LOGIN"; then

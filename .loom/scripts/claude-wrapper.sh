@@ -138,7 +138,9 @@ _WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # defaults/scripts source. If absent (older install), every classifier below
 # takes its DEGRADED path — the same hand-rolled fallback regexes, which since
 # #8037 live in `loom-daemon retry-classify` alongside the library path rather
-# than inline here.
+# than inline here. Since #11208 the library itself delegates to
+# `loom-daemon classify-error` when a binary resolves, so these predicates
+# consume native classifications without any change to this file.
 if [[ -f "${_WRAPPER_DIR}/lib/classify-error.sh" ]]; then
     # shellcheck source=lib/classify-error.sh
     # shellcheck disable=SC1091
@@ -201,6 +203,11 @@ _write_exit_sidecar() {
         echo "${code}" > "${_EXIT_CODE_SIDECAR}" 2>/dev/null || true
     fi
 }
+
+# #10830: keep the pinned session id as a shell variable for the retry check in
+# run_with_retry, but stop exporting it, so the claude CLI (and every Bash call
+# it makes) never inherits it.
+export -n LOOM_CLAUDE_SESSION_ID
 
 # Logging helpers
 log_info() {
@@ -479,8 +486,15 @@ resolve_mcp_workspace() {
 #
 # Args: $1 = path to the MCP server entry point (e.g. dist/index.js)
 #       $2 = node binary to invoke it with
+# Reads MCP_SERVER_ENV (set by _check_mcp_candidate): the server's declared
+# `.mcp.json` `env` as K=V words, merged over the inherited env via `env` the
+# way Claude Code launches it (#10870). Values are never logged.
+# The handshake bound is LOOM_MCP_PREFLIGHT_TIMEOUT seconds (default 15; a
+# non-numeric or non-positive value falls back to the default) — a healthy
+# server can take ~4 s on a loaded host, so a 5 s cap failed it spuriously.
 # Sets (for the caller to log on failure): MCP_SMOKE_TEST_STDOUT,
-# MCP_SMOKE_TEST_STDERR.
+# MCP_SMOKE_TEST_STDERR, MCP_SMOKE_TEST_TIMED_OUT (1 if `timeout` fired, else 0),
+# MCP_SMOKE_TEST_TIMEOUT_SECS (the bound that was applied).
 # Returns: 0 if a valid JSON-RPC initialize response was observed, 1 otherwise.
 _mcp_smoke_test() {
     local mcp_entry="$1"
@@ -488,12 +502,25 @@ _mcp_smoke_test() {
 
     local init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"loom-mcp-preflight","version":"1.0.0"}}}'
 
+    local smoke_timeout="${LOOM_MCP_PREFLIGHT_TIMEOUT:-15}"
+    if ! [[ "${smoke_timeout}" =~ ^[0-9]+$ ]] || [[ "${smoke_timeout}" -le 0 ]]; then
+        smoke_timeout=15
+    fi
+    MCP_SMOKE_TEST_TIMEOUT_SECS="${smoke_timeout}"
+    MCP_SMOKE_TEST_TIMED_OUT=0
+
     local tmp_stdout tmp_stderr
     tmp_stdout=$(mktemp)
     tmp_stderr=$(mktemp)
 
-    printf '%s\n' "${init_request}" | timeout 5 "${node_bin}" "${mcp_entry}" \
-        >"${tmp_stdout}" 2>"${tmp_stderr}" || true
+    # PIPESTATUS[1] is `timeout`'s exit status (124 = the bound fired). Capture
+    # it instead of discarding it with `|| true`.
+    local smoke_rc=0
+    printf '%s\n' "${init_request}" | timeout "${smoke_timeout}" env ${MCP_SERVER_ENV[@]+"${MCP_SERVER_ENV[@]}"} \
+        "${node_bin}" "${mcp_entry}" >"${tmp_stdout}" 2>"${tmp_stderr}" || smoke_rc=${PIPESTATUS[1]}
+    if [[ "${smoke_rc}" -eq 124 ]]; then
+        MCP_SMOKE_TEST_TIMED_OUT=1
+    fi
 
     MCP_SMOKE_TEST_STDOUT=$(cat "${tmp_stdout}")
     MCP_SMOKE_TEST_STDERR=$(cat "${tmp_stderr}")
@@ -537,25 +564,27 @@ _check_mcp_candidate() {
     local mcp_workspace="$1"
     local mcp_config="${mcp_workspace}/.mcp.json"
 
-    # Extract the MCP server entry point from .mcp.json
+    # Extract the server name, entry point, and declared `env` (#10870) from
+    # .mcp.json as NUL-delimited fields: name, args[-1], then K=V per env key.
+    # NUL framing keeps values with spaces/quotes/newlines intact — no eval.
     # Use timeout to prevent hanging on resource-contended systems (see issue #2472).
-    local mcp_entry
-    mcp_entry=$(timeout 10 python3 -c "
+    local field mcp_entry mcp_name mcp_fields=()
+    while IFS= read -r -d '' field; do mcp_fields+=("${field}"); done < <(timeout 10 python3 -c "
 import json, sys
-with open('${mcp_config}') as f:
-    cfg = json.load(f)
-servers = cfg.get('mcpServers', {})
-for name, srv in servers.items():
-    args = srv.get('args', [])
-    if args:
-        print(args[-1])
-        sys.exit(0)
-" 2>/dev/null || echo "")
+for name, srv in json.load(open(sys.argv[1])).get('mcpServers', {}).items():
+    if srv.get('args'):
+        env = [k + '=' + (v if isinstance(v, str) else json.dumps(v)) for k, v in (srv.get('env') or {}).items() if k.isidentifier()]
+        sys.stdout.write('\0'.join([name, str(srv['args'][-1])] + env) + '\0')
+        break
+" "${mcp_config}" 2>/dev/null || true)
+    mcp_name="${mcp_fields[0]:-}" mcp_entry="${mcp_fields[1]:-}"
 
     if [[ -z "${mcp_entry}" ]]; then
         log_warn "Could not extract MCP entry point from ${mcp_config} - not a usable pre-flight candidate"
         return 2
     fi
+    MCP_SERVER_ENV=("${mcp_fields[@]:2}")
+    log_info "MCP pre-flight: smoke-testing server '${mcp_name}' (${mcp_entry}) from ${mcp_config}"
 
     # Check if the entry point file exists
     if [[ ! -f "${mcp_entry}" ]]; then
@@ -617,6 +646,14 @@ for name, srv in servers.items():
     fi
     if [[ -n "${MCP_SMOKE_TEST_STDOUT}" ]]; then
         log_warn "MCP stdout: ${MCP_SMOKE_TEST_STDOUT}"
+    fi
+
+    # A pure handshake timeout on an entry point that exists and is not stale
+    # is a slow start, not a broken bundle: a rebuild cannot fix it, and its
+    # "cannot rebuild" error would hide the real cause.
+    if [[ "${MCP_SMOKE_TEST_TIMED_OUT}" -eq 1 ]]; then
+        log_error "MCP smoke test timed out after ${MCP_SMOKE_TEST_TIMEOUT_SECS}s (${mcp_config}) - skipping rebuild; raise LOOM_MCP_PREFLIGHT_TIMEOUT if the host is loaded"
+        return 1
     fi
 
     # Attempt rebuild and retry
@@ -1521,13 +1558,16 @@ check_api_reachable() {
 # defaults/scripts/tests/test-claude-wrapper-retry.sh (#8032), whose assertions
 # were written against the pre-port shell and run unchanged against the port.
 #
-# What deliberately did NOT move: `classify_error` and
+# What deliberately did NOT move INTO THIS FILE'S LOGIC: `classify_error` and
 # `classification_is_transient`. Those belong to lib/classify-error.sh, which
 # every runtime adapter sources and which is, per #4501, the fleet's single
 # source of truth for whether a category is retryable. A second copy of that
-# deny-list in Rust would recreate the exact defect #4501 fixed — two
+# deny-list here would recreate the exact defect #4501 fixed — two
 # independent verdict systems printing contradictory conclusions about one
-# failure. So the shell still answers WHAT this failure is; the port owns WHAT
+# failure. So the classifier still answers WHAT this failure is (and, since
+# #11208, does so natively via `loom-daemon classify-error` whenever a daemon
+# binary resolves — the library delegates and falls back to its in-file
+# tables; from this file's point of view nothing changed); the port owns WHAT
 # THE WRAPPER DOES about it.
 #
 # #8138 moved a seventh across the same boundary, for the same reason: the
@@ -1782,8 +1822,8 @@ _auth_dead_phrase() {
     # JSON-enveloped 401 of #6614 yields a clean phrase for the `.bad_tokens`
     # reason string instead of falling through to the generic default — grep
     # returns the LEFTMOST match, so the quoted `"type":"` wrapper is never
-    # captured with it.
-    m="$(echo "${output}" | grep -ioE "401[^a-z]*authentication_error|(OAuth )?(access )?token (has been|was) revoked|authentication_error|invalid bearer token|OAuth token has expired|token has expired" | head -1)"
+    # captured with it. #11205's Claude Code phrasings name themselves too.
+    m="$(echo "${output}" | grep -ioE "401[^a-z]*authentication_error|(OAuth )?(access )?token (has been |was )?revoked|authentication_error|invalid bearer token|OAuth token has expired|token has expired|OAuth access token is invalid|OAuth session expired|401 Invalid API key" | head -1)"
     echo "${m:-401/invalid credential}"
 }
 
@@ -2499,8 +2539,7 @@ _run_via_script() {
 
 # Main retry loop with exponential backoff
 run_with_retry() {
-    local attempt=1
-    local exit_code=0
+    local attempt=1 exit_code=0
     local output=""
     # Account-rotation bookkeeping (#3738). Rotations do NOT consume a
     # MAX_RETRIES attempt; this independent cap is a loop guard for the
@@ -2539,6 +2578,11 @@ run_with_retry() {
         fi
 
         log_info "Attempt ${attempt}/${MAX_RETRIES}: Starting Claude CLI"
+        # #10830: spawn-claude.sh pins `--session-id` (LOOM_CLAUDE_SESSION_ID), and
+        # Claude refuses a second launch with an id whose transcript exists
+        # ("Session ID ... is already in use"). Once it does, every retry resumes
+        # the same session instead, which also keeps the id the daemon recorded.
+        compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${LOOM_CLAUDE_SESSION_ID:-none}.jsonl" >/dev/null && set -- "${@/#--session-id/--resume}"
         write_retry_state "running" "${attempt}"
 
         # Run Claude CLI, capturing both stdout and stderr
@@ -2792,7 +2836,7 @@ run_with_retry() {
             log_error "Re-authenticate the affected account(s), then run 'loom-daemon tokens unblock <name>'."
             echo "# ACCOUNT_POOL_EXHAUSTED" >&2
             clear_retry_state
-            return 1
+            return 78  # EX_CONFIG: no alternate account (#10294)
         fi
 
         # Check if this is a transient error worth retrying

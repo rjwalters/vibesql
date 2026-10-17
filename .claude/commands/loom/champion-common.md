@@ -53,7 +53,7 @@ for the length of this pass's own session. Run `champion-pr-merge.md` →
 number / hold reason / `mergeable` status for every currently-held PR to the
 pinned `Champion: Merge-Risk Hold Digest` tracking issue, so a human or another
 role (e.g. Guide) can read the current pile without a Champion transcript or a
-hand-run `loom:operator` label query. This is reporting/visibility only — it
+hand-run label query. This is reporting/visibility only — it
 changes no Safety Criteria evaluation and no merge decision.
 
 **Example report**:
@@ -118,13 +118,7 @@ This role is designed for **autonomous operation** with a recommended interval o
 
 ### Autonomous Behavior
 
-When running autonomously:
-1. Check for `loom:pr` PRs (Priority 1)
-2. Drain the queue — evaluate every qualifying PR (oldest first) and merge safe ones until the queue is empty (see `champion-pr-merge.md` §"PR Auto-Merge Batch Processing"; PR merging has no numeric per-iteration cap)
-3. If no PRs, check for `loom:curated` issues (Priority 2)
-4. Evaluate qualifying issues (oldest first) and promote them within `champion-issue-promo.md`'s tier limits (Tier 1 unlimited / Tier 2 up to 2 per iteration / Tier 3 up to 1, gated at 5 backlog)
-5. If no promotion work remains, run the capped-PR recovery pass over open `loom:blocked` + `loom:changes-requested` PRs (Priority 5) — one grant / keep-parked / recommend-close decision each, with a rationale (`champion-pr-merge.md` §"Capped-PR Recovery Pass")
-6. Report results and stop
+When running autonomously, follow `champion.md` → "Autonomous Operation": the PR queue is drained every pass (no numeric cap on merges), but it pauses after its slice so promotion runs every pass even while PRs remain (#10753). Promotion stays within `champion-issue-promo.md`'s per-level caps (`loom:very-important` and `loom:important` unlimited; no-level promotions capped per pass by `LOOM_CHAMPION_TIER2_CAP`, default 2; no backlog gate). The capped-PR recovery pass (Priority 5, `champion-pr-merge.md` §"Capped-PR Recovery Pass") runs once no promotion work remains. Then report results and stop.
 
 ### Quality Over Quantity
 
@@ -147,6 +141,21 @@ Issue Lifecycle (Hermit Proposal):
 PR Lifecycle:
 (created) -> loom:review-requested -> [Judge] -> loom:pr -> [Champion merges] -> (merged)
 ```
+
+### Hold set (#11795)
+
+Champion's hold filters read the registry, never a hand list: until `labels
+migrate` reaches an item it may still carry a retired hold name, which must
+still count as held (#11843 drops `--with-retired`). The fallback is for a
+daemon without the flag. Each block that filters on holds starts with:
+
+```bash
+HOLDS=$(loom-daemon labels list --property hold --with-retired 2>/dev/null || printf 'loom:blocked\nloom:operator\nloom:frozen'); export HOLDS
+OP_HOLDS=$(loom-daemon labels list --property operator_gate --with-retired 2>/dev/null || echo loom:operator); export OP_HOLDS
+```
+
+and matches with `($ENV.HOLDS | split("\n")) as $h | ... IN($h[])` (`$o` for
+`OP_HOLDS`, the operator holds alone).
 
 ---
 
@@ -251,53 +260,92 @@ because the two callers need different confidence:
 
 | Tier | Sources | Who may act on it |
 |---|---|---|
-| **Strong** (containment) | (a) `loom:epic-phase` children carrying the phase marker, (b) native GitHub sub-issues, (c) `- [ ] #N` task-list entries in the epic body | Step 2's classification, and `champion-epic.md` → "Step 0" **including its autonomous close** |
-| **Weak** (prose reference) | (d) issues whose body merely names `Epic #N` | Never on its own — it may only downgrade `champion-epic.md`'s Step 0 to an operator ask, and it never affects Step 2 |
+| **Strong** (containment) | (a) `loom:epic-phase` children carrying the phase marker, (b) native GitHub sub-issues, (c) `- [ ] #N` task-list entries in the epic body, (e) issues carrying `<!-- loom:parent #N -->` (`create-issue.sh --parent`), (f) same-repo `#N` refs in a `<!-- loom:park Blocked by: #N … -->` record in the epic body | Step 2's classification, and `champion-epic.md` → "Step 0" **including its autonomous close** |
+| **Weak** (prose reference) | (d) issues whose body merely names `Epic #N`; `#N` cells in an epic-body table are deliberately **not** read at all (too loose to promote, #10935) | Never on its own — it may only downgrade `champion-epic.md`'s Step 0 to an operator ask, and it never affects Step 2 |
 
 ```bash
 # Sets EPIC_CHILD_STRONG_{OPEN,CLOSED}, EPIC_CHILD_WEAK_{OPEN,CLOSED},
-# EPIC_CHILD_SOURCES (comma list of the sources that actually contributed).
+# EPIC_CHILD_SOURCES (comma list of the sources that actually contributed),
+# EPIC_CHILD_DISCOVERY_COMPLETE (yes|no — "no" when any source read failed or a
+# list was truncated; the counts are then a lower bound, #10935).
 # $1 = "owner/repo", $2 = epic number.
 discover_epic_children() {
   local repo="$1" num="$2" marker="loom:epic:$2:phase:" srcs=""
+  EPIC_CHILD_DISCOVERY_COMPLETE=yes
 
+  page_full() { [ "$(printf '%s' "$1" | jq 'length' 2>/dev/null || echo 0)" -ge "$2" ]; }
+  local a a_raw
   # (a) phase-marker children — the historical source (champion-epic.md Step 3).
-  local a
-  # `gh --jq` takes only an expression (no `--arg`), so the marker — digits and
-  # literals only — is interpolated into the program directly.
-  a=$(${GH_READ:-gh} issue list --repo "$repo" --label="loom:epic-phase" --state=all --limit=500 \
-    --json number,state,body \
-    --jq "[.[] | select(.body | contains(\"$marker\")) | {number, state}]" 2>/dev/null || echo '[]')
+  # Every `gh issue list` below is fetched UNFILTERED and filtered locally with
+  # jq: the truncation check must see the raw page, because a full page whose
+  # marker matches are few would otherwise look short (#10935). Includes
+  # loom:frozen children (discovery, not work).
+  a_raw=$(${GH_READ:-gh} issue list --repo "$repo" --label="loom:epic-phase" --state=all --limit=500 \
+    --json number,state,body 2>/dev/null) \
+    || { a_raw='[]'; EPIC_CHILD_DISCOVERY_COMPLETE=no; }
+  # A full page means the list was cut at --limit: more children may exist.
+  page_full "$a_raw" 500 && EPIC_CHILD_DISCOVERY_COMPLETE=no
+  a=$(printf '%s' "$a_raw" | jq --arg m "$marker" '[.[] | select(.body | contains($m)) | {number, state}]')
 
   # (b) native sub-issues. 404s (→ `[]`) on forges/repos without the API, which
-  # is a legitimate "no evidence", never "no children".
-  local b
+  # is a legitimate "no evidence", never "no children". Any OTHER failure (rate
+  # limit, 5xx, network) is a failed read, not an empty list (#10935).
+  local b berr
+  berr=$(mktemp)
   b=$(gh api "repos/$repo/issues/$num/sub_issues" --paginate \
-    --jq '[.[] | {number, state: (.state | ascii_upcase)}]' 2>/dev/null | jq -s 'add // []')
+    --jq '[.[] | {number, state: (.state | ascii_upcase)}]' 2>"$berr" | jq -s 'add // []')
+  if [ -s "$berr" ] && ! grep -q 'HTTP 404' "$berr"; then
+    b='[]'; EPIC_CHILD_DISCOVERY_COMPLETE=no
+  fi
+  rm -f "$berr"
 
   # (c) same-repo task-list entries in the epic body ("- [ ] #123" / "- [x] #123").
   # Resolve each ref's state; cap the fan-out so a pathological body cannot burn
-  # the API budget (a >40-item hand-written epic is already an operator problem).
-  local body refs c='[]'
-  body=$(${GH_READ:-gh} issue view "$num" --repo "$repo" --json body --jq '.body // ""' 2>/dev/null)
-  refs=$(printf '%s\n' "$body" \
+  # the API budget. The cap is never silent: refs beyond it mark discovery
+  # incomplete (#10935).
+  local body refs c='[]' all_refs
+  body=$(${GH_READ:-gh} issue view "$num" --repo "$repo" --json body --jq '.body // ""' 2>/dev/null) \
+    || { body=""; EPIC_CHILD_DISCOVERY_COMPLETE=no; }
+  all_refs=$(printf '%s\n' "$body" \
     | grep -Eo '^[[:space:]]*[-*][[:space:]]*\[[ xX]\][[:space:]]*#[0-9]+' \
-    | grep -Eo '[0-9]+' | sort -un | head -40)
+    | grep -Eo '[0-9]+' | sort -un)
+  [ "$(printf '%s\n' "$all_refs" | grep -c .)" -gt 100 ] && EPIC_CHILD_DISCOVERY_COMPLETE=no
+  refs=$(printf '%s\n' "$all_refs" | head -100)
+
+  # (f) same-repo refs in the epic's own park record (park-record.md grammar:
+  # `<!-- loom:park Blocked by: #N by=… -->`). Cross-repo refs are skipped here.
+  refs=$(printf '%s\n%s\n' "$refs" "$(printf '%s\n' "$body" \
+    | grep -E '<!-- loom:park Blocked by: #[0-9]+' \
+    | sed -E 's/.*Blocked by: #([0-9]+).*/\1/')" | grep -E '^[0-9]+$' | sort -un)
   for r in $refs; do
     [ "$r" = "$num" ] && continue
     local st
-    st=$(${GH_READ:-gh} issue view "$r" --repo "$repo" --json state --jq '.state' 2>/dev/null) || continue
+    st=$(${GH_READ:-gh} issue view "$r" --repo "$repo" --json state --jq '.state' 2>/dev/null) \
+      || { EPIC_CHILD_DISCOVERY_COMPLETE=no; continue; }
     c=$(printf '%s' "$c" | jq --argjson n "$r" --arg s "$st" '. + [{number:$n, state:$s}]')
   done
+
+  # (e) `<!-- loom:parent #N -->` children. The search is a loose text match; the
+  # jq select re-checks the exact marker so #12 never matches #123.
+  # Search recall on an HTML comment is not guaranteed; `create-issue.sh --parent`
+  # also files a native sub-issue link, so source (b) is the independent fallback.
+  local e e_raw
+  e_raw=$(${GH_READ:-gh} issue list --repo "$repo" --state=all --limit=200 \
+    --search "\"loom:parent #$num\" in:body" --json number,state,body 2>/dev/null) \
+    || { e_raw='[]'; EPIC_CHILD_DISCOVERY_COMPLETE=no; }
+  page_full "$e_raw" 200 && EPIC_CHILD_DISCOVERY_COMPLETE=no
+  e=$(printf '%s' "$e_raw" | jq --arg m "<!-- loom:parent #$num -->" '[.[] | select(.body | contains($m)) | {number, state}]')
 
   # (d) weak: prose references to this epic, no containment claimed.
   local d
   d=$(${GH_READ:-gh} issue list --repo "$repo" --state=all --limit=200 \
-    --search "\"Epic #$num\" in:body" --json number,state --jq '.' 2>/dev/null || echo '[]')
+    --search "\"Epic #$num\" in:body" --json number,state 2>/dev/null) \
+    || { d='[]'; EPIC_CHILD_DISCOVERY_COMPLETE=no; }
+  page_full "$d" 200 && EPIC_CHILD_DISCOVERY_COMPLETE=no
 
   local strong weak
   strong=$(jq -s --argjson e "$num" 'add | map(select(.number != $e)) | unique_by(.number)' \
-    <(printf '%s' "$a") <(printf '%s' "$b") <(printf '%s' "$c"))
+    <(printf '%s' "$a") <(printf '%s' "$b") <(printf '%s' "$c") <(printf '%s' "$e"))
   weak=$(jq -s --argjson e "$num" '(.[0] | map(.number)) as $s
     | .[1] | map(select(.number != $e and (.number | IN($s[]) | not))) | unique_by(.number)' \
     <(printf '%s' "$strong") <(printf '%s' "$d"))
@@ -309,10 +357,18 @@ discover_epic_children() {
   [ "$(printf '%s' "$a" | jq 'length')" -gt 0 ] && srcs="$srcs,phase-marker"
   [ "$(printf '%s' "$b" | jq 'length')" -gt 0 ] && srcs="$srcs,sub-issues"
   [ "$(printf '%s' "$c" | jq 'length')" -gt 0 ] && srcs="$srcs,task-list"
+  [ "$(printf '%s' "$e" | jq 'length')" -gt 0 ] && srcs="$srcs,parent-marker"
   [ "$(printf '%s' "$weak" | jq 'length')" -gt 0 ] && srcs="$srcs,prose-reference"
   EPIC_CHILD_SOURCES="${srcs#,}"
 }
 ```
+
+**An incomplete discovery is never evidence of completion (#10935).** Every
+source read ends in an explicit failure branch, never `|| echo '[]'`, so a failed
+read cannot masquerade as "no children". `EPIC_CHILD_DISCOVERY_COMPLETE=no`
+means the counts are a lower bound; `champion-epic.md` Step 0a then refuses a
+completion candidate. Source (c)'s `- [ ] #N` ref list is capped at 100 and a
+longer list sets the flag instead of truncating silently.
 
 **A source finding nothing is never evidence of completion.** Every counter
 starts at 0, so "no children anywhere" is `STRONG_CLOSED == 0` and both
@@ -410,8 +466,9 @@ against the **dependent** issue/PR being evaluated in the current repo
 DEPENDENT_ISSUE=<the issue/PR being evaluated, in the CURRENT repo>
 
 # Terminal state check first — never re-comment or re-tally once a human owns this.
+OP_HOLDS=$(loom-daemon labels list --property operator_gate --with-retired 2>/dev/null || echo loom:operator); export OP_HOLDS  # "Hold set" above
 ALREADY_ROUTED=$(gh issue view "$DEPENDENT_ISSUE" --json labels --jq \
-  '.labels[] | select(.name=="loom:operator-only")' 2>/dev/null)
+  '($ENV.OP_HOLDS | split("\n")) as $o | .labels[] | select(.name | IN($o[]))' 2>/dev/null)
 if [ -n "$ALREADY_ROUTED" ]; then
   # Stays unconditional HERE (#5664). champion-issue-promo.md's equivalent
   # short-circuit became conditional so a dependency-only escalation can
@@ -419,7 +476,7 @@ if [ -n "$ALREADY_ROUTED" ]; then
   # it guards says "an epic looks complete but is still open" — that resolves
   # only by a human closing or promoting the epic, never on its own. An
   # un-escalation here would loop the same escalation forever.
-  echo "#$DEPENDENT_ISSUE already routed to loom:operator-only — skip silently"
+  echo "#$DEPENDENT_ISSUE already routed to loom:operator — skip silently"
 else
   # REST, not `gh issue view` — only the REST payload has the numeric comment
   # id the PATCH below needs (the `gh issue view --json comments` id is a
@@ -432,7 +489,7 @@ else
 
   if [ -n "$FLAG_COMMENT_ID" ]; then
     # Same fingerprint seen before — read the streak this marker has already
-    # recorded (mirrors champion-issue-promo.md's unrevised-skips counter).
+    # recorded (the shape of the retired unrevised-skips counter, #4967).
     STREAK=$(printf '%s' "$FLAG_COMMENT_BODY" \
       | sed -n "s|.*<!-- champion:epic-block-streak:$FINGERPRINT:\([0-9]\{1,\}\) -->.*|\1|p" | tail -n 1)
     STREAK=${STREAK:-1}
@@ -453,7 +510,7 @@ Blocked by $BLOCKER_REPO#$BLOCKER_NUM
 
 ---
 *Automated by Champion role*" \
-        && gh issue edit "$DEPENDENT_ISSUE" --add-label "loom:operator-only,loom:operator-blocked"
+        && gh issue edit "$DEPENDENT_ISSUE" --add-label "loom:operator"
     else
       # Still within budget: tally the streak IN PLACE (PATCH, no new
       # comment/notification) and keep not-gating on this reference.
@@ -516,8 +573,8 @@ closed, gained an open child again, etc.) computes a different
 `EPIC_BLOCK_MARKER` entirely, so it is treated as new — the streak resets by
 construction rather than by an explicit reset step.
 
-**Invariants a future edit must preserve** (mirrors
-`champion-issue-promo.md`'s "Bounding the silent skip" for the same reason):
+**Invariants a future edit must preserve** (the reason #4967 gave for the
+proposal path's since-retired silent-skip tally):
 
 - Comment budget for a persistently-unresolved `epic-complete-unpromoted`
   state is bounded, not unbounded: one flag comment, then only silent
@@ -530,14 +587,14 @@ construction rather than by an explicit reset step.
   — they are not new behavior, so they carry none of this section's comment
   or label overhead.
 - `ALREADY_ROUTED=yes` short-circuits everything — a dependent already
-  carrying `loom:operator-only` from this mechanism is never re-tallied or
+  carrying `loom:operator` from this mechanism is never re-tallied or
   re-escalated.
-- The escalation always adds `loom:operator-blocked` alongside
-  `loom:operator-only` (#5671) — this condition is, by construction,
-  self-clearing once `$BLOCKER_REPO#$BLOCKER_NUM` closes or promotes, which is
-  exactly the distinction #5664 needs from a genuine operator decision. See
-  `.loom/docs/label-state-machine.md` "operator-only sub-kinds" for the full
-  convention, including the required `Blocked by #N` machine-readable line.
+- The escalation comment always carries the machine-readable
+  `Blocked by $BLOCKER_REPO#$BLOCKER_NUM` line beside `loom:operator`
+  (#5671, #11795): the human action waits on that epic closing or promoting,
+  which is exactly the distinction #5664 needs from a genuine operator
+  decision (no decision block). See `.loom/docs/label-state-machine.md` →
+  "Routing to a human".
 - This check must run **independently of** any body-hash-keyed idempotency
   skip a caller applies to itself (e.g. `champion-issue-promo.md`'s unrevised-
   proposal skip). A dependent's own text can stay byte-identical for weeks
