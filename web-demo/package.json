@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@11.22.0",
   "overrides": {
-    "dompurify": ">=3.3.2"
+    "dompurify": ">=3.4.13"
   },
   "scripts": {
     "dev": "vite",
