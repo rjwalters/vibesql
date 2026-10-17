@@ -1,20 +1,26 @@
 version: 2
+# Policy (rjwalters/.github repo-policy.json, provider: dependabot):
+# - cooldown: version updates wait 14 days after release; security updates are
+#   not delayed by cooldown and ignore the schedule.
+# - package ecosystems group minor + patch only; majors arrive as their own,
+#   individually reviewable PRs.
 updates:
-  # Cargo dependency updates (daily for security, weekly grouped for regular)
+  # Cargo dependency updates (daily scan, minor + patch grouped)
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 10
     groups:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -25,16 +31,17 @@ updates:
     directory: "/fuzz"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5
     groups:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -46,6 +53,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5
     ignore:
       # TypeScript 7 removes moduleResolution=node10 and changes compiler APIs
@@ -57,11 +66,10 @@ updates:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -71,6 +79,8 @@ updates:
     directory: "/web-demo"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5
     ignore:
       # TypeScript 7 is unsupported by typescript-eslint (crashes `pnpm lint`
@@ -83,11 +93,10 @@ updates:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -97,16 +106,17 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5
     groups:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
@@ -116,31 +126,37 @@ updates:
     directory: "/benchmarks"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 5
     groups:
       dependencies:
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
 
-  # GitHub Actions updates
+  # GitHub Actions updates (all update types grouped, majors included)
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types: ["major", "minor", "patch"]
     labels:
       - "dependencies"
       - "loom:review-requested"
-    reviewers:
-      - "rwalters"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
