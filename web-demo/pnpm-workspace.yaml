@@ -10,7 +10,7 @@ packages:
 # ("The 'pnpm' field in package.json is no longer read by pnpm"), so the
 # dompurify version floor lives here — same home as the repo-root workspace.
 overrides:
-  dompurify: '>=3.3.2'
+  dompurify: '>=3.4.13'
 onlyBuiltDependencies:
   - esbuild
 allowBuilds:
