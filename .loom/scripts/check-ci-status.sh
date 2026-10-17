@@ -185,15 +185,18 @@ get_ci_status() {
     # forge_get_workflow_runs's doc comment and issue #5495.
     local workflow_runs
     workflow_runs=$(forge_get_workflow_runs "$REPO_NWO" "$commit") || {
-        # Not critical if this fails - check runs are the primary signal
-        workflow_runs='{"workflow_runs": []}'
+        # Fail closed (#9879): an unreadable CI feed is PENDING, never "no
+        # runs" — empty previously read as a false green through
+        # analyze_status. The state marker forces the verdict to pending
+        # unless a definitive failure exists.
+        workflow_runs='{"workflow_runs": [], "workflow_runs_state": "unknown"}'
     }
 
     # Merge results
     echo "$check_runs" | jq \
         --argjson status "$combined_status" \
         --argjson wf "$workflow_runs" \
-        '. + {combined_status: $status, workflow_runs: ($wf.workflow_runs // [])}'
+        '. + {combined_status: $status, workflow_runs: ($wf.workflow_runs // []), workflow_runs_state: ($wf.workflow_runs_state // "ok")}'
 }
 
 analyze_status() {
@@ -210,6 +213,8 @@ analyze_status() {
 
     local combined_state
     combined_state=$(echo "$data" | jq -r '.combined_status.state // "unknown"')
+
+    local workflow_runs_state; workflow_runs_state=$(echo "$data" | jq -r '.workflow_runs_state // "ok"')
 
     # Count by status
     local completed=0
@@ -248,17 +253,14 @@ analyze_status() {
     # Analyze workflow runs (#5495): a workflow run that is `queued` or
     # `in_progress` counts as pending even when it has dispatched zero jobs
     # yet -- and therefore has no corresponding entries at all in $check_runs
-    # above. This is deliberately additive-only: a `completed` workflow run
-    # contributes nothing here because its job-level detail already arrived
-    # via $check_runs (double-counting it would risk over-counting success/
-    # failure, not just pending).
-    while IFS= read -r run; do
-        local wf_status
-        wf_status=$(echo "$run" | jq -r '.status')
-        if [[ "$wf_status" != "completed" ]]; then
-            ((pending++))
-        fi
-    done < <(echo "$workflow_runs" | jq -c '.[]')
+    # above. A `completed` run adds nothing to the counts (its job-level
+    # detail already arrived via $check_runs) -- EXCEPT a run that completed
+    # `cancelled` with no successful run of the same workflow (#10415): one
+    # cancelled before creating any job has no $check_runs entry. That is NO
+    # VERDICT (ci-principles.md), never success. A `workflow_run`-event run is
+    # exempt (#11147): the forge files it under the default-branch tip, not this commit.
+    pending=$((pending + $(echo "$workflow_runs" | jq '[.[] | select(.status != "completed")] | length')))
+    local no_verdict; no_verdict=$(echo "$workflow_runs" | jq '[map(select(.event != "workflow_run")) | group_by(.name)[] | select(any(.[]; .conclusion == "cancelled") and (any(.[]; .conclusion == "success") | not))] | length')
 
     # Determine overall status
     local overall_status
@@ -266,6 +268,8 @@ analyze_status() {
         overall_status="failure"
     elif [[ $pending -gt 0 ]]; then
         overall_status="pending"
+    elif [[ $no_verdict -gt 0 ]]; then
+        overall_status="unknown"
     elif [[ $success -gt 0 || $completed -gt 0 ]]; then
         overall_status="success"
     elif [[ "$combined_state" == "success" ]]; then
@@ -278,32 +282,41 @@ analyze_status() {
         overall_status="unknown"
     fi
 
+    # Fail closed (#9879): an unreadable workflow-runs feed is PENDING, never
+    # resolved. A definitive failure still dominates — "some CI failed" plus
+    # "the rest is unreadable" must not soften to pending. (Statement-level
+    # `&&` for the shell-budget ratchet: safe mid-function — a failing LEFT
+    # side of `&&` is exempt from `set -e` (line 68), and the jq -n that
+    # follows consumes the status anyway.)
+    [[ "$workflow_runs_state" == "unknown" && "$overall_status" != "failure" ]] && overall_status="pending"
+
     # Output JSON results
     jq -n \
         --arg commit "$COMMIT" \
         --arg short_sha "$SHORT_SHA" \
         --arg status "$overall_status" \
-        --arg combined_state "$combined_state" \
+        --arg combined_state "$combined_state" --arg wf_state "$workflow_runs_state" \
         --argjson total "$total_count" \
         --argjson completed "$completed" \
         --argjson success "$success" \
         --argjson failure "$failure" \
         --argjson pending "$pending" \
-        --argjson skipped "$skipped" \
+        --argjson skipped "$skipped" --argjson no_verdict "$no_verdict" \
         --argjson check_runs "$check_runs" \
         --argjson workflow_runs "$workflow_runs" \
         '{
             commit: $commit,
             short_sha: $short_sha,
             status: $status,
-            combined_state: $combined_state,
+            combined_state: $combined_state, workflow_runs_state: $wf_state,
             counts: {
                 total: $total,
                 completed: $completed,
                 success: $success,
                 failure: $failure,
                 pending: $pending,
-                skipped: $skipped
+                skipped: $skipped,
+                no_verdict: $no_verdict
             },
             check_runs: $check_runs,
             workflow_runs: $workflow_runs
@@ -480,6 +493,8 @@ else
     [[ "$SUCCESS_COUNT" -gt 0 ]] && echo -e "  ${GREEN}$SUCCESS_COUNT passed${NC}"
     [[ "$FAILURE_COUNT" -gt 0 ]] && echo -e "  ${RED}$FAILURE_COUNT failed${NC}"
     [[ "$PENDING_COUNT" -gt 0 ]] && echo -e "  ${YELLOW}$PENDING_COUNT pending${NC}"
+
+    [[ "$STATUS" == "unknown" ]] && echo "$RESULT" | jq -r '.workflow_runs[] | select(.conclusion == "cancelled" and .event != "workflow_run") | "  \(.name): cancelled workflow run, no verdict (#10415)"'
 
     # Show failed checks
     if [[ "$FAILURE_COUNT" -gt 0 ]]; then

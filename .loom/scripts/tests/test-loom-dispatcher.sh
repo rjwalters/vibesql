@@ -37,6 +37,15 @@ REAL_RESOLVER="$REPO_ROOT/defaults/scripts/lib/config-resolver.sh"
 REAL_SPAWN_WORKER="$REPO_ROOT/defaults/scripts/spawn-worker.sh"
 REAL_HARVEST_LIB="$REPO_ROOT/defaults/scripts/lib/daemon-env-harvest.sh"
 
+# #10238: keep the dispatcher's advisory state out of the real HOME for every case.
+XDG_STATE_HOME="$(mktemp -d)"; export XDG_STATE_HOME
+# #10238: `loom update` skips its daemon half when no loom-daemon is on PATH, so
+# the delegation cases pin inert stubs rather than depend on the host's install
+# (a CI runner has no loom-daemon on PATH; a dev box usually does). node/npm are
+# stubbed too: Test 5b's fresh bundle never runs them, but the refresh probes them.
+DAEMON_STUB_DIR="$(mktemp -d)"
+for _s in loom-daemon node npm; do printf '#!/usr/bin/env bash\nexit 0\n' > "$DAEMON_STUB_DIR/$_s"; chmod +x "$DAEMON_STUB_DIR/$_s"; done
+WITH_DAEMON_PATH="$DAEMON_STUB_DIR:$PATH"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
@@ -210,7 +219,7 @@ assert_contains "$out" "args=[]" "the --machine selector is stripped before dele
 # ── Finding 3: thin update verb ──────────────────────────────────────────────
 echo "Test 5: 'update' is a thin delegator with no rebuild logic of its own (Finding 3)"
 set +e
-out=$(LOOM_HOME="$CHK" bash "$DISPATCHER" update --check 2>&1)
+out=$(LOOM_HOME="$CHK" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update --check 2>&1)
 rc=$?
 set -e 2>/dev/null || true
 assert_eq "$rc" "0" "'loom update' exits 0 via delegation"
@@ -232,7 +241,7 @@ CHK2=$(make_checkout)
 # test hermetic/offline).
 mkdir -p "$CHK2/mcp-loom/dist"; : > "$CHK2/mcp-loom/dist/index.js"
 set +e
-out=$(LOOM_HOME="$CHK2" bash "$DISPATCHER" update 2>&1)
+out=$(LOOM_HOME="$CHK2" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update 2>&1)
 rc=$?
 set -e 2>/dev/null || true
 assert_eq "$rc" "0" "'loom update' exits 0 with an mcp-loom bundle present"
@@ -241,12 +250,38 @@ assert_contains "$out" "STUB_UPDATE" "'update' still delegates the daemon update
 
 echo "Test 5c: 'update --check' does not touch the mcp-loom bundle (#4230)"
 set +e
-out=$(LOOM_HOME="$CHK2" bash "$DISPATCHER" update --check 2>&1)
+out=$(LOOM_HOME="$CHK2" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update --check 2>&1)
 rc=$?
 set -e 2>/dev/null || true
 assert_eq "$rc" "0" "'loom update --check' exits 0"
 assert_contains "$out" "read-only mode" "'update --check' skips the bundle refresh (read-only)"
 assert_contains "$out" "STUB_UPDATE args=[--check]" "'update --check' still delegates with --check"
+
+echo "Test 5d: 'update --help' / '-h' run no sync/provision/bundle refresh (#12558)"
+CHK3=$(make_checkout)
+# Stale bundle: src/ file newer than dist/index.js, so a non-read-only update
+# WOULD invoke npm. A recording npm stub proves it is never called for help.
+mkdir -p "$CHK3/mcp-loom/dist" "$CHK3/mcp-loom/src"
+: > "$CHK3/mcp-loom/dist/index.js"
+touch -d '2 hours ago' "$CHK3/mcp-loom/dist/index.js"
+: > "$CHK3/mcp-loom/src/index.ts"
+NPM_STUB_DIR=$(mktemp -d)
+NPM_LOG="$NPM_STUB_DIR/npm.calls"
+printf '#!/usr/bin/env bash\necho "$*" >> "%s"\nexit 1\n' "$NPM_LOG" > "$NPM_STUB_DIR/npm"
+chmod +x "$NPM_STUB_DIR/npm"
+bundle_mtime_before="$(stat -c %Y "$CHK3/mcp-loom/dist/index.js")"
+for helpflag in --help -h; do
+    set +e
+    out=$(LOOM_HOME="$CHK3" PATH="$NPM_STUB_DIR:$WITH_DAEMON_PATH" bash "$DISPATCHER" update "$helpflag" 2>&1)
+    rc=$?
+    set -e 2>/dev/null || true
+    assert_eq "$rc" "0" "'loom update $helpflag' exits 0"
+    assert_contains "$out" "STUB_UPDATE args=[$helpflag]" "'update $helpflag' delegates to the updater's usage"
+    assert_not_contains "$out" "refreshing the user-scoped mcp-loom bundle" "'update $helpflag' does not refresh the bundle"
+    assert_not_contains "$out" "read-only mode" "'update $helpflag' prints no read-only banner"
+done
+assert_eq "$([[ -e "$NPM_LOG" ]] && echo called || echo none)" "none" "'update --help' never invoked npm"
+assert_eq "$(stat -c %Y "$CHK3/mcp-loom/dist/index.js")" "$bundle_mtime_before" "'update --help' left dist/index.js untouched"
 
 # ── AC5: config resolution through the Phase 2 tier resolver ─────────────────
 if command -v jq >/dev/null 2>&1; then
@@ -258,7 +293,7 @@ if command -v jq >/dev/null 2>&1; then
     out=$(cd "$RTIER" && LOOM_CONFIG_DEFAULTS_FILE="" LOOM_HOME="$CHK" bash "$DISPATCHER" status 2>&1)
     assert_contains "$out" "autonomous.workFinder.enabled = true" ".loom-local/local.json overrides .loom/config.json (resolver, not direct read)"
 else
-    echo "Test 6: SKIP (jq not on PATH)"
+    loom_test_skip "Test 6: jq not on PATH"
 fi
 
 echo "Test 7: status is explicit when jq is unavailable — not masqueraded as 'no config' (AC5)"
@@ -334,14 +369,14 @@ assert_contains "$out" "machine_checkout=[$CHK]" "'start --machine' hands the re
 out=$(cd "$CONSUMER" && LOOM_HOME="$CHK" bash "$DISPATCHER" stop --machine 2>&1)
 assert_contains "$out" "machine_checkout=[$CHK]" "'stop --machine' hands the resolved checkout to loom-daemon-stop.sh"
 
-out=$(LOOM_HOME="$CHK" bash "$DISPATCHER" update --check 2>&1)
+out=$(LOOM_HOME="$CHK" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update --check 2>&1)
 assert_contains "$out" "machine_checkout=[$CHK]" "'update' hands the resolved checkout to loom-daemon-update.sh (Gap 1)"
 
 echo "Test 12: 'loom update' hands off the checkout from a NON-REPO directory too (Gap 1 regression)"
-out=$(cd "$NR" && LOOM_HOME="$CHK" bash "$DISPATCHER" update --check 2>&1)
+out=$(cd "$NR" && LOOM_HOME="$CHK" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update --check 2>&1)
 assert_contains "$out" "machine_checkout=[$CHK]" "'update' from a non-repo dir still resolves+hands off the machine checkout"
 rc_check=0
-(cd "$NR" && LOOM_HOME="$CHK" bash "$DISPATCHER" update --check >/dev/null 2>&1) || rc_check=$?
+(cd "$NR" && LOOM_HOME="$CHK" PATH="$WITH_DAEMON_PATH" bash "$DISPATCHER" update --check >/dev/null 2>&1) || rc_check=$?
 assert_eq "0" "$rc_check" "'update --check' from a non-repo dir does not refuse (no 'only works inside a Loom source checkout')"
 
 # ── Phase 3b (#4229): the `restart` verb ─────────────────────────────────────
@@ -556,7 +591,7 @@ EOF
     assert_contains "$out" "LOOM_MAIN_HEALTH_GATE=[1]" "harvested LOOM_MAIN_HEALTH_GATE from a real plist reaches start_target's re-render"
     assert_contains "$out" "preserved 2 LOOM_*/token env var(s)" "dispatcher reports the harvested count (real plist)"
 else
-    echo "Test 16f: SKIP (plutil and/or jq not on PATH — harvest_plist_env is a macOS-only production path)"
+    loom_test_skip "Test 16f: plutil and/or jq not on PATH — harvest_plist_env is a macOS-only production path"
 fi
 
 echo "Test 16e: 'loom restart --machine' still falls back cleanly when this checkout predates daemon-env-harvest.sh (#4581 backward-compat)"
@@ -613,8 +648,18 @@ assert_not_contains "$out" "STUB_CODEX" "default path does not touch the codex r
 assert_contains "$out" 'argv=[-p /loom:sweep 4467 --dangerously-skip-permissions]' "default path forwards the same claude args as before (byte-for-byte)"
 
 echo "Test 20: 'LOOM_RUNTIME=codex loom sweep' routes to spawn-codex.sh"
+# Hermeticity (#8859): this test asserts the *dispatcher's* runtime routing, so it
+# must not also be running runtime_admission's role gate. `codex` is the one legacy
+# adapter that calls resolve_and_admit when LOOM_ROLE is non-empty
+# (worker_spawn/mod.rs) — and every daemon-launched shell carries one (a Builder
+# running build-gate.sh carries LOOM_ROLE=sweep-lifecycle, which binds to Builder's
+# requirements). Builder requires worktreeIsolation, defaults/runtimes/codex.json
+# still declares it "partial", so the ambient role alone makes this exit 78 before
+# spawn-codex.sh is ever reached. LOOM_WORKSPACE must go too: worker_spawn::workspace()
+# prefers it over the fixture, so an ambient one silently re-roots admission at the
+# real checkout instead of $SWEEPREPO. Same `env -u LOOM_ROLE` shape as Test 22.
 set +e
-out=$(cd "$SWEEPREPO" && LOOM_RUNTIME=codex LOOM_CONFIG_DEFAULTS_FILE="" LOOM_HOME="$CHK" bash "$DISPATCHER" sweep 4467 2>&1)
+out=$(cd "$SWEEPREPO" && env -u LOOM_ROLE -u LOOM_WORKSPACE LOOM_RUNTIME=codex LOOM_CONFIG_DEFAULTS_FILE="" LOOM_HOME="$CHK" bash "$DISPATCHER" sweep 4467 2>&1)
 rc=$?
 set -e 2>/dev/null || true
 assert_eq "$rc" "0" "'LOOM_RUNTIME=codex loom sweep' exits 0"
@@ -626,15 +671,19 @@ if command -v jq >/dev/null 2>&1; then
     echo "Test 21: 'loom sweep' honors .loom/config.json runtimes.default (no env)"
     SWEEPCFG="$(make_sweep_repo)"
     echo '{"runtimes":{"default":"codex"}}' > "$SWEEPCFG/.loom/config.json"
+    # `-u LOOM_ROLE` for the same reason as Test 20 (#8859): this is also a codex
+    # route, so an ambient role runs the admission gate against a fixture that ships
+    # no defaults/roles/*.json at all — "role manifest .../builder.json: No such
+    # file or directory", exit 78, before spawn-codex.sh is reached.
     set +e
-    out=$(cd "$SWEEPCFG" && env -u LOOM_RUNTIME -u LOOM_WORKSPACE LOOM_CONFIG_DEFAULTS_FILE="" LOOM_HOME="$CHK" bash "$DISPATCHER" sweep 4467 2>&1)
+    out=$(cd "$SWEEPCFG" && env -u LOOM_RUNTIME -u LOOM_ROLE -u LOOM_WORKSPACE LOOM_CONFIG_DEFAULTS_FILE="" LOOM_HOME="$CHK" bash "$DISPATCHER" sweep 4467 2>&1)
     rc=$?
     set -e 2>/dev/null || true
     assert_eq "$rc" "0" "'loom sweep' with runtimes.default=codex exits 0"
     assert_contains "$out" "STUB_CODEX" "runtimes.default=codex (no env) resolves to spawn-codex.sh"
     assert_not_contains "$out" "STUB_CLAUDE" "config-selected codex path does not touch the claude runner"
 else
-    echo "Test 21: SKIP (jq not on PATH)"
+    loom_test_skip "Test 21: jq not on PATH"
 fi
 
 echo "Test 22: 'loom sweep' with an unknown runtime exits 78 naming runtime, source, and runners present"
@@ -674,8 +723,116 @@ echo "Test 24: 'loom sweep' no longer hardcodes a Claude-only prerequisite gate 
 src="$(cat "$DISPATCHER")"
 assert_not_contains "$src" "'claude' CLI not found on PATH; cannot dispatch a sweep." "the Claude-only prereq gate was removed from sweep"
 
+# ── #10238: update provisions user-scope links + ff-syncs the checkout ────────
+# Every case runs under a throwaway HOME so nothing touches the real one.
+set +e   # the cases below assert on non-zero exits and warnings
+git_t() { git -c user.name=t -c user.email=t@example.com "$@"; }
+
+# Build origin.git + a clone on main carrying the shipped dispatcher, the two
+# provision libs, a stub update delegate and a tiny skills tree. Echoes the
+# clone path; the origin lives at "<clone>.origin.git".
+make_synced_checkout() {
+    local seed origin c; seed="$(mktemp -d)"; c="$(mktemp -d)"; origin="$c.origin.git"
+    mkdir -p "$seed/scripts/install" "$seed/defaults/scripts/cli" \
+             "$seed/defaults/.claude/commands/loom" "$seed/defaults/.claude/agents"
+    cp "$DISPATCHER" "$seed/scripts/loom"
+    cp "$PROVISION_LIB" "$seed/scripts/install/provision-dispatcher.sh"
+    cp "$REPO_ROOT/scripts/install/provision-skills.sh" "$seed/scripts/install/provision-skills.sh"
+    printf '#!/usr/bin/env bash\necho "STUB_UPDATE args=[$*]"\n' > "$seed/defaults/scripts/cli/loom-daemon-update.sh"
+    chmod +x "$seed/defaults/scripts/cli/loom-daemon-update.sh"
+    echo "# star" > "$seed/defaults/.claude/commands/loom/star.md"
+    echo "# builder" > "$seed/defaults/.claude/commands/loom/builder.md"
+    echo "# loom-builder agent" > "$seed/defaults/.claude/agents/loom-builder.md"
+    git -C "$seed" init -q -b main && git -C "$seed" add -A && git_t -C "$seed" commit -q -m seed
+    git clone -q --bare "$seed" "$origin" && git clone -q "$origin" "$c"
+    printf '%s\n' "$c"
+}
+advance_origin() { # <clone>: push one new commit to the clone's origin via a scratch clone
+    local w; w="$(mktemp -d)"; git clone -q "$1.origin.git" "$w"
+    echo "$RANDOM" > "$w/NEW"; git -C "$w" add -A && git_t -C "$w" commit -q -m advance && git -C "$w" push -q origin main
+}
+# PATH without any directory that provides loom-daemon (the daemonless laptop).
+NODAEMON_PATH=""
+IFS=: read -ra _pd <<<"$PATH"
+for _d in "${_pd[@]}"; do [[ -x "$_d/loom-daemon" ]] || NODAEMON_PATH+="${NODAEMON_PATH:+:}$_d"; done
+
+echo "Test 25: daemonless 'loom update' on an empty HOME provisions dispatcher + skills, exits 0 (#10238)"
+CK=$(make_synced_checkout); H=$(mktemp -d)
+out=$(HOME="$H" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1); rc=$?
+assert_eq "$rc" "0" "no-daemon update exits 0"
+assert_contains "$out" "loom-daemon not installed; skipping daemon update" "no-daemon path prints a note, not an error"
+[[ -L "$H/.local/share/loom" ]] && pass "machine checkout link created" || fail "machine checkout link missing"
+[[ -x "$H/.local/bin/loom" ]] && pass "dispatcher installed" || fail "dispatcher missing"
+[[ -L "$H/.claude/commands/loom" ]] && pass "commands link created" || fail "commands link missing"
+[[ -L "$H/.claude/commands/star.md" ]] && pass "/star alias created" || fail "/star alias missing"
+[[ -L "$H/.claude/agents/loom-builder.md" ]] && pass "loom-* agent link created" || fail "agent link missing"
+HOME="$H" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update >/dev/null 2>&1; rc=$?
+assert_eq "$rc" "0" "second update (idempotent) exits 0"
+
+echo "Test 26: update fast-forwards a clean, behind main checkout (#10238)"
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"
+out=$(HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1)
+assert_contains "$out" "fast-forwarded" "clean behind checkout is fast-forwarded"
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$(git -C "$CK" rev-parse origin/main)" "HEAD == origin/main after update"
+
+echo "Test 27: dirty / diverged / non-main checkouts are left byte-for-byte untouched (#10238)"
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"
+echo "local edit" >> "$CK/defaults/.claude/commands/loom/builder.md"
+before_head="$(git -C "$CK" rev-parse HEAD)"; before_file="$(cat "$CK/defaults/.claude/commands/loom/builder.md")"
+out=$(HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1); rc=$?
+assert_eq "$rc" "0" "dirty: update still exits 0"
+assert_contains "$out" "uncommitted changes" "dirty: warning names the reason"
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$before_head" "dirty: HEAD unchanged"
+assert_eq "$(cat "$CK/defaults/.claude/commands/loom/builder.md")" "$before_file" "dirty: worktree edit preserved"
+
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"
+echo local > "$CK/LOCAL"; git -C "$CK" add -A; git_t -C "$CK" commit -q -m local
+before_head="$(git -C "$CK" rev-parse HEAD)"
+out=$(HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1)
+assert_contains "$out" "diverged" "diverged: warning names the reason"
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$before_head" "diverged: HEAD unchanged"
+
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"
+git -C "$CK" checkout -q -b topic; before_head="$(git -C "$CK" rev-parse HEAD)"
+out=$(HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1)
+assert_contains "$out" "not main" "non-main: warning names the reason"
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$before_head" "non-main: HEAD unchanged"
+assert_eq "$(git -C "$CK" symbolic-ref --short HEAD)" "topic" "non-main: branch unchanged"
+
+echo "Test 27b: an untracked machine config tier does not block the fast-forward"
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"
+mkdir -p "$CK/config"; echo '{}' > "$CK/config/defaults.json"
+out=$(HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update 2>&1)
+assert_contains "$out" "fast-forwarded" "untracked config/ only: checkout is fast-forwarded"
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$(git -C "$CK" rev-parse origin/main)" "untracked config/ only: HEAD == origin/main"
+assert_eq "$(cat "$CK/config/defaults.json")" "{}" "untracked config/ only: the config file is preserved"
+
+echo "Test 28: 'update --check' / '--dry-run' neither provision nor ff-sync (#10238)"
+CK=$(make_synced_checkout); H=$(mktemp -d); advance_origin "$CK"; before_head="$(git -C "$CK" rev-parse HEAD)"
+for f in --check --dry-run; do
+    HOME="$H" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update "$f" >/dev/null 2>&1; rc=$?
+    assert_eq "$rc" "0" "update $f exits 0"
+done
+assert_eq "$(git -C "$CK" rev-parse HEAD)" "$before_head" "read-only modes do not fast-forward"
+[[ -e "$H/.claude" || -e "$H/.local/bin/loom" ]] && fail "read-only modes created user-scope files" || pass "read-only modes create no user-scope files"
+
+echo "Test 29: rate-limited advisory warning for missing links; silent when healthy; no refetch in-window (#10238)"
+CK=$(make_synced_checkout); H=$(mktemp -d); S=$(mktemp -d)
+out=$(HOME="$H" XDG_STATE_HOME="$S" LOOM_NO_HEALTH_WARN='' LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" sweep 2>&1)
+assert_contains "$out" "user-scope skills not linked" "missing links warn without being asked"
+stamp1="$(cat "$S/loom/fetch-stamp")"; warn1="$(cat "$S/loom/warn-stamp")"
+out=$(HOME="$H" XDG_STATE_HOME="$S" LOOM_NO_HEALTH_WARN='' LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" sweep 2>&1)
+assert_not_contains "$out" "not linked" "second run inside the window is silent"
+assert_eq "$(cat "$S/loom/fetch-stamp")" "$stamp1" "no second background fetch inside the window"
+assert_eq "$(cat "$S/loom/warn-stamp")" "$warn1" "warn stamp not re-armed inside the window"
+HOME="$H" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" update >/dev/null 2>&1
+out=$(HOME="$H" XDG_STATE_HOME="$(mktemp -d)" LOOM_NO_HEALTH_WARN='' LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" sweep 2>&1)
+assert_not_contains "$out" "not linked" "healthy machine is silent"
+out=$(HOME="$(mktemp -d)" XDG_STATE_HOME="$(mktemp -d)" LOOM_HOME="$CK" PATH="$NODAEMON_PATH" bash "$CK/scripts/loom" status 2>&1)
+assert_contains "$out" "WARNING" "'loom status' lists the missing links"
+
 echo ""
 echo "======================================"
-echo "test-loom-dispatcher.sh: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"
+echo "test-loom-dispatcher.sh: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed, ${TESTS_SKIPPED:-0} skipped"
 echo "======================================"
 [[ "$TESTS_FAILED" -eq 0 ]]

@@ -16,27 +16,8 @@ HELPERS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 MERGE_PR_SRC="$HELPERS_DIR/merge-pr.sh"
 REAL_CHECK_SCRIPT="$HELPERS_DIR/check-defaults-version-bump.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
@@ -65,6 +46,12 @@ assert_not_contains() {
         echo "    In: '$haystack'"
     fi
 }
+
+# The guard is `loom-daemon merge-pr version-policy` since #8191's slice; pin
+# the binary the extracted stub calls to this checkout's build.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$TEST_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin "$HELPERS_DIR" "merge-pr"
 
 if [[ ! -x "$REAL_CHECK_SCRIPT" ]]; then
     echo -e "${RED}FATAL${NC}: check-defaults-version-bump.sh missing or not executable: $REAL_CHECK_SCRIPT" >&2

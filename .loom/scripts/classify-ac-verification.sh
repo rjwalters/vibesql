@@ -223,8 +223,8 @@ _extract_ac_items() {
 #
 # `<!-- loom:ac-verified sha=<head> -->`, modeled on judge.md's
 # `<!-- loom:verdict-sha sha=... verdict=... -->` (#5686) and anchored the same
-# way require-complexity-marker.sh / extract-capability-markers.sh anchor theirs
-# (#4840): the full `<!-- ... -->` comment form with a HEX sha, so prose that
+# way extract-capability-markers.sh anchors its own (the #4840 anchoring
+# rule): the full `<!-- ... -->` comment form with a HEX sha, so prose that
 # merely quotes the syntax with a `<head>` placeholder can never be mistaken for
 # a live marker. Prints every marker SHA found, one per line.
 _extract_ac_verified_shas() {
@@ -336,12 +336,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             exit 1
         }
         # Evidence may live on the issue's comments OR on the merged PR (body or
-        # comments) -- the marker's author is whoever performed the step, and
-        # that is as often the PR author as the issue's.
-        EVIDENCE="$(gh issue view "$ISSUE" "${REPO_ARGS[@]}" --json comments -q '.comments[].body' 2>/dev/null || echo '')"
+        # comments), and counts only from a TRUSTED author (#9548: an outsider's
+        # marker is prose; the PR body only when the PR's author is trusted).
+        # requires-daemon: forge optional   Without `trusted-comments --fetch` (absent or older binary) there is no evidence: exit 12, the issue stays held open (the fail-safe answer).
+        EVIDENCE="$("${LOOM_DAEMON_BIN:-loom-daemon}" forge trusted-comments --fetch "$ISSUE" "${REPO_ARGS[@]}" 2>/dev/null | jq -r '.[].body' || echo '')"
         if [[ -n "$PR" ]]; then
             EVIDENCE="$EVIDENCE
-$(gh pr view "$PR" "${REPO_ARGS[@]}" --json body,comments -q '.body, .comments[].body' 2>/dev/null || echo '')"
+$("${LOOM_DAEMON_BIN:-loom-daemon}" forge trusted-comments --fetch "$PR" --with-body "${REPO_ARGS[@]}" 2>/dev/null | jq -r '.[].body' || echo '')"
             if [[ -z "$HEAD_SHA" ]]; then
                 HEAD_SHA="$(gh pr view "$PR" "${REPO_ARGS[@]}" --json headRefOid -q '.headRefOid' 2>/dev/null || echo '')"
             fi

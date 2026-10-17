@@ -87,27 +87,8 @@ done
 # shellcheck source=/dev/null
 source "$SCRIPTS_DIR/warn-out-of-set-deps.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 # Pin a literal snippet as present verbatim in a doc file — catches drift
 # between this test's mirrored functions and the shipped markdown.
@@ -131,8 +112,8 @@ assert_doc_contains() {
 guide_parse_dependencies() {
     local body="$1"
     echo "$body" \
-        | grep -E '(Blocked by|Depends on|Requires|\- \[ \])[*_:[:space:]]*#[0-9]+' \
-        | grep -oE '#[0-9]+' | tr -d '#' | sort -u
+        | grep -E '(Blocked by|Depends on|Requires|\- \[ \])[*_:[:space:]]*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+' \
+        | grep -oE '([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+' | sed 's/^#//' | sort -u
 }
 
 # =====================================================================
@@ -210,6 +191,15 @@ out="$(guide_parse_dependencies 'Depends on #5 (see #99)')"
 assert_eq $'5\n99' "$out" "captures the unrelated same-line #99 too (documented conservative trade-off)"
 
 echo
+echo "--- guide.md parse_dependencies: cross-repo OWNER/REPO#N (#10443) ---"
+
+out="$(guide_parse_dependencies 'Blocked by: example-org/tool-repo#202')"
+assert_eq "example-org/tool-repo#202" "$out" "qualified ref is kept whole (routed via --repo by check_and_unblock)"
+
+out="$(guide_parse_dependencies '**Blocked by:** example-org/tool-repo#202, #5')"
+assert_eq "5"$'\n'"example-org/tool-repo#202" "$out" "mixed qualified + bare refs: bare stays a plain number"
+
+echo
 echo "--- sweep.md --auto-stack detection: widened separator, phrase-set unchanged ---"
 
 out="$(sweep_auto_stack_detect '**Depends on:** #101 (x), #102 (y)')"
@@ -272,8 +262,8 @@ echo
 echo "--- Doc pins: shipped markdown matches the mirrored functions above ---"
 
 assert_doc_contains "$GUIDE_MD" \
-    "grep -E '(Blocked by|Depends on|Requires|\- \[ \])[*_:[:space:]]*#[0-9]+'" \
-    "guide.md parse_dependencies ships the widened four-alternative pattern (unchecked checkbox only, #7973)"
+    "grep -E '(Blocked by|Depends on|Requires|\- \[ \])[*_:[:space:]]*([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+'" \
+    "guide.md parse_dependencies ships the widened four-alternative pattern (unchecked checkbox only, #7973; OWNER/REPO#N, #10443)"
 
 assert_doc_contains "$SWEEP_MD" \
     "grep -E '(Depends on|Requires)[*_:[:space:]]*#[0-9]+'" \

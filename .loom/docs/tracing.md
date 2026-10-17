@@ -2,16 +2,21 @@
 
 Loom's opt-in OTLP exporter carries completed spans alongside lifecycle logs and
 metrics. Trace IDs and span IDs are native OTLP fields, so a backend can join a
-log to its exact execution span. Enable the `otlp` Cargo feature and configure
-`observability.enabled`, `exporter: "otlp"`, an endpoint, and an ingest key file
+log to its exact execution span. Every build includes the exporter (#10700);
+configure `observability.enabled`, `exporter: "otlp"`, an endpoint, and an ingest key file
 as described in [observability](observability.md).
 
 ## Identity and process boundaries
 
-Every new execution receives random nonzero 128-bit trace and 64-bit span IDs.
-An issue number is metadata, never an identity. Before an owned sweep process is
+No trace or span ID is random; the derivations and the provenance every span
+carries are policy: [trace identity](trace-identity.md). An issue
+number never identifies an execution: retries and restarts of one issue are
+distinct executions, each with a root span ID derived from its sweep id. An
+issue sweep's trace is derived from its repo key and sweep id too — never a
+random one. Before an owned sweep process is
 spawned, Loom persists its root identity under `.loom/logs/trace-context/` and
-passes `LOOM_TRACEPARENT` plus `LOOM_TRACE_CONTEXT_FILE` to that child. Reopening
+passes `LOOM_TRACEPARENT`, the standard W3C `TRACEPARENT` (same value, see
+"Worker-native sub-spans" below) plus `LOOM_TRACE_CONTEXT_FILE` to that child. Reopening
 the same execution after a daemon restart reuses its identity. A new attempt
 gets a new execution identity. The parser accepts strict W3C version-00 context;
 it rejects malformed, uppercase, and zero IDs.
@@ -59,29 +64,270 @@ transport behavior; live lifecycle acceptance requires the native workload too.
 ## Owned lifecycle instrumentation
 
 Sweep dispatch persists the root before spawning, including the failed-spawn
-path. Independent scheduled roles receive independent roots. Rust worker launches
+path. Independent scheduled roles receive independent roots, and join stories
+after the fact (below). Rust worker launches
 record preflight and runtime spans; a rejected preflight does not create a runtime
 span. Pi and OpenCode receive the validated context through their environment,
 and the shared native read/write/edit/bash bridge records tool name and outcome.
-There are no spans for model HTTP requests or hidden third-party CLI operations.
+Each daemon `gh` call through the facade is one `invoke github` span (#9985);
+Loom spans no model HTTP request — a worker's own harness can, opt-in below.
 Resolved provider/model identity is distinct from a configured model alias.
 
-Phase timing has two explicit forms. An explicitly launched role has an observed
-start; its checkpoint completes that attempt. A role performed inside one
-third-party CLI session has only an observed checkpoint completion, represented
-as a zero-duration phase/role span. `loom.timing_source` distinguishes these from
-legacy polling observations. Checkpoint writes preserve repeated Judge rejections,
+## Worker-native sub-spans (opt-in, #9215)
+
+A sweep dispatch is one `claude -p "/loom:sweep N …"` process that runs Curator
+→ Builder → Judge → Doctor → Merge inside itself, so Loom's own instrumentation
+can only time the whole session. Claude Code can emit the breakdown natively —
+`claude_code.llm_request` (with `ttft_ms`) and `claude_code.tool` /
+`claude_code.tool.execution` — and parents those spans on the **standard
+`TRACEPARENT`** environment variable, which is why `prepare_child` exports it
+alongside `LOOM_TRACEPARENT` with the same value, always together, and removes
+both whenever propagation is off. That mirror alone is harmless: a worker with
+no telemetry configuration reads it and does nothing. `TRACEPARENT` is honored
+in `-p`/Agent-SDK sessions only — an interactive CLI session ignores it rather
+than inherit an ambient value — and every owned dispatch is `-p`.
+
+Configuring the worker's exporter is a separate, **default-off** opt-in under
+`observability.claudeCodeTelemetry` (**env > config > default**, resolved by
+`loom-daemon/src/observability/claude_code_telemetry.rs`):
+
+| Config key | Env override | Default |
+|---|---|---|
+| `enabled` | `LOOM_CLAUDE_CODE_TELEMETRY_ENABLED` | `false` |
+| `endpoint` | `LOOM_CLAUDE_CODE_TELEMETRY_ENDPOINT` | `observability.endpoint`'s own resolution |
+| `protocol` | `LOOM_CLAUDE_CODE_TELEMETRY_PROTOCOL` | `http/json` (`grpc`, `http/protobuf`) |
+| `logToolDetails` | `LOOM_CLAUDE_CODE_TELEMETRY_LOG_TOOL_DETAILS` | `false` |
+
+With it on and a usable endpoint, the child receives
+`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` (the
+traces exporter does nothing without it), `OTEL_TRACES_EXPORTER=otlp`, an
+explicit `OTEL_EXPORTER_OTLP_PROTOCOL` (OTLP has no silent default, so an
+omitted protocol is a feature that looks wired and exports nothing) and
+`OTEL_EXPORTER_OTLP_ENDPOINT`. The endpoint defaults to the same host-local
+edge the daemon's own OTLP sink targets and is held to the same policy — an
+HTTP(S) URL without credentials, query or fragment, never a reserved
+placeholder domain — so a stray `enabled: true` fails closed with a warning.
+These spans travel from the worker's own SDK to that endpoint; they never enter
+Loom's durable queue, and nothing in the daemon reads them back.
+
+Loom owns those six variables: they are removed unconditionally before any is
+set, so what reaches a worker is decided by this host's config and not by the
+daemon supervisor's ambient environment. `OTEL_EXPORTER_OTLP_HEADERS` is
+deliberately not among them — an edge requiring bearer auth is configured by
+exporting that variable to the daemon, which never handles the credential
+itself. `OTEL_LOG_TOOL_DETAILS` captures Bash command lines and tool input and
+therefore has its own sub-toggle that stays off when the master switch is on:
+"No prompt or tool payload capture is enabled" above describes Loom's own
+spans, and enabling span *timing* must never silently enable content capture.
+Containerized dispatch forwards `TRACEPARENT` and `OTEL_*` by name into the
+container (`spawn-claude.sh`'s containment allowlist); before #9215 it dropped
+both silently while bare-metal dispatch on the same host worked.
+
+The same opt-in covers the daemon's **scheduled** Claude sessions, not just
+sweeps (#10743): every role-runner tick (its launch carries the tick's
+`loom.role_attempt` context as `TRACEPARENT`, applied first) and every
+epic-supervisor role dispatch (no trace context of its own, so its spans are
+roots). With the opt-in on, those sessions' `OTEL_RESOURCE_ATTRIBUTES` is
+extended (never replaced) with `loom.role=<role>` and `loom.sweep_id=<tick or
+dispatch id>`, so per-request records group by role and tick.
+
+That opt-in points a session's exporter **directly** at an endpoint. To have
+launched sessions export **through the daemon** instead — identity bound and
+secrets scrubbed by the daemon, no separate collector — see the agent telemetry
+relay in [`observability.md` §3d](observability.md#3d-agent-telemetry-relay-issue-10964)
+(#10964); when both are on, the relay's endpoint wins.
+
+Phase timing has three explicit forms, distinguished by `loom.timing_source`
+(and from legacy polling observations):
+
+- **Explicitly launched role** (`owned_boundary`): a standalone worker process
+  has an observed start; its checkpoint completes that attempt.
+- **Begun sweep phase** (`checkpoint_begin_observed`, #9935): a role performed
+  as a subagent inside one orchestrator CLI session — every `/loom:sweep`
+  curator, builder, judge, doctor and merge phase — is opened at its dispatch
+  instant by `sweep-checkpoint begin ISSUE ROLE [--attempt N] [--model M]`.
+  That call is telemetry only: it never reads or writes the checkpoint file, so
+  resume (which keys on the file's `phase`) is unaffected. The phase's later
+  `*-done`/`judge-rejected` write completes the same attempt, which closes as
+  `owned_start_checkpoint_completion` with `loom.attempt.worked="true"` and a
+  duration equal to dispatch → checkpoint. Begun attempts carry `loom.issue`,
+  so parallel builders in one wave each complete their own. A re-dispatch of
+  the same phase closes the earlier still-open begin as `loom.result=superseded`
+  (`worked` absent); a begin never followed by its checkpoint is closed at
+  execution end as `exit_unobserved` / `terminal_observed` (`worked` absent).
+- **Completion only** (`checkpoint_write_observed` / `checkpoint_poll_observed`):
+  a checkpoint with no observed start — an older orchestrator prompt or binary
+  without `begin`, a phase skipped without a dispatch (e.g. an already-curated
+  issue), or a legacy poll — is represented as a zero-duration phase/role span
+  with `worked="false"`. That is the only legitimate zero-duration attempt. Checkpoint writes preserve repeated Judge rejections,
 Doctor completions, and subsequent Judge approvals even between daemon polls.
 The terminal checkpoint helper journals after its atomic write succeeds. It does
 not infer an earlier start or a missing verdict. A caller that bypasses that
 helper can provide only the phases that the daemon actually observes.
+Every checkpoint-observed phase and role span, and an owned attempt its
+checkpoint completes, also carries its execution root's `loom.repo` and
+`loom.sweep_id` (#10637), so it names the repository and sweep, not only the
+issue. `loom.repo` is GitHub's own `owner/name` spelling on every Loom span,
+the value `loom.dispatch.*` carries; where a repo keys a trace ID, the key is
+its ASCII lowercase ([trace identity](trace-identity.md)).
+
+`loom.attempt.worked` (#9420) is the companion a **duration** query needs:
+`"true"` when the span's interval measures an attempt that ran its stage's
+work, `"false"` when it provably does not (a role-runner tick that never
+launched a child session — `RoleTickResult::spawned()` is false — or a
+synthetic zero-duration completion, the two `loom.timing_source` values in
+`SYNTHETIC_TIMING_SOURCES`), and **absent** when undetermined. Absent is not
+`false`: an `exit_unobserved` close and a transcript-window carrier span say
+nothing either way, and guessing would publish a measurement that was never
+taken. Any percentile/dwell aggregate over `loom.role_attempt` must filter
+`loom.attempt.worked = "true"` — unconditioned, the `false` population
+dominates and the median collapses to milliseconds.
+
+Since #9438 the role runner removes most of that population at the source: a
+role-runner tick opens its `loom.role_attempt` root only at the launch (the
+moment its child command is built, immediately before spawn), started at the
+tick's own instant. A tick that returns before launching — every `skipped_*`
+outcome except `skipped_load` (a session that ran to the ceiling),
+`runtime_rejected`, and a `failure` raised before the launch — journals no
+span, no trace context and no join entry, and its `role_tick.outcome` record
+(still written for every tick) carries no envelope `trace_context`. The filter
+above stays required: synthetic completions, and pre-#9438 data, are still
+`false`.
 
 `loom.role_attempt` spans have distinct IDs for retries. Explicit checkpoint
 attempt numbers are retained. Unknown usage remains absent; measured zero stays
-zero. Outcome logs include existing grouped usage, failure classification, ordered
+zero. Each attempt's token usage is a set of per-model `loom.runtime.usage`
+children with `loom.usage.scope=attempt` (#9303), written by the daemon for
+its own role-runner ticks. No CLI an attended or outside session can call
+emits usage telemetry (#12536): only daemon work is recorded. The whole execution's
+usage is the `scope=execution` set; see `telemetry-schema.md` for how to total
+the two without double counting. Outcome logs include existing grouped usage, failure classification, ordered
 Judge verdicts and Doctor counts. Grouped usage inherits the source journal's
 attribution window and is not a measured provider bill. Free-form role error text,
 configuration blobs, prompts and account contents are not exported.
+
+## Role-runner ticks join stories after the fact (#9168)
+
+A role-runner tick (Judge, Curator, Champion, Doctor, …) is spawned without a
+target, so its `loom.role_attempt` root — present only when the tick launched
+(#9438) — is its own trace. Once the tick ends,
+the same transcript pass that tallies `role_tick.outcome` `actions` also
+collects the issues and PRs the tick **wrote** to: `gh issue|pr
+comment/edit/close/reopen/…`, `gh pr merge|review|ready`, `merge-pr.sh <N>`
+(not `--dry-run`), and `gh api` `POST`/`PATCH`/`PUT`/`DELETE` on
+`repos/<o>/<r>/{issues,pulls}/<N>/…`. Reads (`view`, `list`, `diff`,
+`checks`, `GET`) never count; a command naming another repository (`-R`,
+URL, explicit API path, `GH_REPO`) or run after a `cd` out of the tick's
+checkout is refused, and one whose repository cannot be told (`cd $DIR`,
+`GH_HOST`, `GIT_DIR`) yields nothing (#9180); a branch name or `$VAR` names
+nothing. Here-document bodies — also `cat<<EOF` and the
+`--body "$(cat <<'EOF' … EOF)"` form — are never parsed as commands.
+
+Each distinct target gets one additional `loom.role_attempt` span in its story
+trace, parented to the story root (`story_context(repo_id, N)`). One batched,
+cached (10 min) GraphQL `issueOrPullRequest` lookup says whether
+the number is an issue — its own story — or a PR, which joins a story by the
+CI stitcher's rule: exactly one same-repo closing issue, counting the
+`feature/issue-N` head branch. Zero or several candidates, a foreign closing
+reference, a failed lookup, or an unresolvable `repo_id` → no story span.
+The whole lookup — `repo_id` included — shares one 20 s deadline per tick, and
+a failed or rate-limited lookup is not retried for that repository for 60 s. The
+span id is derived from the story root, `loom.role_tick`, the tick's execution
+id (`loom.sweep_id`) and the target (`pr:<M>` / `issue:<N>`), so a re-emit
+yields the same id. It carries `loom.role`, `loom.issue`, `loom.pr_number`
+(PR targets), `loom.story`, `loom.story.key_version`, `loom.repo`,
+`loom.result`, `loom.runtime`/`loom.model` when known,
+`loom.timing_source=tick` — its start and end are the whole tick's, not the
+individual action's — and `loom.attempt.worked` derived from the tick's result
+label (#9420), plus a link to the tick's own root. The spans are
+appended to the tick's trace journal and drained like every lifecycle span.
+Its token usage is journalled as per-model `loom.runtime.usage` spans:
+`scope=execution` under the tick's own root, and `scope=attempt` under the
+story span only when exactly one target is stitched (#9303).
+All of this is best-effort after the tick's child has exited; it never fails
+the tick. Non-Claude runtimes record no transcript actions, so their ticks
+join no story yet.
+
+Role attempts and their runtime spans additionally carry a measured host
+memory state at each observed boundary — span begin and span end — as
+`loom.host.*` attributes (physical and available memory, the compressed page
+store, swap capacity/usage and cumulative in/out volume in bytes, the kernel
+OOM-kill counter, the PSI pressure class, and per-core load). These are read
+from OS-native probes at the span edge itself, not modeled: state at the
+decision moment, not only the 30-second `host.health` sampling cadence. A
+source that is unmeasurable on the host (macOS has no PSI or OOM counter,
+Linux exposes no compression figure) is absent, never zero — the "unknown !=
+zero" contract the telemetry schema states for every measured field.
+
+Role-attempt completion attributes close the same gap on the *why*: a fixed
+`loom.admission.reason` literal — `session-down` (#10455),
+`session-mount-stale` (#10364), `runtime-rejected`, `no-token-pool`,
+`pool-exhausted`, `model-runtime-mismatch`, `load-ceiling`, plus
+`preflight-rejected` (stamped on the runtime-preflight span itself, not a
+role-attempt finish) — plus the measured context that distinguishes them: the
+actual load against the ceiling on a load deferral, which pool gated and its
+total size, and the runtime's missing capabilities. The free-form text these
+outcomes carry in daemon and role logs is deliberately not exported: span
+attributes stay allowlisted, 256-byte bounded, and free of untrusted content.
+Together the two boundaries' host state and the admission reason let an
+operator separate an attempt deferred for memory pressure from one the kernel
+killed from one that simply timed out, directly in the trace.
+
+A role-runner attempt that launched and then failed (`loom.result=failure`)
+was admitted, so since #10640 it carries **no** `loom.admission.reason` (the
+earlier `failure` literal only repeated `loom.result`). It says why it failed
+instead, from what the launch site observed:
+
+- `loom.failure_class` — a closed, kebab-case vocabulary that is the sweep
+  `failure_class`'s wherever the two describe the same shape, because the
+  same classifiers read the tick's own region of `role-<role>.log`;
+- `loom.exit_code` — present only when the child exited with a code;
+- the span's **status message** — one line built from a fixed template plus
+  a code, signal number, timeout, `io::ErrorKind` or adapter category. It is
+  journalled as `loom.status_message` and exported as the OTLP status
+  description of the `Error` span, not as an attribute. It never carries log
+  text, argv, environment or a path.
+
+| `loom.failure_class` | Meaning |
+|---|---|
+| `launch-failed` | the launcher could not be spawned; no child ran |
+| `wait-failed` | polling the child for its exit failed |
+| `timeout-ceiling` | the role timeout fired and the child was terminated (a load-saturated ceiling is `skipped_load` instead) |
+| `killed-by-signal` | the child was ended by a signal; the message names it |
+| `toolless-launch`, `sandbox-unavailable` | exit 0, but the launch offered no `loom_*` tools (#8448) or the sandbox refused every tool call (#10003) |
+| `session-down`, `session-mount-stale` | a `session-exec` refusal (#10455, #10364) named in the adapter's terminal record; it outranks `preflight-no-cli-start` and matches `loom.admission.reason` |
+| `preflight-auth-failed`, `preflight-mcp-failed`, `preflight-token-selection-failed`, `preflight-no-cli-start` | the adapter died before its CLI started (`# LOOM_CLI_START` never written) |
+| `account-pool-exhausted` | the wrapper's account rotation ran out mid-run |
+| `credential-expired`, `account-exhausted:<category>`, `session-limit`, `runtime-timeout`, `runtime-fatal`, `cwd-deleted`, `model-refusal` | the runtime adapter's own `# LOOM_TERMINAL_RESULT` category |
+| `no-usable-account`, `account-exhausted:<signature>`, `execution-error`, `self-kill:background-wait`, `exit-<code>` | the sweep crash classifier; `exit-<code>` is its last resort |
+| `unclassified:after-launch` | explicit fallback: the tick failed after launch and no site recorded why |
+
+The adapter's `RECOVERABLE` category is its catch-all for an exit it did not
+recognize, so it yields no class of its own; the status message still quotes
+it (`role child exited with code 1; runtime adapter reported RECOVERABLE`).
+The tick's story copies (`loom.timing_source=tick`) carry the same class,
+code and message. A recovered `process_lost` close carries
+`loom.failure_class=supervisor-lost` — the child and its supervisor both
+exited before either recorded a close — and keeps an unset status.
+A run a planned roll ended (#11263) instead closes as
+`loom.result=interrupted_by_roll`, unset status, no failure class, with
+`loom.roll.disposition` (`paused`|`requeued`|`budget-missed`) and
+`loom.roll.item_id`; recovery keys strictly on pause-manifest membership, so an
+unplanned crash stays `process_lost`. A resumed role run carries
+`loom.resumed_from` = that item id. Failure-rate queries and the role-failures
+watch should exclude `interrupted_by_roll`.
+
+A step's `loom.sweep` root (`loom.sweep_id=step-<role>-<item>-…`, #12253) is
+closed by the step's own end, when the reaper, a cancel or startup sees the
+session exit: `loom.result` is the same `success`/`failure` its
+`role_tick.outcome` reports, with `loom.role`, the step's model and effort,
+`loom.exit_code` when known, and on a failure a `loom.failure_class` of
+`timeout-ceiling`, `cancelled`, `step-outcome-failed` (the session's
+`LOOM_STEP_OUTCOME class=failed`), `exit-<code>` or `exit-unobserved`. A step a
+roll stopped closes as `interrupted_by_roll`. Orphan recovery leaves a step's
+span alone while the step's claim lock still names it and its leader or its
+process group lives, so `process_lost` on a step means the step really died
+unobserved.
 
 ## Journals and recovery
 

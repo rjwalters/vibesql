@@ -19,9 +19,11 @@
 #
 # (the same HTML-comment marker convention as `<!-- loom:standdown claim=... -->`
 # and `<!-- loom:fallback-evaluated sha=... -->`), so the verdict records which
-# tree it covers. This script compares that recorded SHA against the PR's
-# CURRENT head SHA and reports FRESH / STALE, optionally performing the
-# clear+re-queue transition itself.
+# tree it covers. `approved` / `changes-requested` are the canonical spellings
+# writers emit; readers also tolerate `approve` / `request-changes`. This
+# script compares that recorded SHA against the PR's CURRENT head SHA and
+# reports FRESH / STALE, optionally performing the clear+re-queue transition
+# itself.
 #
 # Decision, in priority order (first match wins):
 #   1. NOT_OPEN     — the PR is no longer open (merged, or closed unmerged).
@@ -32,8 +34,9 @@
 #                     says (#6781).
 #   2. NO_VERDICT   — the PR carries neither `loom:pr` nor
 #                     `loom:changes-requested`. Nothing to invalidate.
-#   3. UNVERIFIABLE — a verdict label is present, but no marker comment exists
-#                     for THAT verdict kind. Fail safe: the verdict is kept.
+#   3. UNVERIFIABLE — a verdict label is present, but no TRUSTED marker exists
+#                     for THAT verdict kind (#9548: an untrusted author's marker is
+#                     prose, not state). Fail safe: the verdict is kept.
 #                     This is the pre-migration/rollout case (verdicts written
 #                     before this guard shipped carry no marker), the
 #                     mixed-fleet case (a host still running the older prompt),
@@ -43,11 +46,30 @@
 #                     missing evidence; with --anchor, remediate instead (#3b).
 #  3b. ANCHORED      — --anchor was passed and the UNVERIFIABLE verdict was
 #                     given a marker recording the CURRENT head, so it becomes
-#                     invalidatable from here on (#6319).
-#   4. FRESH        — the newest matching marker's SHA equals the current head
-#                     SHA. The verdict still describes the tree in front of it.
+#                     invalidatable from here on (#6319). `loom:changes-requested`
+#                     only since #9258 (see 3c).
+#  3c. STALE (unmarked approval, #9258) — `loom:pr` with NO trusted marker, and
+#                     the markers could be read. Since #6382 post-verdict.sh
+#                     appends a marker to every verdict, so a markerless approval
+#                     means the mechanism was bypassed (the #9258 incident: an
+#                     approval whose whole body was the literal `@-`). It is NOT
+#                     merge-eligible and is NEVER anchored: anchoring would turn
+#                     an approval posted at SHA A into a FRESH one at SHA B, a
+#                     tree nobody reviewed. It reports DECISION=STALE (exit 12)
+#                     with MARKER_SHA empty, and --clear re-queues it exactly like
+#                     step 5 (hold labels still suppress the write), commenting
+#                     "approval carried no verdict-sha marker; re-review
+#                     required" under `<!-- loom:verdict-stale unanchored head=… -->`.
+#                     When markers could NOT be authenticated it stays
+#                     UNVERIFIABLE (exit 11, --anchor suppressed) — and exit 11
+#                     on a `loom:pr` is never merged (champion-pr-merge.md).
+#   4. FRESH        — the verdict still describes the tree in front of it,
+#                     either because the newest matching marker's SHA equals the
+#                     current head SHA, or because the head moved but the two
+#                     commits' TREES are byte-identical (#9576 — see below).
 #   5. STALE        — the newest matching marker's SHA differs from the current
-#                     head SHA. The verdict describes a tree that no longer
+#                     head SHA AND the trees differ (or the comparison could not
+#                     be made). The verdict describes a tree that no longer
 #                     exists; it must not be trusted.
 #
 # NOT_OPEN is first for a reason (#6781). A merge that lands between a caller's
@@ -72,6 +94,52 @@
 # and the extra machinery would not change a single answer (#5686 explicitly
 # scopes it out).
 #
+# ONE exception, and it is evidence rather than a heuristic (#9124/#9576/#9416):
+# a head move across which THE CHANGE THIS PR MAKES is unchanged. `loom-daemon
+# forge verdict-equivalent <pr> <marker> <head>` re-derives that from the
+# repository and answers with the equivalence kind that proved it:
+#
+#   tree                    the two heads' trees are byte-identical — the #8248
+#                           required-check-freshness guard's automated `chore:
+#                           re-date required checks …` commit (#8508), whose
+#                           whole purpose is to change nothing (#9124/#9576)
+#   clean-merge             the head is exactly the clean automatic merge of
+#                           this PR's base into the reviewed head (#9416)
+#   rebase-patch-identical  the PR's own merge-base-relative patch is
+#                           byte-identical before and after the move (#9416)
+#
+# In all three the verdict still describes the change in front of it, so clearing
+# buys a full extra Judge cycle and nothing else. This is NOT a shape inference:
+# nothing is read from the commit message, the author, the ref-update shape, or
+# any marker — a marker is prose anyone can write (#9548).
+#
+# CI IS NOT EXEMPTED by any of them. Only the *review* carries over; every
+# required check still re-runs against the new head, because the base really did
+# move. This guard touches no check and no auto-merge arm on the FRESH path.
+#
+# THE COMPARISON IS NOT IMPLEMENTED HERE, for the same reason the #8900 disarm
+# below is not: it already existed in loom-daemon (#9124 taught the daemon's
+# periodic `reconcile_pr_verdicts` pass this exemption), and a second copy in
+# shell is what `.loom/docs/shell-language-policy.md` forbids. That divergence
+# is exactly the bug #9576 reports — this guard had NO tree comparison at all
+# while the daemon did, so PRs #9541 and #9483 lost `loom:pr` here to a re-date
+# commit the daemon pass would have kept, on a host already running #9124.
+#
+# FAIL CLOSED, VISIBLY: only a literal `EQUIVALENCE_KIND=<kind>` line suppresses
+# the invalidation; when the verb could not answer, its one-line `Why:` (e.g. an
+# unfetchable head commit) is carried into the STALE REASON (#10134). An absent binary, one predating the verb (clap exits non-zero
+# with nothing on stdout), a `gh` outage, a non-GitHub forge, a shallow clone, a
+# missing git object, a `merge-tree` conflict, an unparsable compare, or either
+# kill switch all leave the answer empty and the verdict reads STALE exactly as
+# it did before #9576 — the same fail-open-into-invalidation arm as the daemon's
+# own `Indeterminate`.
+#
+# This guard does NOT re-anchor the marker to the new head when it takes that
+# exemption (the daemon's carve-out does, in-process). Anchoring is a comment
+# write and the marker prose lives in loom-daemon; the cost of not doing it is
+# one extra compare call per pass until the daemon's periodic pass re-anchors it
+# itself, which is strictly cheaper than a wrongly-cleared verdict.
+#
 # Usage:
 #   verdict-staleness-guard.sh <pr-number>            # report only
 #   verdict-staleness-guard.sh <pr-number> --clear     # report + act on STALE
@@ -88,6 +156,40 @@
 #     when present — those are findings about the OLD tree too
 #   - add `loom:review-requested` so a Judge picks the PR up again
 #   - post an auditable comment naming the old and new SHAs
+#   - DISARM the forge's server-side auto-merge queue if one is armed (#8900)
+#
+# The disarm (#8900) is not optional politeness — without it the label flip is
+# cosmetic. An armed GitHub auto-merge is gated ONLY by the branch ruleset's
+# REQUIRED checks: it never re-reads `loom:pr`, never notices this very
+# clearing, never waits for a non-required suite, and never runs merge-pr.sh's
+# own merge-time gates (including the #8248 required-check freshness guard,
+# which lives inside that script). So a PR whose verdict this guard had just
+# invalidated still merged, unreviewed, the moment required checks went green on
+# the new head: #8694 merged as 528f2971 on 2026-09-25, three minutes after a
+# Doctor rebase force-push, still labeled `loom:review-requested`, with no
+# approval at the merged head; #8847 and #8843 merged ~2 minutes after
+# `gh pr update-branch` moved their heads.
+#
+# THE DISARM IS NOT IMPLEMENTED HERE. It is one call to
+# `loom-daemon forge disable-auto-merge <pr> --audit-comment --hold <label>`,
+# which reads the arm state, sends `disablePullRequestAutoMerge` only when
+# something is actually armed, and posts its own audit comment recording what it
+# did (silent when nothing was armed). The first draft of #8900 mirrored that
+# mutation inline here in `gh api graphql` plus two comment bodies; review
+# rejected it (PR #8990) as exactly the new portable shell
+# `.loom/docs/shell-language-policy.md` forbids — new executable logic is a
+# loom-daemon subcommand — and the shell-budget ratchet refused the PR outright.
+# Do NOT reintroduce an inline mutation "as a fallback for hosts without
+# loom-daemon": that duplication is the thing that was rejected. A host that
+# cannot resolve the binary gets AUTO_MERGE_DISARMED=0 and a named failure in
+# REASON, which is loud, plus the daemon's own periodic
+# `claim_reconciliation` backstop for the non-held cases.
+#
+# The disarm runs BEFORE the comment and the label flip. That is the safest of
+# the three possible orders: disarming can only PREVENT a merge, never cause
+# one, so going first shrinks the window in which the queued merge could still
+# fire, and a later comment/label failure leaves the PR disarmed with its
+# verdict intact — strictly safer than the pre-#8900 behavior either way.
 #
 # With --anchor, an UNVERIFIABLE verdict is remediated rather than merely
 # reported (#6319): the guard posts a comment carrying the marker the verdict
@@ -116,10 +218,21 @@
 #
 # --clear is suppressed (DECISION stays STALE, CLEARED=0) when the PR carries
 # an explicit hold label — `loom:blocked`, `loom:operator`, or
-# `loom:operator-only`. Those mark a PR a human (or Champion's capped-PR
+# `loom:frozen` (the three holds, #11795). Those mark a PR a human (or Champion's capped-PR
 # recovery pass) deliberately took out of automated flow; silently re-queueing
 # it for review would undo that decision. Callers must still treat the verdict
 # as untrustworthy: STALE is STALE whether or not it was cleared.
+#
+# The #8900 auto-merge disarm is deliberately NOT suppressed by a hold label.
+# Every other write this guard makes could undo an operator's decision; the
+# disarm is the one that ENFORCES it. A held PR with an armed auto-merge merges
+# anyway the moment required checks pass — `loom:operator` means "the engine
+# stops acting", and Champion's merge-risk hold applies it specifically to stop
+# a merge, so leaving the forge's own queue armed defeats the hold entirely.
+# Disarming can only prevent a merge, so it cannot be the write that undoes a
+# hold. `--hold "$HOLD_LABEL"` is passed through to the subcommand so its audit
+# comment can say why a parked PR was written to at all; a held PR with nothing
+# armed still collects no comment and no write, exactly as before.
 #
 # Output (stdout — one KEY=VALUE per line, machine-parseable):
 #   DECISION=NOT_OPEN|NO_VERDICT|UNVERIFIABLE|ANCHORED|FRESH|STALE
@@ -129,14 +242,23 @@
 #   MARKER_SHA=<sha the verdict was recorded against, or "">
 #   CLEARED=0|1
 #   ANCHORED=0|1
+#   AUTO_MERGE_DISARMED=0|1   (#8900 — 1 only when a queued server-side
+#                              auto-merge was actually found armed AND
+#                              successfully disabled on this run. 0 covers
+#                              "nothing was armed", "the disarm failed", and
+#                              "loom-daemon could not be resolved"; the latter
+#                              two are named in REASON.)
 #
 # Exit codes:
 #   0  = FRESH (verdict is valid for the current head — safe to act on)
 #   10 = NO_VERDICT (no terminal verdict label on this PR)
-#   11 = UNVERIFIABLE (verdict present, no marker — fail safe, verdict kept)
-#   12 = STALE (verdict invalidated by a head-SHA move)
+#   11 = UNVERIFIABLE (verdict present, no marker — fail safe, verdict kept;
+#        on a loom:pr only when markers could not be authenticated: not mergeable)
+#   12 = STALE (verdict invalidated by a head-SHA move, or an approval with no
+#        trusted marker at all — #9258, see 3c)
 #   13 = ANCHORED (was UNVERIFIABLE; --anchor stamped a marker at the current
-#        head, so it is invalidatable from here on. Labels untouched.)
+#        head, so it is invalidatable from here on. Labels untouched.
+#        loom:changes-requested only, #9258.)
 #   14 = NOT_OPEN (PR is merged or closed — nothing was read past the PR's own
 #        state and nothing was written. NOT an error: it means "this PR is
 #        finished, there is no verdict left to act on". Callers that already
@@ -198,6 +320,16 @@ for bin in gh jq; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: '$bin' not found on PATH" >&2; exit 1; }
 done
 
+# Loom writes only to repos it manages (#9548). --clear/--anchor are vetted
+# once, up front: a refusal turns them into a report-only run (the REASON says
+# why) and every write below names the vetted repo explicitly, so gh's
+# preference for an `upstream` remote can never redirect one.
+# The helper prints only the repo on success and only the reason on failure,
+# so one capture serves both. forge-helpers.sh is sourced in the subshell
+# because it turns on `set -e`, which this script does not run under.
+WRITE_REPO="" WRITE_BLOCK=""
+if [[ "$CLEAR" -eq 1 || "$ANCHOR" -eq 1 ]] && ! WRITE_REPO="$(source "$(dirname "${BASH_SOURCE[0]:-$0}")/lib/forge-helpers.sh" && loom_write_repo "${LOOM_REPO:-}" 2>&1)"; then WRITE_BLOCK="loom-daemon forge may-write: $(printf '%s' "$WRITE_REPO" | tr '\n' ' ')"; WRITE_REPO=""; CLEAR=0; ANCHOR=0; fi
+
 # The two terminal verdict labels and the marker `verdict=` token each one is
 # recorded under. Kept as parallel lookups rather than one map so this stays
 # POSIX-ish bash 3.2 compatible (macOS ships bash 3.2 — no associative arrays).
@@ -213,12 +345,19 @@ emit() {
   local decision="$1" reason="$2" head_sha="$3" verdict_label="$4" marker_sha="$5" cleared="$6"
   local anchored="${7:-0}"
   echo "DECISION=$decision"
-  echo "REASON=$reason"
+  echo "REASON=$reason${WRITE_BLOCK:+; --clear/--anchor suppressed, $WRITE_BLOCK}"
   echo "HEAD_SHA=$head_sha"
   echo "VERDICT_LABEL=$verdict_label"
   echo "MARKER_SHA=$marker_sha"
   echo "CLEARED=$cleared"
   echo "ANCHORED=$anchored"
+  # Read from the global rather than an 8th positional arg (#8900): every
+  # existing emit() call site keeps its signature, and the value is the same for
+  # whichever emit() ends up firing. Unset on every path that returns before
+  # step 5 (report-only, FRESH, NO_VERDICT, NOT_OPEN, UNVERIFIABLE), which is
+  # exactly the paths on which no disarm was attempted, so the `:-0` default
+  # states the truth rather than papering over one.
+  echo "AUTO_MERGE_DISARMED=${AUTO_MERGE_DISARMED:-0}"
 }
 
 # Keep `gh`'s stdout (the JSON we parse) and stderr SEPARATE. `gh` writes
@@ -257,10 +396,15 @@ has_label() { printf '%s\n' "$LABELS" | grep -qx -- "$1"; }
 # The explicit-hold labels: a PR an operator (or Champion's capped-PR recovery
 # pass) deliberately took out of automated flow. Echoes the first one present,
 # or nothing. Shared by --clear (step 5) and --anchor (step 3b) so the two
-# write paths can never disagree about what "parked" means.
+# write paths can never disagree about what "parked" means. The set is the
+# registry's holds plus the retired names `labels migrate` has not moved yet
+# (#11795; #11843 drops --with-retired). The fallback (missing or older daemon)
+# is pinned by label_literal_guard.rs between the registry's `park` and `hold`
+# properties.
 hold_label() {
   local held
-  for held in "loom:blocked" "loom:operator" "loom:operator-only"; do
+  # requires-daemon: labels optional   a missing or older binary takes the fallback list
+  for held in $("${LOOM_DAEMON_BIN:-loom-daemon}" labels list --property hold --with-retired 2>/dev/null || echo loom:blocked loom:operator loom:frozen loom:operator-only loom:operator-decision loom:operator-mechanical loom:operator-blocked loom:needs-capability); do
     if has_label "$held"; then echo "$held"; return 0; fi
   done
   echo ""
@@ -331,18 +475,42 @@ VERDICT_TOKEN="$(verdict_token_for_label "$VERDICT_LABEL")"
 # (default per_page=30, oldest-first), so on a long-running PR the verdict
 # marker — always among the NEWEST comments — would never be seen and every
 # verdict would read as UNVERIFIABLE.
+# Plain `gh`, never gh-cached (docs/gh-cached.md policy "verdict-time CAS
+# rechecks", #9953): the guard exists to observe writes landing within the TTL.
 COMMENTS_JSON="$(gh api "repos/{owner}/{repo}/issues/$PR/comments" --paginate 2>"$GH_STDERR")" || {
   echo "ERROR: 'gh api .../issues/$PR/comments --paginate' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   exit 1
 }
+
+# #9548: a marker counts only from a TRUSTED author — a repo insider by
+# author_association, one of this fleet's Apps, this daemon's own identity, or
+# forge.trustedCommenters. Anyone can post a well-formed marker on a public
+# repo, and another Loom fleet's markers are not ours; an untrusted marker is
+# prose and reads exactly as if it were absent (so it can neither vouch for a
+# verdict nor invalidate one). The predicate lives in the daemon
+# (`loom-daemon forge trusted-comments`, loom-daemon/src/comment_trust.rs);
+# this script owns none of it. If the filter cannot run, EVERY marker is
+# treated as absent: the verdict reads UNVERIFIABLE (never FRESH on
+# unauthenticated markers) and --anchor is suppressed, since anchoring an
+# unverified verdict to the current head would itself mint a FRESH marker.
+# requires-daemon: forge optional   Without the `trusted-comments` verb (an absent binary, or one predating #9548: clap exits 2 with nothing on stdout) every marker counts as absent, so the verdict reads UNVERIFIABLE with the cause named in REASON and --anchor does not post. No version floor on purpose: the degraded answer is the fail-safe one.
+RAW_COMMENTS_JSON="$COMMENTS_JSON"
+COMMENTS_JSON="$("${LOOM_DAEMON_BIN:-loom-daemon}" forge trusted-comments <<<"$COMMENTS_JSON" 2>/dev/null)" && TRUSTED=1 || { COMMENTS_JSON='[]'; TRUSTED=0; }
 
 # One "<created_at>\t<sha>" line per matching marker, oldest first (matches
 # --paginate's page order). `test(...)` guards `capture(...)` so a non-matching
 # body is filtered out via `select` rather than raising a per-item jq error.
 # A short (abbreviated) SHA is accepted defensively but never emitted by the
 # roles, which always stamp the full `headRefOid`.
-MARKER_TEST="<!-- loom:verdict-sha sha=[0-9a-f]{7,40} verdict=$VERDICT_TOKEN -->"
-MARKER_CAPTURE="<!-- loom:verdict-sha sha=(?<sha>[0-9a-f]{7,40}) verdict=$VERDICT_TOKEN -->"
+# Readers are lenient about the verdict spelling (a hand-posted or in-session
+# marker may say `approve` / `request-changes`); writers stay canonical.
+case "$VERDICT_TOKEN" in
+  approved) VERDICT_ALT='approved|approve' ;;
+  changes-requested) VERDICT_ALT='changes-requested|request-changes' ;;
+  *) VERDICT_ALT="$VERDICT_TOKEN" ;;
+esac
+MARKER_TEST="<!-- loom:verdict-sha sha=[0-9a-f]{7,40} verdict=($VERDICT_ALT) -->"
+MARKER_CAPTURE="<!-- loom:verdict-sha sha=(?<sha>[0-9a-f]{7,40}) verdict=($VERDICT_ALT) -->"
 MARKER_LINES="$(jq -r --arg t "$MARKER_TEST" --arg c "$MARKER_CAPTURE" '
   .[]
   | select(.body != null and (.body | test($t)))
@@ -350,13 +518,24 @@ MARKER_LINES="$(jq -r --arg t "$MARKER_TEST" --arg c "$MARKER_CAPTURE" '
   | @tsv
 ' <<<"$COMMENTS_JSON" 2>/dev/null || true)"
 
-MARKER_SHA=""
-if [[ -n "$MARKER_LINES" ]]; then
-  MARKER_SHA="$(tail -n 1 <<<"$MARKER_LINES" | cut -f2)"
-fi
+# Newest marker wins (the lines are oldest-first). The `-n "$MARKER_LINES"`
+# guard this used to carry was redundant — `tail -n 1` of the empty string is an
+# empty line and `cut -f2` of an empty line is empty, so MARKER_SHA comes out ""
+# either way, which is the value the UNVERIFIABLE branch below keys on. Dropping
+# it pays for the three lines the #8900 disarm delegation adds above, per option
+# 2 of the shell-budget gate's own remedies ("remove portable shell elsewhere in
+# the same change to pay for it"); cases (g)/(h)/(i) cover the no-marker path.
+MARKER_SHA="$(tail -n 1 <<<"$MARKER_LINES" | cut -f2)"
 
-if [[ -z "$MARKER_SHA" ]]; then
-  UNVERIFIABLE_REASON="verdict label $VERDICT_LABEL present but no <!-- loom:verdict-sha ... verdict=$VERDICT_TOKEN --> marker found (marker never written) — failing safe, verdict kept"
+# #9258: an APPROVAL with no trusted marker is STALE, not UNVERIFIABLE — never
+# anchored (3b would launder an approval posted at SHA A into a FRESH one at B),
+# never merged, and re-queued by --clear (step 5). post-verdict.sh marks every
+# verdict, so a markerless loom:pr bypassed it. Only when markers could be read
+# (TRUSTED=1); a markerless loom:changes-requested still takes 3/3b below.
+[[ -z "$MARKER_SHA" && "$VERDICT_TOKEN" == approved && "$TRUSTED" -eq 1 ]] && UNANCHORED_MARKER="<!-- loom:verdict-stale unanchored head=$HEAD_SHA -->" STALE_TITLE="Approval re-queued — it carried no verdict-sha marker; re-review required"
+if [[ -z "$MARKER_SHA" && -z "${UNANCHORED_MARKER:-}" ]]; then
+  UNVERIFIABLE_REASON="verdict label $VERDICT_LABEL present but no <!-- loom:verdict-sha ... verdict=$VERDICT_TOKEN --> marker from a trusted author found — failing safe, verdict kept"
+  [[ "$TRUSTED" -eq 1 ]] || UNVERIFIABLE_REASON="$UNVERIFIABLE_REASON; markers could not be authenticated (loom-daemon forge trusted-comments unavailable), so every marker was treated as absent and --anchor is suppressed (#9548)"
 
   # --- Step 3b: UNVERIFIABLE — optionally anchor to the current head (#6319) -
   # Note the asymmetry with --clear below, and that it is deliberate: this
@@ -364,7 +543,7 @@ if [[ -z "$MARKER_SHA" ]]; then
   # re-queue anything. It only makes the standing verdict checkable from here
   # on. Without it the verdict stays permanently unverifiable and keeps the
   # full pre-#5686 hazard for as long as the label sits there.
-  if [[ "$ANCHOR" -eq 1 ]]; then
+  if [[ "$ANCHOR" -eq 1 && "$TRUSTED" -eq 1 ]]; then
     HOLD_LABEL="$(hold_label)"
     if [[ -n "$HOLD_LABEL" ]]; then
       emit "UNVERIFIABLE" "$UNVERIFIABLE_REASON; anchor suppressed — PR is on an explicit $HOLD_LABEL hold" \
@@ -372,7 +551,7 @@ if [[ -z "$MARKER_SHA" ]]; then
       exit 11
     fi
 
-    gh pr comment "$PR" --body "<!-- loom:verdict-sha sha=$HEAD_SHA verdict=$VERDICT_TOKEN -->
+    gh pr comment "$PR" --repo "$WRITE_REPO" --body "<!-- loom:verdict-sha sha=$HEAD_SHA verdict=$VERDICT_TOKEN -->
 **Verdict anchored to the current head — no marker had been recorded**
 
 This PR carries \`$VERDICT_LABEL\`, but no verdict-SHA marker was ever written for that verdict, so it was **unverifiable**: nothing could tell whether it still described the tree in front of it, and it would have survived a force-push undetected — the exact pre-#5686 hazard.
@@ -402,19 +581,69 @@ fi
 # --- Step 4: fresh or stale? ------------------------------------------------
 # Compare on the marker's own length so a legitimately abbreviated marker SHA
 # still matches the full head SHA it prefixes (the roles stamp full SHAs; this
-# only guards a hand-written or truncated marker).
-if [[ "${HEAD_SHA:0:${#MARKER_SHA}}" == "$MARKER_SHA" ]]; then
-  emit "FRESH" "verdict $VERDICT_LABEL was rendered against the current head SHA" \
-    "$HEAD_SHA" "$VERDICT_LABEL" "$MARKER_SHA" 0
+# only guards a hand-written or truncated marker). That string compare is the
+# first arm on purpose: it is the common case and needs no binary, no network
+# and no forge, so a host that cannot resolve loom-daemon still reads FRESH
+# normally and only loses the #9576 exemption.
+#
+# The second arm delegates whole to `loom-daemon forge verdict-equivalent`
+# (loom-daemon/src/verdict_equivalence/) — the SAME function the daemon's
+# periodic pass calls in-process, so the two can no longer disagree. It prints
+# VERDICT_EQUIVALENT=1 plus EQUIVALENCE_KIND=<kind> and exits 0 when the verdict
+# carries, VERDICT_EQUIVALENT=0 and exits 0 when it provably does not; anything
+# else (exit 1, an absent binary, a daemon predating the verb,
+# LOOM_VERDICT_TREE_CARVEOUT or LOOM_VERDICT_EQUIVALENCE switched off — the verb
+# evaluates both kill switches itself) leaves EQUIVALENCE_KIND empty, which falls
+# through to STALE. The verb supersedes `forge tree-unchanged` here: it asks that
+# same tree-identical test FIRST and then the two #9416 kinds, so this arm can
+# never be less permissive than it was before #9416. See the header for why every
+# non-affirmative answer is fail-closed.
+# requires-daemon: forge optional   Without the `verdict-equivalent` verb (an absent binary, or one predating #9416: clap exits non-zero with nothing on stdout) an equivalent head move reads STALE — the pre-#9576 behavior, which only ever costs a redundant Judge cycle. No version floor on purpose: the degraded answer is the fail-safe one.
+FRESH_REASON=""
+if [[ -n "$MARKER_SHA" && "${HEAD_SHA:0:${#MARKER_SHA}}" == "$MARKER_SHA" ]]; then
+  FRESH_REASON="verdict $VERDICT_LABEL was rendered against the current head SHA"
+elif [[ -n "$MARKER_SHA" ]]; then
+  EQUIV_KIND="$("${LOOM_DAEMON_BIN:-loom-daemon}" forge verdict-equivalent "$PR" "$MARKER_SHA" "$HEAD_SHA" 2>"$GH_STDERR" | sed -n 's/^EQUIVALENCE_KIND=//p')"
+  EQUIV_WHY="$(sed -n 's/.* Why: //p' "$GH_STDERR" | head -n 1)"; if [[ -n "$EQUIV_KIND" ]]; then
+    FRESH_REASON="verdict $VERDICT_LABEL was rendered against $MARKER_SHA and head is now $HEAD_SHA, but the change this PR makes is unchanged across the move (equivalence kind: $EQUIV_KIND) — so the verdict still describes it (#9576, #9416). CI still re-runs against $HEAD_SHA; only the review carries over."
+  fi
+fi
+
+if [[ -n "$FRESH_REASON" ]]; then
+  emit "FRESH" "$FRESH_REASON" "$HEAD_SHA" "$VERDICT_LABEL" "$MARKER_SHA" 0
   exit 0
 fi
 
 # --- Step 5: STALE — optionally clear + re-queue -----------------------------
 CLEARED=0
-REASON="verdict $VERDICT_LABEL was rendered against $MARKER_SHA but head is now $HEAD_SHA"
+REASON="verdict $VERDICT_LABEL was rendered against ${MARKER_SHA:-no recorded tree (no trusted verdict-sha marker: post-verdict.sh always writes one, so the mechanism was bypassed; never anchored or merged, #9258)} but head is now $HEAD_SHA${EQUIV_WHY:+; equivalence could not be checked, failing closed (#10134): $EQUIV_WHY}"
 
 if [[ "$CLEAR" -eq 1 ]]; then
   HOLD_LABEL="$(hold_label)"
+
+  # #8900: stand down the forge's queued server-side merge BEFORE the comment
+  # and the label flip, and before the hold branch below — the disarm is the one
+  # write a hold does NOT suppress (see the header). Delegated whole to
+  # `loom-daemon forge disable-auto-merge`, which reads the arm state, mutates
+  # only when something is armed, and posts its own audit comment; this guard
+  # deliberately owns none of that logic (header: "THE DISARM IS NOT IMPLEMENTED
+  # HERE"). `--hold` is passed unconditionally — the subcommand reads an empty
+  # value as "not held" — so no conditional argument assembly is needed.
+  #
+  # The binary is probed through ${LOOM_DAEMON_BIN:-loom-daemon}, the first two
+  # tiers of lib/locate-daemon-bin.sh's own precedence (explicit override, then
+  # $PATH). The full resolver is NOT sourced here on purpose: it would add more
+  # portable shell to this `contract`-category script than the whole delegation
+  # does, which the shell-budget ratchet refuses.
+  #
+  # stderr is deliberately NOT redirected — a failed disarm must reach the
+  # caller's stderr, not a temp file nobody reads. An unresolvable binary or a
+  # failed mutation leaves this empty, which emit() reports as
+  # AUTO_MERGE_DISARMED=0 and the next line names in REASON.
+  #
+  # requires-daemon: forge optional   The guard probes with `command -v` first and degrades to AUTO_MERGE_DISARMED=0 with the failure named in REASON — an absent binary, and equally a resolved binary predating `disable-auto-merge` or its `--audit-comment`/`--hold` flags (clap exits non-zero with nothing on stdout), both land in that same branch. No version floor is declared on purpose: every other write this guard makes is unaffected, so refusing the whole stale-verdict clear over a missing disarm would trade the #5686 hazard back for the #8900 one (#8900/#8990).
+  AUTO_MERGE_DISARMED="$(command -v "${LOOM_DAEMON_BIN:-loom-daemon}" >/dev/null 2>&1 && "${LOOM_DAEMON_BIN:-loom-daemon}" forge disable-auto-merge "$PR" --audit-comment --hold "$HOLD_LABEL" | sed -n 's/^DISARMED=//p')"
+  REASON="$REASON; auto-merge DISARMED=${AUTO_MERGE_DISARMED:-FAILED (could not resolve loom-daemon, or the disarm itself failed — a queued merge may still be armed; disarm it by hand)}"
 
   if [[ -n "$HOLD_LABEL" ]]; then
     REASON="$REASON; clear suppressed — PR is on an explicit $HOLD_LABEL hold"
@@ -423,34 +652,13 @@ if [[ "$CLEAR" -eq 1 ]]; then
     # don't post a second comment (a Judge pass and the daemon backstop can
     # both notice the same move). The label writes below are idempotent on
     # their own, so this only guards comment spam on a partial-failure retry.
-    STALE_MARKER="<!-- loom:verdict-stale from=$MARKER_SHA to=$HEAD_SHA -->"
+    STALE_MARKER="${UNANCHORED_MARKER:-<!-- loom:verdict-stale from=$MARKER_SHA to=$HEAD_SHA -->}"
     ALREADY_ANNOUNCED="$(jq -r --arg m "$STALE_MARKER" \
       '[.[] | select(.body != null and (.body | contains($m)))] | length' \
       <<<"$COMMENTS_JSON" 2>/dev/null || echo 0)"
 
-    if [[ "${ALREADY_ANNOUNCED:-0}" -eq 0 ]]; then
-      gh pr comment "$PR" --body "$STALE_MARKER
-**Stale review verdict cleared — head SHA moved**
-
-This PR's \`$VERDICT_LABEL\` verdict was rendered against \`$MARKER_SHA\`, but the current head is \`$HEAD_SHA\`. A review verdict is a statement about a specific tree, so it does not survive a rebase, a force-push, or new commits.
-
-- Verdict cleared: \`$VERDICT_LABEL\` (recorded for \`$MARKER_SHA\`)
-- Returned to the review queue: \`loom:review-requested\` (current head \`$HEAD_SHA\`)
-
-Judge will re-evaluate the tree that is actually here now. No judgment about the new tree is implied either way — the old verdict simply no longer describes it.
-
----
-*Automated by verdict-staleness-guard.sh (#5686)*" >/dev/null 2>"$GH_STDERR" || {
-        echo "ERROR: failed to post stale-verdict comment on PR #$PR: $(cat "$GH_STDERR" 2>/dev/null)" >&2
-        emit "STALE" "$REASON; comment failed, labels left untouched" \
-          "$HEAD_SHA" "$VERDICT_LABEL" "$MARKER_SHA" 0
-        exit 1
-      }
-    fi
-
-    # Comment first, then labels — the same ordering the roles use for their
-    # own verdict writes, so the audit trail can never show a label flip with
-    # no explanation attached.
+    # Labels first, then the comment (#10601) — the announcement claims a
+    # state change, so it is only posted after the flip is verified (below).
     #
     # Strip BOTH terminal verdict labels here, not just the one this pass
     # detected as stale ($VERDICT_LABEL) — issue #7018. current_verdict_label()
@@ -464,18 +672,32 @@ Judge will re-evaluate the tree that is actually here now. No judgment about the
     # (see champion-issue-promo.md's Pass 0b race-safety note), so it is safe
     # to always request removal of both regardless of which one is actually
     # on the PR.
-    EDIT_ARGS=(--add-label "loom:review-requested")
-    for verdict in "loom:pr" "loom:changes-requested"; do
-      EDIT_ARGS+=(--remove-label "$verdict")
-    done
+    EDIT_ARGS=(--add-label "loom:review-requested" --remove-label "loom:pr" --remove-label "loom:changes-requested")
     for companion in "loom:ci-failure" "loom:merge-conflict"; do
       if has_label "$companion"; then
         EDIT_ARGS+=(--remove-label "$companion")
       fi
     done
-    if gh pr edit "$PR" "${EDIT_ARGS[@]}" >/dev/null 2>"$GH_STDERR"; then
+    if gh pr edit "$PR" --repo "$WRITE_REPO" "${EDIT_ARGS[@]}" >/dev/null 2>"$GH_STDERR"; then
       CLEARED=1
       REASON="$REASON; cleared and re-queued as loom:review-requested"
+    if [[ "${ALREADY_ANNOUNCED:-0}" -eq 0 ]]; then
+      # #9709: the notice is rendered by the daemon's own template (`forge
+      # verdict-stale-notice`), so the two stale-clear paths cannot drift. It is
+      # fed the RAW listing: when a newer marker was dropped as untrusted, the
+      # notice names its login + author_association and forge.trustedCommenters
+      # instead of asserting a head move that may not have happened.
+      # requires-daemon: forge optional   Without the `verdict-stale-notice` verb (a binary predating #9709: clap exits non-zero with nothing on stdout) the one-line fallback below is posted — same stale marker, so dedup holds; only the #9709 attribution is lost. No version floor: the clear itself is unaffected.
+      STALE_BODY="$("${LOOM_DAEMON_BIN:-loom-daemon}" forge verdict-stale-notice --label "$VERDICT_LABEL" --marker-sha "$MARKER_SHA" --head-sha "$HEAD_SHA" <<<"$RAW_COMMENTS_JSON" 2>/dev/null)"
+      [[ "$STALE_BODY" == "$STALE_MARKER"* ]] || STALE_BODY="$STALE_MARKER
+**${STALE_TITLE:-Stale review verdict cleared — head SHA moved}**: \`$VERDICT_LABEL\` was rendered against \`${MARKER_SHA:-no recorded tree}\`, head is now \`$HEAD_SHA\`; returned to \`loom:review-requested\`. *Automated by verdict-staleness-guard.sh (#5686)*"
+      if ! gh pr comment "$PR" --repo "$WRITE_REPO" --body "$STALE_BODY" >/dev/null 2>"$GH_STDERR"; then
+        # The flip already happened and the label state is the source of truth:
+        # report it, do not revert (#10601).
+        echo "ERROR: failed to post stale-verdict comment on PR #$PR (labels already flipped): $(cat "$GH_STDERR" 2>/dev/null)" >&2
+        REASON="$REASON; announcement comment failed"
+      fi
+    fi
     else
       echo "ERROR: failed to clear $VERDICT_LABEL on PR #$PR: $(cat "$GH_STDERR" 2>/dev/null)" >&2
       emit "STALE" "$REASON; label clear failed" \

@@ -27,7 +27,7 @@
 # Strategy (mirrors test-merge-pr-loom-pr-label-guard.sh): extract
 # _check_verdict_label_contradiction from the real merge-pr.sh source and
 # source it, driving the REAL `loom-daemon merge-pr verdict-contradiction`
-# behind it (no stub — its logic is pure string matching with no forge calls),
+# behind it (no stub, except a stubbed `gh` for the #11330 section),
 # then assert on exit code + emitted message. The guard calls `error` (which `exit 1`s), so it is always
 # invoked inside a command-substitution subshell.
 #
@@ -44,27 +44,8 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 MERGE_PR_SRC="$HELPERS_DIR/merge-pr.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
@@ -124,7 +105,9 @@ loom_test_require_daemon_bin "$HELPERS_DIR" "merge-pr"
 # command, and every `# requires-daemon:` marker comment — that function reads
 # the floor back out of ${BASH_SOURCE[0]}, i.e. out of THIS extracted file, so
 # the markers have to travel with it or the refusal degrades to
-# `<undeclared>` here while production says 0.19.172.
+# `<undeclared>` here while production names whatever version the marker
+# declares. Deliberately not quoting that version: it MOVES (#8967 raised it
+# from 0.19.172 to 0.19.465), and a number pinned in prose here just goes stale.
 FUNCS_FILE="$(mktemp)"
 trap 'rm -f "$FUNCS_FILE" 2>/dev/null || true' EXIT
 awk '
@@ -238,6 +221,90 @@ PR_HEAD_SHA="deadbeef"
 run_guard
 assert_eq "1" "$LAST_RC" "loom:pr + loom:review-requested -> merge hard-blocked (exit 1)"
 assert_contains "$LAST_OUT" "loom:review-requested" "Block message names loom:review-requested"
+
+# T10 (#9016): the critical-file-hold release path, end to end through this
+# guard. Champion's criterion-#3 hold keeps `loom:pr` and adds `loom:operator`,
+# and its documented human path is "remove the label, then run merge-pr.sh".
+# Before #9016 Champion re-added the label on its next tick, so the operator's
+# second command hit T4's block again (merge train #8996: the label was back
+# 1m42s later). The Champion-side fix is head-scoped and lives in
+# champion-critical-file-hold.md; what has to be true HERE is that the release
+# actually opens the merge, and that it opens it for NOTHING ELSE.
+DRY_RUN=false
+PR_HEAD_SHA="c0ffee1"
+PR_LABELS=$'loom:pr\nloom:operator\nloom:operator-priority'
+run_guard
+assert_eq "1" "$LAST_RC" "#9016: while the critical-file hold's loom:operator is on, the merge is still refused"
+
+# The operator's release: the label is gone, `loom:pr` (Judge's approval of this
+# head) stays. No flag, no bypass — the contradiction is simply no longer there.
+# loom:operator-priority (#9244) rides along to prove the release is an EXACT
+# match on loom:operator, never a prefix match on the operator's star.
+PR_LABELS=$'loom:pr\nloom:operator-priority'
+run_guard
+assert_eq "0" "$LAST_RC" "#9016: once the operator removes loom:operator, merge-pr.sh passes this guard with no override flag"
+assert_not_contains "$LAST_OUT" "Merge blocked" "#9016: a released critical-file hold produces no block message"
+
+# And the release is scoped to that one label: a genuine Judge rejection racing
+# an approval is exactly as fatal as it was, with or without a hold label in the
+# set. This is #8112's property, which #9016 must not have weakened.
+PR_LABELS=$'loom:pr\nloom:changes-requested'
+run_guard
+assert_eq "1" "$LAST_RC" "#9016 does not weaken #8112: loom:pr + loom:changes-requested is still a hard block"
+PR_LABELS=$'loom:pr\nloom:changes-requested\nloom:operator-priority'
+run_guard
+assert_eq "1" "$LAST_RC" "#9016 does not weaken #8112: a rejection blocks even with loom:operator absent"
+assert_contains "$LAST_OUT" "loom:changes-requested" "#9016: the rejection is still the named blocker"
+
+# --- #11330: a sequencing hold is retryable (exit 7), not a failure ---------
+#
+# loom:pr + loom:sequenced (and no other blocker) means "approved, landing
+# after another PR" — re-queue, never a failure comment. The guard prints the
+# stable `LOOM-SEQUENCED-HOLD pr=<N> after=<M>` token and exits 7; `after` is
+# read from the PR's trusted `loom:sequence` marker through a STUBBED forge
+# (LOOM_GH_BIN), so no real API call is made.
+echo ""
+echo "Testing the #11330 sequencing-hold exit..."
+SEQ_DIR="$(mktemp -d)"
+trap 'rm -rf "$FUNCS_FILE" "$SEQ_DIR" 2>/dev/null || true' EXIT
+SHA_A="$(printf 'a%.0s' {1..40})"; SHA_B="$(printf 'b%.0s' {1..40})"
+cat > "$SEQ_DIR/gh" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$SEQ_DIR/gh-argv"
+printf '[{"body":"<!-- loom:sequence after=111 pred_head=$SHA_A follower_head=$SHA_B plan=p1 -->","author_association":"OWNER","user":{"login":"op","type":"User"}}]\n'
+STUB
+chmod +x "$SEQ_DIR/gh"
+export LOOM_GH_BIN="$SEQ_DIR/gh"
+REPO_NWO="o/r"
+DRY_RUN=false
+PR_LABELS=$'loom:pr\nloom:sequenced'
+run_guard
+assert_eq "7" "$LAST_RC" "loom:pr + loom:sequenced -> held, exit 7 (re-queue, not a failure)"
+assert_contains "$LAST_OUT" "LOOM-SEQUENCED-HOLD pr=8076 after=111" "the hold token names the PR and its predecessor"
+assert_contains "$LAST_OUT" "Exiting 7" "the hold says it is exiting 7"
+assert_contains "$(cat "$SEQ_DIR/gh-argv" 2>/dev/null)" "repos/o/r/issues/8076/comments" "after= came from the stubbed forge"
+
+# A second blocker beside the hold is still a real refusal: once the
+# predecessor lands the PR stays blocked, so re-queueing would loop.
+PR_LABELS=$'loom:pr\nloom:sequenced\nloom:changes-requested'
+run_guard
+assert_eq "1" "$LAST_RC" "loom:sequenced + loom:changes-requested -> still exit 1"
+assert_not_contains "$LAST_OUT" "LOOM-SEQUENCED-HOLD" "no hold token when another blocker is present"
+
+# --dry-run reports the would-be hold without exiting.
+DRY_RUN=true
+PR_LABELS=$'loom:pr\nloom:sequenced'
+run_guard
+assert_eq "0" "$LAST_RC" "--dry-run + sequencing hold -> exit 0"
+assert_contains "$LAST_OUT" "Would HOLD merge of PR #8076 (exit 7)" "--dry-run names the would-be exit 7"
+DRY_RUN=false
+
+# Without a repository (the opt-in a pre-#11330 caller never sends) the
+# verb keeps its old contract: exit 1, which the guard reports as a block.
+REPO_NWO=""
+run_guard
+assert_eq "1" "$LAST_RC" "no LOOM_SEQUENCED_HOLD_REPO opt-in -> the pre-#11330 exit 1"
+unset LOOM_GH_BIN REPO_NWO
 
 # --- FAILS CLOSED when the implementation behind the guard cannot run ---
 #

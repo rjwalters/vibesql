@@ -53,23 +53,17 @@ When you claim an issue and realize mid-work it requires >6 hours or touches >8 
 # 1. Create 2-5 focused sub-issues, each born at loom:triage -- applied
 #    atomically at creation (#5047), never a follow-up `gh issue edit
 #    --add-label`. A separate Curator pass produces loom:curated, and a
-#    human adds loom:issue; do NOT add loom:issue yourself to a sub-issue
-#    you just created -- that would skip both Curator review and the
-#    human-approval gate.
-./.loom/scripts/create-issue.sh --title "[Parent #812] Part 1: Core functionality" --body "..." --label "loom:triage"
-./.loom/scripts/create-issue.sh --title "[Parent #812] Part 2: Edge cases" --body "..." --label "loom:triage"
+#    human or Champion adds loom:issue; do NOT add loom:issue yourself to a sub-issue you just created
+#    -- that would skip both Curator review and the approval gate. --parent writes the loom:parent marker + native
+#    sub-issue link; priority labels are not inherited (#11103).
+./.loom/scripts/create-issue.sh --parent 812 --title "Part 1: Core functionality" --body "..." --label "loom:triage"
+./.loom/scripts/create-issue.sh --parent 812 --title "Part 2: Edge cases" --body "..." --label "loom:triage"
 # ... create remaining sub-issues ...
 
-# 2. Update parent issue explaining decomposition
-gh issue comment 812 --body "This issue is complex (>6 hours). Decomposed into:
-- #XXX: Part 1 (2 hours)
-- #YYY: Part 2 (1.5 hours)
-- #ZZZ: Part 3 (2 hours)"
-
-# 3. Mark the parent blocked — humans close it once children are filed.
-#    NEVER close a parent issue yourself; the decomposition comment above
-#    is the record, loom:blocked is the terminal state.
-gh issue edit 812 --remove-label "loom:building" --add-label "loom:blocked"
+# 2. Park the parent on its children: one body park record per child, then
+#    building -> blocked. NEVER close a parent yourself; humans close it once
+#    children are filed, and loom:blocked is the terminal state.
+loom-daemon park-record apply --issue 812 --blocked-by XXX,YYY,ZZZ --by builder --remove-label loom:building
 
 # Then exit and let the Curator/sweep pipeline pick up each sub-issue.
 ```
@@ -81,26 +75,19 @@ gh issue edit 812 --remove-label "loom:building" --add-label "loom:blocked"
 ```
 
 > **`loom:blocked` is the terminal state for a decomposition — not
-> `loom:operator-only` (#5819).** Size is not a routing signal: "this is too
+> `loom:operator` (#5819).** Size is not a routing signal: "this is too
 > big for one PR" is a `loom:blocked` parent with children filed, and the
-> pipeline picks it up again on its own. Reserve `loom:operator-only` for work
-> a *human* must act on (an authority a human alone holds, host or credential
-> access — not "requires judgement"). On the rare occasion you do apply it,
-> **never apply it alone** — add exactly one sub-kind in the same command
-> (`loom:operator-blocked` / `loom:operator-mechanical` /
-> `loom:operator-decision` / `loom:operator-objective`), e.g.
-> `gh issue edit 812 --remove-label "loom:building" --add-label "loom:operator-only,loom:operator-decision"`.
-> Being unsure which sub-kind fits means the analysis isn't finished — it is
-> **not** a reason to default to `loom:operator-decision` (#5826). Full rule,
-> including the machine-readable `Blocked by #N` line required with
-> `loom:operator-blocked`: `builder.md` → "Applying `loom:operator-only`".
+> pipeline picks it up again on its own. Reserve `loom:operator` for a
+> PO-level decision or a human-hands step (#10001), never "requires
+> judgement"; rule: `.loom/docs/label-state-machine.md` → "Routing to a
+> human".
 
 ### Sub-issue labeling (mirrors curator.md decomposition rule)
 
 When you create sub-issues during decomposition:
 
 1. **Label each sub-issue `loom:triage` only.** Do NOT apply `loom:issue`, `loom:curated`, or `loom:building` to a sub-issue you just created -- even if your decomposition includes acceptance criteria, file references, and scope guards.
-2. **Do NOT self-claim a sub-issue you just created in the same session.** A separate Curator pass must independently review it (-> `loom:curated`), and a human must promote it (-> `loom:issue`), before any Builder claims it.
+2. **Do NOT self-claim a sub-issue you just created in the same session.** A separate Curator pass must independently review it (-> `loom:curated`), and a human or Champion must promote it (-> `loom:issue`), before any Builder claims it.
 3. **Update the parent issue body or add a comment** with a "Decomposed sub-issues" section linking each child.
 4. **Do not close the parent yourself if you cannot complete it.** Mark `loom:blocked` with a comment explaining the decomposition; humans close once children are filed.
 
@@ -375,7 +362,7 @@ EOF
 
 **Step 3: Mark Parent Blocked (don't close a decomposition-parent yourself)**
 
-Record the decomposition in a comment, then move the parent to `loom:blocked`. A
+Park-record the children in the parent's body (step 2 of the recipe above), then move the parent to `loom:blocked`. A
 freshly-decomposed **parent** is a tracking issue for its children, so it is **not**
 a close candidate — a human (or Curator, per `curator.md` item 4) closes it once the
 children are filed and curated. This is the decomposition-parent exception, not a
@@ -384,17 +371,7 @@ with a rationale per `builder.md` → "Issues Are Suggestions" (or the `.no-chan
 marker under `/loom:sweep`).
 
 ```bash
-gh issue comment <parent-number> --body "$(cat <<'EOF'
-Decomposed into smaller sub-issues for incremental implementation:
-
-- #<phase1-number>: Phase 1 (1-2 hours)
-- #<phase2-number>: Phase 2 (2-3 hours)
-- #<phase3-number>: Phase 3 (1-2 hours)
-
-Each sub-issue references this parent for full context. Curator will enhance them with implementation details.
-EOF
-)"
-gh issue edit <parent-number> --remove-label "loom:building" --add-label "loom:blocked"
+loom-daemon park-record apply --issue <parent-number> --blocked-by <phase1>,<phase2>,<phase3> --by builder --remove-label loom:building
 ```
 
 ### Real-World Example
@@ -417,9 +394,8 @@ gh issue edit <parent-number> --remove-label "loom:building" --add-label "loom:b
 ./.loom/scripts/create-issue.sh --title "Add activity querying to /loom heuristic"
 # -> Issue #536 (1-2 hours, depends on #535)
 
-# Mark parent blocked — a human closes it once the children are curated
-gh issue comment 524 --body "Decomposed into #534, #535, #536"
-gh issue edit 524 --remove-label "loom:building" --add-label "loom:blocked"
+# Park the parent on its phases (body park records + label, as above)
+loom-daemon park-record apply --issue 524 --blocked-by 534,535,536 --by builder --remove-label loom:building
 ```
 
 **Benefits**:

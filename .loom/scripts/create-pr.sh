@@ -34,6 +34,31 @@
 #      403: force a fresh installation-token mint (bypassing the ~1h cache),
 #      then a personal token. See `forge_gh_perm_safe` in lib/forge-helpers.sh
 #      for the full ladder and why this is NOT the rate-limit fallback.
+#   4. 1:1 ISSUE-TO-PR REVIEW-GATE GUARD (#9453 phase 5). Immediately before
+#      creating a brand-new PR, re-run `loom-daemon forge check-open-pr` on
+#      the issue THIS PR's own body references (closing OR `Part of` /
+#      `Contributes to`). If that probe finds an open linked PR on a
+#      DIFFERENT head branch than ours, refuse -- a second builder racing the
+#      same issue on its own branch must stand down rather than push a
+#      competing PR into the same review pipeline (`loom:review-requested` /
+#      `loom:reviewing` / `loom:pr`). Same-head-branch adoption (#6074, item 1
+#      above) always takes precedence: it already returns 0 before this guard
+#      runs.
+#   5. RATE-LIMIT REST FALLBACK (#9226). `gh pr create` is GraphQL-backed, and
+#      GitHub's GraphQL and REST quotas are independent: a fleet can exhaust
+#      the GraphQL pool while REST sits idle, which used to leave a Builder's
+#      pushed branch with no PR. On -- and only on -- a rejection matching the
+#      shared five-signature table (`is_rate_limit_error`, lib/forge-helpers.sh,
+#      the same predicate create-issue.sh's #5047 fallback uses), the filing is
+#      retried as one `POST repos/OWNER/REPO/pulls` (JSON on stdin, never
+#      `-f body=@path`), then labels via `POST .../issues/N/labels` -- the pulls
+#      endpoint takes no labels. A label failure after a successful create
+#      still exits 0 with the URL (the PR exists; re-running would only adopt
+#      it) and names the unapplied labels on stderr.
+#   6. PRIORITY-LABEL COPY (#10518). The priority labels (`loom:important` /
+#      `loom:very-important`, #11103) of every issue the body closes are added
+#      to --label, so a caller passes only `loom:review-requested`. Never for
+#      `Part of #N`.
 #
 # Usage:
 #   create-pr.sh --title TITLE (--body BODY | --body-file PATH) \
@@ -55,14 +80,26 @@
 #   --draft, -d           Create as a draft.
 #   --repo, -R OWNER/REPO Target repository. Omit for the current repo.
 #
+# LOOM_WORK_ORIGIN=interactive explicitly records a human-driven session.
+# Autonomous launchers pin autonomous; unset/invalid values record unknown.
+# Existing PR adoption and existing body records preserve their original origin.
+#
 # Output: the PR's URL on stdout -- newly created OR adopted (identical to
 # `gh pr create`, so a caller parsing the URL needs no change).
 #
 # Exit codes:
-#   0 - A PR exists for this branch (created by this call, or adopted).
+#   0 - A PR exists for this branch (created by this call -- over GraphQL or
+#       the REST fallback -- or adopted).
 #   1 - Creation failed, or the target issue was already closed by a
 #       superseding PR (message on stderr in both cases).
 #   2 - Invalid arguments.
+#   6 - Refused: the issue this PR's body references (closing OR `Part of` /
+#       `Contributes to`) already has an open linked PR on a DIFFERENT head
+#       branch than ours (1:1 issue-to-PR review-gate guard, #9453 phase 5).
+#       Stand down instead of pushing a second PR into the same review
+#       pipeline -- message on stderr names the existing PR.
+#   7 - Refused: `buildGate` is enabled and HEAD has no passing
+#       `loom-daemon preflight` receipt (#10476). Run it, fix, re-run.
 #
 # NOTE: GitHub-specific, like create-issue.sh. On a Gitea forge it exits 2 --
 # Gitea has no GitHub App installation tokens, so it has no equivalent
@@ -75,7 +112,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$SCRIPT_DIR/lib/forge-helpers.sh"
 
 usage() {
-  sed -n '2,69p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
+  sed -n '2,84p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
 }
 
 TITLE=""
@@ -90,23 +127,10 @@ HAVE_BODY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --help | -h)
-      usage
-      exit 0
-      ;;
-    --title | -t)
-      TITLE="${2:-}"
-      shift 2
-      ;;
-    --body | -b)
-      BODY="${2:-}"
-      HAVE_BODY=true
-      shift 2
-      ;;
-    --body-file | -F)
-      BODY_FILE="${2:-}"
-      shift 2
-      ;;
+    --help | -h) usage; exit 0 ;;
+    --title | -t) TITLE="${2:-}"; shift 2 ;;
+    --body | -b) BODY="${2:-}"; HAVE_BODY=true; shift 2 ;;
+    --body-file | -F) BODY_FILE="${2:-}"; shift 2 ;;
     --label | -l)
       # `gh pr create --label "a,b"` splits on commas; match that so a
       # prompt's existing invocation transfers unchanged.
@@ -118,22 +142,10 @@ while [[ $# -gt 0 ]]; do
       done
       shift 2
       ;;
-    --base | -B)
-      BASE_BRANCH="${2:-}"
-      shift 2
-      ;;
-    --head | -H)
-      HEAD_BRANCH="${2:-}"
-      shift 2
-      ;;
-    --draft | -d)
-      DRAFT=true
-      shift
-      ;;
-    --repo | -R)
-      REPO_NWO="${2:-}"
-      shift 2
-      ;;
+    --base | -B) BASE_BRANCH="${2:-}"; shift 2 ;;
+    --head | -H) HEAD_BRANCH="${2:-}"; shift 2 ;;
+    --draft | -d) DRAFT=true; shift ;;
+    --repo | -R) REPO_NWO="${2:-}"; shift 2 ;;
     *)
       echo "create-pr.sh: unknown argument: $1" >&2
       echo "Run 'create-pr.sh --help' for usage." >&2
@@ -142,14 +154,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$TITLE" ]]; then
-  echo "create-pr.sh: --title is required" >&2
-  exit 2
-fi
+[[ -n "$TITLE" ]] || { echo "create-pr.sh: --title is required" >&2; exit 2; }
 
-if [[ -n "$BODY_FILE" ]] && [[ "$HAVE_BODY" == "true" ]]; then
-  echo "create-pr.sh: --body and --body-file are mutually exclusive" >&2
-  exit 2
+if [[ -n "$BODY_FILE" && "$HAVE_BODY" == "true" ]]; then
+  echo "create-pr.sh: --body and --body-file are mutually exclusive" >&2; exit 2
 fi
 
 if [[ -n "$BODY_FILE" ]]; then
@@ -225,6 +233,72 @@ if [[ -n "$EXISTING_URL" && "$EXISTING_URL" != "null" ]]; then
   exit 0
 fi
 
+# --- 1:1 issue-to-PR review-gate guard (#9453 phase 5) -----------------------
+#
+# Adopt-first above only catches a race when both builders share a head
+# branch. Two builders racing the SAME issue on DIFFERENT branches (a second
+# hand-claim that never saw the first's branch, or a re-dispatch that created
+# a fresh branch name) reach `gh pr create` unchecked otherwise. Reuse
+# `loom-daemon forge check-open-pr` (#8551) -- the identical
+# closes-graph ∪ timeline union the dispatch guard and the pre-claim
+# hand-check both already use -- against whichever issue THIS PR's own body
+# references (a closing keyword OR a `Part of` / `Contributes to` partial
+# reference; a family/epic issue that intentionally stays open across many
+# PRs is exactly the case this guard must also cover).
+#
+# EX_REVIEW_GATE_COLLISION=6 is intentionally a NEW code distinct from every
+# other exit this script already uses (0 create/adopt, 1 create-failed/
+# superseded, 2 bad args) and from `forge check-open-pr`'s OWN codes
+# (0 open / 1 none / 3 gitea / 5 probe-failed) -- a caller must be able to
+# tell "refused: review-gate collision" apart from all of those.
+#
+# Fail-open by construction, matching every other lookup in this script: no
+# daemon binary resolvable, a probe failure (exit 5), or a Gitea decline
+# (exit 3, unreachable here since the forge-type check above already exited
+# on non-GitHub) all fall through and let `gh pr create` be the final
+# authority -- this is a defense-in-depth pre-check, not the only gate.
+EX_REVIEW_GATE_COLLISION=6
+
+# An empty body matches nothing (grep's no-match is absorbed by `|| true`).
+TARGET_ISSUE="$(grep -ioE '\b(close[sd]?|closing|fix(e[sd])?|resolve[sd]?|part of|contributes to)[[:space:]]+#[0-9]+' <<< "$BODY" \
+  | head -1 | grep -oE '[0-9]+' || true)"
+
+# One daemon resolution, shared by every daemon call below (#10518).
+# shellcheck source=./lib/locate-daemon-bin.sh
+source "$SCRIPT_DIR/lib/locate-daemon-bin.sh"
+_cpr_loom_daemon="$(loom_resolve_self_daemon_bin 2>/dev/null || true)"
+
+if [[ -n "$TARGET_ISSUE" ]]; then
+  # requires-daemon: forge optional   #9453 phase 5 -- without a resolvable daemon binary (absent, or predating `forge check-open-pr`, #8551) this pre-check is skipped and `gh pr create` remains the sole authority
+  if [[ -n "$_cpr_loom_daemon" ]]; then
+    _cpr_opr_rc=0
+    _cpr_opr_pr="$("$_cpr_loom_daemon" forge check-open-pr "$TARGET_ISSUE" 2>/dev/null)" || _cpr_opr_rc=$?
+    if [[ "$_cpr_opr_rc" -eq 0 && -n "$_cpr_opr_pr" ]]; then
+      _cpr_opr_head="$(gh pr view "$_cpr_opr_pr" --json headRefName --jq '.headRefName' ${REPO_NWO:+--repo "$REPO_NWO"} 2>/dev/null || true)"
+      if [[ -n "$_cpr_opr_head" && "$_cpr_opr_head" != "$HEAD_BRANCH" ]]; then
+        echo "create-pr.sh: issue #$TARGET_ISSUE already has an open linked PR: \
+#$_cpr_opr_pr (branch $_cpr_opr_head) — refusing to open a second PR into the \
+same review pipeline (1:1 issue-to-PR review-gate guard, #9453 phase 5). \
+Stand down: do NOT push further on $HEAD_BRANCH. If your work supersedes \
+#$_cpr_opr_pr, say so on the issue and let Judge/a human decide; otherwise \
+close this branch as a duplicate." >&2
+        exit "$EX_REVIEW_GATE_COLLISION"
+      fi
+    fi
+    # _cpr_opr_rc == 1 (verified no open PR), 3 (gitea — unreachable here),
+    # or 5 (probe failed): all fall through, matching the fail-open posture
+    # of every other lookup in this script.
+  fi
+fi
+
+# --- Pre-PR gate receipt (#10476) ---------------------------------------------
+# requires-daemon: preflight optional   no binary, or one predating `preflight`, skips this (only exit 7, or 8 = a skip-CI marker in a commit #11389, refuses)
+if [[ -n "$_cpr_loom_daemon" ]]; then
+  _cpr_pf_rc=0
+  LOOM_PR_BASE="$BASE_BRANCH" "$_cpr_loom_daemon" preflight --check || _cpr_pf_rc=$?
+  [[ "$_cpr_pf_rc" -ne 7 && "$_cpr_pf_rc" -ne 8 ]] || exit "$_cpr_pf_rc"
+fi
+
 # --- Superseded-target-issue freshness check (#6277) -------------------------
 #
 # Two workers racing on the same issue is not caught today until Judge
@@ -239,11 +313,8 @@ fi
 # partial-increment references for a family/epic issue that intentionally
 # stays open across multiple PRs -- never match this pattern, so those PRs
 # are exempt by construction; no separate carve-out is needed.
-CLOSES_ISSUE=""
-if [[ -n "$BODY" ]]; then
-  CLOSES_ISSUE="$(grep -ioE '\b(close[sd]?|closing|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' <<< "$BODY" \
-    | head -1 | grep -oE '[0-9]+' || true)"
-fi
+CLOSES_ISSUE="$(grep -ioE '\b(close[sd]?|closing|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' <<< "$BODY" \
+  | head -1 | grep -oE '[0-9]+' || true)"
 
 if [[ -n "$CLOSES_ISSUE" ]]; then
   # shellcheck disable=SC2054  # the comma is inside a single --json value, not an array separator
@@ -284,6 +355,22 @@ fi
 
 # --- Create -----------------------------------------------------------------
 
+# #9548: open the PR only on a repo this installation manages and can write,
+# and name it: with no --repo, gh would pick an `upstream` remote over origin.
+REPO_NWO="$(loom_write_repo "${REPO_NWO:-${LOOM_REPO:-}}")" || { echo "create-pr.sh: not opening a PR for $HEAD_BRANCH: loom-daemon forge may-write refused the repo (#9548)" >&2; exit 1; }
+
+# --- Priority labels from the closing issues (#10518) ------------------------
+# The PR carries each priority label (`loom:important` / `loom:very-important`)
+# of every issue its body closes, on the GraphQL and REST paths alike. WHICH
+# issues and labels is `loom-daemon forge priority-labels`'s decision (closing
+# refs + this repo's Loom-Issue trailers; never `Part of #N`); this only
+# appends its output (deduplicated). Fail open: a failed lookup warns, naming
+# the issue; the verb's own warnings go straight to stderr.
+# requires-daemon: forge optional   #10518 -- absent or pre-#10518 binary: the priority label is not copied, with a one-line warning naming the issue
+_cpr_prio="$("${_cpr_loom_daemon:-false}" forge priority-labels --body-file - --repo "$REPO_NWO" <<< "$BODY")" || { _cpr_prio=""
+  [[ -z "$CLOSES_ISSUE" ]] || echo "create-pr.sh: WARNING: issue #$CLOSES_ISSUE was NOT checked for priority labels (no loom-daemon with \`forge priority-labels\`); if it carries loom:important or loom:very-important, add that label to this PR by hand (#10518)" >&2; }
+while IFS= read -r _l; do [[ -z "$_l" || " ${LABELS[*]-} " == *" $_l "* ]] || LABELS+=("$_l"); done <<< "$_cpr_prio"
+
 CREATE_ARGS=(pr create --head "$HEAD_BRANCH" --title "$TITLE" --body "$BODY")
 if [[ -n "$BASE_BRANCH" ]]; then
   CREATE_ARGS+=(--base "$BASE_BRANCH")
@@ -298,9 +385,57 @@ for _label in "${LABELS[@]+"${LABELS[@]}"}"; do
   CREATE_ARGS+=(--label "$_label")
 done
 
-if ! forge_gh_perm_safe "${CREATE_ARGS[@]}"; then
+# stderr is captured (not merged) so stdout stays the URL and the #9226
+# rate-limit predicate can read what `gh` said; it is re-emitted unchanged.
+_cpr_ef="$(mktemp)"; _cpr_rc=0
+PR_URL="$(forge_gh_perm_safe "${CREATE_ARGS[@]}" 2>"$_cpr_ef")" || _cpr_rc=$?
+cat "$_cpr_ef" >&2
+if [[ $_cpr_rc -ne 0 ]] && is_rate_limit_error "$(cat "$_cpr_ef")"; then
+  # #9226: GraphQL pool exhausted -> the identical filing as REST POSTs. REST
+  # requires `base`; an omitted --base is the repo default (also REST).
+  echo "create-pr.sh: gh pr create was rate-limited — retrying as a REST POST to repos/$REPO_NWO/pulls (#9226)" >&2
+  if { [[ -n "$BASE_BRANCH" ]] || BASE_BRANCH="$(gh api "repos/$REPO_NWO" --jq .default_branch 2>"$_cpr_ef")"; } &&
+    _cpr_rest="$(jq -n --arg t "$TITLE" --arg h "$HEAD_BRANCH" --arg b "$BASE_BRANCH" --arg body "$BODY" --argjson d "$DRAFT" \
+      '{title: $t, head: $h, base: $b, body: $body, draft: $d}' | gh api --method POST "repos/$REPO_NWO/pulls" --input - --jq '.html_url, .number' 2>"$_cpr_ef")"; then
+    _cpr_rc=0; PR_URL="${_cpr_rest%%$'\n'*}"; _cpr_num="${_cpr_rest##*$'\n'}"
+    if [[ ${#LABELS[@]} -gt 0 ]] && ! jq -nc '{labels: $ARGS.positional}' --args "${LABELS[@]}" | gh api --method POST "repos/$REPO_NWO/issues/$_cpr_num/labels" --input - >/dev/null 2>"$_cpr_ef"; then
+      echo "create-pr.sh: WARNING: PR $PR_URL was opened over REST but its label(s) were NOT applied: ${LABELS[*]} ($(cat "$_cpr_ef")). Apply them by hand: gh api --method POST repos/$REPO_NWO/issues/$_cpr_num/labels -f 'labels[]=<label>' (#9226)" >&2
+    fi
+  else echo "create-pr.sh: the REST fallback also failed: $(cat "$_cpr_ef")" >&2; fi
+fi
+rm -f "$_cpr_ef"
+if [[ $_cpr_rc -ne 0 ]]; then
   echo "create-pr.sh: could not open a PR for $HEAD_BRANCH. If the commits are \
 pushed, do NOT rebuild — re-run this script (it adopts an existing PR) or open \
 the PR by hand from that branch." >&2
   exit 1
+fi
+# The URL is the script's stdout contract (identical to `gh pr create`'s, so a
+# caller parsing the URL needs no change) — echoed before the best-effort
+# footer step below, which only ever adds stderr.
+echo "$PR_URL"
+
+# --- #9774: the opened PR's body ends with the dashboard footer -------------
+# Best-effort, via the daemon's --patch-created (fetch, footer, PATCH — the
+# number exists only inside the URL after the create). A daemon that cannot
+# (absent, or pre-#9818) leaves the body unfootered; it never un-opens the PR.
+# requires-daemon: forge optional   absent or pre-#9818 binary → the footer is skipped with a stderr note; the PR itself is already open (#9774)
+self_bin="$(command -v loom-daemon 2>/dev/null || true)"
+if [[ -n "$self_bin" ]]; then
+  # #10140: keep the daemon's stderr + exit code so the note names the cause
+  # (`2>&1 >/dev/null` captures stderr only; stdout stays the URL contract).
+  _footer_rc=0
+  _footer_err="$("$self_bin" forge comment --patch-created "$PR_URL" 2>&1 >/dev/null)" || _footer_rc=$?
+  if [[ "$_footer_rc" -ne 0 ]]; then
+    # First non-empty stderr line (the anyhow top-level message, which embeds
+    # gh's error), capped so a multi-KB dump cannot flood the terminal. Pure
+    # bash: a grep pipeline would trip set -e/pipefail on empty stderr.
+    _footer_line=""
+    while IFS= read -r _l; do
+      [[ "$_l" =~ ^[[:space:]]*$ ]] && continue
+      _footer_line="${_l:0:300}"
+      break
+    done <<<"$_footer_err"
+    echo "create-pr.sh: note: could not append the dashboard footer to the PR body (loom-daemon exit ${_footer_rc}: ${_footer_line:-no stderr}; best-effort, the PR itself is open)" >&2
+  fi
 fi

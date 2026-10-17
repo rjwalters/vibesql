@@ -36,28 +36,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MERGE_PR_SRC="$HELPERS_DIR/merge-pr.sh"
 
+# #8191: the strip-or-skip decision now delegates to `loom-daemon merge-pr
+# closed-building`. Pin the binary the extracted function execs and verify it
+# HAS that subcommand — the same harness the epic's other ported suites use.
+# Without the subcommand check every decision below would come back "did not
+# run", and a pass that never strips anything looks exactly like a pass whose
+# skips are all correct.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin "$HELPERS_DIR" "merge-pr closed-building"
+# shellcheck source=lib/write-scope-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
+
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 assert_contains() {
     local haystack="$1" needle="$2" msg="$3"
@@ -179,6 +172,11 @@ STUB
 chmod +x "$STUB_DIR/gh"
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# #9548: merge-pr.sh vets its write target through the write scope before it
+# writes. It runs from a checkout registered as owner/repo (origin, .loom/, push
+# reported to the permission probe), so the real decision admits it.
+write_scope_register "$STUB_DIR/checkout" owner/repo
+cd "$STUB_DIR/checkout"
 
 # --- Shared globals the functions read ---
 REPO_NWO="owner/repo"
@@ -205,7 +203,7 @@ cat > "$STUB_DIR/issue-103.json" <<'EOF'
 {"state":"closed","pull_request":{"url":"x"},"labels":[{"name":"loom:building"}]}
 EOF
 cat > "$STUB_DIR/issue-104.json" <<'EOF'
-{"state":"closed","labels":[{"name":"loom:building"},{"name":"tier:maintenance"}]}
+{"state":"closed","labels":[{"name":"loom:building"},{"name":"loom:important"}]}
 EOF
 
 reset_log() {
@@ -230,10 +228,16 @@ reset_log
 _strip_one_closed_issue_building_label "101"
 assert_eq "" "$(read_log)" "Open issue #101 -> no-op (label left in place)"
 
-# T3: closed but no loom:building label -> no-op (idempotent).
+# T3: closed, no loom:building but still loom:issue -> only loom:issue is
+# stripped (#11517, operator ruling 2026-10-13: a closed issue must not keep
+# the queue label consumers read as "Ready").
 reset_log
 _strip_one_closed_issue_building_label "102"
-assert_eq "" "$(read_log)" "Closed issue #102 (no loom:building) -> no-op, idempotent"
+log="$(read_log)"
+assert_contains "$log" "issue edit 102 --repo owner/repo --remove-label loom:issue" \
+  "Closed issue #102 (loom:issue, no loom:building) -> loom:issue stripped (#11517)"
+assert_not_contains "$log" "--remove-label loom:building" \
+  "Closed issue #102 -> no loom:building removal attempted"
 
 # T4: target is actually a PR (has .pull_request) -> skip.
 reset_log
@@ -247,9 +251,9 @@ reset_log
 _strip_one_closed_issue_building_label "104"
 log="$(read_log)"
 assert_contains "$log" "issue edit 104 --repo owner/repo --remove-label loom:building" \
-  "Closed issue #104 (loom:building + tier:maintenance) -> only loom:building removed"
-assert_not_contains "$log" "--remove-label tier:maintenance" \
-  "Closed issue #104 -> tier:maintenance is untouched"
+  "Closed issue #104 (loom:building + loom:important) -> only loom:building removed"
+assert_not_contains "$log" "--remove-label loom:important" \
+  "Closed issue #104 -> loom:important is untouched"
 
 echo ""
 echo "Testing _strip_closed_issue_building_labels behavior..."
@@ -270,8 +274,10 @@ assert_contains "$log" "issue edit 100 --repo owner/repo --remove-label loom:bui
   "Multi-target: #100 (closed, building) is stripped"
 assert_not_contains "$log" "issue edit 101" \
   "Multi-target: #101 (open) is left alone"
-assert_not_contains "$log" "issue edit 102" \
-  "Multi-target: #102 (closed, not building) is left alone"
+assert_not_contains "$log" "issue edit 102 --repo owner/repo --remove-label loom:building" \
+  "Multi-target: #102 (closed, not building) keeps no building removal"
+assert_contains "$log" "issue edit 102 --repo owner/repo --remove-label loom:issue" \
+  "Multi-target: #102 (closed, still loom:issue) loses loom:issue (#11517)"
 
 # T8: no close targets at all -> no-op, no gh calls.
 reset_log
@@ -301,6 +307,48 @@ rc=$?
 set -e
 assert_eq "0" "$rc" "A failed removal attempt does not propagate a nonzero exit (best-effort)"
 
+# T11 (#8191): the decision moved to `loom-daemon merge-pr closed-building`,
+# so a daemon that predates the verb must produce a WARNING naming the manual
+# removal and must NOT mutate anything. A guessed strip here would drop a live
+# builder's claim label; a silent skip would hide that the pass stopped
+# running at all.
+reset_log
+fake_no_verb="$STUB_DIR/fake-loom-daemon-no-closed-building"
+cat > "$fake_no_verb" <<'FAKEDAEMON'
+#!/usr/bin/env bash
+echo "error: unrecognized subcommand 'closed-building'" >&2
+exit 2
+FAKEDAEMON
+chmod +x "$fake_no_verb"
+saved_bin="${LOOM_DAEMON_BIN:-}"
+export LOOM_DAEMON_BIN="$fake_no_verb"
+stderr_out="$(_strip_one_closed_issue_building_label "100" 2>&1 >/dev/null)"
+export LOOM_DAEMON_BIN="$saved_bin"
+assert_eq "" "$(read_log)" "Daemon without the verb -> nothing is mutated"
+assert_contains "$stderr_out" "--remove-label loom:building" \
+  "Daemon without the verb -> warning names the manual removal"
+
+# T12 (#8191): exit 0 is not enough — the wrapper accepts only the two known
+# lines. A daemon answering with anything else (a truncated write, a future
+# protocol it does not share) must be treated as "did not run", never replayed
+# as a silent SKIP. This is the whole reason the skip is a positive `SKIP`
+# line rather than empty output.
+reset_log
+fake_garbage="$STUB_DIR/fake-loom-daemon-garbage"
+cat > "$fake_garbage" <<'FAKEDAEMON'
+#!/usr/bin/env bash
+echo "MAYBE"
+exit 0
+FAKEDAEMON
+chmod +x "$fake_garbage"
+saved_bin="${LOOM_DAEMON_BIN:-}"
+export LOOM_DAEMON_BIN="$fake_garbage"
+stderr_out="$(_strip_one_closed_issue_building_label "100" 2>&1 >/dev/null)"
+export LOOM_DAEMON_BIN="$saved_bin"
+assert_eq "" "$(read_log)" "Daemon answering off-protocol at exit 0 -> nothing is mutated"
+assert_contains "$stderr_out" "rather than STRIP or SKIP" \
+  "Daemon answering off-protocol -> warning says what it printed instead"
+
 # --- Invariant guard: merge-pr.sh actually wires this pass in at the
 # confirmed-merge choke point (#6199 AC #1 and #4) ---
 echo ""
@@ -309,8 +357,8 @@ echo "Testing merge-pr.sh wiring..."
 src="$(cat "$MERGE_PR_SRC")"
 assert_contains "$src" "_strip_closed_issue_building_labels || true" \
   "merge-pr.sh invokes the closed-issue cleanup pass at the confirmed-merge choke point"
-assert_contains "$src" 'forge_gh_remove_label_rl_safe "$REPO_NWO" "$issue_num" "loom:building"' \
-  "merge-pr.sh strips loom:building via the rate-limit-safe remove wrapper (#4856-style)"
+assert_contains "$src" 'forge_gh_remove_label_rl_safe "$REPO_NWO" "$issue_num" "$label"' \
+  "merge-pr.sh strips loom:building / loom:issue via the rate-limit-safe remove wrapper (#4856-style)"
 
 # --- Summary ---
 echo ""

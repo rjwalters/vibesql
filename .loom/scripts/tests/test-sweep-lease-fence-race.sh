@@ -92,45 +92,10 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 SCRIPT="$SCRIPTS_DIR/sweep-lease-fence.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
 
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
-
-# assert_contains/assert_not_contains use a pure-bash substring match (no
-# forked printf|grep pipeline) so a transient fork/exec failure under
-# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
-# content mismatch (#7819, #7874).
-assert_contains() {
-    local haystack="$1" needle="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$haystack" == *"$needle"* ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected substring: '$needle'"
-        echo "    In: '$haystack'"
-    fi
-}
 
 if [[ ! -x "$SCRIPT" ]]; then
     echo -e "${RED}FATAL${NC}: $SCRIPT not found or not executable" >&2
@@ -151,7 +116,9 @@ if [[ "$1" == "api" ]]; then
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --jq) filter="$2"; shift 2 ;;
-      -R) shift 2 ;;
+      -R|--repo)
+        # Real `gh api` has no -R/--repo flag (#9552): fail exactly like it.
+        echo "unknown shorthand flag: 'R' in -R" >&2; exit 1 ;;
       --paginate) shift ;;
       *)
         if [[ -z "$path" ]]; then path="$1"; fi
@@ -159,6 +126,7 @@ if [[ "$1" == "api" ]]; then
         ;;
     esac
   done
+  echo "$path" >> "$D/api-paths.log"
   if [[ "$path" == repos/*/issues/*/comments ]]; then
     if [[ -f "$D/comments-fail" ]]; then
       echo "stub gh: comments fetch failed" >&2
@@ -179,6 +147,10 @@ chmod +x "$STUB_DIR/gh"
 
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# #9548: the subject filters lease markers through `forge trusted-comments`.
+# shellcheck source=lib/trust-stub.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/trust-stub.sh"
+loom_trust_stub "$STUB_DIR"
 
 PUSHED_LOG="$STUB_DIR/pushed.log"
 

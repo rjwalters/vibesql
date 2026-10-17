@@ -138,7 +138,9 @@ _WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # defaults/scripts source. If absent (older install), every classifier below
 # takes its DEGRADED path — the same hand-rolled fallback regexes, which since
 # #8037 live in `loom-daemon retry-classify` alongside the library path rather
-# than inline here.
+# than inline here. Since #11208 the library itself delegates to
+# `loom-daemon classify-error` when a binary resolves, so these predicates
+# consume native classifications without any change to this file.
 if [[ -f "${_WRAPPER_DIR}/lib/classify-error.sh" ]]; then
     # shellcheck source=lib/classify-error.sh
     # shellcheck disable=SC1091
@@ -201,6 +203,11 @@ _write_exit_sidecar() {
         echo "${code}" > "${_EXIT_CODE_SIDECAR}" 2>/dev/null || true
     fi
 }
+
+# #10830: keep the pinned session id as a shell variable for the retry check in
+# run_with_retry, but stop exporting it, so the claude CLI (and every Bash call
+# it makes) never inherits it.
+export -n LOOM_CLAUDE_SESSION_ID
 
 # Logging helpers
 log_info() {
@@ -479,8 +486,15 @@ resolve_mcp_workspace() {
 #
 # Args: $1 = path to the MCP server entry point (e.g. dist/index.js)
 #       $2 = node binary to invoke it with
+# Reads MCP_SERVER_ENV (set by _check_mcp_candidate): the server's declared
+# `.mcp.json` `env` as K=V words, merged over the inherited env via `env` the
+# way Claude Code launches it (#10870). Values are never logged.
+# The handshake bound is LOOM_MCP_PREFLIGHT_TIMEOUT seconds (default 15; a
+# non-numeric or non-positive value falls back to the default) — a healthy
+# server can take ~4 s on a loaded host, so a 5 s cap failed it spuriously.
 # Sets (for the caller to log on failure): MCP_SMOKE_TEST_STDOUT,
-# MCP_SMOKE_TEST_STDERR.
+# MCP_SMOKE_TEST_STDERR, MCP_SMOKE_TEST_TIMED_OUT (1 if `timeout` fired, else 0),
+# MCP_SMOKE_TEST_TIMEOUT_SECS (the bound that was applied).
 # Returns: 0 if a valid JSON-RPC initialize response was observed, 1 otherwise.
 _mcp_smoke_test() {
     local mcp_entry="$1"
@@ -488,12 +502,25 @@ _mcp_smoke_test() {
 
     local init_request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"loom-mcp-preflight","version":"1.0.0"}}}'
 
+    local smoke_timeout="${LOOM_MCP_PREFLIGHT_TIMEOUT:-15}"
+    if ! [[ "${smoke_timeout}" =~ ^[0-9]+$ ]] || [[ "${smoke_timeout}" -le 0 ]]; then
+        smoke_timeout=15
+    fi
+    MCP_SMOKE_TEST_TIMEOUT_SECS="${smoke_timeout}"
+    MCP_SMOKE_TEST_TIMED_OUT=0
+
     local tmp_stdout tmp_stderr
     tmp_stdout=$(mktemp)
     tmp_stderr=$(mktemp)
 
-    printf '%s\n' "${init_request}" | timeout 5 "${node_bin}" "${mcp_entry}" \
-        >"${tmp_stdout}" 2>"${tmp_stderr}" || true
+    # PIPESTATUS[1] is `timeout`'s exit status (124 = the bound fired). Capture
+    # it instead of discarding it with `|| true`.
+    local smoke_rc=0
+    printf '%s\n' "${init_request}" | timeout "${smoke_timeout}" env ${MCP_SERVER_ENV[@]+"${MCP_SERVER_ENV[@]}"} \
+        "${node_bin}" "${mcp_entry}" >"${tmp_stdout}" 2>"${tmp_stderr}" || smoke_rc=${PIPESTATUS[1]}
+    if [[ "${smoke_rc}" -eq 124 ]]; then
+        MCP_SMOKE_TEST_TIMED_OUT=1
+    fi
 
     MCP_SMOKE_TEST_STDOUT=$(cat "${tmp_stdout}")
     MCP_SMOKE_TEST_STDERR=$(cat "${tmp_stderr}")
@@ -537,25 +564,27 @@ _check_mcp_candidate() {
     local mcp_workspace="$1"
     local mcp_config="${mcp_workspace}/.mcp.json"
 
-    # Extract the MCP server entry point from .mcp.json
+    # Extract the server name, entry point, and declared `env` (#10870) from
+    # .mcp.json as NUL-delimited fields: name, args[-1], then K=V per env key.
+    # NUL framing keeps values with spaces/quotes/newlines intact — no eval.
     # Use timeout to prevent hanging on resource-contended systems (see issue #2472).
-    local mcp_entry
-    mcp_entry=$(timeout 10 python3 -c "
+    local field mcp_entry mcp_name mcp_fields=()
+    while IFS= read -r -d '' field; do mcp_fields+=("${field}"); done < <(timeout 10 python3 -c "
 import json, sys
-with open('${mcp_config}') as f:
-    cfg = json.load(f)
-servers = cfg.get('mcpServers', {})
-for name, srv in servers.items():
-    args = srv.get('args', [])
-    if args:
-        print(args[-1])
-        sys.exit(0)
-" 2>/dev/null || echo "")
+for name, srv in json.load(open(sys.argv[1])).get('mcpServers', {}).items():
+    if srv.get('args'):
+        env = [k + '=' + (v if isinstance(v, str) else json.dumps(v)) for k, v in (srv.get('env') or {}).items() if k.isidentifier()]
+        sys.stdout.write('\0'.join([name, str(srv['args'][-1])] + env) + '\0')
+        break
+" "${mcp_config}" 2>/dev/null || true)
+    mcp_name="${mcp_fields[0]:-}" mcp_entry="${mcp_fields[1]:-}"
 
     if [[ -z "${mcp_entry}" ]]; then
         log_warn "Could not extract MCP entry point from ${mcp_config} - not a usable pre-flight candidate"
         return 2
     fi
+    MCP_SERVER_ENV=("${mcp_fields[@]:2}")
+    log_info "MCP pre-flight: smoke-testing server '${mcp_name}' (${mcp_entry}) from ${mcp_config}"
 
     # Check if the entry point file exists
     if [[ ! -f "${mcp_entry}" ]]; then
@@ -617,6 +646,14 @@ for name, srv in servers.items():
     fi
     if [[ -n "${MCP_SMOKE_TEST_STDOUT}" ]]; then
         log_warn "MCP stdout: ${MCP_SMOKE_TEST_STDOUT}"
+    fi
+
+    # A pure handshake timeout on an entry point that exists and is not stale
+    # is a slow start, not a broken bundle: a rebuild cannot fix it, and its
+    # "cannot rebuild" error would hide the real cause.
+    if [[ "${MCP_SMOKE_TEST_TIMED_OUT}" -eq 1 ]]; then
+        log_error "MCP smoke test timed out after ${MCP_SMOKE_TEST_TIMEOUT_SECS}s (${mcp_config}) - skipping rebuild; raise LOOM_MCP_PREFLIGHT_TIMEOUT if the host is loaded"
+        return 1
     fi
 
     # Attempt rebuild and retry
@@ -1521,13 +1558,16 @@ check_api_reachable() {
 # defaults/scripts/tests/test-claude-wrapper-retry.sh (#8032), whose assertions
 # were written against the pre-port shell and run unchanged against the port.
 #
-# What deliberately did NOT move: `classify_error` and
+# What deliberately did NOT move INTO THIS FILE'S LOGIC: `classify_error` and
 # `classification_is_transient`. Those belong to lib/classify-error.sh, which
 # every runtime adapter sources and which is, per #4501, the fleet's single
 # source of truth for whether a category is retryable. A second copy of that
-# deny-list in Rust would recreate the exact defect #4501 fixed — two
+# deny-list here would recreate the exact defect #4501 fixed — two
 # independent verdict systems printing contradictory conclusions about one
-# failure. So the shell still answers WHAT this failure is; the port owns WHAT
+# failure. So the classifier still answers WHAT this failure is (and, since
+# #11208, does so natively via `loom-daemon classify-error` whenever a daemon
+# binary resolves — the library delegates and falls back to its in-file
+# tables; from this file's point of view nothing changed); the port owns WHAT
 # THE WRAPPER DOES about it.
 #
 # #8138 moved a seventh across the same boundary, for the same reason: the
@@ -1782,8 +1822,8 @@ _auth_dead_phrase() {
     # JSON-enveloped 401 of #6614 yields a clean phrase for the `.bad_tokens`
     # reason string instead of falling through to the generic default — grep
     # returns the LEFTMOST match, so the quoted `"type":"` wrapper is never
-    # captured with it.
-    m="$(echo "${output}" | grep -ioE "401[^a-z]*authentication_error|(OAuth )?(access )?token (has been|was) revoked|authentication_error|invalid bearer token|OAuth token has expired|token has expired" | head -1)"
+    # captured with it. #11205's Claude Code phrasings name themselves too.
+    m="$(echo "${output}" | grep -ioE "401[^a-z]*authentication_error|(OAuth )?(access )?token (has been |was )?revoked|authentication_error|invalid bearer token|OAuth token has expired|token has expired|OAuth access token is invalid|OAuth session expired|401 Invalid API key" | head -1)"
     echo "${m:-401/invalid credential}"
 }
 
@@ -1805,6 +1845,7 @@ is_account_session_limit() { _retry_classify_bool session-limit "$1" "${2:-1}"; 
 # loom-daemon binary resolved" — the same observable failure a broken Python
 # selector used to produce).
 reselect_account_no_mark() {
+    _proxied_launch && { _proxy_rotate concurrent-session && return 0 || return 1; }
     local ws daemon_bin
     ws="$(_resolve_token_workspace)"
     daemon_bin="$(declare -F loom_locate_daemon_bin >/dev/null 2>&1 && loom_locate_daemon_bin "${ws}" || true)"
@@ -1812,49 +1853,76 @@ reselect_account_no_mark() {
         log_warn "No loom-daemon binary resolved — cannot re-select an OAuth account"
         return 1
     fi
+    _select_rotation_account "${ws}" "${daemon_bin}" || return 1
+    log_info "Re-selected OAuth account → '${ACTIVE_TOKEN_NAME}' after concurrent-session limit (token NOT marked bad)"
+    return 0
+}
 
-    local sel_output _sel_rc
+# Run Loom token selection (which skips bad-marked accounts) and export the
+# pick into CLAUDE_CODE_OAUTH_TOKEN / LOOM_TOKEN_NAME / ACTIVE_TOKEN_NAME. The
+# shared tail of all three rotation helpers (one call site, so the #8146
+# `env -u LOOM_ROLE` invariant has exactly one place to hold). Returns 1 when
+# selection yields nothing.
+#
+# #8058: scope selection to the model class this wrapper is running, so an
+# account bad-marked only for another class stays eligible. The helper emits
+# nothing when LOOM_MODEL is unset or the resolved daemon binary predates
+# `--model`, which is why the expansion is deliberately unquoted (it is either
+# two words or none) and why a missing helper -- an older
+# lib/locate-daemon-bin.sh mid-resync -- degrades to plain selection. The class
+# comes from LOOM_MODEL, not from an explicit `--model` in this wrapper's own
+# args: the daemon path sets both (spawn-claude.sh exports LOOM_MODEL and
+# appends the flag), and on the rare path where they disagree a mismatch costs
+# at most one extra rotation -- never a wrong mark, since marking is gated
+# separately by `retry-classify model-class`.
+# #8146: `env -u LOOM_ROLE` is load-bearing here, not hygiene. `tokens select
+# --role` reads LOOM_ROLE straight from the environment (clap `env =`), and the
+# role runner exports it into every spawn, so leaving it set would hand this
+# call the prompt-cache affinity key -- which names the very account we are
+# rotating AWAY from. reselect_account_no_mark does not bad-mark, so that
+# account is still a candidate; affinity would re-pick it every time and burn
+# the retry budget on the same limit. The two bad-marking paths already exclude
+# the failed account, but unsetting keeps the invariant true end-to-end and
+# stops a rotation re-recording the affinity key.
+_select_rotation_account() {
+    local ws="$1" daemon_bin="$2" sel_output _sel_rc
     set +e
-    # #8058: scope selection to the model class this wrapper is running, so an
-    # account bad-marked only for another class stays eligible. The helper
-    # emits nothing when LOOM_MODEL is unset or the resolved daemon binary
-    # predates `--model`, which is why the expansion is deliberately unquoted
-    # (it is either two words or none) and why a missing helper -- an older
-    # lib/locate-daemon-bin.sh mid-resync -- degrades to plain selection.
-    # The class comes from LOOM_MODEL, not from an explicit `--model` in this
-    # wrapper's own args: the daemon path sets both (spawn-claude.sh exports
-    # LOOM_MODEL and appends the flag), and on the rare path where they
-    # disagree a mismatch costs at most one extra rotation -- never a wrong
-    # mark, since marking is gated separately by `retry-classify model-class`.
-    # #8146: `env -u LOOM_ROLE` is load-bearing here, not hygiene. `tokens
-    # select --role` reads LOOM_ROLE straight from the environment (clap
-    # `env =`), and the role runner exports it into every spawn, so leaving it
-    # set would hand this call the prompt-cache affinity key -- which names the
-    # very account we are rotating AWAY from. This function deliberately does
-    # not bad-mark, so that account is still a candidate; affinity would re-pick
-    # it every time and burn the retry budget on the same limit. The two
-    # bad-marking rotation paths below unset it too: they already exclude the
-    # failed account, but unsetting keeps the invariant true end-to-end and
-    # stops a rotation re-recording the affinity key.
     # shellcheck disable=SC2046
     sel_output="$(env -u LOOM_ROLE "${daemon_bin}" tokens select --workspace "${ws}" --export $(declare -F loom_daemon_model_select_flag >/dev/null 2>&1 && loom_daemon_model_select_flag "${daemon_bin}" "${LOOM_MODEL:-}" || true) 2>/dev/null)"
     _sel_rc=$?
     set -e
-    if [[ ${_sel_rc} -ne 0 || -z "${sel_output}" ]]; then
-        return 1
-    fi
-
+    [[ ${_sel_rc} -eq 0 && -n "${sel_output}" ]] || return 1
     # `--export` emits shell-evalable `export CLAUDE_CODE_OAUTH_TOKEN=...` /
-    # `export LOOM_TOKEN_NAME=...` lines (issue #4228) — no more round-trip
-    # through `python3 -c 'import json...'` to pull the two fields back out.
+    # `export LOOM_TOKEN_NAME=...` lines (issue #4228).
     eval "${sel_output}"
-    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] || return 1
+    ACTIVE_TOKEN_NAME="${LOOM_TOKEN_NAME:-}"
+}
+
+# --- Proxied launch (#8818) ---
+# Under the Claude credential egress proxy (#8697) this wrapper runs inside a
+# container whose token pool is masked and whose CLAUDE_CODE_OAUTH_TOKEN is a
+# per-launch `loom-placeholder-…`, so `tokens mark-bad` / `tokens select` here
+# would lose the mark and find no account. Instead the HOST rotates:
+# `worker proxy-rotate` asks the proxy to bad-mark this launch's current
+# account (the request carries only a reason from a fixed vocabulary -- never an
+# account, credential or upstream) and swap a fresh credential in behind the
+# SAME placeholder, so the retry needs no new value. It prints only
+# `export LOOM_TOKEN_NAME=…` for attribution. `$2` non-empty narrows an
+# exhaustion mark to the host's model class (#8058).
+# requires-daemon: worker optional   #8818 — only on the opt-in proxied path; an in-container binary predating `worker proxy-rotate` fails the rotation exactly as before this change (ACCOUNT_POOL_EXHAUSTED), never an unproxied fallback.
+_proxied_launch() { [[ "${CLAUDE_CODE_OAUTH_TOKEN:-}" == loom-placeholder-* ]]; }
+_proxy_rotate() {
+    local daemon_bin out
+    daemon_bin="$(declare -F loom_locate_daemon_bin >/dev/null 2>&1 && loom_locate_daemon_bin "$(_resolve_token_workspace)" || true)"
+    if [[ -z "${daemon_bin}" ]]; then
+        log_warn "No loom-daemon binary resolved — cannot ask the host proxy to rotate the OAuth account"
         return 1
     fi
-
+    out="$("${daemon_bin}" worker proxy-rotate --reason "$1" ${2:+--model-scoped})" || return 1
+    eval "${out}"
     ACTIVE_TOKEN_NAME="${LOOM_TOKEN_NAME:-}"
-    log_info "Re-selected OAuth account → '${ACTIVE_TOKEN_NAME}' after concurrent-session limit (token NOT marked bad)"
-    return 0
+    log_info "Host-side proxy rotated OAuth account → '${ACTIVE_TOKEN_NAME}' (reason=$1; credential never entered this container)"
 }
 
 # Echo a short human phrase describing why the account was considered
@@ -1930,6 +1998,9 @@ _derive_token_name() {
 # account-wide mark unchanged.
 rotate_exhausted_account() {
     local reason="$1"
+    # Proxied (#8818): the host marks + swaps. "session limit" picks the 5h
+    # window's shorter hold (#7522); the scope flag mirrors the mark below.
+    _proxied_launch && { _proxy_rotate "$(grep -qi 'session limit' <<<"${reason}" && echo session-window || echo usage-limit)" "$(_retry_classify model-class "${2:-}" "${3:-1}" --model "${LOOM_MODEL:-}" && printf '%s' "${_RETRY_CLASSIFY_OUT}" || true)" && return 0 || return 1; }
     local ws daemon_bin
     ws="$(_resolve_token_workspace)"
     daemon_bin="$(declare -F loom_locate_daemon_bin >/dev/null 2>&1 && loom_locate_daemon_bin "${ws}" || true)"
@@ -1964,33 +2035,7 @@ rotate_exhausted_account() {
         log_warn "Active account name unknown — cannot mark it bad; re-selecting anyway"
     fi
 
-    local sel_output _sel_rc
-    set +e
-    # #8058: scope selection to the model class this wrapper is running, so an
-    # account bad-marked only for another class stays eligible. The helper
-    # emits nothing when LOOM_MODEL is unset or the resolved daemon binary
-    # predates `--model`, which is why the expansion is deliberately unquoted
-    # (it is either two words or none) and why a missing helper -- an older
-    # lib/locate-daemon-bin.sh mid-resync -- degrades to plain selection.
-    # The class comes from LOOM_MODEL, not from an explicit `--model` in this
-    # wrapper's own args: the daemon path sets both (spawn-claude.sh exports
-    # LOOM_MODEL and appends the flag), and on the rare path where they
-    # disagree a mismatch costs at most one extra rotation -- never a wrong
-    # mark, since marking is gated separately by `retry-classify model-class`.
-    # shellcheck disable=SC2046
-    sel_output="$(env -u LOOM_ROLE "${daemon_bin}" tokens select --workspace "${ws}" --export $(declare -F loom_daemon_model_select_flag >/dev/null 2>&1 && loom_daemon_model_select_flag "${daemon_bin}" "${LOOM_MODEL:-}" || true) 2>/dev/null)"
-    _sel_rc=$?
-    set -e
-    if [[ ${_sel_rc} -ne 0 || -z "${sel_output}" ]]; then
-        return 1
-    fi
-
-    eval "${sel_output}"
-    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-        return 1
-    fi
-
-    ACTIVE_TOKEN_NAME="${LOOM_TOKEN_NAME:-}"
+    _select_rotation_account "${ws}" "${daemon_bin}" || return 1
     log_info "Rotated OAuth account → '${ACTIVE_TOKEN_NAME}' (token tail=…${CLAUDE_CODE_OAUTH_TOKEN: -4})"
     return 0
 }
@@ -2008,6 +2053,7 @@ rotate_exhausted_account() {
 # resolves).
 rotate_auth_dead_account() {
     local reason="$1"
+    _proxied_launch && { _proxy_rotate auth-dead && return 0 || return 1; }
     local ws daemon_bin
     ws="$(_resolve_token_workspace)"
     daemon_bin="$(declare -F loom_locate_daemon_bin >/dev/null 2>&1 && loom_locate_daemon_bin "${ws}" || true)"
@@ -2032,33 +2078,7 @@ rotate_auth_dead_account() {
         log_warn "Active account name unknown — cannot mark it bad; re-selecting anyway"
     fi
 
-    local sel_output _sel_rc
-    set +e
-    # #8058: scope selection to the model class this wrapper is running, so an
-    # account bad-marked only for another class stays eligible. The helper
-    # emits nothing when LOOM_MODEL is unset or the resolved daemon binary
-    # predates `--model`, which is why the expansion is deliberately unquoted
-    # (it is either two words or none) and why a missing helper -- an older
-    # lib/locate-daemon-bin.sh mid-resync -- degrades to plain selection.
-    # The class comes from LOOM_MODEL, not from an explicit `--model` in this
-    # wrapper's own args: the daemon path sets both (spawn-claude.sh exports
-    # LOOM_MODEL and appends the flag), and on the rare path where they
-    # disagree a mismatch costs at most one extra rotation -- never a wrong
-    # mark, since marking is gated separately by `retry-classify model-class`.
-    # shellcheck disable=SC2046
-    sel_output="$(env -u LOOM_ROLE "${daemon_bin}" tokens select --workspace "${ws}" --export $(declare -F loom_daemon_model_select_flag >/dev/null 2>&1 && loom_daemon_model_select_flag "${daemon_bin}" "${LOOM_MODEL:-}" || true) 2>/dev/null)"
-    _sel_rc=$?
-    set -e
-    if [[ ${_sel_rc} -ne 0 || -z "${sel_output}" ]]; then
-        return 1
-    fi
-
-    eval "${sel_output}"
-    if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-        return 1
-    fi
-
-    ACTIVE_TOKEN_NAME="${LOOM_TOKEN_NAME:-}"
+    _select_rotation_account "${ws}" "${daemon_bin}" || return 1
     log_info "Rotated OAuth account → '${ACTIVE_TOKEN_NAME}' (token tail=…${CLAUDE_CODE_OAUTH_TOKEN: -4})"
     return 0
 }
@@ -2519,8 +2539,7 @@ _run_via_script() {
 
 # Main retry loop with exponential backoff
 run_with_retry() {
-    local attempt=1
-    local exit_code=0
+    local attempt=1 exit_code=0
     local output=""
     # Account-rotation bookkeeping (#3738). Rotations do NOT consume a
     # MAX_RETRIES attempt; this independent cap is a loop guard for the
@@ -2559,6 +2578,11 @@ run_with_retry() {
         fi
 
         log_info "Attempt ${attempt}/${MAX_RETRIES}: Starting Claude CLI"
+        # #10830: spawn-claude.sh pins `--session-id` (LOOM_CLAUDE_SESSION_ID), and
+        # Claude refuses a second launch with an id whose transcript exists
+        # ("Session ID ... is already in use"). Once it does, every retry resumes
+        # the same session instead, which also keeps the id the daemon recorded.
+        compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${LOOM_CLAUDE_SESSION_ID:-none}.jsonl" >/dev/null && set -- "${@/#--session-id/--resume}"
         write_retry_state "running" "${attempt}"
 
         # Run Claude CLI, capturing both stdout and stderr
@@ -2812,7 +2836,7 @@ run_with_retry() {
             log_error "Re-authenticate the affected account(s), then run 'loom-daemon tokens unblock <name>'."
             echo "# ACCOUNT_POOL_EXHAUSTED" >&2
             clear_retry_state
-            return 1
+            return 78  # EX_CONFIG: no alternate account (#10294)
         fi
 
         # Check if this is a transient error worth retrying

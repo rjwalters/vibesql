@@ -79,50 +79,17 @@
 #   ./.loom/scripts/tests/test-sweep-lease-convergence.sh
 
 set -uo pipefail
+# shellcheck source=lib/write-scope-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 SCRIPT="$SCRIPTS_DIR/sweep-lease-publish.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
 
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
-
-# assert_contains/assert_not_contains use a pure-bash substring match (no
-# forked printf|grep pipeline) so a transient fork/exec failure under
-# run-ci-suites.sh's parallel suite pool can never masquerade as a genuine
-# content mismatch (#7819, #7874).
-assert_contains() {
-    local haystack="$1" needle="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$haystack" == *"$needle"* ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected substring: '$needle'"
-        echo "    In: '$haystack'"
-    fi
-}
 
 if [[ ! -x "$SCRIPT" ]]; then
     echo -e "${RED}FATAL${NC}: $SCRIPT not found or not executable" >&2
@@ -147,7 +114,9 @@ if [[ "$1" == "api" ]]; then
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --method) method="$2"; shift 2 ;;
-      -R) shift 2 ;;
+      -R|--repo)
+        # Real `gh api` has no -R/--repo flag (#9552): fail exactly like it.
+        echo "unknown shorthand flag: 'R' in -R" >&2; exit 1 ;;
       --paginate) shift ;;
       --jq) jq_filter="$2"; shift 2 ;;
       -f) shift 2 ;;
@@ -161,6 +130,7 @@ if [[ "$1" == "api" ]]; then
         ;;
     esac
   done
+  echo "$path" >> "$D/api-paths.log"
   resolve_body() {
     if [[ -n "$have_typed_body" ]]; then
       case "$typed_body" in
@@ -208,6 +178,15 @@ chmod +x "$STUB_DIR/gh"
 
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# #9548: the subject filters lease markers through `forge trusted-comments`.
+# shellcheck source=lib/trust-stub.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/trust-stub.sh"
+loom_trust_stub "$STUB_DIR"
+# #9548: sweep-lease-publish.sh vets its write target through the write scope before it
+# writes. It runs from a checkout registered as acme/widget (origin, .loom/, push
+# reported to the permission probe), so the real decision admits it.
+write_scope_register "$STUB_DIR/checkout" acme/widget
+cd "$STUB_DIR/checkout" || exit 1
 export STUB_ISSUE_COMMENTS_FILE="$STUB_DIR/comments.json"
 echo "[]" > "$STUB_ISSUE_COMMENTS_FILE"
 

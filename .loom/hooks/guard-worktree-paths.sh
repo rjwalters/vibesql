@@ -233,7 +233,8 @@ if declare -F loom_installed_write_denied >/dev/null 2>&1 \
     _IFW_GUARD_ON=true
 fi
 
-if [[ "$_WT_GUARD_ON" != true && "$_IFW_GUARD_ON" != true ]]; then
+# A role session always continues: the per-role tool restriction below has no toggle.
+if [[ "$_WT_GUARD_ON" != true && "$_IFW_GUARD_ON" != true && -z "${LOOM_ROLE:-}" ]]; then
     exit 0
 fi
 
@@ -520,6 +521,33 @@ if declare -F loom_canonical_path >/dev/null 2>&1; then
     [[ -n "$NORM_PATH" ]] || NORM_PATH="$FILE_PATH"
 else
     NORM_PATH=$(printf '%s' "$FILE_PATH" | python3 -c "import os,sys; print(os.path.normpath(sys.stdin.read()))" 2>/dev/null) || NORM_PATH="$FILE_PATH"
+fi
+
+# --------------------------------------------------------------------------
+# Per-role tool restriction (#8256): the Edit/Write half of the Bash rule in
+# guard-loom-workflow.sh — a role whose JSON does not declare
+# `credential-store` cannot write under ~/.ssh and the other credential
+# stores. Same call, same fail-closed rule; see guard-hooks.md.
+# --------------------------------------------------------------------------
+# requires-daemon: role-tool-policy optional   #8256 — `check --path`; with no usable answer the built-in read-only roles are denied, every other role is allowed.
+if [[ -n "${LOOM_ROLE:-}" ]]; then
+    # Judge BOTH spellings (#11227): the credential-store matcher is name-based,
+    # so a symlinked credential dir (~/.config/gh -> ~/dotfiles/gh) loses its
+    # name in $NORM_PATH. The raw absolutized $FILE_PATH keeps it; the matcher
+    # normalizes `.`/`..` lexically, so passing it unresolved is safe. One call
+    # when the two spellings agree; deny if either answers BLOCKED.
+    RTP_PATHS=("$NORM_PATH")
+    [[ "$FILE_PATH" == "$NORM_PATH" ]] || RTP_PATHS+=("$FILE_PATH")
+    for RTP_PATH in "${RTP_PATHS[@]}"; do
+        RTP_RC=0
+        RTP_OUT=$("${LOOM_DAEMON_SELF_BIN:-loom-daemon}" role-tool-policy check --roles-dir "$SCRIPT_DIR/../roles" --workspace "$SCRIPT_DIR/../.." --path "$RTP_PATH" 2>/dev/null) || RTP_RC=$?
+        if [[ "$RTP_RC" -eq 1 && "$RTP_OUT" == "BLOCKED [role-tool-policy]"* ]]; then
+            emit_deny "$RTP_OUT"
+        elif [[ "$RTP_RC" -ne 0 && " architect auditor champion curator guide hermit judge " == *" $(printf '%s' "$LOOM_ROLE" | tr '[:upper:]_' '[:lower:]-') "* ]]; then
+            emit_deny "BLOCKED [role-tool-policy]: role '$LOOM_ROLE' is restricted, and loom-daemon role-tool-policy check could not answer (exit $RTP_RC), so this write is denied rather than allowed unchecked (#8256)."
+        fi
+    done
+    [[ "$_WT_GUARD_ON" == true || "$_IFW_GUARD_ON" == true ]] || exit 0
 fi
 
 # --------------------------------------------------------------------------

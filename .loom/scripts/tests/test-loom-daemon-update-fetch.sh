@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # test-loom-daemon-update-fetch.sh -- artifact-fetch mode (Epic #4990 Phase 3,
-# #5020) of loom-daemon-update.sh: tests A-V, split out of
+# #5020) of loom-daemon-update.sh: tests A-Y, split out of
 # test-loom-daemon-update.sh by #8028 (epic #7810 PR 6a).
+#
+# Scenario V (post-provision signature preservation, #8008) moved OUT of here
+# to test-loom-daemon-update-dest-signature.sh with #8770, which added a
+# second scenario on that same subject: it is about what provisioning does to
+# the destination binary, not about fetching, and this suite had no room left
+# under the file-size ratchet (see the closing note at the bottom).
 #
 # WHY THIS IS A SEPARATE SUITE
 #
@@ -57,30 +63,15 @@ export LOOM_SYSTEMD_UNIT="loom-daemon-fetch-test-$$.service"
 # shellcheck source=lib/daemon-update-fixtures.sh
 source "$SCRIPT_DIR/lib/daemon-update-fixtures.sh"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 MINIMAL_PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 BASE_WORKDIR="$(mktemp -d)"
+# #8712: every fixture write in this suite must land under this directory. A
+# fake loom-daemon that escapes to a real `loom-daemon/target/release/` poisons
+# `loom-daemon-update.sh --fetch` on the host until it is removed by hand.
+loom_fixture_scratch_root "$BASE_WORKDIR"
 cleanup() { rm -rf "$BASE_WORKDIR"; }
 trap cleanup EXIT
 
@@ -1053,14 +1044,51 @@ rcT=$(echo "$outT" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
 assert_eq "0" "$rcT" "release-gap: a still-usable (newer-than-installed) artifact update still exits 0"
 
 TESTS_RUN=$((TESTS_RUN + 1))
-if grep -q 'Artifact path cannot reach current source' <<<"$outT" \
-    && grep -q '0.20.0' <<<"$outT" && grep -q 'v0.16.0' <<<"$outT"; then
+if grep -q 'Note (informational): this run installs release v0.16.0' <<<"$outT" \
+    && grep -q '0.20.0' <<<"$outT" \
+    && ! grep -q 'will hard-fail' <<<"$outT"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} release-gap: plain run warns when the resolved release is behind source VERSION"
+    echo -e "${GREEN}✓${NC} release-gap: plain run notes (informationally) that the chosen release is behind source VERSION"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} release-gap: plain run warns when the resolved release is behind source VERSION"
+    echo -e "${RED}✗${NC} release-gap: plain run notes (informationally) that the chosen release is behind source VERSION"
     echo "  output: $outT"
+fi
+
+# T3. (#11070) Checkout ahead of the newest release + a forced --fetch whose
+#     release IS newer than installed: the fetch proceeds and succeeds, so no
+#     message may claim a forced --fetch "will hard-fail" (the contradictory
+#     pair the issue reported).
+WT3="$BASE_WORKDIR/w-fetch-t3"
+new_fixture "$WT3"
+write_fake_daemon "$WT3/installed-loom-daemon" "oldc0mm" "$WT3/marker"
+echo "0.16.1" > "$WT3/VERSION"
+WT3_ASSETS="$WT3/gh-assets"
+mkdir -p "$WT3_ASSETS"
+write_fake_artifact_daemon "$WT3_ASSETS/$WT_BIN_NAME" "0.16.0" "artifact-t3"
+sha256_of "$WT3_ASSETS/$WT_BIN_NAME" > "$WT3_ASSETS/$WT_BIN_NAME.sha256"
+WT3_FAKEBIN="$WT3/fakebin"
+mkdir -p "$WT3_FAKEBIN"
+write_fake_gh "$WT3_FAKEBIN/gh" "v0.16.0" "$WT3_ASSETS"
+
+outT3=$( cd "$WT3" && PATH="$WT3_FAKEBIN:$TEST_PATH" \
+    LOOM_DAEMON_BIN="$WT3/installed-loom-daemon" \
+    LOOM_DAEMON_UPDATE_GH_REPO="test-owner/test-repo" \
+    LOOM_DAEMON_UPDATE_TARGET="x86_64-unknown-linux-gnu" \
+    bash "$UPDATE_SCRIPT" --no-restart --fetch 2>&1; echo "EXIT=$?" )
+rcT3=$(echo "$outT3" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
+assert_eq "0" "$rcT3" "release-gap (#11070): forced --fetch of a release behind source VERSION still installs it (exit 0)"
+
+TESTS_RUN=$((TESTS_RUN + 1))
+if grep -q 'preferring fetch over a local rebuild' <<<"$outT3" \
+    && ! grep -q 'will hard-fail' <<<"$outT3" \
+    && ! grep -q 'Artifact path cannot reach current source' <<<"$outT3"; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}✓${NC} release-gap (#11070): checkout ahead of release + --fetch prints no contradictory hard-fail warning"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}✗${NC} release-gap (#11070): checkout ahead of release + --fetch prints no contradictory hard-fail warning"
+    echo "  output: $outT3"
 fi
 
 WT2="$BASE_WORKDIR/w-fetch-t2"
@@ -1143,54 +1171,6 @@ if grep -q 'Rebuilding loom-daemon (cargo build' <<<"$outU"; then
 else
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} release-gap: forced --fetch hard-fail never falls back to 'cargo build'"
-fi
-
-# ------------------------------------------------------------
-# V. Post-provision signature-preservation assertion (#8008, the follow-up to
-#    #7932): the VERIFIED download carries a Developer ID Authority=
-#    signature, but the PROVISIONED DESTINATION reports ad-hoc/no Authority=
-#    afterward -- exactly the shape of the #7932 regression (sign_daemon_binary's
-#    `codesign ... | grep -q` pipe form silently reported 141 under
-#    `set -o pipefail`, so it force-resigned every Developer ID-signed release
-#    artifact ad-hoc on every provision, unnoticed because nothing compared
-#    the destination's signature against the verified download's). Must
-#    hard-fail (exit 5, same class as the existing version-mismatch check),
-#    not silently succeed.
-# ------------------------------------------------------------
-WV="$BASE_WORKDIR/w-fetch-v"
-new_fixture "$WV"
-write_fake_daemon "$WV/installed-loom-daemon" "oldc0mm" "$WV/marker"
-
-WV_ASSETS="$WV/gh-assets"
-mkdir -p "$WV_ASSETS"
-WV_BIN_NAME="loom-daemon-aarch64-apple-darwin"
-write_fake_artifact_daemon "$WV_ASSETS/$WV_BIN_NAME" "0.16.0" "sigdown0"
-sha256_of "$WV_ASSETS/$WV_BIN_NAME" > "$WV_ASSETS/$WV_BIN_NAME.sha256"
-
-WV_FAKEBIN="$WV/fakebin"
-mkdir -p "$WV_FAKEBIN"
-write_fake_gh "$WV_FAKEBIN/gh" "v0.16.0" "$WV_ASSETS"
-# Authority= for every codesign target EXCEPT the provisioning destination
-# itself, which reports ad-hoc -- simulating a post-provision downgrade.
-write_fake_codesign_signature_downgrade "$WV_FAKEBIN/codesign" "$WV/installed-loom-daemon"
-
-outV=$( cd "$WV" && PATH="$WV_FAKEBIN:$TEST_PATH" \
-    LOOM_DAEMON_BIN="$WV/installed-loom-daemon" \
-    LOOM_DAEMON_UPDATE_GH_REPO="test-owner/test-repo" \
-    LOOM_DAEMON_UPDATE_TARGET="aarch64-apple-darwin" \
-    bash "$UPDATE_SCRIPT" --no-restart 2>&1; echo "EXIT=$?" )
-rcV=$(echo "$outV" | grep -o 'EXIT=[0-9]*' | cut -d= -f2)
-assert_eq "5" "$rcV" "macOS signature-preservation: Authority pre-provision, ad-hoc post-provision hard-fails (exit 5)"
-
-TESTS_RUN=$((TESTS_RUN + 1))
-if grep -q 'Post-provision verification FAILED.*Developer ID (Authority=) signature' <<< "$outV" \
-    && grep -q 'DOWNGRADED the signature' <<< "$outV"; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} macOS signature-preservation: downgrade reported explicitly, names the #7932 regression class"
-else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} macOS signature-preservation: downgrade reported explicitly, names the #7932 regression class"
-    echo "  output: $outV"
 fi
 
 
@@ -1395,6 +1375,15 @@ fi
 # release-fetch deliberately hands its scratch dir to the caller (the wrapper's
 # EXIT trap owns it in production); this suite is that caller here.
 rm -rf "$(grep '^TMP_DIR=' <<<"$outY" | cut -d= -f2-)"
+
+# The containment guard armed above (loom_fixture_scratch_root) is exercised by
+# its own sibling suite, test-daemon-update-fixture-containment.sh — it belongs
+# to lib/daemon-update-fixtures.sh, not to `--fetch`.
+#
+# Keep that reflex: this suite sat one code line short of the 1000-line freeze
+# until #8770 moved scenario V out to test-loom-daemon-update-dest-signature.sh.
+# A new scenario belongs in the sibling whose SUBJECT it shares, not here by
+# default.
 
 echo
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed, $TESTS_FAILED failed"

@@ -341,7 +341,7 @@ assert_eq "FAKE_DAEMON WF=[1] HG=[]" "$out" "pre-exported LOOM_WORK_FINDER=1 win
 #     "env not forced" wording when something WAS forced.
 banner_out=$( ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE LOOM_DAEMON_BIN="$FAKE_BIN" bash "$START_SCRIPT" --from-config --work-finder --foreground 2>&1 ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$banner_out" | grep -q 'forced: work_finder=1' && ! echo "$banner_out" | grep -q 'env not forced'; then
+if grep -q 'forced: work_finder=1' <<<"$banner_out" && ! grep -q 'env not forced' <<<"$banner_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} startup banner names the forced loop, never prints 'env not forced' when something was forced (#4353)"
 else
@@ -353,7 +353,7 @@ fi
 # 8. --help mentions the FLAGS-OFF default and the opt-in flags.
 help_out=$(bash "$START_SCRIPT" --help 2>/dev/null)
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$help_out" | grep -qi 'FLAGS-OFF' && echo "$help_out" | grep -q -- '--work-finder'; then
+if grep -qi 'FLAGS-OFF' <<<"$help_out" && grep -q -- '--work-finder' <<<"$help_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} --help documents the FLAGS-OFF default and --work-finder"
 else
@@ -388,6 +388,8 @@ chmod +x "$BG_FAKE_BIN"
 # real ~/.loom/autonomy-desired. LOOM_WATCHDOG_LABEL is a scratch label so even
 # if the watchdog script were resolvable here, provisioning could not touch the
 # real com.rjwalters.loom-daemon-watchdog LaunchAgent.
+# #9588: seed an operator-stop record, which an explicit start must clear.
+mkdir -p "$WORKDIR/.loom" && echo 'operator_stop_reason=then-exit' > "$WORKDIR/.loom/autonomy-desired.stopped"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     LOOM_DAEMON_BIN="$BG_FAKE_BIN" \
     LOOM_SOCKET_PATH="$WORKDIR/.loom/loom-daemon.sock" \
@@ -396,14 +398,8 @@ chmod +x "$BG_FAKE_BIN"
     bash "$START_SCRIPT" --no-launchd --no-systemd >/dev/null 2>&1 )
 bg_rc=$?
 assert_eq "0" "$bg_rc" "bare (zero-arg) background start exits 0 (no unbound-variable crash, #3968)"
-TESTS_RUN=$((TESTS_RUN + 1))
-if [[ -f "$WORKDIR/.loom/.daemon.flags" && ! -s "$WORKDIR/.loom/.daemon.flags" ]]; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} bare start persists an EMPTY .loom/.daemon.flags (no autonomy flags to record)"
-else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} bare start persists an EMPTY .loom/.daemon.flags (no autonomy flags to record)"
-fi
+flags_state=$([[ -f "$WORKDIR/.loom/.daemon.flags" && ! -s "$WORKDIR/.loom/.daemon.flags" ]] && echo empty || echo other)
+assert_eq "empty" "$flags_state" "bare start persists an EMPTY .loom/.daemon.flags (no autonomy flags to record)"
 # #4011: a successful start writes the durable autonomy-desired intent marker
 # (into the isolated WORKDIR location pinned above — never the real ~/.loom).
 TESTS_RUN=$((TESTS_RUN + 1))
@@ -416,6 +412,11 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} bare start writes the autonomy-desired marker with heartbeat + liveness fields (#4011)"
 fi
+# #9588: an explicit start is the operator's "run again" — it clears the
+# operator-stop record so the new daemon does not come up held and the watchdog
+# is re-armed by the marker written above.
+stop_state=$([[ -e "$WORKDIR/.loom/autonomy-desired.stopped" ]] && echo present || echo cleared)
+assert_eq "cleared" "$stop_state" "explicit start clears the operator-stop record (#9588)"
 
 # Clean up the background daemon this test started.
 if [[ -f "$WORKDIR/.loom/.daemon.pid" ]]; then
@@ -439,7 +440,7 @@ out=$( ( cd "$NON_REPO_DIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE 
     LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --foreground 2>&1 ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$out" | grep -q '^FAKE_DAEMON'; then
+if grep -q '^FAKE_DAEMON' <<<"$out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} machine mode: start succeeds from a NON-REPO directory (no dev-mode '.loom directory not found' refusal)"
 else
@@ -448,7 +449,7 @@ else
     echo "  output: $out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$out" | grep -q "Mode:.*machine (workdir: $MACHINE_CHECKOUT"; then
+if grep -q "Mode:.*machine (workdir: $MACHINE_CHECKOUT" <<<"$out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} machine mode: plist workdir resolves to the checkout, not \$PWD"
 else
@@ -479,7 +480,7 @@ fi
 out_dev=$( cd "$NON_REPO_DIR" && LOOM_DAEMON_BIN="$FAKE_BIN" bash "$START_SCRIPT" --foreground 2>&1 )
 rc_dev=$?
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$rc_dev" -ne 0 ]] && echo "$out_dev" | grep -qi "Not in a Loom workspace"; then
+if [[ "$rc_dev" -ne 0 ]] && grep -qi "Not in a Loom workspace" <<<"$out_dev"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dev-mode fallback unchanged: refuses from a non-repo dir with no dispatcher (#4229 scope guard)"
 else
@@ -500,39 +501,37 @@ SD_UNIT="loom-daemon-test-$$.service"
 
 # S1. --print-unit renders the unit with NO side effects (no systemctl, no file
 #     write). Assert the six load-bearing fields from the issue's test plan:
-#     Restart=on-success, KillMode=mixed (#4862), TimeoutStopSec=20 (#4950),
+#     Restart=always (#11058), KillMode=mixed (#4862), TimeoutStopSec=20 (#4950),
 #     WantedBy=default.target, the baked Environment=LOOM_DAEMON_SUPERVISOR=systemd,
 #     and WorkingDirectory=<repo>.
 unit_out=$( ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     LOOM_DAEMON_BIN="$FAKE_BIN" bash "$START_SCRIPT" --print-unit 2>/dev/null ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$unit_out" | grep -qx 'Restart=on-success' \
-    && echo "$unit_out" | grep -qx 'KillMode=mixed' \
-    && echo "$unit_out" | grep -qx 'TimeoutStopSec=20' \
-    && echo "$unit_out" | grep -qx 'WantedBy=default.target' \
-    && echo "$unit_out" | grep -qx 'Environment=LOOM_DAEMON_SUPERVISOR=systemd' \
-    && echo "$unit_out" | grep -qx "WorkingDirectory=$WORKDIR"; then
+if grep -qx 'Restart=always' <<<"$unit_out" && grep -qx 'OOMPolicy=continue' <<<"$unit_out" \
+    && grep -qx 'KillMode=mixed' <<<"$unit_out" \
+    && grep -qx 'TimeoutStopSec=20' <<<"$unit_out" \
+    && grep -qx 'WantedBy=default.target' <<<"$unit_out" \
+    && grep -qx 'Environment=LOOM_DAEMON_SUPERVISOR=systemd' <<<"$unit_out" \
+    && grep -qx "WorkingDirectory=$WORKDIR" <<<"$unit_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} --print-unit renders Restart=on-success, KillMode=mixed, TimeoutStopSec=20, WantedBy=default.target, LOOM_DAEMON_SUPERVISOR=systemd, WorkingDirectory=<repo>"
+    echo -e "${GREEN}✓${NC} --print-unit renders Restart=always, OOMPolicy=continue, KillMode=mixed, TimeoutStopSec=20, WantedBy=default.target, LOOM_DAEMON_SUPERVISOR=systemd, WorkingDirectory=<repo>"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} --print-unit renders the expected unit fields"
     echo "$unit_out" | sed 's/^/    /'
 fi
 
-# S1b (#6129): a clean operator stop (SIGTERM->143, SIGINT->130) must land the
-# unit in `inactive`, not `failed` -- SuccessExitStatus= reclassifies both
-# codes as a clean exit; RestartPreventExitStatus= is the belt-and-braces
-# guard against a raw (non-systemctl) `kill -TERM` newly tripping
-# Restart=on-success now that those codes count as "success".
+# S1b (#6129, #11058): SuccessExitStatus= lands a clean operator stop (143/130)
+# in `inactive`, not `failed`; under Restart=always, RestartPreventExitStatus=
+# keeps every stay-down exit down (1, 79 fleet-stopped, 130, 143 then-exit).
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$unit_out" | grep -qx 'SuccessExitStatus=143 130' \
-    && echo "$unit_out" | grep -qx 'RestartPreventExitStatus=143 130'; then
+if grep -qx 'SuccessExitStatus=143 130' <<<"$unit_out" \
+    && grep -qx 'RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT' <<<"$unit_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${GREEN}✓${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT (#6129, #11058)"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${RED}✗${NC} --print-unit renders SuccessExitStatus=143 130 + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT (#6129, #11058)"
     echo "$unit_out" | sed 's/^/    /'
 fi
 
@@ -595,19 +594,19 @@ fi
 rm -f "$WORKDIR/.loom/.daemon.pid"
 TESTS_RUN=$((TESTS_RUN + 1))
 if [[ -f "$SD_HOME/.config/systemd/user/$SD_UNIT" ]] \
-    && grep -qx 'Restart=on-success' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
+    && grep -qx 'Restart=always' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'KillMode=mixed' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'TimeoutStopSec=20' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
     && grep -qx 'SuccessExitStatus=143 130' "$SD_HOME/.config/systemd/user/$SD_UNIT" \
-    && grep -qx 'RestartPreventExitStatus=143 130' "$SD_HOME/.config/systemd/user/$SD_UNIT"; then
+    && grep -qx 'RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT' "$SD_HOME/.config/systemd/user/$SD_UNIT"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=on-success + KillMode=mixed (#4862) + TimeoutStopSec=20 (#4950) + SuccessExitStatus/RestartPreventExitStatus=143 130 (#6129)"
+    echo -e "${GREEN}✓${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=always (#11058) + KillMode=mixed (#4862) + TimeoutStopSec=20 (#4950) + SuccessExitStatus=143 130 (#6129) + RestartPreventExitStatus=1 79 130 143 SIGTERM SIGINT"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=on-success + KillMode=mixed + TimeoutStopSec=20"
+    echo -e "${RED}✗${NC} systemd path: renders the unit file under ~/.config/systemd/user with Restart=always + KillMode=mixed + TimeoutStopSec=20"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$sd_out" | grep -qi 'enable-linger'; then
+if grep -qi 'enable-linger' <<<"$sd_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} systemd path: prints the loginctl enable-linger reboot-survival reminder"
 else
@@ -619,7 +618,7 @@ fi
 # tier degrades to its missing-script skip. Confirm that degrade is a WARNING,
 # never a failed start (parity with the launchd branch, #4260 sub-issue D AC).
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$sd_out" | grep -qi 'watchdog.*loom-daemon-watchdog.sh not found'; then
+if grep -qi 'watchdog.*loom-daemon-watchdog.sh not found' <<<"$sd_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} systemd path: missing watchdog script degrades to a warning (start already asserted exit 0 above)"
 else
@@ -733,7 +732,7 @@ wd2_out=$( cd "$WD_REPO" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
 wd2_rc=$?
 assert_eq "0" "$wd2_rc" "systemd watchdog: a failed 'enable --now' on the timer does not fail the daemon start"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$wd2_out" | grep -qi 'watchdog.*enable --now failed'; then
+if grep -qi 'watchdog.*enable --now failed' <<<"$wd2_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} systemd watchdog: install failure is reported as a warning"
 else
@@ -801,7 +800,7 @@ rm -rf "$SD_HOME3"
 
 # S5. --help documents the systemd escape hatch + --print-unit.
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$help_out" | grep -q -- '--no-systemd' && echo "$help_out" | grep -q -- '--print-unit'; then
+if grep -q -- '--no-systemd' <<<"$help_out" && grep -q -- '--print-unit' <<<"$help_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} --help documents --no-systemd and --print-unit"
 else
@@ -878,7 +877,7 @@ sh1_out=$( ( cd "$SH1_HOME" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE 
     LOOM_WATCHDOG_LABEL="com.example.loom-sandbox-$$-sh1-watchdog" \
     bash "$START_SCRIPT" --no-launchd --no-systemd 2>&1 ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$sh1_out" | grep -q '^Safehouse:.*not configured'; then
+if grep -q '^Safehouse:.*not configured' <<<"$sh1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} safehouse: no config block -> 'not configured' (#4345)"
 else
@@ -906,8 +905,8 @@ sh2_out=$( ( cd "$SH2_HOME" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE 
     LOOM_WATCHDOG_LABEL="com.example.loom-sandbox-$$-sh2-watchdog" \
     bash "$START_SCRIPT" --no-launchd --no-systemd 2>&1 ) )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$sh2_out" | grep -q '^Safehouse:.*configured, unreachable' \
-    && echo "$sh2_out" | grep -q 'does-not-exist.sock'; then
+if grep -q '^Safehouse:.*configured, unreachable' <<<"$sh2_out" \
+    && grep -q 'does-not-exist.sock' <<<"$sh2_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} safehouse: enabled + missing socket -> 'configured, unreachable' with the resolved path (#4345)"
 else
@@ -944,7 +943,7 @@ EOF
         LOOM_WATCHDOG_LABEL="com.example.loom-sandbox-$$-sh3-watchdog" \
         bash "$START_SCRIPT" --no-launchd --no-systemd 2>&1 ) )
     TESTS_RUN=$((TESTS_RUN + 1))
-    if echo "$sh3_out" | grep -q '^Safehouse:.*configured (socket present'; then
+    if grep -q '^Safehouse:.*configured (socket present' <<<"$sh3_out"; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "${GREEN}✓${NC} safehouse: enabled + socket file present -> 'configured (socket present ...)' (#4345)"
     else
@@ -955,7 +954,7 @@ EOF
     # #4464: SH3's config has no `safehouse.room`, so the room-unset caveat MUST
     # be surfaced (omitting room is valid only for a single-room safehoused).
     TESTS_RUN=$((TESTS_RUN + 1))
-    if echo "$sh3_out" | grep -q 'safehouse.room is unset'; then
+    if grep -q 'safehouse.room is unset' <<<"$sh3_out"; then
         TESTS_PASSED=$((TESTS_PASSED + 1))
         echo -e "${GREEN}✓${NC} safehouse: room unset -> room caveat surfaced (#4464)"
     else
@@ -967,7 +966,7 @@ EOF
         kill "$(cat "$SH3_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH3: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH3: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH3_HOME"
 
@@ -994,7 +993,7 @@ EOF
         LOOM_WATCHDOG_LABEL="com.example.loom-sandbox-$$-sh4-watchdog" \
         bash "$START_SCRIPT" --no-launchd --no-systemd 2>&1 ) )
     TESTS_RUN=$((TESTS_RUN + 1))
-    if echo "$sh4_out" | grep -q 'safehouse.room is unset'; then
+    if grep -q 'safehouse.room is unset' <<<"$sh4_out"; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
         echo -e "${RED}✗${NC} safehouse: room set -> no room caveat (#4464)"
         echo "  output: $sh4_out"
@@ -1006,7 +1005,7 @@ EOF
         kill "$(cat "$SH4_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH4: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH4: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH4_HOME"
 
@@ -1037,7 +1036,7 @@ dek1_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE -u LOOM_SAFEHOUSE_E
     HOME="$DEK_HOME" LOOM_MACHINE_CHECKOUT="$DEK_HOME" LOOM_LAUNCHD_LABEL="$DEK_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek1_out" | grep -qi 'drops.*env key'; then
+if ! grep -qi 'drops.*env key' <<<"$dek1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): first-ever install (no existing plist) never warns (#4522)"
 else
@@ -1057,7 +1056,7 @@ dek2_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE -u LOOM_SAFEHOUSE_E
     HOME="$DEK_HOME" LOOM_MACHINE_CHECKOUT="$DEK_HOME" LOOM_LAUNCHD_LABEL="$DEK_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$dek2_out" | grep -qi 'drops 1 env key' && echo "$dek2_out" | grep -q 'LOOM_SAFEHOUSE_ENABLED'; then
+if grep -qi 'drops 1 env key' <<<"$dek2_out" && grep -q 'LOOM_SAFEHOUSE_ENABLED' <<<"$dek2_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): re-render missing an exported key warns and names it (#4522)"
 else
@@ -1066,7 +1065,7 @@ else
     echo "  output: $dek2_out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$dek2_out" | grep -q 'safehouse.*block.*--from-config'; then
+if grep -q 'safehouse.*block.*--from-config' <<<"$dek2_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): LOOM_SAFEHOUSE_* drop prints the config-tier migration hint (#4353)"
 else
@@ -1095,7 +1094,7 @@ dek3_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE HOME="$DEK_HOME" LO
     LOOM_SAFEHOUSE_ENABLED=1 LOOM_WORK_FINDER=1 LOOM_DAEMON_PATH_EXTRA=/extra/bin LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek3_out" | grep -qi 'drops.*env key'; then
+if ! grep -qi 'drops.*env key' <<<"$dek3_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): re-render with the same/superset keys never warns (#4522)"
 else
@@ -1109,7 +1108,7 @@ dek4_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE -u LOOM_SAFEHOUSE_E
     HOME="$DEK_HOME" LOOM_MACHINE_CHECKOUT="$DEK_HOME" LOOM_LAUNCHD_LABEL="$DEK_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist --force-env 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek4_out" | grep -qi 'drops.*env key'; then
+if ! grep -qi 'drops.*env key' <<<"$dek4_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): --force-env suppresses the warning (#4522)"
 else
@@ -1125,7 +1124,7 @@ dek4b_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE -u LOOM_SAFEHOUSE_
     HOME="$DEK_HOME" LOOM_MACHINE_CHECKOUT="$DEK_HOME" LOOM_LAUNCHD_LABEL="$DEK_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist --force-env 2>/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek4b_out" | grep -q '<key>LOOM_SAFEHOUSE_ENABLED</key>'; then
+if ! grep -q '<key>LOOM_SAFEHOUSE_ENABLED</key>' <<<"$dek4b_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (plist): --force-env actually drops the key from the render, not just the warning (#5344)"
 else
@@ -1177,7 +1176,7 @@ dek5_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE -u
     LOOM_AUTONOMY_MARKER="$DEK_SD_HOME/.loom/autonomy-desired" \
     bash "$START_SCRIPT" --no-launchd 2>&1 )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek5_out" | grep -qi 'drops.*env key'; then
+if ! grep -qi 'drops.*env key' <<<"$dek5_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (systemd): first-ever install (no existing unit) never warns (#4522)"
 else
@@ -1205,7 +1204,7 @@ bg_proc_track "$DEK_SD_PID1"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$DEK_SD_BIN:$PATH" HOME="$DEK_SD_HOME" \
     LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$DEK_SD_UNIT" \
-    LOOM_SAFEHOUSE_ENABLED=1 LOOM_WORK_FINDER=1 \
+    LOOM_SAFEHOUSE_ENABLED=1 \
     LOOM_DAEMON_BIN="$FAKE_BIN" \
     LOOM_SOCKET_PATH="$DEK_SD_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$DEK_SD_HOME/.loom/autonomy-desired" \
@@ -1242,8 +1241,8 @@ kill "$DEK_SD_PID2" 2>/dev/null || true
 wait "$DEK_SD_PID2" 2>/dev/null || true
 wait_for_pid_file_gone "$DEK_SD_PID_FILE"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$dek6_out" | grep -qi 'drops 1 env key' && echo "$dek6_out" | grep -q 'LOOM_SAFEHOUSE_ENABLED' \
-    && echo "$dek6_out" | grep -q 'safehouse.*block.*--from-config'; then
+if grep -qi 'drops 1 env key' <<<"$dek6_out" && grep -q 'LOOM_SAFEHOUSE_ENABLED' <<<"$dek6_out" \
+    && grep -q 'safehouse.*block.*--from-config' <<<"$dek6_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (systemd): real re-render missing a key warns, names it, and prints the migration hint (#4522)"
 else
@@ -1267,7 +1266,7 @@ bg_proc_track "$DEK_SD_PID3"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$DEK_SD_BIN:$PATH" HOME="$DEK_SD_HOME" \
     LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$DEK_SD_UNIT" \
-    LOOM_SAFEHOUSE_ENABLED=1 LOOM_WORK_FINDER=1 \
+    LOOM_SAFEHOUSE_ENABLED=1 \
     LOOM_DAEMON_BIN="$FAKE_BIN" \
     LOOM_SOCKET_PATH="$DEK_SD_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$DEK_SD_HOME/.loom/autonomy-desired" \
@@ -1291,7 +1290,7 @@ kill "$DEK_SD_PID4" 2>/dev/null || true
 wait "$DEK_SD_PID4" 2>/dev/null || true
 wait_for_pid_file_gone "$DEK_SD_PID_FILE"
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$dek7_out" | grep -qi 'drops.*env key'; then
+if ! grep -qi 'drops.*env key' <<<"$dek7_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} dropped-env-key (systemd): --force-env suppresses the warning on the real install path (#4522)"
 else
@@ -1300,7 +1299,7 @@ else
     echo "  output: $dek7_out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$dek7_out" | grep -q -- '--force-env'; then
+if grep -q -- '--force-env' <<<"$dek7_out"; then
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} dropped-env-key (systemd): --force-env is excluded from the persisted .daemon.flags file"
 elif [[ -f "$DEK_SD_HOME/.loom/.daemon.flags" ]] && grep -q -- '--force-env' "$DEK_SD_HOME/.loom/.daemon.flags"; then
@@ -1347,7 +1346,7 @@ EOF
         LOOM_WATCHDOG_LABEL="com.example.loom-sandbox-$$-sh5-watchdog" \
         bash "$START_SCRIPT" --no-launchd --no-systemd 2>&1 ) )
     TESTS_RUN=$((TESTS_RUN + 1))
-    if echo "$sh5_out" | grep -q 'safehouse.room is unset'; then
+    if grep -q 'safehouse.room is unset' <<<"$sh5_out"; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
         echo -e "${RED}✗${NC} safehouse: rooms.signal set -> no room caveat (#4225)"
         echo "  output: $sh5_out"
@@ -1359,7 +1358,7 @@ EOF
         kill "$(cat "$SH5_HOME/.loom/.daemon.pid" 2>/dev/null)" 2>/dev/null || true
     fi
 else
-    echo "  (skipping SH5: python3 AF_UNIX bind unavailable on this host)"
+    loom_test_skip "SH5: python3 AF_UNIX bind unavailable on this host"
 fi
 rm -rf "$SH5_HOME"
 
@@ -1389,7 +1388,7 @@ ad1_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     HOME="$AD_HOME" LOOM_MACHINE_CHECKOUT="$AD_HOME" LOOM_LAUNCHD_LABEL="$AD_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad1_out" | grep -qi 'autonomy downgrade' && echo "$ad1_out" | grep -q 'LOOM_WORK_FINDER: 1 -> 0'; then
+if grep -qi 'autonomy downgrade' <<<"$ad1_out" && grep -q 'LOOM_WORK_FINDER: 1 -> 0' <<<"$ad1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): prior-plist-had-work-finder + plain restart warns and names the transition (#4693)"
 else
@@ -1398,7 +1397,7 @@ else
     echo "  output: $ad1_out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad1_out" | grep -qi -- '--from-config' && echo "$ad1_out" | grep -qi -- '--work-finder'; then
+if grep -qi -- '--from-config' <<<"$ad1_out" && grep -qi -- '--work-finder' <<<"$ad1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): warning names the --from-config / --work-finder remediation (#4693)"
 else
@@ -1421,7 +1420,7 @@ ad1b_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     LOOM_DAEMON_LAUNCHD=0 \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad1b_out" | grep -qi 'autonomy downgrade' && echo "$ad1b_out" | grep -q 'LOOM_WORK_FINDER: 1 -> 0'; then
+if grep -qi 'autonomy downgrade' <<<"$ad1b_out" && grep -q 'LOOM_WORK_FINDER: 1 -> 0' <<<"$ad1b_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): --print-plist warns even when this host would NOT use launchd (platform-independent, #4693)"
 else
@@ -1437,7 +1436,7 @@ ad2_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     HOME="$AD_HOME" LOOM_MACHINE_CHECKOUT="$AD_HOME" LOOM_LAUNCHD_LABEL="$AD_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist --from-config 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad2_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad2_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): --from-config is exempt (control explicitly handed to config, #4693)"
 else
@@ -1451,7 +1450,7 @@ ad3_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     HOME="$AD_HOME" LOOM_MACHINE_CHECKOUT="$AD_HOME" LOOM_LAUNCHD_LABEL="$AD_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist --no-work-finder 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad3_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad3_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): explicit --no-work-finder is not silent -- no warning (#4693)"
 else
@@ -1466,7 +1465,7 @@ ad4_out=$( env -u LOOM_MAIN_HEALTH_GATE LOOM_WORK_FINDER=0 \
     HOME="$AD_HOME" LOOM_MACHINE_CHECKOUT="$AD_HOME" LOOM_LAUNCHD_LABEL="$AD_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad4_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad4_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): a pre-exported LOOM_WORK_FINDER=0 is not silent -- no warning (#4693)"
 else
@@ -1490,7 +1489,7 @@ ad5_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     HOME="$AD5_HOME" LOOM_MACHINE_CHECKOUT="$AD5_HOME" LOOM_LAUNCHD_LABEL="$AD5_LABEL" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad5_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad5_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): no warning when the prior value was already 0 (no fresh transition, #4693)"
 else
@@ -1507,7 +1506,7 @@ ad6_out=$( env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     HOME="$AD6_HOME" LOOM_MACHINE_CHECKOUT="$AD6_HOME" LOOM_LAUNCHD_LABEL="com.rjwalters.loom-daemon-ad6-test" LOOM_DAEMON_BIN="$FAKE_BIN" \
     bash "$START_SCRIPT" --print-plist 2>&1 >/dev/null )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad6_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad6_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): clean first-ever install (no prior plist, no marker) never warns (#4693)"
 else
@@ -1543,7 +1542,7 @@ if [[ "$ad7_rc" -ne 0 ]]; then
     TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "${RED}✗${NC} autonomy downgrade (plist): marker present + no readable prior value still warns"
     echo "  subprocess exited $ad7_rc (expected 0) -- output: $ad7_out"
-elif echo "$ad7_out" | grep -qi 'autonomy downgrade' && echo "$ad7_out" | grep -q 'autonomy-desired marker'; then
+elif grep -qi 'autonomy downgrade' <<<"$ad7_out" && grep -q 'autonomy-desired marker' <<<"$ad7_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (plist): marker present + no readable prior value still warns (#4693)"
 else
@@ -1561,16 +1560,18 @@ AD_SD_UNIT="loom-daemon-ad-test-$$.service"
 AD8_HOME="$(mktemp -d)"; mkdir -p "$AD8_HOME/.loom/logs"
 AD8_LOG="$WORKDIR/ad8-install.log"; : > "$AD8_LOG"
 
-# Install the "prior" unit with LOOM_WORK_FINDER=1.
+# Install the "prior" unit, then give it a pre-#11951 LOOM_WORK_FINDER=1 line
+# (the start script no longer renders one).
 sleep 30 & AD8_SLEEP_PID1=$!
 bg_proc_track "$AD8_SLEEP_PID1"
 make_sd_stub "$AD8_LOG" "$AD8_SLEEP_PID1"
 ( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$SD_BIN:$PATH" HOME="$AD8_HOME" LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$AD_SD_UNIT" \
-    LOOM_WORK_FINDER=1 LOOM_DAEMON_BIN="$FAKE_BIN" \
-    LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
+    LOOM_DAEMON_BIN="$FAKE_BIN" LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$AD8_HOME/.loom/autonomy-desired" \
     bash "$START_SCRIPT" --no-launchd >/dev/null 2>&1 )
+AD8_UNIT_DIR="$AD8_HOME/.config/systemd/user"
+printf '%s\n' '[Service]' 'Environment=LOOM_WORK_FINDER=1' >> "$AD8_UNIT_DIR/$AD_SD_UNIT"
 # Kill AND reap the decoy synchronously (`wait`, not just `kill`) before the
 # very next invocation runs its already-running guard: a killed-but-not-yet-
 # reaped child is still a ZOMBIE in the process table, and `kill -0` on a
@@ -1607,7 +1608,7 @@ ad8_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
 ad8_rc=$?
 assert_eq "1" "$ad8_rc" "autonomy downgrade (systemd): a DETECTED downgrade on a real start now REFUSES rather than warn-and-continue (#5409 AC1)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad8_out" | grep -qi 'autonomy downgrade' && echo "$ad8_out" | grep -q 'LOOM_WORK_FINDER: 1 -> 0'; then
+if grep -qi 'autonomy downgrade' <<<"$ad8_out" && grep -q 'LOOM_WORK_FINDER: 1 -> 0' <<<"$ad8_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (systemd): prior-unit-had-work-finder + plain restart warns and names the transition (#4693)"
 else
@@ -1616,7 +1617,7 @@ else
     echo "  output: $ad8_out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad8_out" | grep -qi 'refusing to start' && echo "$ad8_out" | grep -qi -- '--work-finder'; then
+if grep -qi 'refusing to start' <<<"$ad8_out" && grep -qi -- '--work-finder' <<<"$ad8_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (systemd): the refusal names the explicit-flag escape hatch (#5409 AC1)"
 else
@@ -1643,30 +1644,24 @@ else
     echo "  enable-now count: $ad8_enable_count; systemctl calls: $(cat "$AD8_LOG" 2>/dev/null)"
 fi
 
-# AD9. The escape hatch: the SAME detected downgrade, but with an explicit
-#      --work-finder this invocation -- proceeds normally (exit 0), proving
-#      the refusal is only for the SILENT case, not a hard block on ever
-#      re-installing over a prior autonomous unit.
+# AD9. The way out on systemd (#11951): the unit no longer carries autonomy
+#      env, so the host's drop-in owns it. With one setting the work finder
+#      on, the SAME plain start proceeds (exit 0) and purges the base line.
 sleep 30 & AD9_SLEEP_PID=$!
 bg_proc_track "$AD9_SLEEP_PID"
 make_sd_stub "$AD8_LOG" "$AD9_SLEEP_PID"
+mkdir -p "$AD8_UNIT_DIR/$AD_SD_UNIT.d"
+printf '%s\n' '[Service]' 'Environment=LOOM_WORK_FINDER=1' > "$AD8_UNIT_DIR/$AD_SD_UNIT.d/15-autonomy.conf"
 ad9_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     PATH="$SD_BIN:$PATH" HOME="$AD8_HOME" LOOM_SYSTEMD_FORCE=1 LOOM_SYSTEMD_UNIT="$AD_SD_UNIT" \
-    LOOM_DAEMON_BIN="$FAKE_BIN" \
-    LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
+    LOOM_DAEMON_BIN="$FAKE_BIN" LOOM_SOCKET_PATH="$AD8_HOME/.loom/loom-daemon.sock" \
     LOOM_AUTONOMY_MARKER="$AD8_HOME/.loom/autonomy-desired" \
-    bash "$START_SCRIPT" --no-launchd --work-finder 2>&1 )
+    bash "$START_SCRIPT" --no-launchd 2>&1 )
 ad9_rc=$?
-assert_eq "0" "$ad9_rc" "autonomy downgrade (systemd): an explicit --work-finder on the SAME detected-downgrade host proceeds normally (#5409 AC1 escape hatch)"
-TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad9_out" | grep -qi 'autonomy downgrade'; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "${GREEN}✓${NC} autonomy downgrade (systemd): an explicit --work-finder is not silent -- no warning, no refusal (#5409)"
-else
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗${NC} autonomy downgrade (systemd): an explicit --work-finder is not silent -- no warning, no refusal"
-    echo "  output: $ad9_out"
-fi
+assert_eq "0" "$ad9_rc" "autonomy downgrade (systemd): a drop-in that sets the work finder lets the SAME plain start proceed (#11951)"
+assert_not_contains "$ad9_out" "autonomy downgrade" "autonomy downgrade (systemd): a drop-in-owned work finder is out of the start's reach -- no warning (#11951)"
+assert_not_contains "$(cat "$AD8_UNIT_DIR/$AD_SD_UNIT")" "LOOM_WORK_FINDER" "autonomy downgrade (systemd): the re-render purges the base unit's autonomy line (#11951)"
+assert_contains "$(cat "$AD8_HOME/.loom/autonomy-desired")" "work_finder=1" "autonomy downgrade (systemd): the marker records the drop-in's effective value (#11951)"
 kill "$AD9_SLEEP_PID" 2>/dev/null || true
 wait "$AD9_SLEEP_PID" 2>/dev/null || true
 # Same real-path fix as the AD8 setup above -- AD9's successful start writes
@@ -1725,7 +1720,7 @@ ad10_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
 ad10_rc=$?
 assert_eq "0" "$ad10_rc" "autonomy downgrade (nohup): a bare restart after a PRIOR bare start exits 0 (#5437 AC1)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ad10_out" | grep -qi 'autonomy downgrade'; then
+if ! grep -qi 'autonomy downgrade' <<<"$ad10_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (nohup): bare-after-bare restart is silent -- no WARNING/ERROR (#5437 AC1, the reported regression)"
 else
@@ -1761,7 +1756,7 @@ ad11_out=$( cd "$WORKDIR" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
 ad11_rc=$?
 assert_eq "1" "$ad11_rc" "autonomy downgrade (nohup): a bare restart after a PRIOR AUTONOMOUS start still REFUSES (#5437 AC2 -- the guard's intent is preserved, not overcorrected away)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad11_out" | grep -qi 'autonomy downgrade' && echo "$ad11_out" | grep -q 'LOOM_WORK_FINDER: 1 -> 0'; then
+if grep -qi 'autonomy downgrade' <<<"$ad11_out" && grep -q 'LOOM_WORK_FINDER: 1 -> 0' <<<"$ad11_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (nohup): prior-marker-had-work-finder + plain restart warns and names the transition (#5437)"
 else
@@ -1770,7 +1765,7 @@ else
     echo "  output: $ad11_out"
 fi
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ad11_out" | grep -qi 'refusing to start' && echo "$ad11_out" | grep -qi -- '--work-finder'; then
+if grep -qi 'refusing to start' <<<"$ad11_out" && grep -qi -- '--work-finder' <<<"$ad11_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} autonomy downgrade (nohup): the refusal names the explicit-flag escape hatch (#5437)"
 else
@@ -1792,7 +1787,7 @@ rm -rf "$WORKDIR/ad11"
 
 # ---------- KillMode=mixed real-systemd regression (#4862) ----------
 # The stub-based systemd tests above assert the RENDERED TEXT of the unit
-# (Restart=on-success, KillMode=mixed present) but never exercise a real
+# (Restart=always, KillMode=mixed present) but never exercise a real
 # `systemd --user` manager, so they cannot catch a regression in what those
 # fields actually DO. This block drives the ACTUAL production-rendered unit
 # (via --print-unit, only ExecStart/WorkingDirectory substituted) against a
@@ -1800,9 +1795,9 @@ rm -rf "$WORKDIR/ad11"
 # issue's acceptance criteria in one shot:
 #   MX1. a clean exit(0) with a SIGTERM-ignoring lingering child (standing in
 #        for an in-flight claude/tee/sleep sweep worker) still causes
-#        Restart=on-success to fire — the #4862 fix.
-#   MX2. a crash exit(1) does NOT get restarted — the #4054 no-crash-loop
-#        property must survive the #4862 change (KillMode=mixed touches only
+#        the relaunch to fire — the #4862 fix.
+#   MX2. a startup-refusal exit(1) does NOT get restarted (#4054; #11058 keeps
+#        1 in RestartPreventExitStatus) (KillMode=mixed touches only
 #        HOW leftover cgroup members are reaped, never the crash/on-success
 #        exit-code contract).
 # Skips cleanly (not a failure) when no reachable `systemd --user` manager
@@ -1879,11 +1874,11 @@ MXEOF
     mx_render "$MX_SCRIPT_DIR/mx-crash.sh" > "$MX_UNIT_DIR/$MX_UNIT_CRASH"
     systemctl --user daemon-reload >/dev/null 2>&1 || true
 
-    # MX1. Clean exit + lingering child -> Restart=on-success fires (NRestarts
-    # climbs above 0 within a few restart cycles). Poll up to ~8s.
+    # MX1. Clean exit + lingering child -> the relaunch fires (NRestarts climbs
+    # above 0). Poll up to ~15s: the 1s fixture plus RestartSec=5 (#11058).
     systemctl --user start "$MX_UNIT_MIXED" >/dev/null 2>&1
     mx1_restarts=0
-    for _ in 1 2 3 4 5 6 7 8; do
+    for _ in $(seq 1 15); do
         mx1_restarts="$(systemctl --user show -p NRestarts --value "$MX_UNIT_MIXED" 2>/dev/null)"
         [[ "$mx1_restarts" =~ ^[0-9]+$ ]] && (( mx1_restarts > 0 )) && break
         sleep 1
@@ -1891,21 +1886,21 @@ MXEOF
     TESTS_RUN=$((TESTS_RUN + 1))
     if [[ "$mx1_restarts" =~ ^[0-9]+$ ]] && (( mx1_restarts > 0 )); then
         TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "${GREEN}✓${NC} real systemd (#4862): clean exit + lingering child -> Restart=on-success fires (NRestarts=$mx1_restarts)"
+        echo -e "${GREEN}✓${NC} real systemd (#4862): clean exit + lingering child -> relaunch fires (NRestarts=$mx1_restarts)"
     else
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "${RED}✗${NC} real systemd (#4862): clean exit + lingering child -> Restart=on-success fires"
+        echo -e "${RED}✗${NC} real systemd (#4862): clean exit + lingering child -> relaunch fires"
         echo "  systemctl --user status ${MX_UNIT_MIXED}:"
         systemctl --user status "$MX_UNIT_MIXED" --no-pager -l 2>&1 | sed 's/^/    /'
     fi
     systemctl --user stop "$MX_UNIT_MIXED" >/dev/null 2>&1 || true
 
     # MX2. Crash exit(1) -> stays down (the #4054 no-crash-loop property).
-    # Wait past the fixture's own 1s sleep + a restart-cycle margin, then
+    # Wait past the fixture's 1s sleep + RestartSec=5 + a margin, then
     # assert BOTH that it never restarted and that it is in a failed/inactive
     # (not activating/running) state.
     systemctl --user start "$MX_UNIT_CRASH" >/dev/null 2>&1
-    sleep 3
+    sleep 9
     mx2_restarts="$(systemctl --user show -p NRestarts --value "$MX_UNIT_CRASH" 2>/dev/null)"
     mx2_active="$(systemctl --user show -p ActiveState --value "$MX_UNIT_CRASH" 2>/dev/null)"
     TESTS_RUN=$((TESTS_RUN + 1))
@@ -2036,7 +2031,7 @@ rc1=$?
 kill "$LD1_REAL_PID" 2>/dev/null || true
 assert_eq "0" "$rc1" "launchd path (#5081): clean bootstrap + matching env -> exit 0"
 TESTS_RUN=$((TESTS_RUN + 1))
-if [[ "$rc1" -eq 0 ]] && ! echo "$out1" | grep -qi 'does NOT match'; then
+if [[ "$rc1" -eq 0 ]] && ! grep -qi 'does NOT match' <<<"$out1"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} launchd path (#5081): env verification passes against the real rendered plist"
 else
@@ -2067,7 +2062,7 @@ rc2=$?
 kill "$LD2_REAL_PID" 2>/dev/null || true
 assert_eq "0" "$rc2" "launchd path (#5081): one EIO bootstrap failure, retry succeeds -> exit 0"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$out2" | grep -qi 'async-bootout race' && echo "$out2" | grep -q 'attempt 1/'; then
+if grep -qi 'async-bootout race' <<<"$out2" && grep -q 'attempt 1/' <<<"$out2"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} launchd path (#5081): EIO retry is logged"
 else
@@ -2093,7 +2088,7 @@ out3=$( PATH="$LD3_BIN:$PATH" HOME="$LD3_HOME" LOOM_MACHINE_CHECKOUT="$LD3_HOME"
 rc3=$?
 assert_eq "1" "$rc3" "launchd path (#5081): EIO race persists past the retry ceiling -> exit 1"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$out3" | grep -qi 'bootstrap failed' && ! echo "$out3" | grep -qi 'started under launchd'; then
+if grep -qi 'bootstrap failed' <<<"$out3" && ! grep -qi 'started under launchd' <<<"$out3"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} launchd path (#5081): exhausted EIO retries never report a false success"
 else
@@ -2125,7 +2120,7 @@ rc4=$?
 kill "$LD4_REAL_PID" 2>/dev/null || true
 assert_eq "1" "$rc4" "launchd path (#5081): env mismatch after a successful bootstrap -> exit 1"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$out4" | grep -qi 'does NOT match' && echo "$out4" | grep -qi 'LOOM_SOCKET_PATH' && ! echo "$out4" | grep -qi 'started under launchd'; then
+if grep -qi 'does NOT match' <<<"$out4" && grep -qi 'LOOM_SOCKET_PATH' <<<"$out4" && ! grep -qi 'started under launchd' <<<"$out4"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} launchd path (#5081): env mismatch is named and never reported as a false success"
 else
@@ -2180,7 +2175,7 @@ heal1_out=$( cd "$HEAL1_REPO" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GAT
 heal1_rc=$?
 assert_eq "0" "$heal1_rc" "watchdog self-heal (#5343): re-run against an already-running daemon exits 0"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$heal1_out" | grep -qi 'already running' \
+if grep -qi 'already running' <<<"$heal1_out" \
     && grep -q -- "--user enable --now $HEAL_TIMER" "$HEAL1_LOG"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} watchdog self-heal (#5343): marker present + job missing -> provisions the watchdog on an already-running daemon"
@@ -2379,9 +2374,9 @@ ac4a_out=$( cd "$AC4_REPO" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
 ac4a_rc=$?
 assert_eq "0" "$ac4a_rc" "already-running guard (#5409): --work-finder against an already-running daemon still exits 0 (no-op)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$ac4a_out" | grep -qi 'already running' \
-    && echo "$ac4a_out" | grep -qi 'ignoring' \
-    && echo "$ac4a_out" | grep -q -- '--work-finder'; then
+if grep -qi 'already running' <<<"$ac4a_out" \
+    && grep -qi 'ignoring' <<<"$ac4a_out" \
+    && grep -q -- '--work-finder' <<<"$ac4a_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} already-running guard (#5409): --work-finder is explicitly reported as ignored, not silently accepted"
 else
@@ -2410,7 +2405,7 @@ ac4b_out=$( cd "$AC4_REPO" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GATE \
     LOOM_AUTONOMY_MARKER="$AC4_REPO/.loom/autonomy-desired" \
     bash "$START_SCRIPT" --no-launchd 2>&1 )
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$ac4b_out" | grep -qi 'ignoring'; then
+if ! grep -qi 'ignoring' <<<"$ac4b_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} already-running guard (#5409): a bare re-run with no flags prints no ignored-flag notice"
 else
@@ -2574,7 +2569,7 @@ heal8_out=$( cd "$HEAL8_REPO" && env -u LOOM_WORK_FINDER -u LOOM_MAIN_HEALTH_GAT
 heal8_rc=$?
 assert_eq "0" "$heal8_rc" "--heal-watchdog-only (#5405): an unresolvable daemon binary is never fatal"
 TESTS_RUN=$((TESTS_RUN + 1))
-if ! echo "$heal8_out" | grep -qi 'binary not found'; then
+if ! grep -qi 'binary not found' <<<"$heal8_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} --heal-watchdog-only (#5405): skips the daemon-binary lookup entirely"
 else
@@ -2641,7 +2636,7 @@ assert_eq "$PF_MACHINE/.loom/.daemon.pid" "$pf_machine_value" "#6420: moving the
 # The asymmetry with stop/update/watchdog must be documented, not silent.
 pf_help=$( bash "$START_SCRIPT" --help 2>&1 )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$pf_help" | grep -q 'LOOM_PID_FILE' && echo "$pf_help" | grep -qi 'OUTPUT, not input'; then
+if grep -q 'LOOM_PID_FILE' <<<"$pf_help" && grep -qi 'OUTPUT, not input' <<<"$pf_help"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} #6420: --help documents LOOM_PID_FILE as an output of this script, not an input"
 else
@@ -2755,7 +2750,7 @@ si1_rc=$?
 rm -f "$SI_REPO/.loom/.daemon.pid"
 assert_eq "1" "$si1_rc" "#6568: a real start from an agent-session context with no identity override is REFUSED (exit 1)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$si1_out" | grep -q "refusing to start" && echo "$si1_out" | grep -q "agent-session context detected"; then
+if grep -q "refusing to start" <<<"$si1_out" && grep -q "agent-session context detected" <<<"$si1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} #6568: the refusal names the detected agent-session context"
 else
@@ -2766,7 +2761,7 @@ fi
 assert_eq "" "$(cat "$SI_LOG")" "#6568: the refusal happens BEFORE any systemctl/launchctl call (zero supervisor calls)"
 assert_eq "0" "$(find "$SI1_HOME/.config" -name '*.service' 2>/dev/null | wc -l | tr -d ' ')" "#6568: the refusal happens BEFORE the unit file is written (nothing installed)"
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$si1_out" | grep -q "LOOM_SYSTEMD_UNIT=" && echo "$si1_out" | grep -q "LOOM_ALLOW_SESSION_DAEMON_START=1"; then
+if grep -q "LOOM_SYSTEMD_UNIT=" <<<"$si1_out" && grep -q "LOOM_ALLOW_SESSION_DAEMON_START=1" <<<"$si1_out"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} #6568: the refusal spells out both escape hatches (scope the identity / acknowledge explicitly)"
 else
@@ -2850,7 +2845,7 @@ assert_contains "$si4_out" "SCRATCH / temporary directory" "#6568: a start whose
 #      the refusal can find the way out without reading the source.
 si_help=$( bash "$START_SCRIPT" --help 2>&1 )
 TESTS_RUN=$((TESTS_RUN + 1))
-if echo "$si_help" | grep -q 'LOOM_ALLOW_SESSION_DAEMON_START'; then
+if grep -q 'LOOM_ALLOW_SESSION_DAEMON_START' <<<"$si_help"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "${GREEN}✓${NC} #6568: --help documents LOOM_ALLOW_SESSION_DAEMON_START"
 else
@@ -2882,5 +2877,5 @@ fi
 
 # ---------- summary ----------
 echo
-echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $TESTS_FAILED failed"
+echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $TESTS_FAILED failed, ${TESTS_SKIPPED:-0} skipped"
 [[ "$TESTS_FAILED" -eq 0 ]]

@@ -34,6 +34,8 @@
 #   ./.loom/scripts/tests/test-merge-pr-app-permission-fallback.sh
 
 set -euo pipefail
+# shellcheck source=lib/write-scope-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -100,8 +102,13 @@ export ATTEMPT_LOG MINT_LOG MODE_FILE MINT_MODE_FILE
 #   other-error   - an unrelated failure (no escalation allowed).
 #   declined      - exit 3, the Gitea "not handled natively" decline.
 #   head-mismatch - exit 4, EX_FORGE_HEAD_MISMATCH.
-cat > "$STUB_DIR/loom-daemon" <<'STUB'
-#!/usr/bin/env bash
+echo '#!/usr/bin/env bash' > "$STUB_DIR/loom-daemon"
+# #9548: the write-scope vetting (`forge may-write`) is NOT logged as an
+# attempt: it goes to a real daemon when WRITE_SCOPE_DAEMON names one
+# (lib/write-scope-fixture.sh), else answers as a pre-verb binary, so the
+# registered fixture repo below is admitted by a real decision either way.
+write_scope_stub_verb_snippet >> "$STUB_DIR/loom-daemon"
+cat >> "$STUB_DIR/loom-daemon" <<'STUB'
 mode="$(cat "$MODE_FILE" 2>/dev/null || echo ok)"
 cred="ambient"
 [[ -n "${GH_TOKEN:-}" ]] && cred="token:${GH_TOKEN}"
@@ -197,6 +204,10 @@ FAKE_REPO="$STUB_DIR/repo"
 mkdir -p "$FAKE_REPO"
 git -C "$FAKE_REPO" init -q
 git -C "$FAKE_REPO" remote add origin "https://github.com/owner/repo.git"
+# #9548: every write here is vetted through the write scope first. The fake
+# repo is registered as owner/repo (origin, .loom/, push reported to the
+# permission probe), so the real decision admits it.
+write_scope_register "$FAKE_REPO" owner/repo
 
 # Runs a ladder invocation inside the fake repo with the stubs on PATH.
 # Usage: _run <mode> <mint-mode> [env-prefix…] <command…>
@@ -318,14 +329,22 @@ assert_contains "$out" "Base branch was modified" \
 echo ""
 echo "Testing merge-pr.sh source wiring (#6752)..."
 
-if grep -q 'forge_cmd_perm_safe loom-daemon forge auto-merge "\$PR_NUMBER"' "$MERGE_PR_SRC"; then
-    pass "merge-pr.sh routes the native auto-merge through forge_cmd_perm_safe"
+# #8410 removed the native auto-merge call site along with the rest of the
+# server-side arm, so the write this ladder has to protect on the `--auto`
+# path is now the synchronous REST merge itself (forge_merge_pr, section 2
+# above — it carries its own escalation and is exercised there). What must
+# still hold here is that the merge call merge-pr.sh DOES make is the
+# ladder-protected one.
+if grep -q 'forge_merge_pr "\$REPO_NWO" "\$PR_NUMBER" "\$MERGE_PRECONDITION_SHA"' "$MERGE_PR_SRC"; then
+    pass "merge-pr.sh merges through forge_merge_pr, which carries the #6752 escalation ladder"
 else
-    fail "merge-pr.sh must invoke the native auto-merge via forge_cmd_perm_safe (#6752)"
+    fail "merge-pr.sh must merge via forge_merge_pr (the ladder-protected write)"
 fi
 
 # The forcing function: an unwrapped invocation IS the bug, so assert none
-# remains. Prose/comment mentions never start an assignment or a command.
+# remains. Since #8410 there is no wrapped one either — any `loom-daemon forge
+# auto-merge` line in this script is a reintroduced server-side arm.
+# Prose/comment mentions never start an assignment or a command.
 bare_native="$(grep -nE '^[[:space:]]*(AUTO_MERGE_OUTPUT=\$\()?loom-daemon forge auto-merge' "$MERGE_PR_SRC" || true)"
 if [[ -z "$bare_native" ]]; then
     pass "no bare (unwrapped) 'loom-daemon forge auto-merge' invocation remains in merge-pr.sh"

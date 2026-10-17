@@ -47,8 +47,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MERGE_PR="$SCRIPTS_DIR/merge-pr.sh"
 
+# #8191: _maybe_delete_local_branch (called directly and via
+# _remove_loom_worktree) now delegates to `loom-daemon merge-pr delete-branch`.
+# Pin the binary built from this tree so a stale installed daemon cannot answer
+# instead — it would warn-and-keep every branch and fail these cases for the
+# wrong reason.
+#
+# #8191 slice: the porcelain lookups this suite extracts (_primary_worktree_path
+# / _worktree_branch_for) now delegate to `loom-daemon merge-pr worktree-*`, so
+# the LEAF verbs are checked too — a binary with only the `merge-pr` group
+# predates this slice and would make every lookup fail, which the #3710 guard
+# turns into "refuse to clean up anything at all": a whole-suite failure that
+# reads as broken logic rather than as one stale binary.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin "$SCRIPTS_DIR" "merge-pr" \
+    "merge-pr worktree-primary" "merge-pr worktree-branch-for" \
+    "merge-pr worktree-find-by-branch" "merge-pr worktree-teardown"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 TESTS_RUN=0
@@ -57,6 +76,19 @@ TESTS_FAILED=0
 
 pass() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1)); echo -e "  ${GREEN}PASS${NC}: $1"; }
 fail() { TESTS_RUN=$((TESTS_RUN + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); echo -e "  ${RED}FAIL${NC}: $1"; }
+
+# An assertion that CANNOT survive the port to Rust, retired under the
+# three-part test in defaults/docs/verification-recipes.md §6. Printed, not
+# deleted: a reader must be able to see what was removed, why it could not
+# survive, and what proves the property now. Counted as run so the totals stay
+# honest.
+retired() { # <what> <property> <why-structural> <successor>
+    TESTS_RUN=$((TESTS_RUN + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "  ${YELLOW}RETIRED${NC}: $1"
+    echo "      property:   $2"
+    echo "      structural: $3"
+    echo "      successor:  $4"
+}
 
 assert_grep() {
     local pattern="$1" file="$2" msg="$3"
@@ -75,10 +107,14 @@ assert_grep 'git -C "\$worktree_path" status --porcelain' "$MERGE_PR" \
 assert_grep 'Refusing to remove worktree at \$worktree_path' "$MERGE_PR" \
     "_remove_loom_worktree refuses removal when uncommitted changes are present"
 # The refusal must sit BEFORE the actual removal, not after.
-guard_line="$(grep -n 'Refusing to remove worktree at \$worktree_path' "$MERGE_PR" | head -1 | cut -d: -f1)"
-remove_line="$(grep -n 'git -C "\$REPO_ROOT" worktree remove "\$worktree_path" --force' "$MERGE_PR" | head -1 | cut -d: -f1)"
+retired "the line-order check against the literal 'git -C \"\$REPO_ROOT\" worktree remove \"\$worktree_path\" --force' call" \
+    "the dirty-worktree refusal precedes the force-remove" \
+    "the #8191 worktree-teardown slice moved the force-remove into loom-daemon (src/merge_pr/worktree_teardown.rs), so that literal no longer exists in merge-pr.sh and its grep finds nothing" \
+    "the same ordering check, re-anchored on the call that now performs the removal ('_mp_worktree worktree-teardown', immediately below), plus Tests 2-4 below (dirty worktrees refused and surviving, behavioural, unchanged)"
+guard_line="$(grep -n 'Refusing to remove worktree at \$worktree_path' "$MERGE_PR" | head -1 | cut -d: -f1 || true)"
+remove_line="$(grep -n '_mp_worktree worktree-teardown' "$MERGE_PR" | head -1 | cut -d: -f1 || true)"
 if [[ -n "$guard_line" && -n "$remove_line" && "$guard_line" -lt "$remove_line" ]]; then
-    pass "the dirty-worktree refusal precedes the force-remove call"
+    pass "the dirty-worktree refusal precedes the force-remove call (merge-pr worktree-teardown)"
 else
     fail "guard must precede force-remove (guard@$guard_line remove@$remove_line)"
 fi
@@ -102,6 +138,10 @@ warning() { echo "WARN: $*"; }
 success() { echo "OK: $*"; }
 error()   { echo "ERROR: $*" >&2; return 1; }
 
+# #8191 slice: the porcelain lookups below shell out through _mp_worktree, so it
+# is extracted with them — without it they die with "_mp_worktree: command not
+# found" under `set -e`.
+eval "$(extract_fn _mp_worktree           "$MERGE_PR")"
 eval "$(extract_fn _primary_worktree_path "$MERGE_PR")"
 eval "$(extract_fn _worktree_branch_for   "$MERGE_PR")"
 # #7812: _maybe_delete_local_branch's `-d` -> `-D` safety check is now the
@@ -332,6 +372,64 @@ if [[ $rc_h -eq 0 ]] \
     pass "(h) mixed trivial+real dirt still refused, names both files, still offers the cross-host-dispatch hypothesis"
 else
     fail "(h) expected refuse+name-files+hypothesis for mixed dirt; rc=$rc_h, out: $out_h"
+fi
+
+# --- Test 10 (i/j): the guard FAILS CLOSED when it cannot run at all (#8191) ---
+#
+# The three decisions above are now `loom-daemon merge-pr dirty-guard`, so this
+# path has a new failure mode the shell implementation could not have: the verb
+# does not answer. Every other step of post-merge cleanup is best-effort (the
+# merge already happened), but this one gates `git worktree remove --force`, and
+# a caller cannot tell "looked, nothing to save" from "never looked". A CLEAN
+# worktree is used deliberately: under the guard's own logic there is nothing to
+# protect here, so only the fail-closed rule can produce a refusal — which is
+# exactly what makes it evidence rather than a restatement of Test 4.
+echo ""
+echo "Test 10: a dirty-guard that cannot answer refuses the force-remove (fail-closed), even on a CLEAN worktree"
+
+# (i) the binary does not exist at all — an un-rolled host, the #8285 case.
+WT_I="$(make_worktree 8191a)"   # clean: only the untracked .loom-managed marker
+
+set +e
+out_i="$(LOOM_DAEMON_BIN="$TMP_ROOT/no-such-loom-daemon" _remove_loom_worktree "$WT_I" 2>&1)"
+rc_i=$?
+set -e
+
+if [[ $rc_i -eq 0 ]] \
+    && [[ "$out_i" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_i" == *"could not run"* ]] \
+    && [[ "$out_i" != *"Removing worktree"* ]] \
+    && [[ -d "$WT_I" ]]; then
+    pass "(i) an unresolvable loom-daemon refuses the removal instead of force-removing on no evidence"
+else
+    fail "(i) expected fail-closed refusal for an unresolvable daemon; rc=$rc_i, dir=$([[ -d "$WT_I" ]] && echo yes || echo no), out: $out_i"
+fi
+
+# (j) a binary that EXITS 0 but never prints the clean sentinel. This is the
+# reason the sentinel is positive rather than "silence means clean": a daemon
+# that predates the verb, or one whose stdout was swallowed, would otherwise
+# hand the caller an exit 0 it would read as consent.
+cat >"$TMP_ROOT/mute-daemon" <<'MUTE'
+#!/usr/bin/env bash
+exit 0
+MUTE
+chmod +x "$TMP_ROOT/mute-daemon"
+
+WT_J="$(make_worktree 8191b)"   # clean, same as (i)
+
+set +e
+out_j="$(LOOM_DAEMON_BIN="$TMP_ROOT/mute-daemon" _remove_loom_worktree "$WT_J" 2>&1)"
+rc_j=$?
+set -e
+
+if [[ $rc_j -eq 0 ]] \
+    && [[ "$out_j" == *"Refusing to remove worktree"* ]] \
+    && [[ "$out_j" == *"could not run"* ]] \
+    && [[ "$out_j" != *"Removing worktree"* ]] \
+    && [[ -d "$WT_J" ]]; then
+    pass "(j) exit 0 without the clean sentinel is not consent — the removal is still refused"
+else
+    fail "(j) expected fail-closed refusal for a silent exit-0 daemon; rc=$rc_j, dir=$([[ -d "$WT_J" ]] && echo yes || echo no), out: $out_j"
 fi
 
 # --- Summary ---

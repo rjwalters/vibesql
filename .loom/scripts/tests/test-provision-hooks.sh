@@ -18,6 +18,8 @@
 #     execs the machine-checkout hook inside one (AC1), and defers to a present
 #     per-repo .loom/hooks/ copy (transition dedup, design decision 3)
 #   - deprovision removes ONLY Loom-owned entries, preserving operator hooks
+#   - #8372: the uncommitted-work consumer canary stub is wired on BOTH Stop and
+#     SubagentStop in both install modes, deduped, deferred, and deprovisioned
 #   - #6544: project-level entries are quoted so a project path containing a
 #     space survives `sh -c` execution, and a pre-existing UNQUOTED entry
 #     self-heals to the quoted form on the next re-provision (not left as an
@@ -61,6 +63,10 @@ if [[ ! -f "$PROVISION_LIB" ]]; then
     exit 0
 fi
 command -v jq >/dev/null 2>&1 || { echo "jq required for these tests"; exit 1; }
+
+# A daemon-spawned session exports this (2am#4501); every wrapper
+# case below that does not set it must see the checkout path.
+unset LOOM_HOOKS_HOME
 
 # shellcheck source=/dev/null
 source "$PROVISION_LIB"
@@ -254,6 +260,22 @@ assert_contains "$WOUT" "MACHINE-RAN:$LOOMREPO" "#4806 AC(c): copies absent -> m
 # 8e: Loom workspace but machine checkout absent -> no-op (fail-open)
 out=$(cd "$LOOMREPO" && LOOM_HOME="/nonexistent/checkout" bash -c "$CMD" </dev/null 2>/dev/null); wrc=$?
 [[ -z "$out" && "$wrc" == "0" ]] && pass "machine checkout absent -> silent no-op (exit 0)" || fail "expected silent exit 0 when checkout absent, got out='$out' rc=$wrc"
+
+# 8f: the daemon's own release hooks (2am#4501). A daemon-spawned
+# session carries LOOM_HOOKS_HOME (the hooks unpacked from the running
+# binary); the wrapper prefers it, and falls back to the checkout when the
+# variable is blank or its hook file is missing, so nothing fails open that
+# did not before.
+REL8=$(mktemp -d)
+mkdir -p "$REL8/defaults/hooks"
+printf '#!/usr/bin/env bash\necho "RELEASE-RAN:$LOOM_PROJECT_ROOT"\nexit 0\n' > "$REL8/defaults/hooks/guard-destructive.sh"
+chmod +x "$REL8/defaults/hooks/guard-destructive.sh"
+out=$(cd "$LOOMREPO" && LOOM_HOOKS_HOME="$REL8" LOOM_HOME="$CHK" bash -c "$CMD" </dev/null 2>/dev/null)
+assert_contains "$out" "RELEASE-RAN:$LOOMREPO" "2am#4501: LOOM_HOOKS_HOME set -> the daemon's release hook runs, not the checkout's"
+out=$(cd "$LOOMREPO" && LOOM_HOOKS_HOME="" LOOM_HOME="$CHK" bash -c "$CMD" </dev/null 2>/dev/null)
+assert_contains "$out" "MACHINE-RAN:$LOOMREPO" "2am#4501: LOOM_HOOKS_HOME blank -> the checkout's hook runs"
+out=$(cd "$LOOMREPO" && LOOM_HOOKS_HOME="/nonexistent/release" LOOM_HOME="$CHK" bash -c "$CMD" </dev/null 2>/dev/null)
+assert_contains "$out" "MACHINE-RAN:$LOOMREPO" "2am#4501: LOOM_HOOKS_HOME without the hook -> falls back to the checkout, never fails open"
 
 # ── Test 9: deprovision removes only Loom-owned entries ──────────────────────
 echo "Test 9: deprovision strips Loom-owned entries, preserves operator hooks"
@@ -619,6 +641,259 @@ CMD24=$(jq -r '.hooks.PreToolUse[] | select(.matcher=="Bash") | .hooks[] | .comm
 assert_contains "$CMD24" "bash -c '" "machine-level entry is still the bash -c wrapper form"
 [[ "$CMD24" != *'"${CLAUDE_PROJECT_DIR}'* ]] && pass "machine-level wrapper does not use the project-level \${CLAUDE_PROJECT_DIR} quoting form at all" \
     || fail "machine-level wrapper unexpectedly picked up the project-level quoting form"
+
+# ── Test 25: the SessionStart gh front (#10516) ──────────────────────────────
+echo "Test 25: SessionStart gh-front-env.sh — wired once, operator entries kept, removed by deprovision, stub fail-open + stdout-silent (#10516)"
+HOME25=$(mktemp -d); mkdir -p "$HOME25/.claude"
+cat > "$HOME25/.claude/settings.json" <<'EOF'
+{ "hooks": { "SessionStart": [ { "matcher": "startup", "hooks": [
+  { "type": "command", "command": "${CLAUDE_PROJECT_DIR}/.claude/skills/repo/hooks/session-start-handoff.sh" }
+] } ] } }
+EOF
+S25="$HOME25/.claude/settings.json"
+provision_loom_hooks "$HOME25/.claude" >/dev/null 2>&1
+provision_loom_hooks "$HOME25/.claude" >/dev/null 2>&1
+assert_eq "$(count_marker "$S25" gh-front-env.sh)" "1" "gh-front-env.sh wired exactly once after two provisions"
+assert_eq "$(jq -r '[.hooks.SessionStart[] | select(any(.hooks[]?; .command | contains("defaults/hooks/gh-front-env.sh"))) | .matcher] == [""]' "$S25")" "true" "wired under matcher \"\" (startup, resume, clear, compact)"
+HANDOFF25='[.hooks.SessionStart[]? | .hooks[]? | .command | select(contains("session-start-handoff.sh"))] | length'
+assert_eq "$(jq -r "$HANDOFF25" "$S25")" "1" "operator's own SessionStart entry preserved"
+deprovision_loom_hooks "$HOME25/.claude" >/dev/null 2>&1
+assert_eq "$(count_marker "$S25" gh-front-env.sh)" "0" "deprovision removed the SessionStart entry"
+assert_eq "$(jq -r "$HANDOFF25" "$S25")" "1" "operator's SessionStart entry survives deprovision"
+# The stub itself: whatever the daemon prints, the hook prints
+# nothing on stdout (SessionStart stdout reaches the model) and exits 0.
+CHK25=$(mktemp -d); mkdir -p "$CHK25/defaults/hooks"
+cp "$REPO_ROOT/defaults/hooks/gh-front-env.sh" "$CHK25/defaults/hooks/"
+ln -s "$REPO_ROOT/defaults/scripts" "$CHK25/defaults/scripts"
+FAKE25="$CHK25/fake-daemon"
+ARGV25="$CHK25/argv"
+# A fake daemon: `--version` answers the preflight (FAKEVER25), anything else
+# is logged with LOOM_PROJECT_ROOT and prints stdout noise the hook must swallow.
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "loom-daemon $FAKEVER25"; exit 0; }\necho "$*|$LOOM_PROJECT_ROOT" >> "%s"\necho STDOUT-NOISE\n' "$ARGV25" > "$FAKE25"
+chmod +x "$FAKE25"
+WS25=$(mktemp -d)
+out=$(cd "$WS25" && FAKEVER25=99.0.0 LOOM_DAEMON_SELF_BIN="$FAKE25" LOOM_PROJECT_ROOT="$WS25" bash "$CHK25/defaults/hooks/gh-front-env.sh" </dev/null 2>/dev/null); rc=$?
+assert_eq "$out|$rc" "|0" "stub is stdout-silent and exits 0 even when the daemon prints on stdout"
+assert_eq "$(cat "$ARGV25" 2>/dev/null)" "gh-shim session-env|$WS25" "stub runs \`gh-shim session-env\` with LOOM_PROJECT_ROOT"
+: > "$ARGV25"
+out=$(cd "$WS25" && FAKEVER25=0.1.0 LOOM_DAEMON_SELF_BIN="$FAKE25" bash "$CHK25/defaults/hooks/gh-front-env.sh" </dev/null 2>/dev/null); rc=$?
+assert_eq "$out|$rc|$(cat "$ARGV25")" "|0|" "a daemon below the declared floor is refused by the preflight: exit 0, never called"
+NOLIB25=$(mktemp -d); cp "$REPO_ROOT/defaults/hooks/gh-front-env.sh" "$NOLIB25/"
+out=$(LOOM_DAEMON_SELF_BIN="$FAKE25" bash "$NOLIB25/gh-front-env.sh" </dev/null 2>&1); rc=$?
+assert_eq "$out|$rc" "|0" "no daemon library -> silent exit 0"
+# Through the wired wrapper: a non-Loom repo never reaches the stub.
+CMD25=$(_phook_cmd gh-front-env.sh)
+NONLOOM25=$(mktemp -d); git -C "$NONLOOM25" init -q
+: > "$ARGV25"
+out=$(cd "$NONLOOM25" && LOOM_HOME="$CHK25" LOOM_DAEMON_SELF_BIN="$FAKE25" bash -c "$CMD25" </dev/null 2>&1); rc=$?
+assert_eq "$out|$rc|$(cat "$ARGV25")" "|0|" "non-Loom repo: the wrapper never runs the stub (PATH untouched)"
+
+# ── Test 26: guard-uncommitted-work.sh on Stop AND SubagentStop (#8372) ─────
+echo "Test 26: uncommitted-work consumer canary stub — both events, both install modes, dedup, deprovision (#8372)"
+# Count entries for <name> under ONE hook event type (machine marker).
+count_marker_in() {
+    local file="$1" ev="$2" name="$3"
+    jq --arg ev "$ev" --arg m "defaults/hooks/$name" '
+        [ (.hooks[$ev] // [])[] | .hooks[]? | .command // "" | select(contains($m)) ] | length
+    ' "$file" 2>/dev/null
+}
+count_project_in() {
+    local file="$1" ev="$2" name="$3"
+    jq --arg ev "$ev" --arg m ".loom/hooks/$name" '
+        [ (.hooks[$ev] // [])[] | .hooks[]? | .command // ""
+          | select(contains($m)) | select(contains("defaults/hooks/") | not) ] | length
+    ' "$file" 2>/dev/null
+}
+UW=guard-uncommitted-work.sh
+
+# 26a: user-scope (machine) provisioning — twice — wires each event exactly once.
+HOME26=$(mktemp -d)
+provision_loom_hooks "$HOME26/.claude" >/dev/null 2>&1
+provision_loom_hooks "$HOME26/.claude" >/dev/null 2>&1
+S26="$HOME26/.claude/settings.json"
+assert_eq "$(count_marker_in "$S26" Stop "$UW")" "1" "user-scope: Stop entry wired exactly once after two provisions"
+assert_eq "$(count_marker_in "$S26" SubagentStop "$UW")" "1" "user-scope: SubagentStop entry wired exactly once after two provisions"
+assert_eq "$(count_marker_in "$S26" Stop guard-background-subagents.sh)" "1" "user-scope: the existing Stop guard is still wired once alongside it"
+assert_eq "$(count_marker "$S26" "$UW")" "2" "user-scope: two entries total (one per event), never more"
+
+# 26b: project-copy (quick-install) fallback wires both events, idempotently.
+R26=$(mktemp -d); git -C "$R26" init -q
+make_transition_repo "$R26"
+mkdir -p "$R26/.loom/scripts/lib"
+cp "$REPO_ROOT/defaults/hooks/$UW" "$R26/.loom/hooks/$UW"; chmod +x "$R26/.loom/hooks/$UW"
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$R26/.loom/config.json"
+printf '{}\n' > "$R26/.claude/settings.json"
+ensure_project_hook_wiring "$R26" >/dev/null 2>&1
+ensure_project_hook_wiring "$R26" >/dev/null 2>&1
+P26="$R26/.claude/settings.json"
+assert_eq "$(count_project_in "$P26" Stop "$UW")" "1" "project-copy: Stop entry asserted exactly once after two runs"
+assert_eq "$(count_project_in "$P26" SubagentStop "$UW")" "1" "project-copy: SubagentStop entry asserted exactly once after two runs"
+
+# 26c: transition dedup — the user-scope wrapper defers to the project copy, so
+# exactly ONE entry point runs per event in a repo wired both ways.
+CHK26=$(mktemp -d); mkdir -p "$CHK26/defaults/hooks"
+printf '#!/usr/bin/env bash\necho MACHINE-RAN\nexit 0\n' > "$CHK26/defaults/hooks/$UW"
+chmod +x "$CHK26/defaults/hooks/$UW"
+for ev in Stop SubagentStop; do
+    CMD26=$(jq -r --arg ev "$ev" --arg m "defaults/hooks/$UW" '.hooks[$ev][] | .hooks[] | .command | select(contains($m))' "$S26" | head -1)
+    OUT26=$(cd "$R26" && LOOM_HOME="$CHK26" bash -c "$CMD26" </dev/null 2>/dev/null); rc26=$?
+    assert_eq "$OUT26|$rc26" "|0" "$ev: user-scope wrapper defers to the project copy (no double-fire)"
+done
+rm -f "$R26/.loom/hooks/$UW"
+for ev in Stop SubagentStop; do
+    CMD26=$(jq -r --arg ev "$ev" --arg m "defaults/hooks/$UW" '.hooks[$ev][] | .hooks[] | .command | select(contains($m))' "$S26" | head -1)
+    OUT26=$(cd "$R26" && LOOM_HOME="$CHK26" bash -c "$CMD26" </dev/null 2>/dev/null)
+    assert_contains "$OUT26" "MACHINE-RAN" "$ev: with no project copy the machine-checkout stub runs"
+done
+
+# 26d: the REAL stub through the REAL user-scope wrapper, against fake daemons.
+CHK26R=$(mktemp -d); mkdir -p "$CHK26R/defaults/hooks"
+cp "$REPO_ROOT/defaults/hooks/$UW" "$CHK26R/defaults/hooks/$UW"
+ln -s "$REPO_ROOT/defaults/scripts" "$CHK26R/defaults/scripts"
+FAKES26=$(mktemp -d)
+printf '#!/bin/sh\ncat >/dev/null\necho %s\n' "'{\"decision\":\"block\",\"reason\":\"fake block\"}'" > "$FAKES26/block"
+printf '#!/bin/sh\ncat >/dev/null\nexit 0\n' > "$FAKES26/allow"
+printf '#!/bin/sh\necho "error: unrecognized subcommand" >&2\nexit 2\n' > "$FAKES26/stale"
+chmod +x "$FAKES26/block" "$FAKES26/allow" "$FAKES26/stale"
+LOG26="$FAKES26/canary.jsonl"
+run26() { # $1=event $2=fake-bin-path -> W26OUT / W26RC
+    local cmd
+    cmd=$(jq -r --arg ev "$1" --arg m "defaults/hooks/$UW" '.hooks[$ev][] | .hooks[] | .command | select(contains($m))' "$S26" | head -1)
+    W26OUT=$(cd "$R26" && LOOM_HOME="$CHK26R" LOOM_DAEMON_SELF_BIN="$2" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$LOG26" \
+        bash -c "$cmd" <<<'{"hook_event_name":"'"$1"'","cwd":"'"$R26"'"}' 2>/dev/null)
+    W26RC=$?
+}
+for ev in Stop SubagentStop; do
+    run26 "$ev" "$FAKES26/block"
+    assert_contains "$W26OUT|$W26RC" '"decision":"block"' "$ev: a successful block verdict passes through the wired stub"
+    assert_eq "$W26RC" "0" "$ev: block is stdout JSON with exit 0"
+    run26 "$ev" "$FAKES26/allow"
+    assert_eq "$W26OUT|$W26RC" "|0" "$ev: an allow is silent"
+    run26 "$ev" "$FAKES26/stale"
+    assert_eq "$W26OUT|$W26RC" "|0" "$ev: a stale daemon (clap exit 2) fails open, never a block"
+    run26 "$ev" "$FAKES26/does-not-exist"
+    assert_eq "$W26RC" "0" "$ev: a missing daemon fails open"
+done
+assert_contains "$(cat "$LOG26" 2>/dev/null)" '"error":"unsupported_subcommand_or_flag"' "stale daemon recorded as a wrapper failure for the opted-in workspace"
+
+# 26d2: effective precedence — a higher-tier false (local) overrides a lower-tier
+# true (.loom/config.json): no wrapper record; reversing the order records one.
+P26X=$(mktemp -d); mkdir -p "$P26X/.loom" "$P26X/.loom-local" "$P26X/defaults/hooks"
+cp "$REPO_ROOT/defaults/hooks/$UW" "$P26X/defaults/hooks/$UW"   # no ../scripts/lib -> lib_missing
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom/config.json"
+printf '{"guards":{"uncommittedWorkConsumerCanary":false}}\n' > "$P26X/.loom-local/local.json"
+LOG26X="$P26X/canary.jsonl"
+for ev in Stop SubagentStop; do
+    LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$LOG26X" \
+        bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"'"$ev"'"}' >/dev/null 2>&1
+done
+assert_eq "$(cat "$LOG26X" 2>/dev/null)" "" "effective false (local overrides config true) writes no wrapper record"
+printf '{"guards":{"uncommittedWorkConsumerCanary":false}}\n' > "$P26X/.loom/config.json"
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom-local/local.json"
+LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$LOG26X" \
+    bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+assert_contains "$(cat "$LOG26X" 2>/dev/null)" '"error":"lib_missing"' "effective true (local overrides config false) writes a wrapper record"
+
+# 26d3: the log override may not point inside a Git checkout (main: .git dir) or
+# worktree (.git file), nor reach one via "..": no record, no directory, still exit 0.
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom-local/local.json"
+mkdir -p "$P26X/chk/.git" "$P26X/wt"; : > "$P26X/wt/.git"
+for L in "$P26X/chk/sub/canary.jsonl" "$P26X/wt/canary.jsonl" "$P26X/other/../chk/canary.jsonl"; do
+    LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$L" \
+        bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+    assert_eq "$?|$(ls "$P26X/chk/sub" "$P26X/other" 2>/dev/null)|$([[ -e "$L" ]] && echo wrote)" "0||" "override $L is refused: exit 0, nothing written"
+done
+LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$P26X/ok/canary.jsonl" \
+    bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+assert_contains "$(cat "$P26X/ok/canary.jsonl" 2>/dev/null)" '"error":"lib_missing"' "an override outside every checkout is still honoured"
+
+# 26d4: a FILE symlink (outside) pointing into a checkout/worktree is resolved
+# before the containment check; nothing is appended through it.
+mkdir -p "$P26X/lnk"; : > "$P26X/chk/target.jsonl"; : > "$P26X/wt/target.jsonl"
+ln -sf "$P26X/chk/target.jsonl" "$P26X/lnk/main.jsonl"; ln -sf "$P26X/wt/target.jsonl" "$P26X/lnk/wt.jsonl"
+for L in "$P26X/lnk/main.jsonl" "$P26X/lnk/wt.jsonl"; do
+    LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$L" \
+        bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+    assert_eq "$(cat "$P26X/chk/target.jsonl" "$P26X/wt/target.jsonl")" "" "file symlink $L into a checkout appends nothing"
+done
+
+# 26d5: only guards.<key> counts — an unrelated same-name key or a non-boolean
+# higher-tier value must not enable wrapper records.
+: > "$P26X/ok/canary.jsonl"
+for CFG in '{"guards":{"uncommittedWorkConsumerCanary":false},"other":{"uncommittedWorkConsumerCanary":true}}' \
+           '{"other":{"uncommittedWorkConsumerCanary":true}}' \
+           '{"guards":{"uncommittedWorkConsumerCanary":"true"}}'; do
+    printf '%s\n' "$CFG" > "$P26X/.loom-local/local.json"
+    LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$P26X/ok/canary.jsonl" \
+        bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+    assert_eq "$(cat "$P26X/ok/canary.jsonl" 2>/dev/null)" "" "config $CFG writes no wrapper record"
+done
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom-local/local.json"
+
+# 26d6: resolver merge semantics — a higher-tier null, or a scalar replacing the
+# whole `guards` object, clears a lower-tier true (config_resolver.rs deep_merge).
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom/config.json"
+for CFG in '{"guards":{"uncommittedWorkConsumerCanary":null}}' '{"guards":null}' '{"guards":"off"}'; do
+    printf '%s\n' "$CFG" > "$P26X/.loom-local/local.json"
+    LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$P26X/ok/canary.jsonl" \
+        bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"Stop"}' >/dev/null 2>&1
+    assert_eq "$(cat "$P26X/ok/canary.jsonl" 2>/dev/null)" "" "local $CFG over config true writes no wrapper record"
+done
+
+# 26d6b: a malformed or non-object tier is ignored as {} (config_resolver.rs
+# soft_read_json_object), so the lower-tier true still records a lib_missing
+# failure on both events.
+for CFG in 'null' '[]' '{broken' '"str"' ''; do
+    for ev in Stop SubagentStop; do
+        : > "$P26X/ok/canary.jsonl"
+        printf '%s' "$CFG" > "$P26X/.loom-local/local.json"
+        LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$P26X/ok/canary.jsonl" \
+            bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"'"$ev"'"}' >/dev/null 2>&1
+        assert_eq "$(grep -c '"error":"lib_missing"' "$P26X/ok/canary.jsonl" 2>/dev/null)" "1" "$ev: invalid local tier [$CFG] is ignored, lower-tier true still records"
+    done
+done
+printf '{"guards":{"uncommittedWorkConsumerCanary":true}}\n' > "$P26X/.loom-local/local.json"
+
+# 26d7: opted in but unable to record -> exit 0 and a non-blocking coverage
+# notice on both events (full log, directory as log, rejected path, relative path).
+head -c 1048576 /dev/zero > "$P26X/full.jsonl"; mkdir -p "$P26X/logdir"
+for ev in Stop SubagentStop; do
+    for L in "$P26X/full.jsonl" "$P26X/logdir" "$P26X/chk/canary.jsonl" "rel/canary.jsonl"; do
+        G26=$(LOOM_PROJECT_ROOT="$P26X" LOOM_CONFIG_DEFAULTS_FILE="" LOOM_UNCOMMITTED_WORK_CANARY_LOG="$L" \
+            bash "$P26X/defaults/hooks/$UW" <<<'{"hook_event_name":"'"$ev"'"}' 2>/dev/null); rc26g=$?
+        assert_eq "$rc26g|$(printf '%s' "$G26" | jq -r '[.continue, (.systemMessage|contains("NOT recorded")), has("decision")]|@csv' 2>/dev/null)" "0|true,true,false" "$ev: unrecordable log $L -> exit 0 + non-blocking coverage notice"
+    done
+done
+assert_eq "$(( $(wc -c < "$P26X/full.jsonl") ))" "1048576" "a full log is never grown"
+
+# 26e: deprovision removes both events' entries and leaves no empty arrays.
+deprovision_loom_hooks "$HOME26/.claude" >/dev/null 2>&1
+assert_eq "$(count_marker "$S26" "$UW")" "0" "deprovision removed both uncommitted-work entries"
+assert_eq "$(jq -r '.hooks.SubagentStop // "absent"' "$S26")" "absent" "deprovision leaves no empty SubagentStop array behind"
+
+# ── Test 27 (#12121): retired operator presence wiring is stripped ───────────
+echo "Test 27: provision_operator_presence strips the retired presence-beat.sh wiring; user settings survive"
+H27=$(mktemp -d); mkdir -p "$H27/.claude"
+S27="$H27/.claude/settings.json"
+PB27="bash -c 'H=\"\$HOME/.local/share/loom/defaults/hooks/presence-beat.sh\"; exec \"\$H\"'"
+jq -n --arg pb "$PB27" '{permissions:{allow:["Bash(ls)"]},env:{KEEP:"1",LOOM_OPERATOR_PRESENCE:"1"},
+  hooks:{Stop:[{hooks:[{type:"command",command:"echo mine"}]},{hooks:[{type:"command",command:$pb}]}],
+         UserPromptSubmit:[{hooks:[{type:"command",command:$pb}]}]}}' > "$S27"
+assert_eq "$(count_marker "$S27" presence-beat.sh)" "2" "fixture: two presence-beat.sh entries present"
+provision_operator_presence "$H27/.claude" >/dev/null 2>&1
+assert_eq "$(count_marker "$S27" presence-beat.sh)" "0" "presence-beat.sh entries stripped"
+assert_eq "$(jq -r '.env.LOOM_OPERATOR_PRESENCE // "absent"' "$S27")" "absent" "presence env=1 removed"
+assert_eq "$(jq -r '.env.KEEP' "$S27")" "1" "unrelated env kept"
+assert_eq "$(jq -r '.permissions.allow[0]' "$S27")" "Bash(ls)" "permissions kept"
+assert_eq "$(jq -r '[.hooks.Stop[].hooks[].command | select(. == "echo mine")] | length' "$S27")" "1" "user's own Stop hook kept"
+assert_eq "$(jq -r '.hooks.UserPromptSubmit // "absent"' "$S27")" "absent" "emptied event removed"
+cp "$S27" "$H27/before.json"
+provision_operator_presence "$H27/.claude" >/dev/null 2>&1
+assert_eq "$(jq -S . "$S27")" "$(jq -S . "$H27/before.json")" "re-run: settings unchanged"
+# the opt-out value is the daemon's privacy switch and is never stripped
+jq '.env.LOOM_OPERATOR_PRESENCE = "0"' "$S27" > "$H27/optout.json" && mv "$H27/optout.json" "$S27"
+provision_operator_presence "$H27/.claude" >/dev/null 2>&1
+assert_eq "$(jq -r '.env.LOOM_OPERATOR_PRESENCE' "$S27")" "0" "env=0 opt-out kept"
 
 echo ""
 echo "======================================"

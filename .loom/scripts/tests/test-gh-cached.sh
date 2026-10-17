@@ -29,27 +29,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GH_CACHED="$(cd "$SCRIPT_DIR/.." && pwd)/gh-cached"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
 if [[ ! -x "$GH_CACHED" ]]; then
     echo "FAIL: gh-cached not found or not executable at $GH_CACHED" >&2
@@ -290,6 +271,17 @@ mkdir -p "$FAKE_DAEMON_DIR"
 # check the way the incident describes.
 cat > "$FAKE_DAEMON_DIR/loom-daemon-mock" <<'FAKE'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DAEMON_LOG"
+if [[ "$1" == "forge" && "$3" == "view" ]]; then
+    # #9254 view path: --invalidate succeeds silently; a --json shape without
+    # `author` is served; everything else declines (exit 3), like the real one.
+    if [[ "$*" == *--invalidate* ]]; then exit 0; fi
+    if [[ "$*" == *--json* && "$*" != *author* ]]; then
+        echo '{"labels":[{"name":"from-etag-view"}],"state":"OPEN"}'
+        exit 0
+    fi
+    exit 3
+fi
 if [[ "$1" == "forge" && "$3" == "list" ]]; then
     if printf '%s\n' "$@" | grep -q -- '--json'; then
         echo '[{"number":777,"title":"from-etag-daemon"}]'
@@ -305,6 +297,10 @@ chmod +x "$FAKE_DAEMON_DIR/loom-daemon-mock"
 # ENABLED. FAKE_DAEMON_DIR is still added to PATH as a belt-and-suspenders
 # safety net for any code path that falls through to a PATH search, but
 # LOOM_DAEMON_BIN is what locate_loom_daemon() actually resolves first.
+FAKE_DAEMON_LOG="$TMP_ROOT/daemon-calls.log"
+: > "$FAKE_DAEMON_LOG"
+export FAKE_DAEMON_LOG
+
 ghc_etag() {
     PATH="$STUB_DIR:$FAKE_DAEMON_DIR:$PATH" \
     GH_CACHE_DIR="$CACHE_DIR" \
@@ -327,6 +323,46 @@ assert_eq "1" "$(call_count)" "a daemon-declined list shape falls through to a r
 reset_cache
 LOOM_ETAG_LIST_DISABLE=1 ghc_etag issue list --label "loom:issue" --state open --json number,title >/dev/null
 assert_eq "1" "$(call_count)" "LOOM_ETAG_LIST_DISABLE=1 bypasses the ETag path (falls to gh)"
+
+# --- 9b. Conditional single-object reads (#9254) ---------------------------
+# `issue view` / `pr view` try `forge … view --cached` before the TTL cache;
+# a decline (exit 3) falls through to exactly the TTL + plain-gh behaviour, and
+# a wrapped mutation drops the daemon's view entries for that number.
+echo ""
+echo "Testing the #9254 ETag/REST single-object view routing..."
+
+reset_cache
+view_out=$(ghc_etag issue view 123 --json labels,state)
+assert_eq '{"labels":[{"name":"from-etag-view"}],"state":"OPEN"}' "$view_out" \
+    "'issue view --json labels,state' is served by the daemon's conditional view path"
+assert_eq "0" "$(call_count)" "…and the stub gh is never called for the ETag-served view"
+case "$(tail -n 1 "$FAKE_DAEMON_LOG")" in
+  "forge issue view --cached 123 --json labels,state") fwd_ok="yes" ;;
+  *) fwd_ok="no: $(tail -n 1 "$FAKE_DAEMON_LOG")" ;;
+esac
+assert_eq "yes" "$fwd_ok" "…with the argv forwarded verbatim after '--cached'"
+
+reset_cache
+declined_out=$(ghc_etag pr view 4242 --json author)
+declined_out2=$(ghc_etag pr view 4242 --json author)
+assert_eq "$(cat "$STATE_DIR/pr-view.json")" "$declined_out" \
+    "a daemon-declined view shape returns exactly plain gh's output"
+assert_eq "1" "$(call_count)" "…through the TTL path (one gh call, the repeat is a TTL hit)"
+assert_eq "$declined_out" "$declined_out2" "…and the TTL hit is identical"
+
+reset_cache
+: > "$FAKE_DAEMON_LOG"
+ghc_etag issue edit 123 --add-label "loom:building" >/dev/null
+assert_eq "1" "$(grep -c -- '--invalidate 123$' "$FAKE_DAEMON_LOG")" \
+    "a wrapped 'issue edit 123' drops the daemon's ETag view entries for #123"
+: > "$FAKE_DAEMON_LOG"
+ghc_etag pr comment 4242 --body hi >/dev/null
+assert_eq "1" "$(grep -c -- '--invalidate 4242$' "$FAKE_DAEMON_LOG")" \
+    "a wrapped 'pr comment 4242' drops the view entries for #4242"
+
+reset_cache
+LOOM_ETAG_VIEW_DISABLE=1 ghc_etag issue view 123 --json labels,state >/dev/null 2>&1
+assert_eq "1" "$(call_count)" "LOOM_ETAG_VIEW_DISABLE=1 bypasses the view path (falls to gh)"
 
 # --- 10. Multi-repo cache isolation (#5224) --------------------------------
 # CACHE_DIR is scoped per-repo so two different repos on the same host never
@@ -425,6 +461,62 @@ if command -v git >/dev/null 2>&1; then
 else
     echo "SKIP: git not available — skipping real-git-toplevel isolation test"
 fi
+
+# --- LOOM_GH_BIN + x-loom-cache outcome field (#9988) -----------------------
+echo ""
+echo "Testing LOOM_GH_BIN and the x-loom-cache outcome record (#9988)..."
+reset_cache
+OUTCOME_LOG="$TMP_ROOT/outcomes.jsonl"
+: > "$OUTCOME_LOG"
+ALT_BIN="$TMP_ROOT/alt-gh"
+cat > "$ALT_BIN" <<'ALT'
+#!/usr/bin/env bash
+echo "ALT-GH-RAN $*"
+ALT
+chmod +x "$ALT_BIN"
+alt_out="$(LOOM_GH_BIN="$ALT_BIN" GH_CACHE_OUTCOME_LOG="$OUTCOME_LOG" ghc pr view 7 --json labels)"
+case "$alt_out" in
+  *ALT-GH-RAN*) alt_ran="yes" ;;
+  *) alt_ran="no" ;;
+esac
+assert_eq "yes" "$alt_ran" "LOOM_GH_BIN runs the named binary instead of gh from PATH"
+assert_eq "0" "$(call_count)" "…and the PATH stub gh is never called"
+LOOM_GH_BIN="$ALT_BIN" GH_CACHE_OUTCOME_LOG="$OUTCOME_LOG" ghc pr view 7 --json labels >/dev/null
+LOOM_GH_BIN="$ALT_BIN" GH_CACHE_OUTCOME_LOG="$OUTCOME_LOG" ghc --no-cache pr view 7 --json labels >/dev/null
+outcomes="$(python3 -c 'import json,sys; print(",".join(json.loads(l)["x-loom-cache"] for l in open(sys.argv[1])))' "$OUTCOME_LOG")"
+assert_eq "miss,hit,bypass" "$outcomes" "records carry x-loom-cache: miss, then hit, then bypass"
+reset_cache
+
+# --- Sweep-support script call sites (#9953) --------------------------------
+# Static contract: observation scripts route reads through $GH_READ and keep
+# the probe/fallback; arbitration scripts stay on literal plain `gh`.
+S_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+for sc in check-duplicate blame-issue sync-labels; do
+    grep -q 'GH_READ="gh"' "$S_DIR/$sc.sh" && grep -q '"$_ghc" --version' "$S_DIR/$sc.sh"
+    assert_eq "0" "$?" "$sc.sh resolves \$GH_READ with the --version probe + plain-gh fallback"
+    grep -q '"$GH_READ" ' "$S_DIR/$sc.sh"
+    assert_eq "0" "$?" "$sc.sh routes at least one read through \$GH_READ"
+done
+for sc in check-evaluating-staleness sweep-lease-renew verdict-staleness-guard claim-staleness rebase-stacked-children; do
+    grep -q 'GH_READ' "$S_DIR/$sc.sh"
+    assert_eq "1" "$?" "$sc.sh (arbitration/CAS) never uses \$GH_READ"
+    grep -q 'gh-cached.md' "$S_DIR/$sc.sh"
+    assert_eq "0" "$?" "$sc.sh cites docs/gh-cached.md for its plain-gh carve-out"
+done
+# The probe degrades to plain gh when the wrapper is absent.
+GH_READ="gh"; _ghc="/nonexistent-dir/gh-cached"
+if [[ -x "$_ghc" ]] && "$_ghc" --version >/dev/null 2>&1; then GH_READ="$_ghc"; fi
+assert_eq "gh" "$GH_READ" "missing wrapper -> GH_READ falls back to plain gh"
+# ...and when it is present but broken (its --version probe fails), under set -euo pipefail.
+BROKEN_DIR="$(mktemp -d)"; printf '#!/usr/bin/env bash\nexit 1\n' > "$BROKEN_DIR/gh-cached"; chmod +x "$BROKEN_DIR/gh-cached"
+broken_out="$(SCRIPT_DIR="$BROKEN_DIR" bash -c 'set -euo pipefail; GH_READ="gh"; _ghc="$SCRIPT_DIR/gh-cached"; if [[ -x "$_ghc" ]] && "$_ghc" --version >/dev/null 2>&1; then GH_READ="$_ghc"; fi; echo "$GH_READ"')"
+assert_eq "gh" "$broken_out" "broken wrapper -> GH_READ falls back to plain gh (set -euo pipefail safe)"
+rm -rf "$BROKEN_DIR"
+# Each routed script resolves the probe on ONE code line (shell budget, #7810).
+for sc in check-duplicate blame-issue sync-labels; do
+    grep -qE '^GH_READ="gh"; _ghc=.*"\$_ghc" --version >/dev/null 2>&1; then GH_READ="\$_ghc"; fi$' "$S_DIR/$sc.sh"
+    assert_eq "0" "$?" "$sc.sh resolves \$GH_READ on a single probe line"
+done
 
 # --- Summary ---------------------------------------------------------------
 echo ""

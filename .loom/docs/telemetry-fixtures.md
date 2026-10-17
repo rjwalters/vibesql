@@ -12,8 +12,8 @@ loom-daemon telemetry-export --input ./comparison-001/envelopes.jsonl --endpoint
 
 The output directory must be new and its parent must exist. The generator never
 overwrites a trial. It publishes `manifest.json` last; an interrupted directory
-without that file is incomplete. The exporter needs an OTLP-enabled binary and
-an explicitly configured Collector. Generation itself works without OTLP.
+without that file is incomplete. The exporter needs an explicitly configured
+Collector (every build is OTLP-enabled since #10700). Generation itself works without OTLP.
 
 Choose the required timestamp inside the backend retention and query windows.
 There is no historical default. Identical run ID and anchor
@@ -81,6 +81,13 @@ buffer saturation, UI usability, per-attempt inference usage, or paid inference
 cost. Those require the live
 trial protocol and a measured report. Never replace these gaps with a product
 winner or a claim that the comparison issue is complete.
+
+This harness dispatches its own attempts through Pi and OpenCode; it does not
+exercise Claude Code's own OTLP exporter. For a human's interactive `claude`
+session reaching this same gateway ingress, see "Claude Code native OTLP
+(interactive sessions)" in `defaults/observability/collector/README.md` —
+that is the canonical env-block wiring and has no `loom-daemon` subcommand of
+its own to run here.
 
 ## Opt-in native harness canary
 

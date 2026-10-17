@@ -33,27 +33,9 @@ SPAWN_AIDER="$SCRIPTS_DIR/spawn-aider.sh"
 CHECK_SCRIPT="$SCRIPTS_DIR/check-runtime-capabilities.sh"
 AIDER_MANIFEST="$DEFAULTS_DIR/runtimes/aider.json"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# shellcheck source=lib/assert.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/assert.sh"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-
-assert_eq() {
-    local expected="$1" actual="$2" msg="$3"
-    TESTS_RUN=$((TESTS_RUN + 1))
-    if [[ "$expected" == "$actual" ]]; then
-        TESTS_PASSED=$((TESTS_PASSED + 1))
-        echo -e "  ${GREEN}PASS${NC}: $msg"
-    else
-        TESTS_FAILED=$((TESTS_FAILED + 1))
-        echo -e "  ${RED}FAIL${NC}: $msg"
-        echo "    Expected: '$expected'"
-        echo "    Actual:   '$actual'"
-    fi
-}
 
 assert_contains() {
     local needle="$1" haystack="$2" msg="$3"
@@ -85,6 +67,14 @@ assert_not_contains() {
 
 TMPROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPROOT"' EXIT
+
+# spawn-aider.sh now execs spawn-generic-launch.sh (#8671), which resolves
+# its launch shape via `loom-daemon runtime-launch-env` before ever reaching
+# spawn-generic.sh -- every section below, not just the dispatcher section,
+# now depends on the port. `spawn-worker` is still required too: Section 6
+# routes `LOOM_RUNTIME=aider` through it.
+source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin --self-only "$SCRIPTS_DIR" spawn-worker runtime-launch-env
 
 # ============================================================
 # Section 1: syntax + help
@@ -314,15 +304,13 @@ assert_contains \
 echo ""
 echo "Testing LOOM_RUNTIME=aider dispatch through spawn-worker.sh..."
 
-source "$SCRIPT_DIR/lib/require-daemon-bin.sh"
-loom_test_require_daemon_bin --self-only "$SCRIPTS_DIR" spawn-worker
-
 STAGE="$TMPROOT/stage"
 mkdir -p "$STAGE/lib"
 cp "$SCRIPTS_DIR/spawn-worker.sh" "$STAGE/spawn-worker.sh"
 cp "$SCRIPTS_DIR/lib/"{config-resolver,locate-daemon-bin,loom-tools}.sh "$STAGE/lib/"
 cp "$SPAWN_GENERIC" "$STAGE/spawn-generic.sh"
 cp "$SPAWN_AIDER" "$STAGE/spawn-aider.sh"
+cp "$SCRIPTS_DIR/spawn-generic-launch.sh" "$STAGE/spawn-generic-launch.sh"
 cp "$SCRIPTS_DIR/lib/classify-error.sh" "$STAGE/lib/classify-error.sh"
 chmod +x "$STAGE"/spawn-*.sh
 

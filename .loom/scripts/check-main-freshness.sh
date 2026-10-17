@@ -105,6 +105,11 @@ if [[ -z "$BRANCH" ]]; then
     exit 0
 fi
 
+# (#9106: loom_default_branch refuses an unsafe name at the source and returns
+# non-zero, which leaves $BRANCH empty — so the "could not determine the default
+# branch; skipping" arm above is also the unsafe-name arm, and this advisory
+# script still never exits non-zero. The `--` below is the second mitigation.)
+
 REMOTE_REF="origin/$BRANCH"
 
 # ---------- bounded fetch (degrade gracefully) ----------
@@ -113,13 +118,16 @@ REMOTE_REF="origin/$BRANCH"
 # can't stall the sweep. On any failure (offline, auth, rate-limit, no `timeout`
 # binary) we fall back to whatever refs/remotes/origin/<branch> is already known
 # locally — possibly stale, but the check stays cheap and never blocks.
-if command -v timeout >/dev/null 2>&1; then
-    timeout 5 git fetch origin "$BRANCH" --quiet >/dev/null 2>&1 || true
-else
-    # No `timeout` available (e.g. minimal macOS without coreutils). Still try,
-    # but git's own --quiet keeps it unobtrusive; a hung network is a rare edge.
-    git fetch origin "$BRANCH" --quiet >/dev/null 2>&1 || true
-fi
+# No `timeout` available (e.g. minimal macOS without coreutils)? Still fetch —
+# git's own --quiet keeps it unobtrusive and a hung network is a rare edge — so
+# the bound is a command PREFIX rather than a second copy of the same fetch.
+# `${a[@]+"${a[@]}"}` not `"${a[@]}"`: this script runs under `set -u`, and on
+# bash 3.2 (the macOS default) expanding an EMPTY array that way is an "unbound
+# variable" error — the recurring 3.2 portability class in
+# `.loom/docs/shell-language-policy.md`. The `+` form expands to nothing when
+# the array is unset/empty and to the quoted elements otherwise.
+_CMF_BOUND=(); command -v timeout >/dev/null 2>&1 && _CMF_BOUND=(timeout 5)
+${_CMF_BOUND[@]+"${_CMF_BOUND[@]}"} git fetch origin --quiet -- "$BRANCH" >/dev/null 2>&1 || true
 
 # ---------- verify we have both refs to compare ----------
 
@@ -222,11 +230,11 @@ fi
 #
 # None of these exist on a checkout that never ran the Loom installer locally —
 # a fresh developer clone, a CI checkout, or any machine that received the repo
-# rather than installing into it. On exactly that population, `resync-installed.sh`
-# fails on first use with "Could not locate a defaults/ source tree to sync
-# from" — discovered only AFTER following this script's own remediation, not
-# before (#6202). Mirror resolve_defaults()'s resolution order here (read-only,
-# best-effort) so the gap can be surfaced up front instead.
+# rather than installing into it. There `resync-installed.sh` hands off to
+# `loom-daemon resync-payload` (the installed daemon's embedded payload, #8961)
+# and fails with "Could not locate a defaults/ source tree to sync from" only
+# when no daemon has that subcommand (#6202). Mirror resolve_defaults()'s
+# order here (read-only, best-effort) so the reader knows which path is next.
 #
 # A candidate root is only usable if it has SOMETHING under defaults/ to sync
 # from — `-d "$root/defaults"` alone is not sufficient (#6780): a sidecar or
@@ -268,16 +276,16 @@ fi
 # above, only when the precondition is actually missing.
 warn_resync_precondition_gap() {
     [[ "$RESYNC_PRECONDITION_MET" -eq 0 ]] || return 0
-    warn "${YELLOW}  NOTE (#6202): resync-installed.sh has no source tree to sync from on${NC}"
-    warn "${YELLOW}  this checkout — it will fail with 'Could not locate a defaults/ source${NC}"
-    warn "${YELLOW}  tree to sync from' until one of these is true:${NC}"
-    warn "${YELLOW}    - this checkout IS the Loom source repo (has defaults/hooks or${NC}"
-    warn "${YELLOW}      defaults/scripts), or${NC}"
-    warn "${YELLOW}    - .loom/loom-source-path points at a local clone of the Loom source${NC}"
-    warn "${YELLOW}      repo (written by install.sh / install-loom.sh; gitignored by${NC}"
-    warn "${YELLOW}      design, so it never arrives with a plain \`git clone\` of this repo).${NC}"
-    warn "${YELLOW}  Fix: clone https://github.com/rjwalters/loom locally, then either${NC}"
-    warn "${YELLOW}  re-run its installer against this repo, or point the sidecar at it:${NC}"
+    warn "${YELLOW}  NOTE (#6202, #8961): resync-installed.sh has no Loom source tree to${NC}"
+    warn "${YELLOW}  sync from on this checkout: it is not the Loom source repo, and the${NC}"
+    warn "${YELLOW}  gitignored .loom/loom-source-path sidecar (written by the installer,${NC}"
+    warn "${YELLOW}  so it never arrives with a plain \`git clone\`) names no usable clone.${NC}"
+    warn "${YELLOW}  It will resync from the payload embedded in the installed loom-daemon${NC}"
+    warn "${YELLOW}  instead (\`loom-daemon resync-payload\`: official release builds only,${NC}"
+    warn "${YELLOW}  never a downgrade). With no loom-daemon that has that subcommand it${NC}"
+    warn "${YELLOW}  fails with 'Could not locate a defaults/ source tree to sync from'.${NC}"
+    warn "${YELLOW}  Fix for that case: install or update loom-daemon, or clone${NC}"
+    warn "${YELLOW}  https://github.com/rjwalters/loom and point the sidecar at it:${NC}"
     warn "${YELLOW}      echo /path/to/local/loom-clone > .loom/loom-source-path${NC}"
 }
 
