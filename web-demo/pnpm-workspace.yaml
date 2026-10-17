@@ -11,6 +11,7 @@ packages:
 # dompurify version floor lives here — same home as the repo-root workspace.
 overrides:
   dompurify: '>=3.4.13'
+  source-map-js: '>=1.2.2'
 onlyBuiltDependencies:
   - esbuild
 allowBuilds:
