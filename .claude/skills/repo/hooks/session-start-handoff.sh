@@ -105,10 +105,46 @@ MAX_HEADERS=9
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo ".")"
 HOOK_ERROR_LOG="${SCRIPT_DIR}/../logs/hook-errors.log"
 
+# ensure_log_dir <log-file> — create the log file's directory and make that
+# directory ignore its own contents (repo#482).
+#
+# Byte-for-byte the same helper guard-destructive.sh carries, and for the same
+# reason: both hooks write into the SAME directory
+# (.claude/skills/repo/logs/ in a real install), whichever one happens to run
+# first creates it, and install.sh never creates it at all. A `*`-only
+# .gitignore dropped in at creation time makes the directory ignore its own
+# contents — that .gitignore included — so a consumer needs no .gitignore rule
+# of their own for hook runtime output, and an untracked hook-errors.log can no
+# longer keep `git status --porcelain` permanently dirty (which is what stalls
+# an installed-surface resync that gates on a clean tree).
+#
+# The two copies are duplicated rather than shared because each hook is
+# installed as a standalone script — there is no shared library on the consumer
+# side to source. An existing .gitignore is never overwritten.
+#
+# Best-effort like everything else on this hook's failure path: a failed mkdir
+# or write never changes behaviour and never produces a non-zero exit.
+ensure_log_dir() {  # <log-file-path>
+    local dir
+    dir="$(dirname "$1" 2>/dev/null)" || return 0
+    [[ -n "$dir" ]] || return 0
+    mkdir -p "$dir" 2>/dev/null || return 0
+    [[ -e "$dir/.gitignore" ]] && return 0
+    # Grouped so a FAILED redirection-open (unwritable dir) has its bash-level
+    # error suppressed by the group's stderr redirect too.
+    { printf '%s\n' \
+        "# Runtime output from the installed Repo Skills hooks (repo#482)." \
+        "# Machine-local: these logs routinely carry absolute filesystem paths," \
+        "# so they must never be committed. This file ignores the whole" \
+        "# directory, itself included, so no consumer .gitignore rule is needed." \
+        "*" >"$dir/.gitignore"; } 2>/dev/null || true
+    return 0
+}
+
 # Log a diagnostic error message (best-effort, never fails the script).
 log_hook_error() {
     local msg="$1"
-    mkdir -p "$(dirname "$HOOK_ERROR_LOG")" 2>/dev/null || true
+    ensure_log_dir "$HOOK_ERROR_LOG"
     echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] [session-start-handoff] $msg" >> "$HOOK_ERROR_LOG" 2>/dev/null || true
 }
 

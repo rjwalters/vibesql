@@ -293,11 +293,13 @@ fixes the audit surfaced — apply the ones the user approves.
 **Report where those fixes landed, not only that they were applied.** In a
 Loom-managed repo [[docs]] picks a destination up front — its "Loom-managed
 repo: land fixes where a sweep cannot take them" step: a commit in a dedicated
-worktree, a commit on an otherwise-clean current branch, or uncommitted plus an
-explicit quarantine warning. [[gitignore]] and [[links]] follow the identical
-ladder, so the same choice governs the rule fixes stage 1 applied and any link
-fixes made here. Carry that destination into this stage's line and into the
-final summary — a branch or worktree name when the fixes were committed,
+issue worktree, a commit on a `chore/repo-hygiene-<date>` branch plus a PR when
+the default branch is PR-protected, a commit on an otherwise-clean current
+branch, or uncommitted plus an explicit quarantine warning. [[gitignore]] and
+[[links]] point at that same canonical ladder, so the one choice governs the
+rule fixes stage 1 applied and any link fixes made here. Carry that destination
+into this stage's line and into the final summary — a branch or worktree name
+when the fixes were committed,
 `uncommitted, at risk` when they were not. In a repo that is not Loom-managed
 there is no destination to name and the line is exactly what it always was.
 
@@ -321,12 +323,24 @@ Two currency checks run here, both report-first.
 itself, … against their sources. Report what's behind and offer to update.
 
 **Third-party dependencies** (see [[deps]]): run `[[deps]] --check`. Report the
-installed organization policy/source, detected provider (Renovate, Dependabot,
-or intentional mixed coverage), config/app status, vulnerability alerts,
-security PR ownership, cooldown and automerge policy, and open dependency PRs.
+installed organization policy/source, detected provider (Dependabot by
+default; Renovate if opted in, or intentional mixed coverage), config/app
+status, vulnerability alerts, **open Dependabot alerts by severity**, security
+PR ownership, cooldown and automerge policy, and open dependency PRs.
 These are independent states: an intentionally disabled Dependabot security-PR
-flag is expected when Renovate owns fixes. Missing Dependabot config does not
-mean automation is absent.
+flag is expected only when an opted-in Renovate owns fixes. Missing Dependabot
+config does not mean automation is absent.
+
+**The alerting flag and the open-alert count are different findings — carry
+both.** `alerts ON` means detection is enabled, not that nothing is detected;
+[[deps]] step 1 reads `GET repos/OWNER/REPO/dependabot/alerts?state=open`
+separately for exactly that reason, and reports `UNKNOWN` (never `0 open`)
+when the token cannot read it. Carry its count, severity breakdown, and the
+count of alerts with **no open fix PR** into this stage's line and the final
+summary. A sweep that reported only the flag and the open-PR counts is how a
+`Deps:` line reads clean on a repo with open vulnerabilities (issue #551): the
+alerts whose fix is blocked by a lockfile pin or an override never produce a
+PR, so no PR count can stand in for them.
 
 Summarize open PRs as real forward majors, other pending work, and genuinely
 stale PRs. Use [[deps]]' base-manifest **and lockfile** comparison; a permissive
@@ -372,7 +386,7 @@ Scrub:        1 at HEAD deferred (identity: docs/runbook.md:41); 63 history-only
 Docs:         2 fixed (README table, CHANGELOG entry), 1 deferred: docs/analysis/ missing README
 Tidy:         freed 240 MB (build/, .cache/, 3 empty dirs)
 Tools:        Anvil updated 1.4.0 → 1.5.1; Loom current
-Deps:         Renovate, org policy current, alerts ON, security PRs: Renovate, age: 14d/1d, automerge OFF, 3 open PRs (0 majors, 2 stale)
+Deps:         Dependabot, org policy current, alerts ON, 2 open alerts (1 high, 1 medium — 1 with no open fix PR), security PRs: Dependabot, cooldown 14d, automerge OFF, 3 open PRs (0 majors, 2 stale)
 Reset:        on main (up to date), tree clean, 4 branches deleted, 1 stash kept
 Skipped:      remote (never part of /repo:all); deps install/review (confirm-first — run /repo:deps); scrub --deep/--owner/--forks (run /repo:scrub)
 ```
@@ -383,6 +397,22 @@ state the repo is in. Tracked orphans are named individually rather than
 counted: the whole point of deferring one is that the user has to decide about
 that specific file later, and a bare `2 orphans deferred` sends them back to
 re-run the audit to find out which.
+
+The `Deps:` line carries an **open-alert clause in every run**, in one of these
+forms — never silently dropped, because an absent clause is indistinguishable
+from "nothing is vulnerable":
+
+```
+Deps:         …, alerts ON, 0 open alerts, security PRs: …
+Deps:         …, alerts ON, 2 open alerts (1 high, 1 medium — 1 with no open fix PR), security PRs: …
+Deps:         …, alerts ON, open alerts UNKNOWN (needs security_events read), security PRs: …
+Deps:         …, alerts OFF, open alerts n/a (alerts disabled), security PRs: …
+```
+
+Name the uncovered packages in the line itself when there are only one or two
+(`1 with no open fix PR: lodash (npm) → 4.17.21`); with more, carry the count
+here and leave the per-package table to the stage output, the same way tracked
+orphans are named individually above. `UNKNOWN` is never rendered as `0`.
 
 When stage 2's early sync-and-switch ran, the `Reset:` line still carries the
 pruning half's outcome — branches, worktrees, and stashes reviewed — and notes
@@ -404,18 +434,19 @@ checkout are quarantined by the next sweep's `check-main-clean.sh --quarantine`
 (stash label `loom-quarantine: run=<sweep-id> issue=<N>`), so `2 fixed` can be
 true when it prints and false ten minutes later. The Docs stage therefore picks
 a destination up front — see [[docs]]' "Loom-managed repo: land fixes where a
-sweep cannot take them", which [[gitignore]] and [[links]] follow identically —
-and **the summary names that destination**:
+sweep cannot take them", the canonical copy [[gitignore]] and [[links]] point at
+— and **the summary names that destination**:
 
 | Where the fixes landed | Summary line |
 |---|---|
-| Committed in a dedicated worktree | `Docs: 2 fixed on feature/issue-448 (worktree .loom/worktrees/issue-448, a1b2c3d)` |
+| Committed in a dedicated issue worktree | `Docs: 2 fixed on feature/issue-448 (worktree .loom/worktrees/issue-448, a1b2c3d)` |
+| Committed on a hygiene branch (PR-protected default) | `Docs: 2 fixed on chore/repo-hygiene-2026-09-30 (worktree .loom/worktrees/repo-hygiene-2026-09-30, a1b2c3d) — main protected; push + PR offered` |
 | Committed on the current branch | `Docs: 2 fixed, committed on main (a1b2c3d)` |
 | Left uncommitted in the primary checkout | `Docs: 2 fixed — uncommitted, at risk` |
 | Not a Loom-managed repo | `Docs: 2 fixed (README table, CHANGELOG entry)` — unchanged |
 
 The same applies to the `Audit:` line when stage 1 applied gitignore rule fixes:
-name where those landed too, on the same three shapes.
+name where those landed too, on the same four shapes.
 
 The `uncommitted, at risk` row carries the warning [[docs]] prints, once, on its
 own line beneath the summary — it is the one arm where the run ends with work

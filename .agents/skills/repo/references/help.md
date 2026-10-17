@@ -58,6 +58,7 @@ stashes, untracked files) always need an explicit opt-in.
 |---------|----------------------|
 | /repo:reset | Done with a task — get back on main, synced, stale state reviewed |
 | /repo:followups | End of session — file follow-on work surfaced this session as issues, here or in the right upstream tool repo |
+| /repo:decide | Blocked on the operator — put the decision as ranked options (best to worst, each with why) they can answer with a number |
 | /repo:handoff | Rolling the session (context full, CLI update) — preserve what only the session knows, then restart |
 | /repo:tidy  | Working tree cluttered with build artifacts and temp files |
 | /repo:remote | Need a cloud dev box (GCP/AWS) with this repo ready to go |
@@ -70,7 +71,8 @@ stashes, untracked files) always need an explicit opt-in.
 | /repo:scrub | What does the public surface expose? Code, history, issues, PRs, forks — report-only |
 | /repo:host-optimize | Prep/re-check a Mac (or Linux box) for heavy Loom/agent build use — Gatekeeper churn, backup-agent interference, build-tree bloat |
 | /repo:update-tools | Keep Loom/Anvil/Repo Skills installs current |
-| /repo:deps | Keep third-party deps current — reconcile organization policy, Renovate or Dependabot, and bot PRs |
+| /repo:deps | Keep third-party deps current — reconcile organization policy, Dependabot-first setup (Renovate opt-in), and bot PRs |
+| /repo:optimize-ci | CI slow or expensive — find unfiltered jobs, broken cache keys, superseded runs; ranked by measured minutes saved |
 | /repo:org-policy | Preview/install canonical organization preferences from the current client repo |
 
 ### Focused checks

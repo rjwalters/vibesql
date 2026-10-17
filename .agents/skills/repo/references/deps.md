@@ -1,6 +1,6 @@
 ---
 name: "deps"
-description: "Third-party dependency currency — reconcile organization policy, Renovate or Dependabot setup, and bot PRs; report-only under --check"
+description: "Third-party dependency currency — reconcile organization policy, Dependabot-first setup (Renovate opt-in), and bot PRs; report-only under --check"
 domain: repo
 type: command
 user-invocable: true
@@ -11,8 +11,9 @@ user-invocable: true
 Keep the repo's **third-party dependencies** current: npm / pip / cargo / Go
 packages and GitHub Actions. Two halves, usually run together:
 
-1. **Resolve organization policy and verify the updater** — Renovate or
-   Dependabot, independently of GitHub vulnerability alerts and security PRs.
+1. **Resolve organization policy and verify the updater** — Dependabot by
+   default, Renovate only as an explicit opt-in, independently of GitHub
+   vulnerability alerts and security PRs.
 2. **Triage dependency PRs** — actual changes, age eligibility, security
    relevance, CI coverage, and merge policy.
 
@@ -36,7 +37,14 @@ and confirm first. `--check` is always report-only.
 /repo:deps --install        # Only setup reconciliation (policy + config + settings)
 /repo:deps --review         # Only the PR-triage half
 /repo:deps --review 123     # Triage one PR in depth
+/repo:deps --all-repos               # Fan-out survey: migration state across the current repo's org, report-only
+/repo:deps --all-repos --owner OWNER # Same, for an explicit org/owner
 ```
+
+`--all-repos` is a distinct mode from everything else above: it surveys many
+repos instead of acting on the invoking one, and it is **always** report-only
+— see "Fan-out survey" below. All other flags operate on the single repo
+`/repo:deps` is run from, as before.
 
 ## Prerequisites
 
@@ -66,17 +74,194 @@ Also detect existing Renovate config, including `renovate.json`, `renovate.json5
 `.gitlab/renovate.json[5]`, and the `renovate` key in `package.json`, alongside
 Dependabot config. Inspect Renovate's current supported config locations if
 none of these explains an active installation. Preserve an existing provider
-unless migration is authorized. With no provider or organization policy, offer
-[[org-policy]] before proposing new automation; do not silently assume that
-missing `dependabot.yml` means dependencies are unmanaged.
+unless migration is authorized. With no provider or organization policy,
+**Dependabot is the default** (decision recorded 2026-10-13, #638): scaffold
+`dependabot.yml` with a `cooldown` (step 4) and offer [[org-policy]] for
+shared policy. Propose Renovate only when the owner explicitly asks for it.
+Do not silently assume that missing `dependabot.yml` means dependencies are
+unmanaged.
+
+**Decision (2026-10-13).** Dependabot is the default provider with a
+version-update `cooldown` (`default-days: 14`; security updates are not
+delayed). Renovate is opt-in only. Reasons: Dependabot is GitHub-native with no
+third-party App to install, and hosted Renovate runs on Mend-hosted terms
+(a Mend-operated GitHub App with its own terms and data handling) and is
+Silent-by-default (#636): an installed-but-unconfigured or misconfigured App
+raises nothing and says nothing, so inert automation looks like healthy
+automation.
+
+**Migrating an existing Renovate repo to Dependabot.** Two separate PRs, in
+this order, so the repo is never without an updater:
+
+1. PR 1: add the rendered/scaffolded `.github/dependabot.yml` (with `cooldown`)
+   first. Leave `renovate.json` in place; the repo is briefly `both-active`.
+2. PR 2: after PR 1 merges and Dependabot has opened or verified its first
+   PRs, remove `renovate.json` (and other Renovate config) in a separate PR,
+   and close Renovate's open PRs individually rather than in bulk. Uninstalling
+   the Mend/Renovate App is an operator step outside this command.
+
+**Organization provider `dependabot`.** When the deployed `repo-policy.json`
+says `"provider": "dependabot"`, the organization has chosen Dependabot. Do not
+propose Renovate. Any Renovate config in the client is a migration leftover:
+report it as `both-active` or `renovate-only` and offer its removal once the
+client's `dependabot.yml` is in place. If `dependencies.policySource` is set,
+the organization renders or owns each client's `dependabot.yml` there. Report
+the client file against that source and **do not rewrite it here**: a local
+edit would be overwritten as drift. Point at `policySource` instead. Both
+`dependabotAlerts` and `dependabotSecurityUpdates` are `true` under this
+provider, so a client with either off (or security updates `paused`) is a
+finding, not the expected state the Renovate note below describes.
 
 Report separately: deployed policy source/revision and drift, provider/config,
-app operation, dependency graph, vulnerability alerts, security PR provider,
+**GitHub App installation status** (Renovate path only — see below), app
+operation, dependency graph, vulnerability alerts, security PR provider,
 effective release-age rules, automerge/required checks, and open bot PRs.
-`dependabotSecurityUpdates: false` is expected when Renovate owns security PRs;
+`dependabotSecurityUpdates: false` is expected only when an opted-in Renovate
+owns security PRs;
 it is not a finding that should be "fixed" by enabling a second provider.
 
-### Renovate setup path
+### Fan-out survey — org-wide migration report (`--all-repos`)
+
+Everything else in this command operates on the single repo it is run from.
+`--all-repos` is a different mode: it answers "where does the org-wide
+provider migration (Renovate→Dependabot by default) stand, across every repo?" It is a **read-only
+survey** — it never writes to, configures, or merges anything in any of the
+repos it enumerates. To act on what the survey finds, run `/repo:deps`
+(optionally `--install`/`--review`) against that one repo; this mode only ever
+reports.
+
+#### Enumerate the org's repos
+
+Derive OWNER from an explicit `--owner OWNER`, or from `origin` of the
+invoking repo when omitted — the same derivation [[org-policy]] uses for its
+own client-owner default. Page through every repo; a single unpaged request
+silently drops repos past the first page in a larger org:
+
+```bash
+# Organization account
+gh api orgs/OWNER/repos --paginate --jq '.[] | select(.archived == false) | .full_name'
+
+# Personal account — the org endpoint 404s for a user account, so fall back
+# rather than guessing which kind of account OWNER is
+gh api users/OWNER/repos --paginate --jq '.[] | select(.archived == false) | .full_name'
+```
+
+Exclude archived repos from the survey by default and say so in the report
+header (e.g. "14 repos, 1 archived excluded") rather than silently shrinking
+the count. A repo the invoking token cannot see at all never appears in this
+listing — that is expected, not a gap to report. A repo that *is* listed but
+then fails a per-repo read below (private repo whose contents/settings the
+token can list but not read, a repo that went private after listing) is a
+different failure and does need reporting — see "could not check" below.
+
+#### Classify each repo's migration state
+
+For every enumerated repo, run the same detection this command already
+performs on the invoking repo in step 0 and step 1 above — `.github/dependabot.yml`
+/ `.github/dependabot.yaml` presence, the dedicated `automated-security-fixes`
+flag, and Renovate config presence (`renovate.json`, `renovate.json5`,
+`.github/renovate.json[5]`, `.renovaterc[.json]`, `.renovaterc.json5`, the
+`renovate` key in `package.json`, per step 0's detection list). Classify each
+repo into exactly one state:
+
+| State | Meaning |
+|---|---|
+| `dependabot-only` | Dependabot version-update config and/or the security-updates flag present; no active Renovate config |
+| `both-active` | Both Dependabot (config or security flag) and an active Renovate config present — the dangerous mid-migration state where two updaters can race |
+| `renovate-only` | Active Renovate config present; no Dependabot version-update config. The security-updates flag is independent (step 1) and does not by itself make a repo `both-active` |
+| `unmanaged` | Neither provider configured |
+| `could not check` | A per-repo read failed (403, network, or similar); report the failure explicitly rather than guessing a state or silently dropping the row |
+
+Also report, per repo:
+
+- **Preset adopted?** — whether the repo's Renovate config `extends` the
+  deployed `github>OWNER/.github:renovate-config` preset (see [[org-policy]]
+  "Installed files and client adoption"). Apply the ordering check below
+  before reporting this column as a plain gap.
+- **Open bot dependency PRs** — a count, using the same author-filter step 7
+  already uses (`app/dependabot`, `app/renovate`, or the configured
+  self-hosted identity for that repo).
+
+Step 1's **open-alert count is deliberately not a survey column.** This mode
+answers one question — where the provider migration stands — and
+alert counts would add one paginated `/dependabot/alerts` read plus a per-alert
+PR cross-reference to every repo enumerated, most of which would come back
+UNKNOWN on a token that is not an admin everywhere. Run `/repo:deps --check`
+against a specific repo for its alert state; a survey row is not evidence that
+a repo has no open vulnerabilities, and must not be reported as if it were.
+
+#### Ordering check: the org preset must be merged before any client can adopt it
+
+Compute this once per survey run, not once per repo. A client's
+`extends: "github>OWNER/.github:renovate-config"` only resolves once
+`OWNER/.github`'s organization policy PR — the one [[org-policy]] `--install`
+opens, titled `chore: reconcile organization dependency policy` — has merged
+on that repo's default branch. Confirm the preset is actually live rather than
+assuming a merged PR:
+
+```bash
+gh api repos/OWNER/.github/contents/renovate-config.json --jq '.sha' 2>/dev/null
+# present on the default branch → preset is live; absent → not yet published/merged
+```
+
+If the preset is **not yet live**, no repo in the survey can be "eligible to
+adopt" it yet: report every repo's preset-adoption column as **"not adopted —
+preset not yet available"**, distinct from an ordinary adoption gap. Once the
+preset is confirmed live, report each repo's actual state — already adopted,
+or a real adoption gap now that adoption is actually possible.
+
+#### App installation is also a once-per-survey org-level fact
+
+Run the App-installation check below once per survey too, against the survey's
+OWNER, and put its result in the report header beside the preset line. The
+failure this guards against is the single-repo one at org scale: a survey can
+truthfully report a live preset and a column of adopted repos while **no repo
+in it will ever receive a PR**, because the App was never installed. A
+`renovate-only`, preset-adopted row is not evidence the App is installed.
+
+```bash
+python3 .claude/skills/repo/scripts/repo-org-policy.py check-app --owner OWNER
+```
+
+#### Report format
+
+```
+ORG MIGRATION SURVEY — OWNER (14 repos, 1 archived excluded)
+==============================================================
+Preset (OWNER/.github renovate-config.json): live on default branch
+Renovate GitHub App: NOT installed — no PRs will be raised for ANY repo below
+  until it is. Install: https://github.com/apps/renovate (organization
+  owner/admin required).
+
+| Repo          | State           | Preset adopted            | Open bot PRs |
+|---------------|-----------------|----------------------------|--------------|
+| OWNER/alpha   | renovate-only   | yes                        | 2            |
+| OWNER/beta    | both-active     | no                         | 5            |
+| OWNER/gamma   | dependabot-only | no                         | 1            |
+| OWNER/delta   | unmanaged       | no                         | 0            |
+| OWNER/epsilon | could not check | — (403 reading contents)  | —            |
+```
+
+Never propose or make a write from this mode, even with authorization already
+covering single-repo writes elsewhere. Point at running `/repo:deps`
+(optionally `--install`/`--review`) against a specific repo as the next step
+for any row that needs action; a `both-active` row that needs a deliberate,
+tracked Dependabot shutdown is a candidate for [[followups]]-style per-repo
+tracking, filed against that repo, not this survey — which is exactly what the
+Renovate path's "Deferred Dependabot shutdown" step below offers to do, one
+repo at a time, when run against that repo.
+
+`--all-repos` is unconditionally report-only regardless of `--check` — `--check`
+has nothing further to restrict here, since this mode never writes in the
+first place.
+
+### Renovate setup path (opt-in)
+
+Renovate is **not** the default. Use this path only when the owner or deployed
+policy (`"provider": "renovate"`) explicitly selects it, and say so up front:
+hosted Renovate is a Mend-hosted GitHub App under Mend's terms, and it is
+Silent-by-default (#636) — with the App missing or the config inert, no PRs
+appear and nothing reports it.
 
 When Renovate is selected, use this path instead of Dependabot steps 1, 4–6.
 Reuse steps 2–3 below for ecosystem/ownership detection and label validation.
@@ -84,7 +269,38 @@ Reuse steps 2–3 below for ecosystem/ownership detection and label validation.
 - Confirm the organization policy PR is merged and its preset is readable by
   the Renovate installation. Config presence alone does not prove an active
   GitHub App or a successful scan: inspect onboarding, the Dependency Dashboard,
-  and job logs. App installation may require an organization administrator.
+  and job logs. **All three of those are simply absent, not contradictory,
+  when the App was never installed at all** — so check installation directly
+  rather than inferring it from their absence:
+
+  ```bash
+  python3 .claude/skills/repo/scripts/repo-org-policy.py check-app --repo OWNER/REPO
+  ```
+
+  This is the same [[org-policy]]-owned check `/repo:org-policy` runs on its
+  own `plan`/`apply` — reused here rather than duplicated, since a client
+  repo's Renovate installation lives on the same organization/user account
+  `org-policy` already checks. Report the result as a distinct line, not
+  folded into "policy: OK":
+  - **Installed** — proceed normally.
+  - **NOT installed** — state this plainly, e.g. `Renovate: policy published,
+    app NOT installed — no PRs will be raised until it is`, name the install
+    URL (`https://github.com/apps/renovate`), and note that installing it
+    requires an organization owner/admin — who may not be the person running
+    this command. Continue the rest of this path anyway (config reconciliation
+    below is still correct groundwork), but do not report overall success.
+  - **Installed (evidence: …)** — personal accounts only, where no ordinary
+    user token can list installed Apps: the check found recent
+    `renovate[bot]` issues/PRs in the owner's repositories. Treat it as
+    installed, but relay the coverage clause verbatim — `Coverage of
+    OWNER/REPO confirmed` (Renovate is active in this repo too) versus
+    `not verified` (the repo may be outside the App's repository selection;
+    the line names `https://github.com/settings/installations` to check).
+  - **UNKNOWN** — this token cannot see the installations endpoint for that
+    account (non-admin org member), or a personal account showed no recent
+    Renovate activity / the activity search failed (the line then also names
+    `https://github.com/settings/installations`). Report it as unresolved, not
+    as either "installed" or "not installed".
 - Update the existing active Renovate config (do not add a competing file) to
   extend the deployed `dependencies.renovatePreset`, usually
   `github>OWNER/.github:renovate-config`. Preserve intentional client exceptions
@@ -95,10 +311,17 @@ Reuse steps 2–3 below for ecosystem/ownership detection and label validation.
   resulting effective native config with `renovate-config-validator`.
 - Keep the dependency graph and Dependabot alerts enabled and grant Renovate
   read access to alerts. Probe the dedicated alerts and security-fixes endpoints
-  shown in step 1. Treat `dependencies.dependabotSecurityUpdates` as desired
+  shown in step 1 — **including the open-alert read** (`GET
+  repos/OWNER/REPO/dependabot/alerts?state=open`): this path skips step 1, and
+  the open-alert count is the one reading that does not depend on which
+  provider owns fix PRs. Report it, its severity breakdown, and any alert with
+  no open fix PR exactly as step 1 specifies, cross-referencing against this
+  repo's actual bot identities. Treat `dependencies.dependabotSecurityUpdates` as desired
   state: disable Dependabot PR generation only after Renovate's fix coverage is
   verified for this client's ecosystems and lockfiles. Report pending migration
-  instead of temporarily removing all security-fix automation.
+  instead of temporarily removing all security-fix automation — and record that
+  pending migration somewhere that outlives this session, per "Deferred
+  Dependabot shutdown" below.
 - During migration, remove/disable the overlapping Dependabot version-update
   entries once Renovate is operational. Retain any deliberately assigned
   Dependabot-only coverage and inspect old PRs individually; do not bulk-close
@@ -120,10 +343,180 @@ Show concrete config/settings changes before applying authorized setup. Continue
 with the common PR review below. Under `--check`, make no changes, including
 organization deployments, client files, flags, or merges.
 
+#### Deferred Dependabot shutdown — offer to file a tracking issue (confirm first)
+
+"Report pending migration" above leaves the second half of the migration in
+scrollback, and a terminal transcript is not a handoff. Once the session ends,
+nothing in the repo, the organization policy, or an issue tracker records that
+this repo is sitting in the `both-active` state the `--all-repos` survey calls
+the dangerous one — a state this path reaches by being followed *correctly*,
+not by anyone skipping a step. So close this path by **offering to file** that
+deferral as an
+issue, against the **client repo** (the repo `/repo:deps` is running against,
+never upstream and never `OWNER/.github` — it is the client's migration to
+finish). This is the per-repo version of the tracking the `--all-repos` survey
+points at for a `both-active` row.
+
+Offer, never file automatically: filing is an outward-facing write, so it takes
+the same confirm-first posture as every other write in this command — show the
+target repo, title, and full body, and file only what is approved.
+
+**When to run it.** At the end of this path, after the reports above, when
+**both** of the following hold:
+
+- Renovate is the selected provider and an active Renovate config is present
+  here, *and*
+- Dependabot still generates — or is still authorized to generate — PRs, in
+  either of these two independent forms (step 1 reports all three Dependabot
+  signals separately; read them from their dedicated endpoints, not from
+  `security_and_analysis`):
+  - a tracked `.github/dependabot.yml[.yaml]` whose `updates:` entries overlap
+    the ecosystems Renovate now covers (version updates), **or**
+  - `automated-security-fixes` enabled while the deployed policy's
+    `dependencies.dependabotSecurityUpdates` is `false` (security updates).
+    `paused` counts as enabled here: the authorization is still in place and
+    GitHub can resume it at any time, so the shutdown is still pending.
+
+**The alerts flag is never a trigger on its own.** This path deliberately keeps
+the dependency graph and Dependabot *alerts* enabled and grants Renovate read
+access to them, so `vulnerability-alerts` being on is the intended end state,
+not an outstanding migration step. A repo whose only remaining Dependabot
+signal is alerts is `renovate-only` and gets no offer.
+
+**Do not guess past an unresolved read.** If the deployed policy was absent or
+unreadable (step 0 keeps those distinct from "policy says false"), or if
+`automated-security-fixes` returned `403` so the flag is UNKNOWN (needs admin,
+step 1), that signal is not evidence of a pending shutdown: report it as
+unresolved and do not offer on the strength of it. A version-update config,
+which is read from the git index rather than a permissioned endpoint, still
+triggers the offer on its own.
+
+**Under `--check`, skip this step entirely** — do not run the dedup search, do
+not draft a body, do not offer. `--check` is report-only, and filing an issue
+is a write to another repo. Report the pending migration as a finding and stop
+there. `--all-repos` never reaches this step at all: that mode is
+unconditionally report-only and acts on no repo it enumerates.
+
+##### 1. Dedup first — never re-offer what is already tracked
+
+Before drafting anything, check the client repo for an open item already
+covering this migration, using the same REST search recipe [[followups]] uses
+for dedup (`gh api search/issues`, not `gh issue list --search`, which is
+GraphQL-backed and exhausts first on a busy agent host):
+
+```bash
+gh api "search/issues?q=repo:OWNER/REPO+state:open+dependabot+renovate+migration&per_page=30" \
+  --jq '.items[] | "#\(.number) \(.title) \(.html_url)"'
+```
+
+Pull requests are deliberately in scope — `search/issues` returns both, and an
+open PR that removes `.github/dependabot.yml` is a *stronger* dedup signal than
+an open issue, because the work is already in flight. Check `html_url` for
+`/pull/` vs `/issues/` to tell which, and say so when reporting a match.
+
+- **Match found** — report it (`Dependabot shutdown: already tracked in #N`)
+  and make no offer. Re-running `/repo:deps` on a repo with an open tracking
+  item must never produce a second one.
+- **Near-match** — flag it with its number/URL and let the user choose: file
+  anyway, skip, or comment on the existing one. Never silently file over it and
+  never silently drop it.
+- **No match** — draft the body below and offer it.
+
+Widen the terms if the first query is empty and a differently-worded issue is
+plausible (`+disable+dependabot`, `+both-active`); search is a third rate-limit
+bucket again, so an extra query costs nothing from the `core` budget the filing
+step needs.
+
+##### 2. The body must make acting on it later a decision, not a re-investigation
+
+Whoever picks this up will not have this session's output. Draft the body with
+all four of these, filled in from what this run actually observed — not as a
+generic "finish the migration" stub:
+
+- **Which Dependabot surfaces are still active**, as the three independent
+  items step 1 reports, each with its observed value: the version-update config
+  (which path, which ecosystems), the security-updates flag, and the alerts
+  flag — marking alerts as **deliberately retained**, so a later reader does not
+  "finish the job" by turning off the alerting Renovate depends on.
+- **What must be verified before disabling anything**: that Renovate has
+  actually opened PRs for *this* repo's ecosystems (not merely that its config
+  is present and the App is installed), and that its fix coverage includes
+  lockfile-only security updates — the case where the advisory is resolved by a
+  transitive bump with no manifest change, which is exactly the coverage
+  Dependabot is being kept around for.
+- **The concrete commands/settings to flip them off**, so the follow-up is
+  mechanical:
+
+  ```bash
+  # Version updates: delete the config, or drop only the overlapping
+  # `updates:` entries if some coverage is deliberately Dependabot-only.
+  git rm .github/dependabot.yml
+
+  # Security updates: the same dedicated endpoint step 1 reads, DELETE to
+  # disable (needs admin; a 403 means it needs a repo admin, not that it failed
+  # silently).
+  gh api --method DELETE repos/OWNER/REPO/automated-security-fixes
+
+  # Alerts: leave ENABLED. Renovate reads them. Listed here only so nobody
+  # reaches for `gh api --method DELETE repos/OWNER/REPO/vulnerability-alerts`
+  # while "turning Dependabot off".
+  ```
+
+- **A pointer back to the deployed desired state**: the organization policy's
+  `dependencies.dependabotSecurityUpdates: false` in root `repo-policy.json` on
+  `OWNER/.github`, named with the revision this run read, plus the note that
+  `/repo:deps` will re-report this repo as `both-active` until it is done.
+
+Scrub the body before proposing it, per [[followups]]' authoring-time rule:
+this body is drafted from a working session and filed into a repo that may be
+public, and an issue body is only `removable-by-deletion` afterward. Keep it to
+this repo's own observable configuration state — no session counts, no other
+clients' names.
+
+##### 3. File it with the REST recipe, not `gh issue create`
+
+On approval, file exactly as [[followups]] step 5 does — write the body to a
+**literal** scratch path (never a shell variable as the redirect target or the
+`--input` argument; the destructive-write guard denies an unexpanded-variable
+write target), then POST it through REST:
+
+```bash
+# Write the body to /tmp/deps-dependabot-shutdown.md with your own file-write
+# capability — not a shell heredoc (a body containing backticks or `$(…)` is
+# still shell input and gets tokenized).
+
+jq -n --arg t "Finish Dependabot→Renovate migration: disable Dependabot PR generation" \
+  --rawfile b /tmp/deps-dependabot-shutdown.md \
+  '{title: $t, body: $b, labels: []}' > /tmp/deps-dependabot-shutdown-payload.json
+
+gh api --method POST "repos/OWNER/REPO/issues" \
+  --input /tmp/deps-dependabot-shutdown-payload.json --jq '.html_url'
+```
+
+`labels: []` is deliberate, matching [[followups]]: this is outward-facing
+tracking, not pipeline work, so it applies no `loom:*` (or other) labels and
+leaves triage to the client repo. Do not substitute `gh issue create` (GraphQL,
+and the pool you least want to lose *after* the user has approved) and do not
+pass the body as `--body @path` or `-f body=@path` — both post the literal
+string `@path` rather than the file's contents. Print the resulting issue URL
+in the report.
+
+##### 4. Report an existing tracking issue as resolvable once the evidence is in
+
+When a tracking item is already open (the dedup match above) and this run
+observes the migration actually finished — no overlapping version-update
+config, `automated-security-fixes` disabled, Renovate raising PRs for this
+repo's ecosystems — say so: `Dependabot shutdown: #N appears resolvable
+(dependabot.yml absent, security-updates off, N open Renovate PRs)`. Offer, on
+the same confirm-first terms, to post that evidence as a comment via the same
+REST shape (`gh api --method POST repos/OWNER/REPO/issues/<n>/comments --input
+<payload>`; `gh issue comment` is GraphQL-backed). Never close the issue
+automatically, and never post the comment under `--check`.
+
 ## Steps — Dependabot install / verify
 
-Use this path when Dependabot remains the chosen provider. An organization's
-Renovate policy is a migration proposal until adoption is authorized, not a
+This is the default path (Dependabot-first, 2026-10-13). An organization's
+Renovate policy is an opt-in proposal until adoption is authorized, not a
 reason to silently replace a working Dependabot installation.
 
 ### 1. Report config and the security flag as two distinct items
@@ -136,14 +529,52 @@ Check and report both:
 ```bash
 git ls-files '.github/dependabot.yml' '.github/dependabot.yaml'   # version updates
 
-# Security updates — a dedicated endpoint, NOT a security_and_analysis key:
-# returns a definitive {"enabled": bool}; 403 → needs admin (see UNKNOWN note below)
-gh api repos/OWNER/REPO/automated-security-fixes --jq '.enabled'
+# Security updates — a dedicated endpoint, NOT a security_and_analysis key.
+# Read the WHOLE object, never `--jq '.enabled'` alone: it answers with TWO
+# fields, {"enabled": bool, "paused": bool}, encoding three states (below);
+# 403 → needs admin (see UNKNOWN note below)
+gh api repos/OWNER/REPO/automated-security-fixes
 
 # Alerts — likewise a dedicated endpoint, NOT a security_and_analysis key:
 #   204 → enabled, 404 → disabled
 gh api repos/OWNER/REPO/vulnerability-alerts -i 2>/dev/null | head -1
+
+# Open alerts — a THIRD endpoint, and the only one that answers "is anything
+# vulnerable RIGHT NOW". The two flags above answer different questions:
+# `vulnerability-alerts` says whether alerting is turned on, and
+# `automated-security-fixes` says whether a fix PR would be raised. Neither is
+# a count of findings, and an alert whose fix sits behind a lockfile pin or a
+# dependency override produces NO PR at all — so it is invisible to both flags
+# AND to step 7's PR list. 403 → UNKNOWN, never 0 (see below).
+gh api repos/OWNER/REPO/dependabot/alerts --paginate -X GET -f state=open \
+  --jq '.[] | {number, severity: .security_advisory.severity, package: .dependency.package.name, ecosystem: .dependency.package.ecosystem, manifest: .dependency.manifest_path, fixed_in: .security_vulnerability.first_patched_version.identifier}'
 ```
+
+**Security updates are three states, not two.** `automated-security-fixes`
+answers with two booleans, and they encode **three** states rather than an
+on/off pair — report the one matching the payload, and never collapse `paused`
+into `enabled`:
+
+| Response | Report as | What it means |
+|---|---|---|
+| `{"enabled": true, "paused": false}` | `enabled` | Dependabot raises a fix PR when a new CVE lands |
+| `{"enabled": true, "paused": true}` | `paused` | The flag is on, but **no fix PRs are being raised right now** |
+| `{"enabled": false, "paused": …}` | `disabled` | No automatic CVE fix PRs, and none authorized |
+| `403` | `UNKNOWN (needs admin)` | Not a state — a permission failure (see below) |
+
+GitHub sets `paused` itself; it is not a setting anyone wrote. GitHub pauses
+Dependabot on a repo it judges idle — typically one whose open Dependabot PRs
+have gone untouched for an extended period — so `paused` is a state a repo
+*drifts into*, which is exactly why reading only `.enabled` hides it. A paused
+repo reads identically to an actively-patched one on `.enabled` alone, while
+producing the same observable outcome as a disabled one: no fix PRs arriving.
+
+**Do not prescribe step 5's enable write for `paused`.** The flag is already
+`enabled`, so `PUT /automated-security-fixes` is a **no-op** against it. GitHub
+resumes on its own once someone engages with the repo's Dependabot PRs (merge,
+close, or comment on one), so report `paused` with that as the next action —
+and if there are no open Dependabot PRs to engage with, say that too rather than
+offering a write that will change nothing.
 
 Read both flags from their dedicated endpoints, never from `security_and_analysis`.
 That object is an unreliable source for either one, for two different reasons:
@@ -162,6 +593,81 @@ That object is an unreliable source for either one, for two different reasons:
   `security_and_analysis` object itself as proof of missing admin is not
   reliable and misreports a plan/visibility limitation as a permission gap.
 
+**Open alerts are a count of findings, not a fourth flag.** A flag being ON
+says nothing about whether anything is currently vulnerable, and the PR list
+in step 7 is not a proxy for the alert list: an advisory resolved only by a
+transitive bump — one held back by a lockfile pin, a `resolutions`/`overrides`
+entry, or a paused Dependabot — generates **no PR**, so a report built from
+the flags and the PR list alone reads clean while the repo has open
+vulnerabilities. (Observed on this repo, issue #551: a `--check` run reported
+config present, security updates ON, 4 open Dependabot PRs / 0 majors / 0
+stale, and the very next `git push` printed GitHub's banner for 2 open
+vulnerabilities on the default branch.)
+
+Group the read above by `security_advisory.severity` and report the counts.
+The API spells the four levels `critical` / `high` / `medium` / `low`; GitHub's
+web UI and the post-push banner render `medium` as **moderate**, so say which
+spelling you used rather than leaving a reader to reconcile "1 medium" with a
+banner that said "1 moderate". The response maps to report values like this:
+
+| Response | Report as | What it means |
+|---|---|---|
+| `[]` | `0 open` | Read succeeded and nothing is open — the only way to earn a zero |
+| a non-empty array | `N open (<by severity>)` | Each alert is live on the default branch right now |
+| `403`, alerts flag **enabled** | `UNKNOWN (needs security_events read)` | Permission failure — this token cannot read alerts |
+| `403`/`404`, alerts flag **disabled** | `n/a — alerts disabled` | Nothing is being detected at all; fix the flag first (step 5) |
+
+**Never report `0 open` for a read that failed.** `GET /dependabot/alerts`
+answers `403` both for a token without `security_events` read (or
+admin/security-manager) **and** for a repo where alert detection is off, so
+disambiguate it against the `vulnerability-alerts` result you just read rather
+than guessing: alerts enabled → the `403` is about the token, so UNKNOWN;
+alerts disabled → there is no alert set to count, so `n/a`. This is the same
+rule the two flags already follow (Safety Rule 2) — "can't see it" and "there
+is nothing there" are different answers, and only one of them is good news.
+
+**Alerts with no open fix PR are the ones needing manual action — list them
+individually.** A severity count tells a reader how bad things are; it does
+not tell them what to do, and the alerts that *do* have a Dependabot PR
+already have an owner (step 7's triage). So cross-reference the open-alert set
+against the open bot PRs, using the same author-filtered listing step 7 uses
+(`gh pr list --author "app/dependabot" --state open`, extended to
+`app/renovate` or the configured self-hosted identity when that provider is
+present — run it here too; it is one cheap REST call, and it keeps this row
+self-contained rather than back-filled after step 7):
+
+```bash
+# Does any open bot PR actually bump the alerting package? Match on the diff,
+# not the title: a grouped PR's title names none of its packages, and a
+# lockfile-only security bump may not appear in the title either.
+gh api "repos/OWNER/REPO/pulls/<N>/files" --paginate \
+  --jq '.[] | select(.filename | test("package-lock.json|pnpm-lock.yaml|yarn.lock|Cargo.lock|uv.lock|poetry.lock|go.sum|package.json|Cargo.toml|pyproject.toml")) | .patch' \
+  | grep -i '<package>'
+```
+
+An alert is **covered** only when some open PR bumps that package to at least
+its `fixed_in` version (`security_vulnerability.first_patched_version`), using
+the ecosystem's version semantics — the same comparison the stale check in
+step 8 uses. A PR that touches the package but lands *below* `fixed_in` is not
+coverage. Everything left over is an alert nothing is currently fixing, and it
+needs a human action — a direct bump, an override/`resolutions` change, or a
+lockfile refresh — so name each one with its package, ecosystem, severity, and
+`fixed_in` version:
+
+```
+ALERTS NEEDING MANUAL ACTION
+============================
+| Package  | Ecosystem | Severity      | Fixed in | Why no PR                                   |
+|----------|-----------|---------------|----------|---------------------------------------------|
+| lodash   | npm       | high          | 4.17.21  | transitive dev dep pinned by an override    |
+| tar-fs   | npm       | medium (mod.) | 3.1.1    | lockfile-only fix; no manifest change to PR |
+```
+
+Print this block only when the leftover set is non-empty — with zero open
+alerts, or with every alert covered by an open PR, the table row below carries
+the whole story. Under `--check` this is still report-only: do not open a PR,
+edit a manifest, or refresh a lockfile to close an alert.
+
 Report them on separate rows, never collapsed into one "Dependabot: on":
 
 ```
@@ -172,7 +678,20 @@ DEPENDABOT
 | .github/dependabot.yml          | absent — no version updates configured  |
 | vulnerability alerts (repo flag)| disabled (404)                          |
 | security updates (repo flag)    | disabled — no automatic CVE fix PRs     |
+| open Dependabot alerts          | 0 open                                  |
 | Open Dependabot PRs             | 0                                       |
+```
+
+The `security updates (repo flag)` row takes one of four values — one per row of
+the state table above. The `paused` rendering is the one an `.enabled`-only read
+cannot produce, and it is a distinct row value, never an annotation on
+`enabled`:
+
+```
+| security updates (repo flag)    | enabled — fix PRs raised on new CVEs    |
+| security updates (repo flag)    | paused — enabled, but GitHub is raising no fix PRs |
+| security updates (repo flag)    | disabled — no automatic CVE fix PRs     |
+| security updates (repo flag)    | UNKNOWN (needs admin) — endpoint returned 403 |
 ```
 
 Reserve **UNKNOWN (needs admin)** for an actual permission failure — a `403`
@@ -184,6 +703,27 @@ them justifies a write. Conversely, do **not** infer UNKNOWN from an absent
 Advanced Security omit that object even for a fully-admin token, so its
 absence alone proves nothing about permissions; the dedicated endpoints are
 the authoritative source either way.
+
+The `open Dependabot alerts` row is a **fourth, always-printed row** — it is a
+count of open findings, not another on/off flag, so never fold it into
+`vulnerability alerts (repo flag)` and never omit it when the count is zero
+(an omitted row reads as "not checked", which is the state this row exists to
+rule out). Its four renderings, one per row of the response table above:
+
+```
+| open Dependabot alerts          | 0 open                                  |
+| open Dependabot alerts          | 2 open (1 high, 1 medium) — 1 with no open fix PR: lodash (npm) → 4.17.21 |
+| open Dependabot alerts          | UNKNOWN (needs security_events read) — endpoint returned 403 |
+| open Dependabot alerts          | n/a — alerts disabled (no alert set to count) |
+```
+
+**Carry the alert counts into the caller's summary**, not just this table.
+`/repo:all` stage 6 runs `/repo:deps --check` and condenses it to a single
+`Deps:` line (see [[all]]' Final Summary); that line must include
+`alerts: N open (<by severity>)` — or `alerts: UNKNOWN` — alongside the
+existing provider/flag/PR counts, and must name any uncovered alert count,
+since a summary that reports only open-PR counts is exactly how an open
+vulnerability reaches the end of a clean-looking hygiene run.
 
 ### 2. Detect the ecosystems actually present
 
@@ -349,6 +889,11 @@ Rules:
 Report the decision explicitly: which label was chosen, or which were rejected
 and why.
 
+Carry the outcome forward. If it is **no `labels:` key** — every candidate was
+refused — and step 2a found a `.loom/` root, that fallback has a review-routing
+consequence on this repo; report it under "Check how dependency PRs interact
+with Loom" below rather than letting the run end on plain success.
+
 ### 4. Offer to scaffold the config (confirm first)
 
 Only ecosystems that survived step 2a's filtering — repo-owned manifests with
@@ -370,6 +915,14 @@ everything — deps coupled to an external binary or service (e.g.
 `playwright-core` and its browser binary, a database driver, a native
 toolchain) should stay ungrouped even at minor/patch, via `exclude-patterns`.
 
+Every entry carries `cooldown: default-days: 14` (the policy's routine
+release-age; `policies/default.json` `dependabot.cooldown.routineDays`). The
+cooldown delays version updates only; security updates are not delayed. Match
+the shape of the rendered `.github/dependabot.yml` (`schedule` with
+`day`/`time`/`timezone`, `cooldown`, `labels`, `groups`) when the organization
+renders it; when `policySource` is set, defer to it instead of writing here.
+A scaffold never creates `renovate.json`.
+
 Show the proposed file in full and get approval before writing:
 
 ```yaml
@@ -379,6 +932,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     groups:
       github-actions:
         patterns: ["*"]
@@ -388,6 +943,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     groups:
       npm-minor-patch:
         patterns: ["*"]
@@ -408,6 +965,8 @@ allowed) sharing one entry's schedule, grouping, and labels:
       - "/crates/gamma"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 14
     groups:
       cargo-minor-patch:
         patterns: ["*"]
@@ -420,7 +979,7 @@ per-directory entries the moment two of those crates need different grouping,
 cadence, or labels: `directories:` buys brevity, and pays for it with a single
 shared policy across every path listed.
 
-Add `labels: ["<validated-label>"]` only if step 3 approved one. Write the file
+Keep the `cooldown` block on every entry. Add `labels: ["<validated-label>"]` only if step 3 approved one. Write the file
 only on explicit approval; under `--check`, stop here and show it as a proposal.
 
 ### 5. Offer to enable the repo-level flags (confirm first)
@@ -436,6 +995,11 @@ gh api -X PUT repos/OWNER/REPO/automated-security-fixes
 Both need admin. On a 403, report that the flag needs a repo admin and move on
 — never present a failed write as success. Re-read the flags afterward and show
 the before/after.
+
+**Do not offer the security-updates write when step 1 reported the flag as
+already `enabled` but `paused`** — the `PUT` is a no-op there, and offering it
+presents a resumption that will not happen as a fix. Report step 1's paused
+next action instead.
 
 ### 6. Check for PRs immediately after the config lands
 
@@ -476,8 +1040,18 @@ land within minutes rather than on the stated interval.
 
 For every PR report: **ecosystem**, **update type** (major vs minor/patch —
 majors flagged), **CI status**, **whether it's stale** (the manifest on the
-base branch already satisfies it — see the sub-step below), and what actually
+base branch already satisfies it — see the sub-step below), **whether another
+open PR supersedes it** (see "Sibling supersession" below), and what actually
 changed.
+
+Those two disqualifiers are **different findings with different actions**, and
+every PR lands in exactly one of three buckets:
+
+| Classification | Test | Action |
+|---|---|---|
+| **stale** | the base branch's manifests *and lockfiles* already satisfy every proposed change | drop from the pending tally; keep the count + evidence in the report; don't close it automatically |
+| **superseded by a sibling** | another **open** bot PR proposes a version at least as new for every dependency this one touches | propose **closing it with a cross-reference to the superseding PR** — never merge it |
+| **real** | neither of the above | propose for merge, subject to step 9 |
 
 Update type comes from the title/branch (`bump X from 1.2.3 to 2.0.0` →
 compare the leading version components) — confirm against the diff rather than
@@ -558,6 +1132,54 @@ major bump that removes a *"Node.js 20 is deprecated"* annotation, with CI
 green on every matrix leg, is a much easier yes than "a major bump, seems
 risky."
 
+#### Sibling supersession — compare the open PRs against *each other*, not only the base
+
+The stale check compares each PR against the base branch. It cannot see the
+case where **another open PR already proposes a strictly newer version of the
+same dependency** — both PRs are ahead of the base, so neither is stale, yet
+merging both is guaranteed conflict for no gain and merging the older one first
+is strictly worse. A bot produces this routinely: it opens a PR, the upstream
+package releases again, and the next scan opens a second PR for the same
+dependency without closing the first.
+
+So after the per-PR pass, do one **cross-PR** pass: build the
+dependency → proposed-version map for every open PR and compare the maps.
+
+```bash
+# Per PR, the (dependency, new version) pairs it proposes — from the manifest
+# hunks, not the title, so grouped PRs are covered too. `gh pr diff` takes no
+# pathspec (`cobra.MaximumNArgs(1)`), so filtering to one file has to go
+# through the files API instead.
+for n in <PR numbers>; do
+  echo "== #$n"
+  gh api "repos/OWNER/REPO/pulls/$n/files" --paginate \
+    --jq '.[] | select(.filename == "package.json") | .patch'
+done
+```
+
+A PR is **superseded** when, for *every* dependency it touches, some other open
+PR proposes a version at least as new — i.e. it is wholly contained in that
+sibling. Use the ecosystem's version semantics for "newer", as in the stale
+check. Partial containment is **not** supersession: a PR that bumps `a` and `b`
+where a sibling only covers `b` is still real work, and closing it loses the
+`a` bump.
+
+Worked example from a four-PR npm queue, where neither PR was stale (the base
+lockfile held `wrangler` 4.120.1, below both):
+
+| PR | `wrangler` | `sharp` |
+|---|---|---|
+| #205 | `^4.139.0` | 0.35.2 → 0.35.4 |
+| #209 | `^4.136.1` | 0.35.2 → 0.35.4 |
+
+#209 is wholly contained in #205 → **superseded by #205**; propose closing
+#209 with a comment naming #205, and merge #205. Report supersession as its own
+`Note`, with the superseding PR number in it, and count it separately from
+stale — the reader needs to know a PR was dropped as redundant rather than as
+already-satisfied, because only one of those is a merge-set decision. Closing
+is still a write: it needs the same explicit confirmation as a merge, and never
+happens under `--check`.
+
 The `Note` column carries the `stale — already satisfied by manifest` flag
 alongside the existing CI-status/diff notes, so a stale PR is visible as such at
 a glance:
@@ -571,24 +1193,69 @@ OPEN DEPENDENCY PRs
 | #13 | npm            | 6 packages (minor + patch) | minor | green | grouped                           |
 | #14 | npm            | playwright-core 1.4 → 2.0  | MAJOR | red   | browser binary coupling           |
 | #15 | npm            | @biomejs/biome 2.5.5 → 2.5.6 | patch | green | stale — base lockfile already resolves 2.5.7 |
+| #16 | npm            | wrangler ^4.136.1 + sharp    | minor | green | superseded by #13 — close, don't merge      |
 ```
 
 Summarize the split explicitly below the table so callers (including
 `/repo:all`) get the counts without re-deriving them —
-**open**, **majors** (real forward majors only), and **stale**:
+**open**, **majors** (real forward majors only), **stale**, and
+**superseded**:
 
 ```
-4 open, 2 majors, 1 stale — already satisfied by manifest
+5 open, 2 majors, 1 stale — already satisfied by manifest, 1 superseded by a sibling
 ```
 
-The majors count excludes every stale PR. A PR whose title names a major bump
-but whose resolved dependency state already satisfies it (stale) is **not** a major here — it
-is counted only in the stale total.
+The majors count excludes every stale **and** every superseded PR. A PR whose
+title names a major bump but whose resolved dependency state already satisfies
+it (stale) is **not** a major here — it is counted only in the stale total; the
+same holds for a superseded PR, counted only in the superseded total. When
+nothing is superseded, leave that clause out entirely rather than printing
+`0 superseded` — the open/majors/stale counts keep their existing always-printed
+form.
 
 ### 9. Offer to merge the safe ones (confirm first)
 
 Propose a merge set and get explicit approval. **Never** merge a major without
 its own separate confirmation, and never merge a PR whose CI is red or pending.
+Every PR classified **superseded by a sibling** in step 8 is proposed for
+closure with a cross-reference, not for merge.
+
+#### A lockfile-bearing ecosystem merges one PR at a time
+
+**Several PRs reporting `mergeable: MERGEABLE` / `mergeStateStatus: CLEAN` at
+the same instant is not evidence that they are mutually compatible.** GitHub
+evaluates each PR against the **base branch** independently and has no concept
+of the other PRs in flight, so a whole queue can read `CLEAN` simultaneously and
+still conflict pairwise. (This is the same GitHub behavior `/loom:sweep`
+documents for its wave machinery — see the base-branch-only callout in
+`loom/sweep-execution-model.md`, installed as
+`.claude/commands/loom/sweep-execution-model.md` on a Loom-managed repo. One
+behavior, two surfaces; don't build a second explanation of it here.)
+
+For any ecosystem with a **single shared lockfile** — npm/pnpm/yarn
+(`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`), Cargo (`Cargo.lock`),
+Poetry/uv (`poetry.lock`, `uv.lock`), Bundler, Go's `go.sum` — the overlap is
+not a heuristic, it is a **certainty**: every PR in that ecosystem edits the
+lockfile, so every pair conflicts. Therefore:
+
+- **Merge strictly one at a time**, never a batch, and re-derive the next PR's
+  state after each merge (the `UNKNOWN`-window poll below).
+- **Order matters** — merge the *superseding* PR of any pair first, so the
+  sibling you would otherwise rebase is one you are closing anyway.
+- Ecosystems with **no** shared lockfile (GitHub Actions workflow pins, Docker
+  base images) only conflict when two PRs touch the same file, so they can be
+  batched — check the file lists from step 8 rather than assuming.
+
+#### After each merge, re-check the survivors instead of trusting them
+
+Each surviving PR's green CI was measured against a base that has now moved, so
+it is evidence about a tree that no longer exists — not about what merging it
+next would produce. In the four-PR run behind this guidance, three PRs had been
+tested against a base five merges old and were reporting a bundle size 10 KB
+below the current one. After every merge, for each remaining PR: re-read its
+mergeability (below), and treat its checks as **needing a re-run on the new
+base** before it counts as green — a rebase (next sub-step) triggers exactly
+that.
 
 In a Loom-managed repo (`.loom/scripts/merge-pr.sh` present) use that script
 rather than `gh pr merge` — `gh pr merge` attempts a local checkout that fails
@@ -620,7 +1287,52 @@ A state that settles on `DIRTY` (or `BLOCKED`) is **not** a timing artifact —
 the earlier merge produced a genuine lockfile conflict, so stop the loop and
 report it rather than retrying.
 
-Under `--check`, stop at the report and merge nothing.
+#### Recovering a conflicted bot branch — ask the bot, not `gh`
+
+A `DIRTY` bot PR after a sibling merge is the **expected** state for a
+lockfile-bearing ecosystem, not a failure. It does not need closing, and it
+cannot be fixed with `gh`:
+
+```
+$ gh pr update-branch 210
+X Cannot update PR branch due to conflicts
+```
+
+`gh pr update-branch` asks GitHub to merge the base into the PR branch (or
+rebase onto it with `--rebase`). Neither mode can accept a conflict
+resolution — the API has no channel for one — so both fail outright on a
+conflicted branch rather than recovering it. The supported recovery is to
+**ask the bot to redo the branch**, which it does by recomputing the update
+against the current base:
+
+```bash
+gh pr comment <N> --body "@dependabot rebase"     # Dependabot
+# Renovate: tick the PR body's "Rebase/retry" checkbox, or comment the
+#   configured rebase trigger for that installation
+```
+
+Two outcomes, both normal, and they differ in a way that matters for anything
+holding a PR number:
+
+- **Simple PR (one or a few packages)** — the bot **rebases in place**: same PR
+  number, new head commit, CI re-runs against the new base.
+- **Grouped PR (a `groups:` entry, many updates)** — the bot **closes it and
+  opens a new PR under a new number**, having recomputed the group membership
+  against the new base (so the update count can change too: a 19-update group
+  came back as 18). Anything referencing the old number — your merge set, the
+  report you already printed, a tracking comment — goes stale the moment this
+  happens, so **re-list open bot PRs (step 7) after a grouped rebase** rather
+  than continuing against the number you had.
+
+Rebasing is a write to the PR, so it needs the same explicit authorization as a
+merge, and never happens under `--check`. Expect one CI cycle per rebase: on a
+queue of N lockfile-bearing PRs, merging all of them costs N sequential
+cycles — worth saying out loud when you propose the merge set, and worth
+weighing against merging the highest-value one or two now and letting the bot's
+next scan regenerate the rest.
+
+Under `--check`, stop at the report and merge nothing — no closures, no
+rebase comments.
 
 ## Check how dependency PRs interact with Loom
 
@@ -636,14 +1348,46 @@ natural wrong assumption, and it is safety-relevant:
   into an auto-merge pipeline is a policy decision for the repo's owner, not a
   side effect of a hygiene command — and any label used for it still has to
   pass the step 3 description check.
+- **Report it as a finding when step 3 ended with no `labels:` key.** On a
+  Loom-managed repo that fallback is not free: Loom routes PRs into review *by
+  label*, and every Loom routing label is spelled `… Applied by: <party>`, so
+  step 3 refuses all of them. The config that results is correct and inert —
+  the bot's PRs carry no label, so nothing routes them for review. Do not let
+  that end as plain success; state the consequence and who can resolve it:
+
+  ```
+  LOOM ROUTING
+  ============
+  Bot PRs on this repo will not be routed for review: every candidate routing
+  label is reserved (`Applied by: ...`), so the config was scaffolded without a
+  `labels:` key. Dependency PRs will therefore sit unreviewed by Loom.
+  Resolution is a human's, not this command's: the repo owner can explicitly
+  choose a bot-applied label to route on.
+  ```
+
+  This is **informational, never an error**, and never something to auto-fix:
+  no `gh label create`, no applying a reserved label anyway, no failing the run
+  over it — Safety Rule 3 is unchanged. Naming the human decision is the point,
+  and it is the same one step 3 already states: if a repo wants a bot-applied
+  label used here, "that is a policy call for a human to make explicitly."
+  Report nothing when step 3 *did* approve a label (routing already works), and
+  nothing on a repo with no `.loom/` root — like the rest of this section, the
+  finding is gated on the `.loom/` tool root from step 2a's
+  `install-metadata.json` scan.
 
 ## Safety Rules
 
 1. **Writes and merges require authorization** — show the concrete scope and
-   use existing authorization when it covers it. Under `--check`, write nothing.
-2. **Policy, updater, alerts, and security PRs are independent** — a present
-   config says nothing about whether CVE alerting is on. Report
-   UNKNOWN (not `disabled`) when the token can't read the setting.
+   use existing authorization when it covers it. Closing a superseded PR and
+   commenting `@dependabot rebase` are writes too, held to the same bar. Under
+   `--check`, write nothing.
+2. **Policy, updater, alerts, open alerts, and security PRs are independent** —
+   a present config says nothing about whether CVE alerting is on, and an
+   alerting flag that is ON says nothing about whether alerts are open. Report
+   UNKNOWN (not `disabled`) when the token can't read a setting, and
+   UNKNOWN (not `0 open`) when it can't read `/dependabot/alerts`. Never
+   present flag state or an empty bot-PR list as evidence that nothing is
+   vulnerable.
 3. **Never create a label**, and never reference one whose description reserves
    it for any party (`Applied by: <party>` — humans, Champion, a bot, …). No
    suitable label → no `labels:` key.
@@ -658,4 +1402,11 @@ natural wrong assumption, and it is safety-relevant:
    dependency-free, recommend not scaffolding and say why.
 6. **Never auto-merge a major** — majors get their own confirmation, always.
    Red or pending CI is never merged.
-7. **Never push or merge under `--check`** — report-only means report-only.
+7. **Never merge a lockfile-bearing ecosystem's PRs in a batch** — one at a
+   time, re-checking each survivor afterwards. Simultaneous `CLEAN` across
+   several PRs proves nothing about their mutual compatibility.
+8. **Never push or merge under `--check`** — report-only means report-only.
+9. **Never file an issue without confirmation, and never re-file one already
+   tracked** — the deferred-Dependabot-shutdown issue is offered, with its full
+   body shown, only after the [[followups]]-style dedup search comes back empty
+   for the client repo, and never under `--check` or `--all-repos`.
