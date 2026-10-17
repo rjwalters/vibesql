@@ -132,9 +132,9 @@ emit() {
 GH_STDERR="$(mktemp)"
 trap 'rm -f "$GH_STDERR" 2>/dev/null || true' EXIT
 
-# --- Step 1: current state, labels, and comments in ONE read -----------------
-ISSUE_JSON="$(gh issue view "$ISSUE" --json state,labels,comments 2>"$GH_STDERR")" || {
-  echo "ERROR: 'gh issue view $ISSUE --json state,labels,comments' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
+# --- Step 1: current state and labels ----------------------------------------
+ISSUE_JSON="$(gh issue view "$ISSUE" --json state,labels 2>"$GH_STDERR")" || {
+  echo "ERROR: 'gh issue view $ISSUE --json state,labels' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   exit 1
 }
 
@@ -146,7 +146,23 @@ fi
 
 HAS_ISSUE_LABEL="$(jq -e '.labels[] | select(.name=="loom:issue")' <<<"$ISSUE_JSON" >/dev/null 2>&1 && echo yes || echo no)"
 
-# Newest comment (by createdAt) whose body contains the APPROVED verdict
+# --- Step 1a: the comments, TRUSTED AUTHORS ONLY (#9548) ---------------------
+# "Champion Review: APPROVED" is a control phrase: it makes this script apply
+# loom:issue. On a repo that accepts outside comments anyone can type it, and
+# another Loom fleet's Champion writes it too, so it counts only from a trusted
+# author (a repo insider by author_association, one of THIS fleet's Apps, this
+# daemon's own identity, or forge.trustedCommenters), decided by
+# `loom-daemon forge trusted-comments` (loom-daemon/src/comment_trust.rs).
+# The REST listing is used, not `gh issue view --json comments`: the latter
+# spells an App author as a bare login, so the fleet's own Champion verdicts
+# could not be told apart from a user who registered the App's name.
+# requires-daemon: forge optional   Without the `trusted-comments` verb (absent binary, or one predating #9548) no author can be verified, so the script exits 1 (environment error) and reconciles nothing, rather than acting on an unauthenticated verdict.
+COMMENTS_JSON="$(gh api "repos/{owner}/{repo}/issues/$ISSUE/comments" --paginate 2>"$GH_STDERR" | "${LOOM_DAEMON_BIN:-loom-daemon}" forge trusted-comments 2>>"$GH_STDERR")" || {
+  echo "ERROR: could not read #$ISSUE's comments or authenticate their authors (loom-daemon forge trusted-comments, #9548): $(cat "$GH_STDERR" 2>/dev/null)" >&2
+  exit 1
+}
+
+# Newest trusted comment (by created_at) whose body contains the APPROVED verdict
 # marker text Step 3b's template writes — compact JSON (`-c`, not `-r`) since
 # this is an object, not a scalar.
 #
@@ -163,17 +179,17 @@ HAS_ISSUE_LABEL="$(jq -e '.labels[] | select(.name=="loom:issue")' <<<"$ISSUE_JS
 # exactly how issue #7287 got incorrectly re-escalated on a second run
 # despite the promotion having genuinely landed (#7299).
 APPROVED_COMMENT="$(jq -c '
-  [.comments[] | select(
+  [.[] | select(
       .body != null
       and (.body | contains("Champion Review: APPROVED"))
       and (.body | contains("<!-- champion:promotion-landed-") | not)
     )]
-  | sort_by(.createdAt)
+  | sort_by(.created_at)
   | last // empty
-' <<<"$ISSUE_JSON" 2>/dev/null || true)"
+' <<<"$COMMENTS_JSON" 2>/dev/null || true)"
 
 if [[ -z "$APPROVED_COMMENT" || "$APPROVED_COMMENT" == "null" ]]; then
-  emit "OK" "no 'Champion Review: APPROVED' verdict comment on this issue — nothing to reconcile"
+  emit "OK" "no 'Champion Review: APPROVED' verdict comment from a trusted author on this issue — nothing to reconcile"
   exit 0
 fi
 
@@ -203,7 +219,7 @@ fi
 # check the label timeline for a `labeled loom:issue` event that happened
 # AFTER the newest APPROVED comment: if one exists, the promotion landed and
 # this is not #6862's failure mode at all (#6933).
-APPROVED_AT="$(jq -r '.createdAt // empty' <<<"$APPROVED_COMMENT")"
+APPROVED_AT="$(jq -r '.created_at // empty' <<<"$APPROVED_COMMENT")"
 
 TIMELINE_JSON="$(gh api "repos/{owner}/{repo}/issues/$ISSUE/timeline" --paginate 2>"$GH_STDERR")" || {
   echo "ERROR: 'gh api .../issues/$ISSUE/timeline' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
@@ -232,6 +248,11 @@ if [[ "$APPLY" -eq 0 ]]; then
   emit "MISMATCH" "$REASON"
   exit 11
 fi
+
+# #9548: --apply writes Champion markers and labels. Vet the repo first
+# (forge-helpers.sh in a subshell: it sets -e) and name it on every write; a
+# refusal leaves this a report-only MISMATCH.
+WRITE_REPO="$(source "$(dirname "${BASH_SOURCE[0]}")/lib/forge-helpers.sh" && loom_write_repo "${LOOM_REPO:-}" 2>"$GH_STDERR")" || { emit "MISMATCH" "$REASON; --apply refused: loom-daemon forge may-write: $(tr '\n' ' ' <"$GH_STDERR")"; exit 11; }
 
 # Recover the tier from the "**Goal Alignment**: [Tier N] ..." line Step 3b's
 # template writes into the verdict comment. Heuristic on purpose — this is
@@ -263,7 +284,7 @@ if [[ -z "$TIER" ]]; then
     exit 0
   fi
 
-  gh issue comment "$ISSUE" --body "<!-- champion:promotion-landed-mismatch -->
+  gh issue comment "$ISSUE" --repo "$WRITE_REPO" --body "<!-- champion:promotion-landed-mismatch -->
 **Champion: Promotion write did not land — escalating**
 
 This issue carries a \`Champion Review: APPROVED\` verdict comment, but \`loom:issue\` was never applied — the label write that was supposed to accompany that verdict silently did not land (#6862). This reconciliation pass could not recover which tier (\`tier:goal-advancing\` / \`tier:goal-supporting\` / \`tier:maintenance\`) the original verdict assigned from its own comment text, so it is routing to an operator to complete the promotion manually rather than guessing.
@@ -274,7 +295,7 @@ This issue carries a \`Champion Review: APPROVED\` verdict comment, but \`loom:i
     emit "ESCALATED" "$REASON; tier unrecoverable and the escalation comment FAILED to post"
     exit 1
   }
-  gh issue edit "$ISSUE" --add-label "loom:operator-only,loom:operator-mechanical" >/dev/null 2>"$GH_STDERR" || {
+  gh issue edit "$ISSUE" --repo "$WRITE_REPO" --add-label "loom:operator-only,loom:operator-mechanical" >/dev/null 2>"$GH_STDERR" || {
     echo "ERROR: failed to add loom:operator-only to #$ISSUE: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   }
   emit "ESCALATED" "$REASON; tier unrecoverable from verdict comment text — routed to loom:operator-only,loom:operator-mechanical"
@@ -282,7 +303,7 @@ This issue carries a \`Champion Review: APPROVED\` verdict comment, but \`loom:i
 fi
 
 # Complete the promotion: add loom:issue + the recovered tier.
-if ! gh issue edit "$ISSUE" --add-label "loom:issue" --add-label "$TIER" >/dev/null 2>"$GH_STDERR"; then
+if ! gh issue edit "$ISSUE" --repo "$WRITE_REPO" --add-label "loom:issue" --add-label "$TIER" >/dev/null 2>"$GH_STDERR"; then
   echo "ERROR: failed to add loom:issue/$TIER to #$ISSUE: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   emit "ESCALATED" "$REASON; the completing label edit FAILED" "$TIER"
   exit 13
@@ -290,7 +311,7 @@ fi
 
 # Verify the write actually landed — the whole point of this script. Never
 # trust the edit's own exit code alone (#6862's root cause).
-VERIFY_JSON="$(gh issue view "$ISSUE" --json labels 2>"$GH_STDERR")" || {
+VERIFY_JSON="$(gh issue view "$ISSUE" --repo "$WRITE_REPO" --json labels 2>"$GH_STDERR")" || {
   echo "ERROR: read-back after completing promotion on #$ISSUE failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   emit "ESCALATED" "$REASON; completed the edit but the read-back verification itself failed" "$TIER"
   exit 13
@@ -301,7 +322,7 @@ if ! jq -e '.labels[] | select(.name=="loom:issue")' <<<"$VERIFY_JSON" >/dev/nul
   exit 13
 fi
 
-gh issue comment "$ISSUE" --body "<!-- champion:promotion-landed-completed -->
+gh issue comment "$ISSUE" --repo "$WRITE_REPO" --body "<!-- champion:promotion-landed-completed -->
 **Champion: Promotion completed — reconciled a missing label write**
 
 This issue carried a \`Champion Review: APPROVED\` verdict comment, but \`loom:issue\` had never been applied — the label write that was supposed to accompany that verdict silently did not land (#6862). This reconciliation pass recovered \`$TIER\` from the original verdict's \"Goal Alignment\" line, applied \`loom:issue\` + \`$TIER\`, and confirmed both are present via a read-back.

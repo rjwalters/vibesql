@@ -2,9 +2,9 @@
 # Loom Stacked-PR Reconciliation (issue #3729, stacked-PR v1)
 #
 # Turns the manual git surgery an operator performs after a stacked parent PR
-# squash-merges into one command. The operator (or merge-pr.sh's post-merge
-# pass) runs this AFTER the parent branch has squash-merged to the default
-# branch.
+# merges into one command. The operator (or merge-pr.sh's post-merge pass)
+# runs this AFTER the parent branch has merged to the default branch (as a
+# merge commit, Loom's default since #9105).
 #
 # Usage:
 #   ./.loom/scripts/reconcile-stack.sh <child-pr> <parent-branch> [options]
@@ -17,9 +17,9 @@
 #   git push --force-with-lease
 #   gh pr edit <child-pr> --base <default-branch>
 #
-# The repo squash-merges (setup-repository-settings.sh: squash only), so after
-# the parent squash-merges to the default branch as ONE commit, the child
-# branch still carries the parent's ORIGINAL pre-squash commits. A naive base
+# The repo merges with merge commits (setup-repository-settings.sh default,
+# Loom-wide since #9105), so after the parent merges to the default branch the
+# child branch still carries the parent's ORIGINAL commits. A naive base
 # retarget (child base -> default) then re-shows the parent's entire diff. The
 # `git rebase --onto` replays ONLY the child's own commits onto the default
 # branch, stripping the parent's now-squashed commits, before retargeting.
@@ -115,12 +115,13 @@ fi
 # `gh pr edit --base` target; the git mutation target is the fetched COMMIT
 # the subcommand resolves below, and the two are deliberately kept apart.
 DEFAULT_BRANCH="main"
-if [[ -f "$SCRIPT_DIR/lib/default-branch.sh" ]]; then
-    # shellcheck source=lib/default-branch.sh
-    source "$SCRIPT_DIR/lib/default-branch.sh"
-    if resolved="$(loom_default_branch 2>/dev/null)" && [[ -n "$resolved" ]]; then
-        DEFAULT_BRANCH="$resolved"
-    fi
+# Required, not optional (#9106): this lib also carries check_branch_name, the
+# ref-operand validator the child/parent names below must pass before
+# `reconcile-stack` puts them in a `git rebase --onto` argv.
+# shellcheck source=lib/default-branch.sh
+source "$SCRIPT_DIR/lib/default-branch.sh"
+if resolved="$(loom_default_branch 2>/dev/null)" && [[ -n "$resolved" ]]; then
+    DEFAULT_BRANCH="$resolved"
 fi
 
 # Discover the child branch from the PR (GitHub via gh).
@@ -135,6 +136,16 @@ if [[ -z "$CHILD_BRANCH" ]]; then
     err "Could not resolve the head branch for PR #$CHILD_PR (is the number correct and the PR open?)."
     exit 1
 fi
+# #9106: $CHILD_BRANCH is the forge's `headRefName` — attacker-controlled —
+# and $PARENT_BRANCH comes from argv. Both are handed to `loom-daemon
+# reconcile-stack`, which puts them in `git rebase --onto`/`rev-parse`/
+# `merge-base` argvs, and to `git rev-parse`/`push --force-with-lease` here.
+# Validate BOTH once, up front, and refuse with a forge-visible explanation: a
+# PR whose headRef fails this is a hostile or broken injection, not a data
+# error. (The daemon revalidates them itself — this refusal is the shell half.)
+check_branch_name "$CHILD_BRANCH" "head branch of child PR #$CHILD_PR" || exit 1
+check_branch_name "$PARENT_BRANCH" "parent branch argument" || exit 1
+
 info "Child branch: $CHILD_BRANCH"
 info "Parent branch: $PARENT_BRANCH"
 info "Forge retarget base (default branch name): $DEFAULT_BRANCH"
@@ -157,6 +168,11 @@ fi
 #    own commits onto the pinned commit. Exit 1 = a prerequisite refused and
 #    nothing was mutated; exit 2 = the rebase itself failed.
 # requires-daemon: reconcile-stack >= 0.19.271   #8583 — the reconciliation planner/executor. Declared at this repo's VERSION because the subcommand lands WITH this marker; the first release actually carrying it is the post-merge bump. A binary predating it refuses with clap's "unrecognized subcommand", which this script reports as a precondition failure rather than proceeding
+# #9548: a real run pushes the child and retargets its PR, so it acts only on a
+# repo this installation manages and can write, named on the PR edit.
+# forge-helpers.sh is sourced in the subshell because it sets -e.
+WRITE_REPO=""
+[[ "$DRY_RUN" == "true" ]] || WRITE_REPO="$(source "$SCRIPT_DIR/lib/forge-helpers.sh" && loom_write_repo "${LOOM_REPO:-}")" || { err "Refusing to reconcile: loom-daemon forge may-write refused this checkout's repo (#9548). Nothing was mutated."; exit 1; }
 RECONCILE_ARGS=(--child-branch "$CHILD_BRANCH" --parent-branch "$PARENT_BRANCH" --default-branch "$DEFAULT_BRANCH" --repo-dir "$PWD")
 [[ "$DRY_RUN" == "true" ]] || RECONCILE_ARGS+=(--rebase)
 # Refuse a too-old binary with the floor and the roll command (#8385) rather
@@ -230,7 +246,7 @@ fi
 # 3. Retarget the child PR's base to the default branch NAME (not the commit —
 #    a PR base is a branch).
 info "Step 3/3: gh pr edit $CHILD_PR --base $DEFAULT_BRANCH"
-if ! run gh pr edit "$CHILD_PR" --base "$DEFAULT_BRANCH"; then
+if ! run gh pr edit "$CHILD_PR" ${WRITE_REPO:+--repo "$WRITE_REPO"} --base "$DEFAULT_BRANCH"; then
     err "Failed to retarget PR #$CHILD_PR base to $DEFAULT_BRANCH. Retarget it manually."
     exit 2
 fi

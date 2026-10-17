@@ -2,6 +2,10 @@
 
 Loom rotates Claude OAuth accounts to spread load across weekly limits.
 
+For capacity *recipes* — adding accounts, ordering taps, bounding a metered
+backstop, and verifying which pool a role actually draws on — see
+[`configuring-resources.md`](configuring-resources.md).
+
 **Storage policy:** keep all real credentials outside repositories/worktrees,
 even ignored files. Provision with `tokens bootstrap --shared` or
 `tokens import-from-monitor --shared`; keep sources external and owner-only.
@@ -27,7 +31,7 @@ it does not change runtime resolution or migrate existing credentials.
 - [Worktree handling](#worktree-handling)
 - [Shared machine-level pool fallback (#3938)](#shared-machine-level-pool-fallback-3938)
 - [Hard-fail on missing pool](#hard-fail-on-missing-pool)
-- [Per-repo pool vs. shared machine-level pool: which to provision (#4642)](#per-repo-pool-vs-shared-machine-level-pool-which-to-provision-4642)
+- [The shared machine-level pool is the only supported location (#4642, #9135)](#the-shared-machine-level-pool-is-the-only-supported-location-4642-9135)
 - [Operator CLI (`loom-daemon tokens pin/unpin/unblock`)](#operator-cli-loom-daemon-tokens-pinunpinunblock)
 - [Tests](#tests)
 - [Codex provider health](#codex-provider-health)
@@ -44,8 +48,10 @@ its files, selection order, state formats, `SelectedToken` API, and
 
 Provider-aware callers identify accounts by `(provider, name)`, so
 `claude/alice` and `codex/alice` are separate identities. Claude inventory
-continues to prefer a repo-local `.loom/tokens` pool and otherwise falls back
-to `LOOM_SHARED_TOKENS_DIR` (default `~/.loom/tokens`).
+resolves to `LOOM_SHARED_TOKENS_DIR` (default `~/.loom/tokens`). A legacy
+repo-local `<workspace>/.loom/tokens` pool is still recognized when the
+workspace is **not** inside a git worktree; inside one it is refused (#9135 —
+see "The shared machine-level pool is the only supported location" below).
 
 Codex inventory uses named directories below `LOOM_CODEX_PROFILE_ROOT`
 (default `~/.loom/codex-profiles`). With no repo metadata, each direct child
@@ -182,8 +188,8 @@ standard way to populate a new host's pool** (it replaces hand-copying a pool
 between machines):
 
 ```bash
-loom-daemon tokens import-from-monitor                  # into <repo>/.loom/tokens
-loom-daemon tokens import-from-monitor --shared         # into the machine-level pool (#3938)
+loom-daemon tokens import-from-monitor                  # into the machine-level pool
+loom-daemon tokens import-from-monitor --shared         # same thing; flag kept for compat (#9135)
 loom-daemon tokens import-from-monitor --force          # apply ROLLED tokens (see below)
 loom-daemon tokens import-from-monitor --dry-run        # preview
 loom-daemon tokens import-from-monitor --prune          # drop accounts the monitor no longer reports
@@ -855,7 +861,11 @@ decisions shape how it is consumed:
   avoid. Instead, `monitor.rs` writes `.ranking.classes.json` beside
   `.ranking` (`tokens_pool::monitor_classes`, its own `schema` field), read
   only by the observability path — `.ranking`'s four-field shape and every
-  existing reader are untouched.
+  existing reader are untouched. The per-account weekly (7-day) utilization
+  follows the same rule (#9005): every `tokens check --ranking` run writes
+  `.ranking.weekly.json` (`tokens_pool::ranking_weekly`), read only by the
+  telemetry collector for `loom.tokens.usage_fraction_weekly`, and ignored
+  once `.ranking` is rewritten after it.
 - **Coverage stays honest.** Only the class actually in use appears in
   `models` (today: `fable` only). An absent class reads as "no data", never
   coerced to a fabricated `0.0` — `MonitorAccount::class_utilization` is a map,
@@ -1246,10 +1256,25 @@ dispatch for that pool when `total > 0 && usable == 0`
 - A hold outranks #5030's half-open recovery probe: a probe dispatched into a
   pool with zero spawnable accounts tests nothing and costs exactly the label
   flip and lease comment this exists to prevent.
-- **Not broadcast to peers.** Each host resolves its *own* pool (repo-local
-  shadow if it holds `.token` files, else shared — #3938/#7527), so one host's
-  exhaustion says nothing about a peer's; broadcasting it would suppress a peer
-  whose pool is healthy.
+- **Broadcast to peers, keyed by account set (#8001).** The arm/clear *edge* is
+  advertised over the peer-claim room (`ClaimKind::PoolHoldArmed` /
+  `PoolHoldCleared`), so a peer does not have to rediscover a dead pool the
+  expensive way — one doomed dispatch, one label flip and one permanent lease
+  comment at a time. The original "do not broadcast" caution is preserved as the
+  **key**, not as abstinence: each host resolves its *own* pool (repo-local
+  shadow if it holds `.token` files, else shared — #3938/#7527), so the ad is
+  keyed by `pool_account_fingerprint` — a hash of the pool's sorted account
+  names — never by the pool directory. A path key is wrong in both directions
+  (two hosts sharing accounts resolve different absolute paths; two hosts with
+  genuinely different repo-local shadow pools resolve the *same* relative path),
+  and the second failure is exactly the "suppress a peer whose pool is healthy"
+  hazard. Exhaustion is a property of the **accounts** — a `.bad_tokens` mark or
+  a `.ranking` hard exclusion records an upstream rate-limit state every host
+  holding that credential shares — so an account-set key matches precisely when
+  suppression is correct. Fail-open throughout: a dropped ad, a peer without
+  safehouse, or a host that has not received the ad yet degrades byte-for-byte
+  to the local-only pre-flight, which still stops that host on its own next
+  tick. See [`safehouse.md` → "Fleet-wide token-pool exhaustion hold"](safehouse.md).
 - `total == 0` (no pool provisioned at all) is a *different* condition with a
   different remedy (`loom-daemon tokens bootstrap`) and its own detection
   (#4642). It never arms this hold.
@@ -1297,10 +1322,13 @@ list.
 ## Shared machine-level pool fallback (#3938)
 
 Token selection resolves the effective pool as: the **per-repo** pool
-`<repo>/.loom/tokens/` when it holds `*.token` files, else the **shared
-machine-level pool** `~/.loom/tokens/` (override `LOOM_SHARED_TOKENS_DIR`; set it
-empty to disable the fallback). **This precedence is presence-based, not
-health-based**: a per-repo pool wins by merely *having* `.token` files present,
+`<repo>/.loom/tokens/` when it holds `*.token` files **and that workspace is not
+inside a git worktree** (issue #9135 — inside one it is refused outright, see
+"The shared machine-level pool is the only supported location" below), else the
+**shared machine-level pool** `~/.loom/tokens/` (override
+`LOOM_SHARED_TOKENS_DIR`; set it empty to disable the fallback). **Where a
+per-repo pool still applies, that precedence is presence-based, not
+health-based**: it wins by merely *having* `.token` files present,
 regardless of whether any of its accounts are actually usable — so a per-repo
 pool whose every account has since gone bad-marked or `.ranking`-excluded still
 shadows a healthy shared pool rather than falling back to it (issue #6758; the
@@ -1368,12 +1396,11 @@ default-`--workspace` case, and the daemon's autonomous ranking-refresh loop):
 
 **Operational contract**: for step 3 to actually find tokens, a machine-level
 daemon's pool must be bootstrapped at the shared location —
-`loom-daemon tokens bootstrap --shared` (or `import-from-monitor --shared`) — rather
-than per-repo at whatever directory happens to be the daemon's own checkout.
+`loom-daemon tokens bootstrap` — which since issue #9135 always writes there,
+never per-repo at whatever directory happens to be the daemon's own checkout.
 Registering the daemon's own checkout as a workspace
-(`loom-daemon workspace add <checkout>`) is the alternative: that makes step 2
-apply instead, so a per-repo pool bootstrapped there (without `--shared`) is
-found too.
+(`loom-daemon workspace add <checkout>`) no longer provides an alternative: a
+pool inside that checkout is refused, so the shared location is the contract.
 
 **No `WorkingDirectory=` needed**: with the pool bootstrapped per the
 contract above, a `systemd`-managed daemon started with the unit's default
@@ -1456,18 +1483,50 @@ hitting this hard-fail on every single tick forever. The skip is logged once
 role's log for `no token pool available` — and is re-checked every tick, so
 provisioning either pool later resumes ticking with no daemon restart needed.
 
-## Per-repo pool vs. shared machine-level pool: which to provision (#4642)
+## The shared machine-level pool is the only supported location (#4642, #9135)
 
-Provision an external shared pool with `loom-daemon tokens bootstrap --shared`
-(or `import-from-monitor --shared`). Its default is `~/.loom/tokens/`;
-`LOOM_SHARED_TOKENS_DIR` can select another external, owner-only directory.
-Do not provision credentials inside a repository, even for separate billing.
+**Invariant: a token pool never lives inside a git worktree.** OAuth
+credentials under version control are one `git add -A`, one directory rename,
+or one stale `.gitignore` away from being pushed — and every guard protecting
+the old in-repo path was keyed on that one literal path string, so any of those
+three defeated all of them at once. The structural answer is that the
+credentials are not in the repository at all (see
+[`credential-storage.md`](credential-storage.md)).
+
+Provision with `loom-daemon tokens bootstrap` (or `import-from-monitor`). The
+destination is always the shared machine-level pool — `~/.loom/tokens/` by
+default, or any other external owner-only directory named by
+`LOOM_SHARED_TOKENS_DIR`. `--shared` is accepted for backward compatibility and
+now selects what already happens; there is no workspace-relative alternative.
+`LOOM_SHARED_TOKENS_DIR` pointing *into* a checkout is refused too: the
+invariant is "outside every worktree", not "named `~/.loom/tokens`".
 
 Repositories using the same external pool compete for the same account quotas.
 Choose accounts deliberately; provisioning changes whose allowance is consumed.
-The runtime still prefers legacy repo-local pools when present. Migrate those
-separately and verify effective selection; this policy does not automatically
-move files or change billing isolation.
+
+### Migrating a legacy `<repo>/.loom/tokens` pool
+
+A populated `<repo>/.loom/tokens` inside a git worktree is **ignored, never
+deleted**: selection refuses it, `token_pool_size` counts it as 0 (so the host's
+concurrency cap does not promise spawns that would fail), and the resulting
+empty-pool error names the directory and the migration. `loom-daemon tokens
+check --all-pools` lists it as `legacy in-worktree, RETIRED and ignored by
+selection`. Loom will not relocate an OAuth token on its own — moving a
+credential is an operator act:
+
+```bash
+mkdir -p ~/.loom/tokens && mv <repo>/.loom/tokens/*.token ~/.loom/tokens/
+rm -rf <repo>/.loom/tokens
+loom-daemon tokens check --ranking          # verify effective selection
+```
+
+Re-provisioning from source (`loom-daemon tokens bootstrap --force`) is
+equivalent and preferable when the account sources are still available. A pool
+at `<dir>/.loom/tokens` that is **not** inside any checkout still resolves
+normally — the refusal is scoped to the policy it enforces, not to the path
+shape. If the shared pool is disabled outright (`LOOM_SHARED_TOKENS_DIR=""`)
+while a legacy in-worktree pool is the only one present, the host fails closed
+rather than readmitting it.
 
 ## Operator CLI (`loom-daemon tokens pin/unpin/unblock`)
 
@@ -1813,8 +1872,10 @@ Terminal policy is intentionally conservative:
   design (#5687).
 - `RECOVERABLE` and `SESSION_LIMIT` apply short temporary backoffs.
 - Success records freshness and clears transient counters.
-- Timeouts, fatal/configuration failures, refusals, and deleted-cwd outcomes do
-  not poison account health.
+- Timeouts, fatal/configuration failures, refusals, deleted-cwd outcomes and
+  `SANDBOX_UNAVAILABLE` (#10003: the session exited 0 but its sandbox refused
+  every tool call) do not poison account health. `SANDBOX_UNAVAILABLE` also
+  records no freshness, because nothing ran.
 
 Codex exposes no trustworthy quota-headroom percentage here. Status/capacity
 therefore reports raw, enabled, healthy, cooldown, and reauth-required counts;
@@ -1984,15 +2045,34 @@ availability.
 file the owning container itself wrote. The ownership rule constrains *process*
 access to the credential chain; this touches none of it.
 
-### Fail-open, always
+### Fail-open, never fail-silent (#8539)
 
-Every unknown is reported as "no evidence", never as a refusal:
+Every unknown is reported as "no evidence" — never as a refusal, and (since
+#8539) never as health either:
 
 | Situation | Result |
 |---|---|
-| No rollout log, unparseable lines, unrecognized schema | `available`, no utilization — the account keeps its place in selection |
-| A reading whose own window **already rolled over** | discarded, not carried forward (the Codex form of #7420's overdue-reset trap: a week-old `100%` must never pin a healthy subscription out of rotation) |
+| No rollout log, unparseable lines, unrecognized schema | `unknown` + `no_rate_limit_snapshot`, no utilization — the account keeps its place in selection |
+| A reading whose own window **already rolled over** | discarded, not carried forward (the Codex form of #7420's overdue-reset trap: a week-old `100%` must never pin a healthy subscription out of rotation) — the row reads `unknown` + `snapshot_window_rolled_over` |
 | A recorded hold in `account-health.json` | outranks the measurement — reporting `available` for an account the selector will skip is the dishonest direction |
+
+`unknown` exists because `available` is a **claim about headroom**, and on a
+host where nothing has ever run an interactive Codex session there is no
+reading to back it. Before #8539 such a host rendered an all-dashes table in
+which every row said `available`: on the reported incident *every* registered
+account was at its provider-side usage limit and the pool still looked
+perfectly healthy. `available` is now only ever earned, by a live reading with
+measurable headroom; `unknown` sorts strictly below it (and strictly above
+every known refusal) so it can never outrank a measured account, and the table
+footer says what the word means and how to fix it — one `codex exec` turn on
+the account records a snapshot.
+
+It is still **fail-open**: `unknown` is the absence of a refusal, not a
+refusal. Nothing holds the account, `has_usable_account` counts it, and codex
+selection reads `account-health.json` rather than this status word at all.
+Treating "no snapshot yet" as unusable would exit `1` on every correctly
+provisioned host that simply has not written a rollout log — the fail-*closed*
+direction this probe rules out.
 
 ### Which window is binding
 
@@ -2007,6 +2087,7 @@ Codex-specific rule:
 | secondary (~weekly) at/over the ceiling | `exhausted` | the weekly reset |
 | primary (~5h) at/over it, weekly below | `rate_limited` | the 5h reset |
 | both below | `available` | — |
+| no live reading at all | `unknown` | — |
 
 One derivation feeds both the reported row and the health hold it arms, so a
 row can never advertise one horizon while the hold uses another — the bug that
@@ -2032,7 +2113,7 @@ flag the command is a pure read.
 | Exit | Meaning |
 |---|---|
 | `0` | A report was produced. **Includes a host with no Codex profiles**, which says so and exits `0` — an un-provisioned host is not an outage. |
-| `1` | Codex accounts exist but **none is dispatchable right now** — every one is rate-limited, exhausted, blocked, disabled, or errored — the pre-dispatch signal that routing codex work here will fail at selection. |
+| `1` | Codex accounts exist but **none is dispatchable right now** — every one is rate-limited, exhausted, blocked, disabled, or errored — the pre-dispatch signal that routing codex work here will fail at selection. An `unknown` row does **not** trigger this: nothing holds that account, so selection will still hand it work. |
 
 This is deliberately stricter than `tokens check` (exit `1` only when every row
 is `error`/`skipped`): that command's consumers re-derive selectability from
@@ -2056,7 +2137,12 @@ beta|exhausted|1.00|2026-09-22T10:00:00Z
 One format, one parser, every provider — so a dashboard (and the API-key
 account pool of #8401) reads them all the same way. Statuses come from the same
 vocabulary (`available`, `rate_limited`, `exhausted`, `blocked`, `skipped`,
-`error`); no Codex-only status word was invented.
+`error`), plus `unknown` (#8539) for an account this probe has no current
+reading for. `unknown` is shared vocabulary, not a Codex-only word: it is
+ranked by the same `status_order::status_rank` every provider sorts on, one
+rung below `available` and above every refusal. No reader today consumes the
+Codex ranking file, so the rung is a table/`--json` ordering fact rather than a
+selection input.
 
 The file is secret-free by construction: every field is a name, a status word,
 a number, or a timestamp. `auth.json` is never opened.
@@ -2068,6 +2154,54 @@ a number, or a timestamp. `auth.json` is never opened.
 `TOKEN_EXHAUSTED` arm — so an account measured at its ceiling is skipped
 *before* a dispatch is burned on it, by the same
 `select_healthy_at` filter every Codex selection already goes through.
+
+### The reactive half: a refusal's own reset horizon (#8539)
+
+The probe above is proactive and needs a rollout log. The reactive half needs
+nothing: a dispatch against a walled account dies with the CLI's own refusal,
+and that refusal names the reset.
+
+```text
+ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage
+to purchase more credits or try again at September 25, 2026 3:00 PM.
+```
+
+`classify-error.sh` already mapped that text to `TOKEN_EXHAUSTED`, and both
+dispatch surfaces already turned the category into a hold — but the hold's
+deadline was a blind `now + LOOM_CODEX_EXHAUSTED_COOLDOWN_SECS` (5h default),
+because nothing parsed `try again at <date>`. So `accounts check` showed no
+`Resets at` for a walled account, and the hold expired on a schedule unrelated
+to the provider's: early (the re-dispatch bounces again) or late (a recovered
+subscription idles).
+
+`tokens_pool::codex_reset` closes that. Both consumers of the adapter's
+terminal record — `sweep_registry::provider_health_feedback` (sweeps) and
+`role_runner::provider_health_feedback` (role ticks) — already read the child's
+retained log and scope their parse to their own dispatch region, so the horizon
+costs one extra call over text they already hold. The parsed instant is passed
+to `health::record_terminal_for_class_with_reset_at`, which uses it as the
+deadline for the two exhaustion arms and nothing else.
+
+Four properties keep a parser reading an agent's own transcript honest:
+
+| Property | Why |
+|---|---|
+| It never decides *whether* to hold an account | that is the adapter's classification, from the CLI's stderr; this text decides only *when* an already-decided hold ends, so a transcript quoting a refusal changes nothing |
+| The **last** match in the dispatch region wins | the CLI's fatal refusal is the last thing written before exit; anything the agent said is necessarily earlier |
+| Only one date shape is recognised | `<Month> <day>, <year> <h:mm AM/PM>`, read as host-local (the CLI prints no timezone, and the process that printed it and the daemon that reads it are the same host). A relative horizon, a bare time, an ambiguous/nonexistent local time (DST) all parse to nothing |
+| Temporal policy is downstream | a horizon already past, or further out than 35 days, falls back to the configured cooldown — a bogus reading degrades to the pre-#8539 behaviour rather than inventing a hold |
+
+The parse happens in `loom-daemon`, not in `spawn-codex.sh`, for two reasons:
+date parsing is new executable logic and belongs in the daemon
+([shell-language-policy.md](https://github.com/rjwalters/loom/blob/main/.loom/docs/shell-language-policy.md)),
+and a new `LOOM_TERMINAL_RESULT` field
+would be dropped wholesale by an older daemon on a mixed-version host, losing
+the bad-mark along with the horizon. Parsing text the adapter already writes
+cannot regress an existing path.
+
+After such a refusal, `accounts check` reports the account `exhausted` with the
+parsed instant in `Resets at`, and `select_healthy_at` skips it until exactly
+then.
 
 Three guardrails bound what a measurement may do:
 

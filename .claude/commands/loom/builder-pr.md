@@ -588,7 +588,7 @@ Before creating a PR, verify your title:
 
 ## Commit Messages: Same Rules as PR Titles
 
-Commit messages follow the **exact same rules** as PR titles above. Since this repo uses squash merge, the PR title becomes the final commit on main — but individual commit messages still matter for worktree history and debugging.
+Commit messages follow the **exact same rules** as PR titles above. This repo merges with merge commits (#9105), so each commit message survives onto main verbatim — write each one as durable history.
 
 ### How to Write Commit Messages
 
@@ -638,7 +638,7 @@ body. `--signoff` is harmless when not required. See
 > **CRITICAL**: PRs MUST include an issue reference in the body — either a closing keyword
 > (`Closes #N` / `Fixes #N` / `Resolves #N`) for a full implementation, or a non-closing
 > reference (`Part of #N` / `Contributes to #N`) for a declared **partial increment** of a
-> family/epic issue (see "Partial increments" below).
+> family/epic issue (see "Multi-PR landings" below).
 > A closing keyword is required for:
 > 1. GitHub to auto-close the issue when the PR merges
 > 2. **Sweep orchestration to detect your PR during phase validation**
@@ -649,7 +649,8 @@ body. `--signoff` is harmless when not required. See
 ### PR Label Rules
 
 **When creating a NEW PR:**
-- Add `loom:review-requested` label during creation
+- Add `loom:review-requested` during creation, plus `loom:operator-priority`
+  if the issue carries it (#9244: the one label a role copies, never invents)
 - This is the ONLY time you add labels to a PR
 
 **After PR creation:**
@@ -658,7 +659,7 @@ body. `--signoff` is harmless when not required. See
 - NEVER add `loom:pr` yourself (only Judge can approve)
 - NEVER modify any labels on PRs you didn't create
 
-**Why?** PR labels are signals in the review pipeline:
+**Why?** PR labels are review-pipeline signals:
 ```
 Builder creates PR -> loom:review-requested -> Judge reviews
                                             |
@@ -667,7 +668,7 @@ Builder creates PR -> loom:review-requested -> Judge reviews
                       Judge adds loom:pr -> Champion merges
 ```
 
-If you touch these labels, you break the pipeline.
+Touching them breaks the pipeline.
 
 ### GitHub Auto-Close Requirements
 
@@ -732,70 +733,81 @@ GitHub's auto-close feature only works with specific keywords **immediately foll
 > "follow-up" checklist. What breaks the link is a word between the keyword and the reference
 > (`close issue #X`, `Fixes issue #X`), not its position in the body. This cuts both ways: it
 > is why `Fixes issue #123` silently fails to close, and why a stray `then close #123` buried
-> in prose silently *does* close — see "Partial increments" below (#4569).
+> in prose silently *does* close — see "Multi-PR landings" below (#4569).
 
-### Partial increments (family/epic issues)
+### Multi-PR landings: every PR declares its issue (#9465)
 
-The auto-close guidance above assumes one issue → one PR → close. Some issues track a **family** of work (labeled `loom:epic` / `loom:epic-phase`, or whose body explicitly scopes a family such as "~346 conformance failures across N files") and are intentionally landed in slices. For a PR that implements only a subset — with tracked work remaining after it merges — use a **non-closing** reference instead:
+The auto-close guidance above assumes one issue → one PR → close. **Two shapes break that, and
+the reference requirement applies to both** — not only to declared families:
+
+- a **family/epic** issue (`loom:epic` / `loom:epic-phase`, or a body scoping a family such as
+  "~346 conformance failures across N files") landed deliberately in slices;
+- an **ordinary** issue that happens to land through more than one merged PR — Doctor rework that
+  opened a fresh PR, a Judge-rejected-then-refixed cycle, a first slice shipped on a reused
+  `feature/issue-N` branch. This is the majority case and had no documented requirement at all:
+  19 of 329 sweep-landing PRs (2026-08-15..09-29) were invisible to GitHub's issue↔PR link, and
+  one issue landed through 47 PRs.
+
+For a PR that does NOT complete the issue, use a **non-closing** reference *and* the
+machine-readable trailer:
 
 ```markdown
 Part of #123
-Contributes to #123
+Loom-Issue: rjwalters/loom#123
 ```
 
-`Part of #N` references the issue (keeping the PR discoverable) but does NOT trigger auto-close, so the family/epic issue survives the merge. Only the **final increment** that completes the family uses `Closes #N`.
+- `Part of #N` / `Contributes to #N` keeps the PR discoverable without triggering auto-close, so
+  the issue survives the merge, and is the form merge-pr.sh parses to fire the `loom:building` →
+  `loom:issue` reset (#3667). **Do not substitute `Refs #N`** — nothing parses it, so the reset
+  silently no-ops.
+- `Loom-Issue: owner/repo#N` is the machine-readable link (`loom-daemon merge-pr-refs
+  loom-issue-trailer-refs`), greppable without GitHub's keyword parser or prose matching. The
+  `owner/repo` slug is **required** (a bare `Loom-Issue: #123` does not parse). **Required on
+  every PR whose body does not close its issue**; optional on a `Closes #N` PR, whose closing
+  reference already carries the link. Only the **final** PR uses `Closes #N`.
 
-**Both the PR body and the commit message must carry the same reference.** This repo squash-merges, and GitHub harvests closing keywords from the squash commit message as well as the PR body — a stray `Closes #N` in the commit body will auto-close the family issue even when the PR body says `Part of #N`. When in doubt on a `loom:epic` issue, prefer `Part of #N`.
+**Write both as PLAIN TEXT — never in backticks (#8796).** A trailer inside an inline code span
+(or a fenced block) is **silently ignored** — merge-pr.sh blanks code spans before matching,
+deliberately (#5234), so the PR looks correct to a reviewer and to Judge while the #3667 reset
+never fires and the issue is stranded at `loom:building` with nothing logged (the
+rjwalters/kicad-tools PR #5686 / #5240 incident).
+
+```markdown
+Part of #123              <- declaration: parsed, the label reset fires on merge
+`Part of #123`            <- code span: NOT a declaration, reset silently skipped
+```
+
+**Both the PR body and the commit messages must carry the same reference.** GitHub harvests closing keywords from the PR body and the merge commit's subject (this repo merges with merge commits, #9105) — individual commit bodies are not parsed, but keep the reference consistent in them anyway. When in doubt, prefer `Part of #N`.
 
 #### A stray closing keyword ANYWHERE in the body defeats `Part of #N` (#4569)
 
 `Part of #N` / `Contributes to #N` is not a shield. GitHub does not weigh the two references
 against each other — **one** closing keyword adjacent to `#N` anywhere in the body is enough
-to close the issue on merge, no matter how explicitly the rest of the body says otherwise.
+to close the issue on merge, no matter how explicitly the rest of the body says otherwise. This
+is observed, not hypothetical (a `Contributes to #2` PR whose operator-handoff step read "then
+close #2" closed #2 on merge, and it had to be reopened by hand).
 
-This is a real, observed failure, not a hypothetical. A partial-increment PR ended with the
-deliberate trailer `Contributes to #2` and an operator-handoff section that read:
-
-```markdown
-## Operator follow-up (after merge)
-
-3. Verify `npm view censusapi` resolves to `0.0.1`, then close #2.   ← closes #2 on merge!
-```
-
-GitHub honored that `close #2`. The issue was closed on squash-merge and had to be reopened
-by hand. (For the record: the head branch was `feature/issue-2`, but branch naming was *not*
-the cause — Loom's `feature/issue-N` convention does not create a Development-sidebar link.)
-
-**Rules for a partial-increment PR body:**
+**Rules for a non-closing PR body:**
 
 - **Never** write a closing keyword immediately before the tracked issue's number. Write
   `then close the issue`, or `then close issue #2` (the intervening word breaks the link).
 - The tracked issue number should appear exactly once with a keyword: the `Part of #N` /
   `Contributes to #N` reference. Scan the whole body — including checklists, test plans, and
-  operator-handoff sections — before creating the PR:
+  operator-handoff sections — and every commit message on the branch (#4595), before pushing:
 
   ```bash
   # Must print nothing for the tracked issue N:
   grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#N\b' <<<"$PR_BODY"
-  ```
-
-- **The same rule applies to every commit message on the branch** (#4595). The squash message
-  GitHub composes from your commits is parsed for closing keywords too, so a stray
-  `close #N` in a commit body closes the issue even when the PR body is spotless. Scan them
-  before pushing — and amend/reword (`git commit --amend`, `git rebase -i`) if one is there:
-
-  ```bash
-  # Must print nothing for the tracked issue N:
   git log --format=%B origin/main..HEAD \
     | grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#N\b'
   ```
 
-**Backstop (not a substitute for the above)**: `merge-pr.sh` detects this contradiction
-before merging — in the PR body, in any commit message of the PR, and in GitHub's
-`closingIssuesReferences` — and warns naming which source is at fault, then reopens the issue
-immediately after the merge if GitHub closed it anyway. That leaves a close/reopen flicker
-plus notification churn on the issue — fix the body or the commit message instead of relying
-on it.
+merge-pr.sh backstops some of this — it warns on a whole-line backticked `Part of` trailer,
+warns naming which source carries a contradicting closing keyword, and reopens the issue if
+GitHub closed it anyway — but every warning reaches only whoever runs the merge, a reopen leaves
+a close/reopen flicker plus notification churn, and **nothing checks the `Loom-Issue:` trailer at
+merge time**. Get it right in the body. Full rationale,
+incidents, and the trailer's parser contract: `.loom/docs/issue-pr-linking.md`.
 
 ### PR Creation Checklist
 
@@ -873,13 +885,15 @@ if [[ "$FENCE_RC" -eq 3 ]]; then
   echo "Lease fence: EXPIRED — MY OWN claim's lease record is stale on the forge's own clock (my renewal loop died). Aborting before push/PR-open; NOT pushing, NOT opening a PR." >&2
   # Stop here for issue $N. Do not push, do not create a PR, do not touch
   # the loom:building label or contest any peer's claim — report this issue
-  # as not-contributed-this-run, same as any other Builder failure marker.
+  # as not-contributed-this-run.
   # (Issue #6783: exit 3 now means the EXPIRED lease is THIS sweep's own —
   # an expired lease owned by a DIFFERENT, abandoned host is no longer a
   # fencing abort; that case is folded into FENCE_RC == 0 below.)
 elif [[ "$FENCE_RC" -eq 4 ]]; then
   echo "Lease fence: SUPERSEDED — a different host's lease is now the freshest for issue $N. Aborting before push/PR-open; NOT pushing, NOT opening a PR." >&2
   # Same stop-here handling as the EXPIRED branch above.
+elif [[ "$FENCE_RC" -eq 5 ]]; then
+  echo "Lease fence: BRANCH_COLLISION — feature/issue-$N exists on origin, unpushed by this worktree. Yours: adopt via create-pr.sh. Else: stand down. NEVER a suffix branch." >&2
 else
   # FENCE_RC == 0 (fresh & own host, OR no lease evidence to fence against —
   # fail-open, see the script's own header doc — OR an EXPIRED lease owned
@@ -901,12 +915,10 @@ the comment is still fresh (`now - updated_at <= LEASE_TTL_MINUTES`, default
 `host=` still names **this** host (`--host`, defaulting to this host's own
 identity — same `LOOM_HOST_ID` > `$HOSTNAME` > `hostname` precedence
 `sweep_registry::host_identity()` uses). It aborts (exit `3` = expired-and-
-own-host, `4` = superseded — the two are logged distinctly so a
-post-incident read can tell them apart) **before doing anything
-externally-visible**: no push, no PR. It never contests or cleans up a peer's
-claim — the `loom:building` label is left exactly as-is; that is out of
-scope for this check (see the script's own header doc,
-`defaults/scripts/sweep-lease-fence.sh`). Since #6320 an in-session run
+own-host, `4` = superseded, `5` = branch collision)
+**before doing anything externally-visible**: no push, no PR. It
+never touches a peer's claim — the `loom:building` label is
+left as-is. Since #6320 an in-session run
 (manual `/loom:sweep`, GH Actions cron, `--no-daemon`) publishes its own
 lease at pre-flight (`sweep-lease-publish.sh`, sweep.md Step 1b), so this
 check is now meaningful on both dispatch paths rather than only the
@@ -929,7 +941,7 @@ live peer genuinely holds the claim.
 ### Creating the PR
 
 **Open the PR with `./.loom/scripts/create-pr.sh`, never a bare `gh pr create` (#6074).**
-The flags are a subset of `gh pr create`'s, so the call below reads the same — but three
+The flags are a subset of `gh pr create`'s, so the call below reads the same — but four
 things a bare `gh pr create` cannot do are load-bearing here:
 
 - **It adopts an already-open PR for your branch** (prints that PR's URL, exits 0, creates
@@ -941,21 +953,25 @@ things a bare `gh pr create` cannot do are load-bearing here:
   two-workers-race scenario that otherwise isn't caught until Judge review. On a detected
   supersede it refuses to open a duplicate PR (names the superseding PR, exits non-zero,
   does not push further, does not delete the branch). `Part of #N` / `Contributes to #N`
-  partial-increment references are exempt by construction — see "Partial increments" below.
+  partial-increment references are exempt by construction — see "Multi-PR landings" below.
+- **It enforces a 1:1 issue-to-PR review-gate (#9453 phase 5)** — the race adopt-first
+  above can't catch: two builders on *different* branches for the *same* issue. Re-runs
+  `forge check-open-pr` on your body's referenced issue (closing OR `Part of`); an open PR
+  on a different head branch refuses (exit `6`, names it). **If refused: stand down** —
+  close your branch, or escalate to Judge/a human if yours genuinely supersedes it.
 - **It survives the GitHub App permission window.** A cached App installation token can
   hold `Contents:write` while `Pull-requests:write` has not propagated into it yet, so
   your `git push` succeeds and the very next `gh pr create` returns `403 Resource not
   accessible by integration`. The script force-mints a fresh installation token (bypassing
   the ~1h cache) and then falls back to a personal token, instead of dying. Before this,
   that 403 killed the sweep with no PR and the next dispatch **rebuilt the identical
-  work**, leaving an orphaned `feature/issue-N` branch behind each pass.
+  work**, orphaning a `feature/issue-N` branch each pass.
 
 **If it still fails, do NOT rebuild and do NOT delete the branch** — your commits are
-already pushed. Re-run the script (it is idempotent), or report the branch name so the PR
-can be opened from it by hand. The same rule applies on an install predating this script
-(no `.loom/scripts/create-pr.sh` on disk — fall back to a plain `gh pr create` there): a
-`403 … not accessible by integration` after a successful push is a transient credential
-window, never a signal to redo the work.
+pushed. Re-run the script (idempotent), or report the branch name for a hand-opened PR.
+On an install predating this script (no `.loom/scripts/create-pr.sh` — use plain
+`gh pr create`), a `403 … not accessible by integration` after a successful push is
+still a transient credential window, never a signal to redo the work.
 
 ```bash
 # CORRECT way to create PR

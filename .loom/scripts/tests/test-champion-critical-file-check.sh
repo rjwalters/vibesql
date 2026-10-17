@@ -54,6 +54,11 @@
 #      repeated FAIL against an unchanged file set is idempotent (no
 #      duplicate label/comment); and a later PASS (diff no longer touches a
 #      critical file) clears the label and posts a one-time cleared notice.
+#   5. (#9357) The bare ".sql" pattern is gone: reference/analytics query SQL
+#      that nothing executes (this repo's `defaults/observability/**/*.sql`
+#      SigNoz/ClickStack queries, SQL test fixtures) no longer arms the hold,
+#      while every real schema surface — which in this repo always lives under
+#      a `migrations/` directory — is still caught by "migrations/".
 #
 # Usage:
 #   ./.loom/scripts/tests/test-champion-critical-file-check.sh
@@ -74,6 +79,10 @@ else
     PROMPT_DIR="$(cd "$SCRIPTS_DIR/../.claude/commands/loom" && pwd)"
 fi
 CHAMPION_MD="$PROMPT_DIR/champion-pr-merge.md"
+# The durable-hold state machine moved to its own sibling prompt in #9016 (the
+# criterion itself stays in champion-pr-merge.md, which now carries only the
+# pointer); its commands are pinned against this file.
+CRITICAL_HOLD_MD="$PROMPT_DIR/champion-critical-file-hold.md"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -130,13 +139,14 @@ assert_doc_lacks() {
 # verbatim (pattern list + matching loop) from defaults/.claude/commands/
 # loom/champion-pr-merge.md.
 # =====================================================================
+# NOTE: no bare ".sql" entry — dropped in #9357 (see the "bare .sql" section
+# below for the false positive it caused on reference query SQL).
 CRITICAL_PATTERNS=(
     "Cargo.toml"
     "loom-daemon/Cargo.toml"
     "loom-api/Cargo.toml"
     "package.json"
     ".github/workflows/"
-    ".sql"
     "migrations/"
     "_migration.py"
 )
@@ -305,6 +315,49 @@ fixture="docs/migration-notes.md"
 out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
 assert_eq "PASS" "$out" \
     "docs/migration-notes.md (bare 'migration' substring, no directory/suffix convention) passes"
+
+echo
+echo "--- champion_critical_file_check: bare '.sql' pattern false-positived on reference query SQL (#9357) ---"
+
+# defaults/observability/**/*.sql is this repo's own reference/analytics query
+# surface: SigNoz/ClickStack queries documented for an operator to run by hand,
+# never executed by build, release or migration machinery. The bare ".sql"
+# pattern matched every one of them, arming the durable critical-file hold on
+# every head (observed on #9348's ci-queries.sql and again on #9775's
+# cycle-time-extract.sql) for a diff with no schema surface at all.
+fixture=$'defaults/docs/ci-observability.md\ndefaults/observability/signoz/ci-queries.sql'
+out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
+assert_eq "PASS" "$out" \
+    "reference query SQL under defaults/observability/ passes (it is not a schema surface)"
+
+fixture=$'defaults/observability/clickstack/cycle-time-extract.sql\nloom-daemon/tests/fixtures/signoz_usage/fixture.sql'
+out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
+assert_eq "PASS" "$out" \
+    "query SQL and SQL test fixtures pass (neither is executed by build/release/migration machinery)"
+
+# ...while every real schema surface in this repo lives under a migrations/
+# directory, so "migrations/" alone still catches it — which is exactly why
+# dropping the bare extension costs zero coverage (Option 1 in #9357).
+fixture=$'dashboard/src/lib.rs\ndashboard/migrations/0003_ephemeral_compute.sql'
+out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
+assert_eq "FAIL: dashboard/migrations/0003_ephemeral_compute.sql" "$out" \
+    "a real schema SQL path (dashboard/migrations/*.sql) is still caught by the migrations/ pattern"
+
+fixture=$'quickstarts/api/main.py\nquickstarts/api/migrations/0001_initial.sql'
+out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
+assert_eq "FAIL: quickstarts/api/migrations/0001_initial.sql" "$out" \
+    "a quickstart's migrations/*.sql is still caught by the migrations/ pattern"
+
+# Edge case from #9357's test plan: ".sql" as a substring of a directory or
+# identifier name rather than a file extension. `src/sql_utils/` has no dot so
+# it passed under the old pattern too; `not_a.sqlite_thing.rs` contains a
+# literal `.sql` and used to FAIL — a second false positive the narrowing
+# fixes, and the reason a bare extension substring was never a safe proxy for
+# "this is a schema file".
+fixture=$'src/sql_utils/foo.py\nsrc/not_a.sqlite_thing.rs'
+out="$(printf '%s\n' "$fixture" | champion_critical_file_check)"
+assert_eq "PASS" "$out" \
+    "paths with 'sql'/'.sql' inside a directory or identifier name (no schema file) pass"
 
 echo
 echo "--- version_only_diff_from_patch: real PR #6118 version-bump diff shapes carve out cleanly (#6147) ---"
@@ -479,6 +532,24 @@ assert_doc_contains "$CHAMPION_MD" \
     "champion-pr-merge.md documents the #5723 docs/migration/ false-positive fix"
 
 echo
+echo "--- Doc pins: shipped markdown no longer carries the bare '.sql' extension pattern (#9357) ---"
+
+# Two leading spaces anchor this to the CRITICAL_PATTERNS array entry itself,
+# so prose that merely mentions `.sql` (including the explanatory comment the
+# fix adds) does not satisfy or defeat the pin.
+assert_doc_lacks "$CHAMPION_MD" \
+    '  ".sql"' \
+    "CRITICAL_PATTERNS array no longer contains the bare .sql extension pattern"
+
+assert_doc_lacks "$CHAMPION_MD" \
+    '- `*.sql` - database schema changes' \
+    "prose critical-file-patterns bullet list no longer advertises a bare *.sql pattern"
+
+assert_doc_contains "$CHAMPION_MD" \
+    "#9357" \
+    "champion-pr-merge.md documents the #9357 bare-.sql false-positive fix in the pattern list"
+
+echo
 echo "--- Doc pins: shipped markdown ships the version-only diff carve-out (#6147) ---"
 
 assert_doc_contains "$CHAMPION_MD" \
@@ -562,17 +633,25 @@ assert_lacks() {
     fi
 }
 
-# STATE_FILE holds exactly one line: "none" | "held" | "cleared" — the state
-# implied by whichever of the two markers was posted LAST, mirroring the
-# doc's "last comment matching either marker prefix" lookup without needing
-# real timestamps (a deterministic check-loop makes this sufficient — see the
-# doc's own rationale for skipping criterion #2's sticky-hold machinery).
+# STATE_FILE holds exactly one line: "<state> [head]", where <state> is
+# "none" | "held" | "released" | "cleared" — the state implied by whichever of
+# the three episode markers was posted LAST, and the head SHA that marker
+# recorded in its own `<!-- champion:hold-state head=<sha> -->` line. This
+# mirrors the doc's "last comment matching any marker prefix" lookup without
+# needing real timestamps (a deterministic check-loop makes this sufficient —
+# see the doc's own rationale for skipping criterion #2's sticky-hold
+# machinery). `released` is #9016's state: the operator hand-removed
+# loom:operator at the head the hold was written against.
 hold_state_get() {
     local f="$1"
-    [[ -f "$f" ]] && cat "$f" || echo "none"
+    [[ -f "$f" ]] && awk '{print $1}' "$f" || echo "none"
+}
+hold_head_get() {
+    local f="$1"
+    [[ -f "$f" ]] && awk '{print $2}' "$f" || echo ""
 }
 hold_state_set() {
-    printf '%s' "$2" >"$1"
+    printf '%s %s' "$2" "${3:-}" >"$1"
 }
 
 # LABEL_FILE tracks whether loom:operator is currently applied ("1"/"0").
@@ -584,35 +663,80 @@ label_set() {
     printf '%s' "$2" >"$1"
 }
 
-# Simulates one Champion tick of criterion #3's durable-hold logic, mirroring
-# the doc's FAIL / CURRENTLY_HELD branches verbatim. Reads a newline-separated
-# file list on stdin (same input shape as champion_critical_file_check).
+# Simulates one Champion tick of the durable-hold state machine in
+# champion-critical-file-hold.md, mirroring its FAIL action table and its PASS
+# branch verbatim. Reads a newline-separated file list on stdin (same input
+# shape as champion_critical_file_check); $3 is the PR's current head SHA
+# (default "sha-A"), which is what the #9016 release is recorded against.
+#
+# $4 stands in for `loom-daemon forge verdict-equivalent <pr> <recorded> <head>`
+# (#9416): the equivalence kind the verb would print for (state_head -> head_sha),
+# or EMPTY for "no answer / provably a different change", which is the fail-closed
+# arm the real tick keys on (it reads only an `EQUIVALENCE_KIND=` line, so an
+# absent binary, a `gh` outage, a merge-tree conflict and a kill switch all look
+# the same to it — empty). The comparison itself is deliberately NOT reimplemented
+# here, for the same reason the prompt does not reimplement it: one evidence
+# implementation, in loom-daemon/src/verdict_equivalence/, covered by its own
+# Rust tests.
+#
 # Emits one ACTION line per observable forge effect (comment posted, label
 # added/removed) so a test can assert on them without a live PR.
 champion_critical_file_hold_tick() {
-    local hold_state_file="$1" label_file="$2"
-    local result currently_held
+    local hold_state_file="$1" label_file="$2" head_sha="${3:-sha-A}" equiv_kind="${4:-}"
+    local result state state_head label_now action cf_equiv_kind=""
 
     result="$(champion_critical_file_check)"
-
-    case "$(hold_state_get "$hold_state_file")" in
-        held) currently_held=true ;;
-        *) currently_held=false ;;
-    esac
+    state="$(hold_state_get "$hold_state_file")"
+    state_head="$(hold_head_get "$hold_state_file")"
+    label_now="$(label_get "$label_file")"
 
     if [[ "$result" == FAIL:* ]]; then
-        if [[ "$currently_held" == true ]]; then
-            echo "HOLD:stands"
+        if [[ "$state" == "released" && "$state_head" == "$head_sha" ]]; then
+            action=none      # already released at this head, already acked
+        elif [[ "$label_now" == "1" && "$state" != "none" ]]; then
+            # The label is back on: a human re-asserted the hold, so there is no
+            # live release to carry, whatever the equivalence evidence says.
+            action=stands
+        elif [[ "$state" == "held" && -n "$state_head" && "$state_head" == "$head_sha" ]]; then
+            action=respect   # operator removed the label at the held head
+        elif [[ "$state" != "held" && "$state" != "released" ]]; then
+            action=hold      # fresh episode
+        elif [[ -n "$state_head" && -n "$equiv_kind" ]]; then
+            # The head moved, but the change this PR makes provably did not
+            # (#9416). Respect the release and RE-ANCHOR it at the new head.
+            cf_equiv_kind="$equiv_kind"
+            action=respect
         else
-            echo "COMMENT:champion:critical-file-hold"
-            hold_state_set "$hold_state_file" "held"
+            action=rearm     # a genuinely different diff, or a legacy hold
         fi
-        echo "LABEL_ADD:loom:operator"
-        label_set "$label_file" "1"
-    elif [[ "$currently_held" == true ]]; then
+
+        case "$action" in
+            none)
+                echo "RELEASED:no-rehold:$head_sha"
+                ;;
+            stands)
+                echo "HOLD:stands"
+                echo "LABEL_ADD:loom:operator"
+                label_set "$label_file" "1"
+                ;;
+            hold|rearm)
+                [[ "$action" == "rearm" ]] && echo "REARM:${state_head:-<none>}->$head_sha"
+                echo "COMMENT:champion:critical-file-hold"
+                echo "LABEL_ADD:loom:operator"
+                hold_state_set "$hold_state_file" "held" "$head_sha"
+                label_set "$label_file" "1"
+                ;;
+            respect)
+                # The whole point of #9016: NO LABEL_ADD on this path.
+                echo "COMMENT:champion:critical-file-release-respected"
+                echo "EQUIVALENCE:${cf_equiv_kind:-same-head}"
+                hold_state_set "$hold_state_file" "released" "$head_sha"
+                ;;
+        esac
+    elif [[ "$state" == "held" || "$state" == "released" ]]; then
         echo "COMMENT:champion:critical-file-hold-cleared"
         echo "LABEL_REMOVE:loom:operator"
-        hold_state_set "$hold_state_file" "cleared"
+        hold_state_set "$hold_state_file" "cleared" ""
         label_set "$label_file" "0"
     else
         echo "PASS:no-hold"
@@ -678,27 +802,262 @@ assert_eq "held" "$(hold_state_get "$HS")" \
 rm -f "$HS" "$LF"
 
 echo
+echo "--- critical-file hold: an operator's label removal at the held head is a durable release (#9016) ---"
+
+# Merge train #8996's exact shape: the hold stands, the operator removes
+# loom:operator by hand (the documented release), and the NEXT Champion tick
+# must not put it back — that re-add is what made the documented
+# `merge-pr.sh <N>` path unusable, because the #8112 verdict-contradiction
+# guard refuses `loom:pr` + `loom:operator` and has no override flag.
+HS="$(mktemp)"
+LF="$(mktemp)"
+rm -f "$HS" "$LF"
+
+printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-A" >/dev/null
+assert_eq "1" "$(label_get "$LF")" \
+    "precondition: the hold is standing with loom:operator applied at sha-A"
+
+label_set "$LF" "0"   # operator: gh pr edit --remove-label "loom:operator"
+rel="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-A")"
+assert_lacks "$rel" "LABEL_ADD:loom:operator" \
+    "the tick after a hand-removal at the held head does NOT re-apply loom:operator (#9016)"
+assert_contains "$rel" "COMMENT:champion:critical-file-release-respected" \
+    "the tick records the release durably, behind its own marker"
+assert_eq "released" "$(hold_state_get "$HS")" \
+    "episode state becomes released (the hold notice itself is never rewritten)"
+assert_eq "sha-A" "$(hold_head_get "$HS")" \
+    "the release is recorded against the head it was made at"
+assert_eq "0" "$(label_get "$LF")" \
+    "loom:operator stays OFF, so merge-pr.sh sees no loom:pr/loom:operator contradiction (#8112)"
+
+# ...and it stays released across further ticks, with no comment spam: this is
+# the "non-racy" half of the acceptance criterion. An operator can release,
+# walk away, and merge whenever.
+rel2="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-A")"
+assert_eq "RELEASED:no-rehold:sha-A" "$rel2" \
+    "a later tick at the same head is a complete no-op — no label, no comment (idempotent ack)"
+assert_eq "0" "$(label_get "$LF")" \
+    "loom:operator is still OFF after repeated ticks at the released head"
+
+echo
+echo "--- critical-file hold: the release survives an EQUIVALENT head move (#9416) ---"
+
+# THE #9416 TAX: the #8248 freshness remedy pushes a tree-identical re-date
+# commit (#8508), so the head moves while the diff the operator released is
+# byte-for-byte the same one. Pre-#9416 that re-armed the hold and demanded a
+# second human removal; #9348 paid that four times to land one PR.
+for kind in tree clean-merge rebase-patch-identical; do
+    hold_state_set "$HS" "released" "sha-A"
+    label_set "$LF" "0"
+    eq="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B" "$kind")"
+    assert_lacks "$eq" "LABEL_ADD:loom:operator" \
+        "an equivalent head move ($kind) does NOT re-arm the hold (#9416)"
+    assert_lacks "$eq" "COMMENT:champion:critical-file-hold" \
+        "an equivalent head move ($kind) posts no new hold notice"
+    assert_contains "$eq" "EQUIVALENCE:$kind" \
+        "the re-acknowledgement records WHICH equivalence carried the release ($kind) — audit trail (#9416)"
+    assert_eq "sha-B" "$(hold_head_get "$HS")" \
+        "the release is re-anchored at the new head, so the next tick needs no comparison ($kind)"
+    assert_eq "0" "$(label_get "$LF")" \
+        "loom:operator stays OFF across an equivalent head move ($kind)"
+done
+
+# ...and the re-anchored release is then honored at the new head with no
+# further evidence needed: the cheap same-head arm, no binary, no API call.
+again="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B")"
+assert_eq "RELEASED:no-rehold:sha-B" "$again" \
+    "the re-anchored release is a complete no-op on the next tick, with no equivalence answer at all"
+
+# FAIL CLOSED: the verb could not answer (absent binary, daemon predating the
+# verb, gh outage, shallow clone, merge-tree conflict, kill switch) or answered
+# "provably a different change". Both look like an empty kind, and both re-arm.
+hold_state_set "$HS" "released" "sha-A"
+label_set "$LF" "0"
+noans="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B" "")"
+assert_contains "$noans" "REARM:sha-A->sha-B" \
+    "no equivalence answer re-arms the hold — fail closed, the pre-#9416 behavior (#9416)"
+assert_contains "$noans" "LABEL_ADD:loom:operator" \
+    "the fail-closed arm re-applies loom:operator, so nothing merges unlooked-at"
+
+# A legacy hold (no recorded head) is never carried by equivalence either: there
+# is no recorded head to compare against, so there is nothing to prove.
+hold_state_set "$HS" "held" ""
+label_set "$LF" "0"
+legacy_eq="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B" "tree")"
+assert_contains "$legacy_eq" "LABEL_ADD:loom:operator" \
+    "a legacy hold with no recorded head re-arms even when an equivalence kind is offered (#9416)"
+
+# THE RESISTING CASE for #9416: a released episode whose `loom:operator` is BACK
+# ON. Proven equivalence must NOT be read as a live release — somebody put the
+# label back, which is a re-assertion of the hold, and the operator-release
+# inference (#9016) only ever meant "the label is absent". The hold stands.
+hold_state_set "$HS" "released" "sha-A"
+label_set "$LF" "1"
+relabeled="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B" "tree")"
+assert_contains "$relabeled" "HOLD:stands" \
+    "a re-added loom:operator overrides a proven equivalence — the hold stands (#9416)"
+assert_lacks "$relabeled" "champion:critical-file-release-respected" \
+    "no release is acknowledged while loom:operator is applied"
+assert_eq "1" "$(label_get "$LF")" \
+    "loom:operator stays ON when a human re-asserted the hold"
+
+echo
+echo "--- critical-file hold: a new push re-arms the hold after a release (#9016) ---"
+
+# The release is a decision about a diff, so it is scoped to that diff. A push
+# that CHANGES it produces one the operator never saw.
+hold_state_set "$HS" "released" "sha-A"
+label_set "$LF" "0"
+rearm="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B")"
+assert_contains "$rearm" "REARM:sha-A->sha-B" \
+    "a FAIL at a new head after a release re-arms the hold"
+assert_contains "$rearm" "COMMENT:champion:critical-file-hold" \
+    "the re-arm is a NEW hold notice, not an edit of the old one"
+assert_contains "$rearm" "LABEL_ADD:loom:operator" \
+    "the re-arm re-applies loom:operator at the new head"
+assert_eq "sha-B" "$(hold_head_get "$HS")" \
+    "the new episode records the new head"
+
+# A second hand-removal, now at sha-B, is honored in turn — the operator never
+# has to race a tick, whatever the history.
+label_set "$LF" "0"
+rel3="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B")"
+assert_lacks "$rel3" "LABEL_ADD:loom:operator" \
+    "a release at the re-armed head is honored too (no re-add), not read as the older release"
+assert_eq "released" "$(hold_state_get "$HS")" \
+    "the second release is recorded like the first"
+
+# A legacy hold (no recorded head — posted before #9016 added the hold-state
+# line) re-arms rather than being read as a release: fail-safe direction.
+hold_state_set "$HS" "held" ""
+label_set "$LF" "0"
+legacy="$(printf '%s\n' "$critical_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B")"
+assert_contains "$legacy" "LABEL_ADD:loom:operator" \
+    "a legacy hold with no recorded head re-arms instead of silently releasing (fail-safe)"
+
+# And a released episode still closes normally once the diff narrows.
+label_set "$LF" "0"
+hold_state_set "$HS" "released" "sha-B"
+closed="$(printf '%s\n' "$clean_fixture" | champion_critical_file_hold_tick "$HS" "$LF" "sha-B")"
+assert_contains "$closed" "COMMENT:champion:critical-file-hold-cleared" \
+    "a PASS closes a RELEASED episode too, not just a held one"
+assert_eq "cleared" "$(hold_state_get "$HS")" \
+    "the released episode ends in the cleared state"
+
+rm -f "$HS" "$LF"
+
+echo
 echo "--- Doc pins: shipped markdown ships the durable critical-file hold (#6879) ---"
 
-assert_doc_contains "$CHAMPION_MD" \
+assert_doc_contains "$CRITICAL_HOLD_MD" \
     'HOLD_MARKER="<!-- champion:critical-file-hold -->"' \
-    "criterion #3 defines its own durable-hold marker, distinct from criterion #2's champion:merge-risk-hold"
+    "the hold prompt defines its own durable-hold marker, distinct from criterion #2's champion:merge-risk-hold"
 
-assert_doc_contains "$CHAMPION_MD" \
+assert_doc_contains "$CRITICAL_HOLD_MD" \
     'CLEARED_MARKER="<!-- champion:critical-file-hold-cleared -->"' \
-    "criterion #3 defines a distinct cleared-marker for the release path"
+    "the hold prompt defines a distinct cleared-marker for the diff-narrowed release path"
 
-assert_doc_contains "$CHAMPION_MD" \
+assert_doc_contains "$CRITICAL_HOLD_MD" \
     'gh pr edit "$PR_NUMBER" --add-label "loom:operator"' \
-    "criterion #3's durable-hold path applies loom:operator (#5502) on FAIL"
+    "the durable-hold path applies loom:operator (#5502) on FAIL"
 
-assert_doc_contains "$CHAMPION_MD" \
+assert_doc_contains "$CRITICAL_HOLD_MD" \
     'gh pr edit "$PR_NUMBER" --remove-label "loom:operator"' \
-    "criterion #3's release path removes loom:operator once the diff no longer touches a critical file"
+    "the release path removes loom:operator once the diff no longer touches a critical file"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    "#6879" \
+    "the hold prompt documents the #6879 durable critical-file-hold fix"
 
 assert_doc_contains "$CHAMPION_MD" \
     "#6879" \
-    "champion-pr-merge.md documents the #6879 durable critical-file-hold fix"
+    "champion-pr-merge.md still documents the #6879 durable critical-file-hold fix"
+
+assert_doc_contains "$CHAMPION_MD" \
+    '[`champion-critical-file-hold.md`](champion-critical-file-hold.md)' \
+    "criterion #3 points at the sibling prompt that owns the hold state machine (#9016)"
+
+echo
+echo "--- Doc pins: the operator's release is durable and head-scoped (#9016) ---"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'RELEASED_MARKER="<!-- champion:critical-file-release-respected -->"' \
+    "the hold prompt defines the release-respected marker the operator's removal is recorded behind"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    '<!-- champion:hold-state head=$HEAD_SHA -->' \
+    "both the hold and the release notice record the head they were written against (reused by merge-pr.sh's #7419 staleness warning)"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'OPERATOR_LABEL_NOW=$(jq -r ' \
+    "the tick reads whether loom:operator is currently applied — the signal a hand-removal produces"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'CF_ACTION=respect' \
+    "the tick has an explicit 'respect the release' action, distinct from re-holding"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'CF_ACTION=rearm' \
+    "the tick re-arms the hold when the head moved past the released one"
+
+# The operator-facing procedure has to be the one that actually works: remove
+# the label, then run merge-pr.sh, with an explicit promise that Champion will
+# not put the label back at this head. The pre-#9016 wording promised a
+# `merge-pr.sh` run the #8112 guard refused.
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'gh pr edit $PR_NUMBER --remove-label \"loom:operator\"' \
+    "the hold notice's Next steps tell the operator to remove loom:operator first"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    './.loom/scripts/merge-pr.sh $PR_NUMBER' \
+    "the hold notice's Next steps name the merge command that follows the removal"
+
+# One line, not a two-line needle: `grep -F` splits a needle on newlines and
+# ORs the parts, so a multi-line pin silently degrades to "either line".
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'no need to beat a Champion tick to it.' \
+    "the hold notice states that the release is durable, i.e. the procedure is not a race (#9016)"
+
+assert_doc_lacks "$CRITICAL_HOLD_MD" \
+    '**Next steps** — this hold stays in force until one of these happens:' \
+    "the pre-#9016 hold wording (which described a merge path the #8112 guard refused) is gone"
+
+echo
+echo "--- Doc pins: the release survives an equivalent head move (#9416) ---"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'forge verdict-equivalent \' \
+    "the tick asks loom-daemon for the equivalence rather than deriving a second comparison in shell (#9416)"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    "sed -n 's/^EQUIVALENCE_KIND=//p'" \
+    "the tick keys on the EQUIVALENCE_KIND= stdout line, never on an exit status — so every failure mode is the same fail-closed arm"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    '<!-- champion:hold-equivalence kind=$CF_EQUIV_KIND from=$STATE_HEAD to=$HEAD_SHA -->' \
+    "the respected-release notice records WHICH equivalence carried the hold, keeping history auditable (#9416)"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'FAIL CLOSED' \
+    "the prompt states the fail-closed rule for the equivalence check (#9416)"
+
+assert_doc_contains "$CRITICAL_HOLD_MD" \
+    'CI is never exempted' \
+    "the prompt states that only the hold is ever exempted, never a required check (#9416)"
+
+# The old head-literal promise has to be gone: it is the sentence that taught
+# the operator a re-date push would cost them a second removal.
+assert_doc_lacks "$CRITICAL_HOLD_MD" \
+    'while this PR'"'"'s\nhead is \`$HEAD_SHA\` Champion will **not** put it back' \
+    "the pre-#9416 head-literal durability promise is gone from the hold notice"
+
+assert_doc_lacks "$CRITICAL_HOLD_MD" \
+    'A new push re-arms the hold.' \
+    "the blanket 'a new push re-arms' claim is gone — a tree-identical re-date push does not (#9416)"
+
+assert_doc_lacks "$CHAMPION_MD" \
+    'CLEARED_MARKER="<!-- champion:critical-file-hold-cleared -->"' \
+    "the hold's commands live in exactly one place — not duplicated back into champion-pr-merge.md"
 
 assert_doc_lacks "$CHAMPION_MD" \
     '- **critical-file**: the sorted, comma-joined list of touched critical file paths.' \

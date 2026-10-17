@@ -133,6 +133,24 @@ echo ""
 echo "Testing forge_gh_*_rl_safe REST-fallback wrappers..."
 
 STUB_DIR=$(mktemp -d)
+# #9548: every wrapper vets its repo through the write scope first. The suite
+# runs from a checkout registered as owner/repo (origin, .loom/, push reported
+# to the permission probe), so the real decision admits it.
+# shellcheck source=lib/write-scope-fixture.sh
+source "$SCRIPT_DIR/lib/write-scope-fixture.sh"
+write_scope_register "$STUB_DIR/checkout" owner/repo
+cd "$STUB_DIR/checkout"
+
+# #9774: forge_gh_comment_rl_safe tries the daemon chokepoint before the gh
+# ladder. This suite's subject is the ladder, so pin the SELF daemon to a
+# mock that refuses — the gh stub stays the path under test, deterministically.
+cat > "$STUB_DIR/loom-daemon" <<'MOCK'
+#!/usr/bin/env bash
+echo "mock loom-daemon: forge comment not under test here" >&2
+exit 127
+MOCK
+chmod +x "$STUB_DIR/loom-daemon"
+export LOOM_DAEMON_SELF_BIN="$STUB_DIR/loom-daemon"
 ARGV_LOG="$STUB_DIR/argv.log"
 GH_MODE_FILE="$STUB_DIR/mode.txt"
 # Captures the JSON body a `gh api ... --input -` call reads from stdin, so
@@ -330,16 +348,19 @@ rest_call_count="$(grep -c "^api " "$ARGV_LOG" || true)"
 assert_eq "1" "$rest_call_count" \
     "forge_gh_create_issue_rl_safe REST fallback is a SINGLE call (no create-then-label)"
 
-# Empty NWO -> gh's literal {owner}/{repo} placeholder, which gh expands from
-# the git remote with zero API calls (never `gh repo view`, itself GraphQL).
+# Empty NWO -> the repo `loom_write_repo` vetted, named explicitly (#9548).
+# The old `{owner}/{repo}` placeholder is exactly what #9548 removed from write
+# paths: gh expands it from an `upstream` remote in preference to `origin`.
+# (Production vetting resolves the target from git config and probes over REST,
+# so this path still makes no GraphQL call.)
 _run_stubbed ratelimited forge_gh_create_issue_rl_safe "" "T" "B" >/dev/null 2>&1
 TESTS_RUN=$((TESTS_RUN + 1))
-if grep -qF "api --method POST repos/{owner}/{repo}/issues" "$ARGV_LOG"; then
+if grep -qF "api --method POST repos/owner/repo/issues" "$ARGV_LOG" && ! grep -qF "{owner}" "$ARGV_LOG"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "  ${GREEN}PASS${NC}: forge_gh_create_issue_rl_safe uses the zero-API-call {owner}/{repo} placeholder when NWO is empty"
+    echo -e "  ${GREEN}PASS${NC}: forge_gh_create_issue_rl_safe names the vetted repo (never {owner}/{repo}) when NWO is empty"
 else
     TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "  ${RED}FAIL${NC}: forge_gh_create_issue_rl_safe must use the {owner}/{repo} placeholder when NWO is empty"
+    echo -e "  ${RED}FAIL${NC}: forge_gh_create_issue_rl_safe must name the vetted repo, not {owner}/{repo}, when NWO is empty"
 fi
 assert_eq "[]" "$(jq -c '.labels' "$API_STDIN_LOG")" \
     "forge_gh_create_issue_rl_safe REST payload uses an empty labels array when no labels are given"
@@ -437,7 +458,28 @@ else
 fi
 
 comment_call_count="$(grep -c 'forge_gh_comment_rl_safe "\$REPO_NWO"' "$MERGE_PR_SRC" || true)"
-assert_eq "4" "$comment_call_count" "merge-pr.sh routes all 4 comment call sites (2x issue, 2x PR) through forge_gh_comment_rl_safe"
+assert_eq "3" "$comment_call_count" "merge-pr.sh routes all 3 comment call sites (PR override, shared partial-increment helper, stacked-child PR) through forge_gh_comment_rl_safe"
+
+# The two partial-increment comments (partial-merged, premature-close) share
+# one helper that owns the single wrapper call above; both kinds must still
+# reach it, so the #4856 rate-limit-safe coverage of each is preserved.
+partial_helper_calls="$(grep -c '^ *_mp_post_partial_comment \(partial-merged\|premature-close\) ' "$MERGE_PR_SRC" || true)"
+assert_eq "2" "$partial_helper_calls" "both partial-increment comment kinds route through _mp_post_partial_comment"
+
+# ...and nothing posts a comment by invoking gh directly. The two assertions
+# above pin the shape of the call sites that DO exist; this one pins that no
+# fourth, unwrapped one was added beside them -- which a count of 3 would
+# otherwise happily accept as "3 wrapped calls plus a raw one". The `gh issue
+# reopen` check further down is the same idea for its own call site, but it
+# names one exact retired line and so says nothing about `comment`.
+#
+# Comment lines are stripped first: merge-pr.sh's operator-advice strings name
+# these commands as prose ("may need manual 'gh issue edit'"), and those must
+# not read as call sites. `$GH` is covered as well as literal `gh`, since the
+# script resolves the binary through that variable.
+raw_comment_calls="$(grep -vE '^[[:space:]]*#' "$MERGE_PR_SRC" \
+  | grep -cE '(^|[^_[:alnum:]])(gh|\$GH|"\$GH") (issue|pr) comment' || true)"
+assert_eq "0" "$raw_comment_calls" "merge-pr.sh posts no comment via a raw gh invocation — every one goes through the #4856 wrapper"
 
 # The raw, un-wrapped mutating calls this issue is about must no longer
 # appear standalone (they are now routed through the wrapper functions

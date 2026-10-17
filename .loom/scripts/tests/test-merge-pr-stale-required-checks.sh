@@ -129,6 +129,8 @@ Merge blocked: PR #8078's required check \`File Size Ratchet\` last ran at 2026-
 REFUSAL
 exit 1" ;;
             nodate) echo "echo 'could not determine'; exit 2" ;;
+            lookupfail) echo "echo \"Merge blocked: PR #8078's required-check freshness guard (#8248) could not determine whether the green required checks predate the base tip — ruleset lookup failed: gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)\"; exit 2" ;;
+            cleanwarn) echo "echo 'Warning: required-check freshness guard (#8248): the ruleset lookup for '\''main'\'' is gated by this repository'\''s GitHub plan (#8844).' >&2; echo 'LOOM-STALE-CHECKS-CLEAN'; exit 0" ;;
             silent) echo "exit 0" ;;
             hang)   echo "exit 127" ;;
         esac
@@ -140,6 +142,8 @@ STUB_CLEAN="$(make_stub clean)"
 STUB_STALE="$(make_stub stale)"
 STUB_NODATE="$(make_stub nodate)"
 STUB_SILENT="$(make_stub silent)"
+STUB_CLEANWARN="$(make_stub cleanwarn)"
+STUB_LOOKUPFAIL="$(make_stub lookupfail)"
 
 # --- Shared globals the function reads ---
 PR_NUMBER="8078"
@@ -184,6 +188,7 @@ assert_contains "$LAST_OUT" "2026-09-18 11:45:21 UTC" "block names the base-tip 
 LOOM_DAEMON_BIN="$STUB_NODATE" run_guard
 assert_eq "1" "$LAST_RC" "exit 2 (undeterminable) -> merge refused (fail closed)"
 assert_contains "$LAST_OUT" "could not run" "fail-closed path explains itself"
+assert_contains "$LAST_OUT" "What it reported: could not determine" "the subcommand's own stdout survives into the refusal"
 
 # T4: exit 0 WITHOUT the sentinel (old/silent binary) -> fails closed too;
 # only a positive clean signal passes.
@@ -219,6 +224,31 @@ assert_contains "$(cat "$STUB_DIR/argv-clean")" "--base-ref trunk" "missing .bas
 PR_JSON='{"base":{"ref":"main"}}'
 unset DEFAULT_BRANCH_NAME
 
+# T9 (#8844): the plan-gate path. On a private repo whose GitHub plan has no
+# rulesets, the daemon answers CLEAN on stdout AND a `Warning:` on stderr
+# saying which source it read as configuring nothing. Two things must hold:
+# the guard still passes (the sentinel comparison must not be contaminated by
+# stderr — this is why the invocation no longer redirects it to /dev/null),
+# and the warning REACHES the operator. A relaxation nobody can see is how a
+# fail-open ships unnoticed.
+LOOM_DAEMON_BIN="$STUB_CLEANWARN" run_guard
+assert_eq "0" "$LAST_RC" "CLEAN + a stderr warning -> guard still passes (stderr does not contaminate the sentinel)"
+assert_contains "$LAST_OUT" "Warning:" "the plan-gate warning is not swallowed"
+assert_contains "$LAST_OUT" "#8844" "the warning names the condition"
+
+# T10 (#8873): the RESIDUAL fail-closed path — a lookup failure the plan-gate
+# predicate deliberately does NOT relax (a scoped 403, a 404, a 5xx). The
+# daemon's reason is on stdout, and the whole safety argument for that narrow
+# predicate ("if GitHub rewords the message we fail closed again") only holds
+# if the refusal the operator reads names what the forge actually said. It
+# must also NOT offer the build/install remedy here: the binary ran fine.
+LOOM_DAEMON_BIN="$STUB_LOOKUPFAIL" run_guard
+assert_eq "1" "$LAST_RC" "exit 2 with a forge reason -> merge still refused (fail closed)"
+assert_contains "$LAST_OUT" "could not run" "the generic fail-closed framing is kept"
+assert_contains "$LAST_OUT" "Upgrade to GitHub Pro" "the forge's own reason reaches the operator"
+assert_contains "$LAST_OUT" "(HTTP 403)" "the refusal keeps the status the forge returned"
+assert_eq "no" "$(grep -qF -- "cargo build" <<<"$LAST_OUT" && echo yes || echo no)" "a binary that RAN is not told to rebuild itself"
+
 # --- The REAL binary's offline contract (--from-stdin) ----------------------
 #
 # The wiring above proves the shell side; these prove the binary side of the
@@ -242,6 +272,51 @@ BIN_RC=$?
 set -e
 assert_eq "0" "$BIN_RC" "real binary: fresh run -> exit 0"
 assert_contains "$BIN_OUT" "LOOM-STALE-CHECKS-CLEAN" "real binary: fresh run prints the CLEAN sentinel"
+
+# --- The input-scoped predicate over the same seam (#8919) ------------------
+#
+# `pr_files` + `base_moves` are OPTIONAL additions to the payload: the two cases
+# above carry neither and still assess by the #8248 time rule (that is the
+# backward-compatibility half of the contract). With them present the verdict is
+# keyed on the base the check ACTUALLY tested, so:
+#
+#   1. a base move into a ratchet baseline under a PR that changes a measured
+#      file is refused EVEN THOUGH the run's started_at postdates the base tip
+#      (an in-place re-run cannot launder it);
+#   2. a base move that touches nothing the check reads is CLEAN even though the
+#      run's started_at predates the base tip (the busy-main race of #8641).
+SCOPED_STALE='{"tip_sha":"abc123","base_tip":"2026-09-18T11:45:21Z","required":["File Size Ratchet"],
+"check_runs":[{"name":"File Size Ratchet","status":"completed","conclusion":"success","started_at":"2026-09-18T16:26:47Z"}],
+"pr_files":[{"filename":"loom-daemon/src/main_health_gate.rs","status":"modified"}],
+"base_moves":{"File Size Ratchet":{"tested_base":"803f0c7d","files":[{"filename":"scripts/file-size-baseline.txt","status":"modified"}]}}}'
+SCOPED_FRESH='{"tip_sha":"abc123","base_tip":"2026-09-18T11:45:21Z","required":["File Size Ratchet"],
+"check_runs":[{"name":"File Size Ratchet","status":"completed","conclusion":"success","started_at":"2026-09-17T22:54:20Z"}],
+"pr_files":[{"filename":"defaults/docs/some-doc.md","status":"modified"}],
+"base_moves":{"File Size Ratchet":{"tested_base":"803f0c7d","files":[{"filename":"dashboard/web/src/app.ts","status":"modified"}]}}}'
+
+set +e
+BIN_OUT="$(printf '%s' "$SCOPED_STALE" | "$REAL_DAEMON_BIN" merge-pr stale-checks --pr 8078 --repo rjwalters/loom --head-sha deadbeef --base-ref main --from-stdin 2>&1)"
+BIN_RC=$?
+set -e
+assert_eq "1" "$BIN_RC" "real binary: input-scoped stale -> exit 1 even though the run postdates the tip"
+assert_contains "$BIN_OUT" "803f0c7d" "the refusal names the base the check actually tested"
+assert_contains "$BIN_OUT" "scripts/file-size-baseline.txt" "the refusal names the base-move path that did it"
+assert_contains "$BIN_OUT" "in place will not clear it" "the refusal says an in-place re-run cannot fix it"
+
+set +e
+BIN_OUT="$(printf '%s' "$SCOPED_FRESH" | "$REAL_DAEMON_BIN" merge-pr stale-checks --pr 8078 --repo rjwalters/loom --head-sha deadbeef --base-ref main --from-stdin 2>/dev/null)"
+BIN_RC=$?
+set -e
+assert_eq "0" "$BIN_RC" "real binary: an unrelated base move is fresh even though the run predates the tip"
+assert_eq "LOOM-STALE-CHECKS-CLEAN" "$BIN_OUT" "stdout carries ONLY the sentinel (warnings go to stderr)"
+
+# The fallback is audible: an old payload (no evidence) still assesses by the
+# time rule, and says so on stderr rather than degrading silently.
+set +e
+FALLBACK_ERR="$(printf '%s' "$FRESH_PAYLOAD" | "$REAL_DAEMON_BIN" merge-pr stale-checks --pr 8078 --repo rjwalters/loom --head-sha deadbeef --base-ref main --from-stdin 2>&1 >/dev/null)"
+set -e
+assert_contains "$FALLBACK_ERR" "Warning:" "an old payload's time-rule fallback is announced on stderr"
+assert_contains "$FALLBACK_ERR" "#8919" "the fallback warning names the predicate it could not apply"
 
 # --- Placement: the guard must run before either merge path -----------------
 IFS= read -r first_match < <(grep -n '^_check_required_check_freshness$' "$MERGE_PR_SRC")

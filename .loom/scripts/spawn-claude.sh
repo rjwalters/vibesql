@@ -17,17 +17,17 @@
 # the wrapper.
 #
 # Behavior on missing tokens:
-#   Token selection resolves the effective pool (issue #3938): the per-repo
-#   pool at `<repo>/.loom/tokens/` when it holds `*.token` files, else the
-#   shared machine-level pool at `~/.loom/tokens/` (override
-#   `LOOM_SHARED_TOKENS_DIR`; set it empty to disable the fallback). This lets a
-#   consumer repo the daemon dispatches into — which has no pool of its own —
-#   spawn against the shared pool instead of hard-failing. All pool STATE
+#   Token selection resolves the effective pool (issue #3938) to the shared
+#   machine-level pool at `~/.loom/tokens/` (override `LOOM_SHARED_TOKENS_DIR`;
+#   set it empty to disable it). A legacy per-repo pool at `<repo>/.loom/tokens/`
+#   still resolves only when that workspace is NOT inside a git worktree —
+#   inside one it is refused outright (issue #9135: OAuth credentials must never
+#   live in a repository checkout). All pool STATE
 #   (`.bad_tokens`/`.ranking`/`.allowlist`/`.failure_counts`) lives in whichever
 #   pool was selected, so it is never forked per repo.
-#   When NEITHER pool exists/has tokens (or all tokens are bad), this script
+#   When no pool exists/has tokens (or all tokens are bad), this script
 #   exits 78 (EX_CONFIG) with a message instructing the user to run
-#   `loom-daemon tokens bootstrap` (or `--shared` for the machine-level pool).
+#   `loom-daemon tokens bootstrap` (which always targets the shared pool).
 #   It does NOT silently fall back to keychain.
 #   (The recovery advice named the Python `loom-tokens` console script until epic
 #   #4081 Phase 4, #4557, deleted the package that provided it; `loom-daemon
@@ -160,6 +160,12 @@
 #                          `runtimes.containment.reservedMemoryMb` config ->
 #                          default `2048` (2 GiB). The resulting budget is
 #                          always >= 512 MiB.
+#   LOOM_SWEEP_CREDENTIAL_PROXY  `1`/`true`/`yes` routes a containerized
+#                          dispatch through the credential egress proxy
+#                          (issue #8697): the container sees only a per-launch
+#                          placeholder for CLAUDE_CODE_OAUTH_TOKEN. Precedence:
+#                          this env var -> `runtimes.containment.claudeCredentialProxy`
+#                          config -> off. No effect unless containment is on.
 #
 # CPU-quota enforcement mechanism (issue #5111 — nothing bounded a sweep's
 # CPU, so an agent-written driver ran 8 concurrent `ngspice` processes and
@@ -545,6 +551,18 @@ if [[ -f "$_sleep_inhibit_config_lib" ]]; then
     fi
 fi
 
+# --- Per-worktree cargo target dir (issue #8458) ---
+#
+# Nothing to do here. The per-worktree `CARGO_TARGET_DIR` a claim-owning sweep
+# runs under is injected by `loom-daemon spawn-worker` itself
+# (`worker_spawn::run`, beside the `CARGO_INCREMENTAL=0` it already sets for the
+# same #8453 reasons), so it is already in this process's environment — and in
+# the environment of every `cargo test` an agent runs as a subprocess of it,
+# which is where #8453's false verdicts came from. That seam is the one every
+# dispatch surface converges on, so one Rust site covers all of them and this
+# script needs no wiring at all; the containerized block below re-exports
+# whatever it finds across the docker boundary, unchanged.
+
 # --- Containerized dispatch mode (issue #7429, epic #6896 Phase 3) ---
 #
 # Config-selectable, initially OFF: `.loom/config.json` ->
@@ -637,17 +655,21 @@ fi
 # containerized sweeps' declared caps sum to no more than the host's usable
 # resources instead of each independently claiming the whole host.
 CONTAINMENT_ENABLED="0"
+_CONTAINMENT_CRED_PROXY="0"
 _containment_config_lib="${_script_dir}/lib/config-resolver.sh"
+# `runtimes.containment.<key>` from the resolved config — empty when unset or
+# when the resolver lib is absent. Every containment knob below is
+# `${ENV_OVERRIDE:-$(_containment_cfg <key>)}`: env > config > default.
+_containment_cfg() {
+    [[ -f "$_containment_config_lib" ]] || return 0
+    # shellcheck source=./lib/config-resolver.sh
+    source "$_containment_config_lib"
+    loom_config_get "$WORKSPACE" "runtimes.containment.$1" ""
+}
 if [[ -z "${LOOM_SPAWN_CONTAINERIZED:-}" ]]; then
-    _containment_enabled="${LOOM_SWEEP_CONTAINERIZED:-}"
-    if [[ -z "$_containment_enabled" && -f "$_containment_config_lib" ]]; then
-        # shellcheck source=./lib/config-resolver.sh
-        source "$_containment_config_lib"
-        _containment_enabled="$(loom_config_get "$WORKSPACE" "runtimes.containment.enabled" "")"
-    fi
+    _containment_enabled="${LOOM_SWEEP_CONTAINERIZED:-$(_containment_cfg enabled)}"
     case "$_containment_enabled" in
         1 | true | yes) CONTAINMENT_ENABLED="1" ;;
-        *) CONTAINMENT_ENABLED="0" ;;
     esac
 fi
 
@@ -658,13 +680,26 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
         exit 78 # EX_CONFIG
     fi
 
-    _containment_image="${LOOM_SWEEP_CONTAINER_IMAGE:-}"
-    if [[ -z "$_containment_image" && -f "$_containment_config_lib" ]]; then
-        # shellcheck source=./lib/config-resolver.sh
-        source "$_containment_config_lib"
-        _containment_image="$(loom_config_get "$WORKSPACE" "runtimes.containment.image" "")"
-    fi
+    _containment_image="${LOOM_SWEEP_CONTAINER_IMAGE:-$(_containment_cfg image)}"
     : "${_containment_image:=ghcr.io/rjwalters/loom-worker:latest}"
+
+    # --- Credential egress proxy (issue #8697, follow-up to #8674) ---
+    # Default OFF, and a SEPARATE switch from containment itself (env
+    # `LOOM_SWEEP_CREDENTIAL_PROXY` > `runtimes.containment.claudeCredentialProxy`
+    # > off), mirroring the native path's `credentialProxy`: turning
+    # containment on must not silently change how the credential reaches
+    # Claude. When on, token selection runs HERE on the host instead of inside
+    # the container, and `loom-daemon worker proxy-exec --docker-workspace`
+    # launches the `docker run` with CLAUDE_CODE_OAUTH_TOKEN swapped for a
+    # per-launch placeholder, ANTHROPIC_BASE_URL pointed at a host-side proxy
+    # that swaps it back, and the token pools masked out of the container (the
+    # daemon owns those docker flags — see its `exec.rs`). The `docker run` is
+    # therefore deferred to the Dispatch section below. Fails closed: never an
+    # unproxied container launch with the real token once this is on.
+    _cred_proxy_enabled="${LOOM_SWEEP_CREDENTIAL_PROXY:-$(_containment_cfg claudeCredentialProxy)}"
+    case "$_cred_proxy_enabled" in
+        1 | true | yes) _CONTAINMENT_CRED_PROXY="1" ;;
+    esac
 
     # --- Per-sweep resource limits (issue #7430, epic #6896 Phase 3) ---
     #
@@ -676,12 +711,7 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
     # disabled (`LOOM_SWEEP_CPU_QUOTA=0`), in which case containment applies
     # NO `--cpus` flag either (unbounded), rather than inventing a budget the
     # bare-metal path itself was told to skip.
-    _containment_cpus="${LOOM_SWEEP_CONTAINER_CPUS:-}"
-    if [[ -z "$_containment_cpus" && -f "$_containment_config_lib" ]]; then
-        # shellcheck source=./lib/config-resolver.sh
-        source "$_containment_config_lib"
-        _containment_cpus="$(loom_config_get "$WORKSPACE" "runtimes.containment.cpus" "")"
-    fi
+    _containment_cpus="${LOOM_SWEEP_CONTAINER_CPUS:-$(_containment_cfg cpus)}"
     [[ -z "$_containment_cpus" ]] && _containment_cpus="${LOOM_SWEEP_CPU_BUDGET_CORES:-}"
 
     # `--memory`: an analogous host-wide share computed via
@@ -692,23 +722,13 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
     # can be legitimately unbounded): an unconfigured container memory cap is
     # exactly the "one runaway sweep can starve the host" gap this issue
     # exists to close.
-    _containment_memory="${LOOM_SWEEP_CONTAINER_MEMORY:-}"
-    if [[ -z "$_containment_memory" && -f "$_containment_config_lib" ]]; then
-        # shellcheck source=./lib/config-resolver.sh
-        source "$_containment_config_lib"
-        _containment_memory="$(loom_config_get "$WORKSPACE" "runtimes.containment.memory" "")"
-    fi
+    _containment_memory="${LOOM_SWEEP_CONTAINER_MEMORY:-$(_containment_cfg memory)}"
     if [[ -z "$_containment_memory" ]]; then
         _containment_mem_lib="${_script_dir}/lib/memory-budget.sh"
         if [[ -f "$_containment_mem_lib" ]]; then
             # shellcheck source=./lib/memory-budget.sh
             source "$_containment_mem_lib"
-            _containment_mem_reserved="${LOOM_SWEEP_CONTAINER_RESERVED_MEMORY_MB:-}"
-            if [[ -z "$_containment_mem_reserved" && -f "$_containment_config_lib" ]]; then
-                # shellcheck source=./lib/config-resolver.sh
-                source "$_containment_config_lib"
-                _containment_mem_reserved="$(loom_config_get "$WORKSPACE" "runtimes.containment.reservedMemoryMb" "")"
-            fi
+            _containment_mem_reserved="${LOOM_SWEEP_CONTAINER_RESERVED_MEMORY_MB:-$(_containment_cfg reservedMemoryMb)}"
             [[ "$_containment_mem_reserved" =~ ^[0-9]+$ ]] || _containment_mem_reserved=2048
             _containment_mem_total="$(loom_mem_total_mb)"
             _containment_mem_inflight="${_cpu_inflight:-1}"
@@ -725,9 +745,13 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
     # The per-repo token pool ($WORKSPACE/.loom/tokens) is already covered by
     # the workspace mount above. The shared machine-level pool (the
     # spawn-claude.sh fallback documented at the top of this file) lives
-    # outside $WORKSPACE and needs its own read-only parity mount.
+    # outside $WORKSPACE and needs its own read-only parity mount — except
+    # under the credential egress proxy (#8697), where the container must hold
+    # no real credential on its filesystem either: the shared pool is not
+    # mounted, and `worker proxy-exec --docker-workspace` masks every pool
+    # directory the workspace mount would expose with an empty tmpfs.
     _containment_shared_tokens="${LOOM_SHARED_TOKENS_DIR:-${HOME:-}/.loom/tokens}"
-    if [[ -n "$_containment_shared_tokens" && -d "$_containment_shared_tokens" \
+    if [[ "$_CONTAINMENT_CRED_PROXY" != "1" && -n "$_containment_shared_tokens" && -d "$_containment_shared_tokens" \
         && "$_containment_shared_tokens" != "${WORKSPACE}"/* ]]; then
         _containment_mounts+=(-v "${_containment_shared_tokens}:${_containment_shared_tokens}:ro")
     fi
@@ -784,10 +808,18 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
     # LOOM_SPAWN_NO_EXPORT bypassed selection) is forwarded by NAME (`-e
     # VAR`, no `=value`) so docker reads the CURRENT value straight from this
     # shell — generic and exhaustive rather than a hardcoded list that drifts
-    # from what the daemon actually sets.
+    # from what the daemon actually sets. Under the credential proxy (#8697)
+    # the variables host-side token selection exports LATER
+    # (CLAUDE_CODE_OAUTH_TOKEN, LOOM_TOKEN_NAME) and ANTHROPIC_BASE_URL are
+    # added by name by `worker proxy-exec --docker-workspace` itself.
+    # TRACEPARENT and OTEL_* are forwarded too (#9215): neither matches a
+    # LOOM_/CLAUDE_ prefix, so before this a contained dispatch silently
+    # dropped the trace parent and the whole Claude Code OTel env — the
+    # in-container session emitted no spans at all, with no error, while the
+    # same host's bare-metal dispatch worked.
     while IFS='=' read -r _containment_var _; do
         case "$_containment_var" in
-            LOOM_* | CLAUDE_* | SAFEHOUSE* | CODEX_* | GH_TOKEN | GITHUB_TOKEN)
+            LOOM_* | CLAUDE_* | SAFEHOUSE* | CODEX_* | GH_TOKEN | GITHUB_TOKEN | TRACEPARENT | OTEL_*)
                 _containment_env+=(-e "$_containment_var")
                 ;;
         esac
@@ -823,14 +855,19 @@ if [[ "$CONTAINMENT_ENABLED" == "1" ]]; then
     # pre-#7430 marker text.
     echo "# LOOM_CONTAINMENT_ENABLED image=${_containment_image}" >&2
 
-    exec ${SLEEP_INHIBIT_WRAP[@]+"${SLEEP_INHIBIT_WRAP[@]}"} docker run --rm \
-        "${_containment_mounts[@]}" \
-        -w "$_containment_cwd" \
-        "${_containment_env[@]}" \
-        "${_containment_labels[@]}" \
-        "${_containment_limit_flags[@]}" \
-        "$_containment_image" \
-        "${WORKSPACE}/.loom/scripts/spawn-claude.sh" "$@"
+    # With the credential proxy on (#8697) this argv (built from the ORIGINAL
+    # args, which the recursed in-container copy re-parses itself) is instead
+    # exec'd under `worker proxy-exec` from the Dispatch section, after
+    # host-side token selection.
+    _containment_docker=(docker run --rm
+        "${_containment_mounts[@]}"
+        -w "$_containment_cwd"
+        "${_containment_env[@]}"
+        "${_containment_labels[@]}"
+        "${_containment_limit_flags[@]}"
+        "$_containment_image"
+        "${WORKSPACE}/.loom/scripts/spawn-claude.sh" "$@")
+    [[ "$_CONTAINMENT_CRED_PROXY" == "1" ]] || exec ${SLEEP_INHIBIT_WRAP[@]+"${SLEEP_INHIBIT_WRAP[@]}"} "${_containment_docker[@]}"
 else
     # Bare-metal dispatch marker (issue #7430): symmetric counterpart to the
     # container marker above, so a status/health reader can distinguish "this
@@ -1090,11 +1127,11 @@ if [[ -z "${LOOM_SPAWN_NO_EXPORT:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; th
         log_error "Token selection failed:"
         cat "$_selection_stderr_file" >&2 || true
         rm -f "$_selection_stderr_file"
-        log_error "Run '$_daemon_bin tokens bootstrap' to populate <repo>/.loom/tokens/,"
-        log_error "or add '--shared' for the machine-level pool"
-        log_error "(~/.loom/tokens, override LOOM_SHARED_TOKENS_DIR) that consumer"
-        log_error "repos fall back to. Use '$_daemon_bin tokens unblock <name>' if"
-        log_error ".bad_tokens is the cause."
+        log_error "Run '$_daemon_bin tokens bootstrap' to populate the shared pool"
+        log_error "(~/.loom/tokens, override LOOM_SHARED_TOKENS_DIR) — the only"
+        log_error "supported location since #9135; a pool inside a git worktree is"
+        log_error "refused. Use '$_daemon_bin tokens unblock <name>' if .bad_tokens"
+        log_error "is the cause."
         log_error "Spawn-claude refuses to auto-clear .bad_tokens — that's"
         log_error "intentional: an empty pool indicates a real auth problem."
         log_error "Set CLAUDE_CODE_OAUTH_TOKEN explicitly to bypass selection."
@@ -1184,7 +1221,9 @@ unset _loom_print_mode
 # never affected and the worker always starts. Only the socket path (no token or
 # key) is ever written into the injected config.
 _mcp_config_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/mcp-config.sh"
-if [[ -f "$_mcp_config_lib" ]]; then
+# Skipped on the host half of a proxied containment launch (#8697): the
+# in-container copy injects it, exactly as for a plain containerized launch.
+if [[ "$_CONTAINMENT_CRED_PROXY" != "1" && -f "$_mcp_config_lib" ]]; then
     # shellcheck source=./lib/mcp-config.sh
     source "$_mcp_config_lib"
 
@@ -1273,6 +1312,25 @@ fi
 # trap directly (see its own header comment). Only a manual/interactive
 # invocation that explicitly omits `--use-wrapper` reaches the raw `exec`
 # below without that backstop.
+#
+# Proxied containment (#8697) dispatches first: the host-selected token is in
+# CLAUDE_CODE_OAUTH_TOKEN now, and `worker proxy-exec` overwrites it with a
+# per-launch placeholder in the environment of the `docker run` it spawns,
+# adds its own docker flags (by-name forwards, --add-host, pool masks), and
+# stays alive as that `docker run`'s parent so the placeholder dies with the
+# launch. A binary without the subcommand is a hard refusal, never an
+# unproxied launch.
+# requires-daemon: worker >= 0.19.331   #8697 — `worker proxy-exec`, declared at this repo's VERSION because it lands WITH this marker (the first release carrying it is the post-merge bump). Needed ONLY on the opt-in credential-proxy path, which probes for it and refuses (exit 78) below the floor; every other dispatch path has no dependency on it.
+if [[ "$_CONTAINMENT_CRED_PROXY" == "1" ]]; then
+    _proxy_bin="$(loom_locate_daemon_bin "$WORKSPACE")"
+    if [[ -z "$_proxy_bin" ]] || ! "$_proxy_bin" worker proxy-exec --help >/dev/null 2>&1; then
+        log_error "spawn-claude: the credential egress proxy is enabled (LOOM_SWEEP_CREDENTIAL_PROXY / runtimes.containment.claudeCredentialProxy) but no loom-daemon binary supporting 'worker proxy-exec' was found (#8697). Refusing to forward the real credential into the container instead. Update loom-daemon, or disable the proxy (LOOM_SWEEP_CREDENTIAL_PROXY=0)."
+        exit 78 # EX_CONFIG
+    fi
+    # Credential variable, upstream and base-URL variable are Claude's defaults.
+    exec ${SLEEP_INHIBIT_WRAP[@]+"${SLEEP_INHIBIT_WRAP[@]}"} "$_proxy_bin" worker proxy-exec \
+        --docker-workspace "$WORKSPACE" -- "${_containment_docker[@]}"
+fi
 if [[ "$USE_WRAPPER" == "true" ]]; then
     _wrapper="${WORKSPACE}/.loom/scripts/claude-wrapper.sh"
     if [[ ! -x "$_wrapper" ]]; then

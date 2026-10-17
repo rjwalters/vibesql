@@ -18,6 +18,8 @@
 #   ./.loom/scripts/tests/test-claim-staleness.sh
 
 set -euo pipefail
+# shellcheck source=lib/write-scope-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -142,8 +144,28 @@ case "$path" in
 esac
 STUB
 chmod +x "$STUB_DIR/gh"
+# #9548: `loom-daemon forge trusted-comments` stub, mirroring the predicate for
+# these fixtures (insider association, or the default fleet App App-spelled).
+# $LOOM_TEST_NO_TRUST_VERB=1 simulates a binary predating the verb.
+echo '#!/usr/bin/env bash' >"$STUB_DIR/loom-daemon"
+# #9548: `forge may-write` goes to a real daemon when WRITE_SCOPE_DAEMON names
+# one (lib/write-scope-fixture.sh), else answers as a pre-verb binary.
+write_scope_stub_verb_snippet >>"$STUB_DIR/loom-daemon"
+cat >>"$STUB_DIR/loom-daemon" <<'STUB'
+[[ "$1 $2" == "forge trusted-comments" ]] || { echo "stub loom-daemon: $*" >&2; exit 64; }
+[[ "${LOOM_TEST_NO_TRUST_VERB:-}" == "1" ]] && exit 2
+exec jq -c '[.[] | select(((.author_association // "") | IN("OWNER","MEMBER","COLLABORATOR"))
+    or ((.user.login // "") | test("^loom-fleet-dispatch(-[0-9]+)?\\[bot\\]$")))]'
+STUB
+chmod +x "$STUB_DIR/loom-daemon"
+unset LOOM_DAEMON_BIN
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# #9548: The script vets its write target through the write scope before it
+# writes. It runs from a checkout registered as owner/repo (origin, .loom/, push
+# reported to the permission probe), so the real decision admits it.
+write_scope_register "$STUB_DIR/checkout" owner/repo
+cd "$STUB_DIR/checkout"
 
 # Deterministic defaults regardless of the ambient environment.
 export LOOM_STALE_REVIEWING_MINUTES=30
@@ -170,13 +192,14 @@ set_claim() { # <label> <iso-ts>  (empty ts => no claim event in the timeline)
     fi
 }
 
-set_comments() { # reads a JSON array on stdin
-    cat >"$STUB_DIR/comments.json"
+set_comments() { # reads a JSON array on stdin; an item without `user` is the fleet's App
+    jq 'map(if has("user") then . else . + {user: {login: "loom-fleet-dispatch[bot]", type: "Bot"}} end)' \
+        >"$STUB_DIR/comments.json"
 }
 
 reset() {
     : >"$STUB_DIR/gh-calls.log"
-    unset LOOM_TEST_MUTATION_FAILS LOOM_TEST_ISSUE_READ_FAILS
+    unset LOOM_TEST_MUTATION_FAILS LOOM_TEST_ISSUE_READ_FAILS LOOM_TEST_NO_TRUST_VERB
     set_labels "loom:reviewing"
     echo '[]' >"$STUB_DIR/comments.json"
 }
@@ -446,6 +469,19 @@ export LOOM_TEST_MUTATION_FAILS=1
 out="$("$TARGET_SCRIPT" standdown --repo owner/repo --number 6513 --label loom:reviewing)"
 unset LOOM_TEST_MUTATION_FAILS
 assert_eq "failed-post" "$(field "$out" STANDDOWN_ACTION)" "T19: a failed POST reports failed-post"
+
+# --- T20: an untrusted author's activity marker is prose (#9548) -----------
+reset
+CLAIM_TS="$(ago 40)"
+set_claim loom:reviewing "$CLAIM_TS"
+jq -n --arg t "$(ago 3)" --arg m "<!-- loom:claim-activity claim=$CLAIM_TS -->" \
+    '[{id:301,created_at:$t,body:("still here " + $m),user:{login:"drive-by",type:"User"},author_association:"NONE"},
+      {id:302,created_at:$t,body:$m,user:{login:"loom-fleet-dispatch",type:"User"},author_association:"CONTRIBUTOR"}]' | set_comments
+out="$("$TARGET_SCRIPT" check --repo owner/repo --number 6513 --label loom:reviewing)"
+assert_eq "stale" "$(field "$out" CLAIM_STATE)" "T20a: outsider / bare-slug activity markers do not keep a claim fresh"
+assert_eq "0" "$(field "$out" ACTIVITY_COUNT)" "T20b: neither is counted as claimant activity"
+out="$(LOOM_TEST_NO_TRUST_VERB=1 "$TARGET_SCRIPT" check --repo owner/repo --number 6513 --label loom:reviewing)"
+assert_eq "unknown" "$(field "$out" CLAIM_STATE)" "T20c: no trust filter -> unknown (fail safe, never stomp)"
 
 # --- Summary ---
 echo ""

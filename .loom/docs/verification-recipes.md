@@ -227,7 +227,9 @@ Differential testing raises the ceiling because the corpus comes from the
 grammar rather than from imagination. Replaying 700 generated inputs through
 both implementations of `extract-refs` reproduced the newline divergence and
 found two more that #8011 had not caught (zero-padded `#007`, and `#N` above
-`u64::MAX` being dropped by `.parse().ok()`).
+`u64::MAX` being dropped by `.parse().ok()`). The corpus is larger now — see
+the fixture's own `_meta` records for the current count and coverage — but the
+method below is unchanged.
 
 ```bash
 # 1. Recover the reference implementation — the commit BEFORE the port.
@@ -262,6 +264,31 @@ mutation it was blind to (the filter ingesting everything; the identity
 normalisation) and fails below a floor. A size assertion cannot catch a corpus
 that quietly stops exercising a field; this one does.
 
+**Generate the whole ALPHABET, not a representative sample of it.** The same
+corpus's `_meta` claimed it spanned "the `[*_:space]` separator class including
+newlines". It contained space, `\n` and `\t` — three of the seven characters
+`[[:space:]]` defines — and the #8094 extension added none of the rest. The
+four missing characters were not an aesthetic gap: `phrase_re()` spelled its
+separator run with the `regex` crate's `\s`, which is Unicode-aware and matches
+NBSP (U+00A0), while the shell's POSIX `[[:space:]]` under GNU grep does not
+and under BSD grep does. `Requires<NBSP>#42` therefore extracted differently on
+Linux and macOS, silently, for as long as no corpus case contained an NBSP.
+#8097 resolved it (the port now uses the crate's own ASCII `[[:space:]]`
+class) and enumerated all seven characters; the test asserts the coverage per
+character, on the same reasoning as the discriminating-power floors above.
+"Every separator" in a provenance record is a claim, and a claim in a fixture
+header is worth exactly as much as the assertion that checks it.
+
+**A "seed" for a generator you did not commit is not provenance.** The first
+two `extract-refs` blocks each named a seed and a rev, which reads like
+reproducibility and is not: neither generator was ever committed, so extending
+a fixture marked `frozen: Never edit` meant archaeology. #8097 committed
+`loom-daemon/examples/generate_extract_refs_oracle.rs`, enumerating
+deterministically from the grammar with no PRNG at all — nothing to keep
+synchronized, and `cargo run -p loom-daemon --example
+generate_extract_refs_oracle` reproduces its block byte for byte. Record
+provenance someone else can actually check.
+
 **Freeze the answers, not the reference.** Once the old implementation is
 deleted, re-running it needs either a full-history checkout (CI checks out
 shallow) or vendoring dead code plus its runtime dependencies into the test. So
@@ -270,8 +297,13 @@ against that — see `loom-daemon/tests/differential_extract_refs.rs` and
 `loom-daemon/tests/fixtures/extract_refs_shell_oracle.jsonl`, which pin the four
 accepted divergences and fail on a fifth. Extending a frozen oracle is additive
 rather than a regeneration — replay the existing cases against the same pinned
-rev to confirm they still reproduce (700 of 700 did), then append the new cases
-and their own provenance record below them.
+rev to confirm they still reproduce (700 of 700 did, then 1050 of 1050 for the
+third block), then append the new cases and their own provenance record below
+them. Once a generator is committed, put that rule *in* the generator:
+`generate_extract_refs_oracle.rs` copies every record above its own `_meta`
+marker through byte for byte, re-replays each one, and aborts rather than
+rewrite one that no longer reproduces. A tool that can only extend cannot
+accidentally regenerate.
 
 **Recognise each divergence class by its MECHANISM, not by a property of the
 input that correlates with it.** This is the sharpest trap in the whole recipe,

@@ -34,7 +34,7 @@ Judge stay refused on Kimi until one lands; see "Kimi" below.
 | --- | --- |
 | Native edits stay in managed worktrees | Every write/edit target is checked by the existing worktree policy before access. Shell commands use the existing shell-write policy. |
 | Protected branches and workflow rules | The same destructive and workflow guards used by the existing runtimes inspect each shell call. |
-| Broken guard cannot permit a tool | Missing guard files, malformed/unknown output, nonzero exit, and a 20-second policy timeout refuse the operation. |
+| Broken guard cannot permit a tool | Missing guard files, malformed/unknown output, and nonzero exit refuse the operation with a `policy error:`-prefixed message. A policy timeout (default 20s, see below) refuses too, but is reported with a distinct `policy timeout:` prefix — see "Policy timeout vs. denial" below. |
 | Binding fails to load | Pi starts with builtin tools and extension discovery disabled. OpenCode uses a dedicated primary agent whose default permission is deny, with only the four named tools enabled. Missing bindings therefore leave no executable unguarded tool surface. *(OpenCode: verified on 1.18.31 only.)* A role tick that exits 0 having used no `loom_*` tool is additionally reported as a failed tick, not a success — see "Toolless launch detection". |
 | Concurrent file edits | File operations share a workspace mutation lock; an edit must match exactly one nonempty old-text occurrence. |
 | Large output and hung commands | Reads/output are bounded; shell execution uses the existing Rust bounded process executor and a maximum 600-second deadline. SIGTERM/SIGINT cancels the owned shell process group. |
@@ -47,7 +47,25 @@ has its own private directory (0700), including concurrent launches in one
 workspace. `LOOM_NATIVE_TOOLS_DIR` selects an alternative **external base**,
 including the existing container-private base; it no longer selects a shared
 binding directory. Pi's agent/auth and session directories, and OpenCode's
-config/data/state/cache directories are pinned beneath the launch directory.
+data/state/cache directories are pinned beneath the launch directory.
+
+**One exception, and only for immutable content (#8663):** OpenCode's
+`OPENCODE_CONFIG_DIR` is a content-keyed tree at
+`<workspace-hash>/bindings/<digest>/opencode/`, shared by every launch of that
+workspace whose bindings hash identically (the plugin source is `include_str!`'d
+and its dependency is pinned, so the bytes are fixed by the daemon build). It
+holds the generated `plugins/loom.ts`, the pinned `package.json`, and the
+`node_modules/` the CLI resolves from them — ~126 MB and ~7,300 files that were
+previously re-installed per launch and never removed (30–37 GB per fleet host,
+two ENOSPC incidents). Nothing mutable is shared: auth snapshots, sessions,
+transcripts and every XDG directory stay inside the launch's own 0700
+directory, so two concurrent workers still share no credential or session
+state. The tree is published by an atomic rename of a fully written staging
+copy, and its two binding files are re-written (idempotently) on every launch,
+so a damaged tree self-heals instead of serving content no launch provisioned.
+
+Stale launch directories are reaped by the next launch for the same workspace
+and by `loom-daemon clean` (see "Reaping stale native launch state" below).
 Absolute paths are required. Paths inside this workspace or another Git
 checkout, including symlink aliases, are refused before binding provisioning;
 unsafe inherited HOME, Pi, OpenCode and XDG directory overrides also refuse
@@ -82,6 +100,68 @@ The OpenCode binding depends on the matching
 directory. That package is pinned to 1.18.31 and was verified against an
 OpenCode 1.18.31 host only; whether a 2.x host loads it is unverified. No
 global CLI model/login settings are rewritten by Loom dispatch.
+
+## Policy timeout vs. denial (#8451)
+
+The guard bridge runs as a subprocess (`guard-codex-bridge.sh`, which itself
+forks `guard-loom-workflow.sh` and `guard-destructive.sh`) under a bounded
+deadline in `loom-daemon/src/native_tools/guard.rs`. On a CPU-saturated host
+that fork chain can outrun the deadline before it ever produces a decision —
+observed live on a host at load average 55/28 cores (another tenant's test run
+holding ~19 cores, not an exec-scan or a guard defect): 4 of 21 `loom_bash`
+calls refused in the first 9 minutes of a sweep, including plain `cat
+.loom/config.json`.
+
+Both outcomes fail closed (no tool runs either way), but they mean different
+things to the model driving a native sweep, so every `loom_bash`/`loom_read`/
+`loom_write`/`loom_edit` failure text carries a class prefix:
+
+| Prefix | Meaning | Retry? |
+| --- | --- | --- |
+| `policy denied: <reason>` | The check ran to completion and the shared guards said no. | No — this is a real refusal; change the command, not the wording. |
+| `policy timeout: …` | The check did not finish inside the budget; the command was never evaluated. | Yes — transient, most likely host load. Retrying the identical command is reasonable once. |
+| `policy error: …` | The guard scripts are missing, crashed, or returned something the bridge could not parse. | Treat as a refusal (fail closed), but it is a provisioning defect, not a policy decision about this command — do not keep retrying the same command in a loop. |
+
+[`native-sweep.md`](native-sweep.md) tells the model to apply this distinction
+directly.
+
+### Configuring the budget
+
+The fixed 20-second budget was chosen on an idle host and is now configurable,
+still bounded and fail-closed at the limit (never "wait forever"):
+
+- `guards.nativePolicyTimeoutSecs` in the effective (tiered) `.loom/config.json`.
+- `LOOM_NATIVE_POLICY_TIMEOUT_SECS` env var, which outranks the config key
+  (env > config > default, the repo's usual precedence).
+- Default `20`; both sources are clamped to `[5, 120]` seconds, so a stray
+  value (e.g. `0`, or a typo like `99999`) cannot turn the guard into an
+  instant-refuse or an unbounded hang.
+
+### Per-worker timeout counter
+
+Every policy timeout appends one line to
+`.loom/native-tools/policy-timeouts.jsonl` (`{"worker_pid", "budget_secs",
+"at"}`), keyed by `LOOM_NATIVE_WORKER_PID` — the stable per-sweep identity
+`native-sweep.md` already uses for session liveness. A starving sweep is
+therefore visible by reading that file (or counting lines for its own worker
+pid via `loom-daemon`'s `policy_timeout_count` helper) rather than only from
+scrollback. This is a best-effort local log, not a daemon-side telemetry
+record; a host too saturated to append one small file has bigger problems
+than a missed counter increment.
+
+### Read-only fast path reachability
+
+`guards.readOnlyFastPath` (default on) is implemented inside
+`guard-destructive-generic.sh` itself, and `guard-destructive.sh` (which the
+bridge's `shell_command` branch runs) `exec`s straight into it — so a shell
+command's destructive-guard leg **does** reach the fast path today; an
+in-workspace `cat`/`ls`/`grep` skips the expensive parts of that leg (the git
+`rev-parse` and the deny/ask array scan) before ever forking further. The
+bridge's *other* forked guard for a shell command,
+`guard-loom-workflow.sh`, always runs in full — it has no fast path of its own
+and is out of scope here, since it is a separate, comparatively cheap
+protected-branch/workflow check, not the destructive-command analyzer this
+issue is about.
 
 ## OpenCode major versions
 
@@ -297,6 +377,46 @@ explicit incompatible pins fail rather than silently choosing another model.
 Standalone scheduled roles can have different runtime bindings; one sweep uses
 one runtime throughout. Keep the purchased provider plan's concurrency limit
 in mind when setting the existing worker concurrency configuration.
+
+## Reaping stale native launch state
+
+A per-launch directory is never reused, and nothing used to remove it: three
+fleet hosts accumulated 252–358 session directories (30–37 GB) in a day, and
+one filled its root volume twice (#8663). There is no exit-time hook to use —
+`worker_spawn::exec` replaces the Loom process image with the harness CLI, so
+no parent survives the session — so the reap runs in the two places a Loom
+process demonstrably exists:
+
+1. **At the next launch for the same workspace**, before the new session
+   directory is created. Best effort: a reap failure never fails a launch.
+2. **`loom-daemon clean`**, over every workspace under the base. It *reports*
+   by default (and under `--dry-run`) and removes with `--force`/`-y`, which is
+   what the fleet's scheduled `clean --deep --safe -y` pass uses. `--safe` does
+   not narrow it: a session directory has no PR to be merged, exactly like the
+   log and tmux artifacts.
+
+What is removed is decided by liveness first, age second. Each session
+directory carries a `loom-session.json` record naming the harness pid (`execve`
+preserves it) and the host that wrote it:
+
+| Session state | Removed when |
+| --- | --- |
+| This host, pid alive | never — a 12-hour sweep is safe |
+| This host, pid exited | 15 minutes old (covers the record-write race) |
+| Another host's record, or no record (pre-#8663) | 6 hours old |
+| Age unreadable | never |
+
+Shared binding trees are content-keyed, so a plugin-pin bump strands the
+previous one; each carries a `.last-used` marker refreshed per launch and is
+removed after 7 idle days. Staging trees stranded by a crashed provision are
+removed on the orphan threshold.
+
+The equivalent manual sweep, for a host that cannot run `clean` (it has no
+liveness check, so run it only when no native launch is in flight):
+
+```bash
+find ~/.local/state/loom/native-tools -mindepth 2 -maxdepth 2 -type d -mmin +360 -exec rm -rf {} +
+```
 
 ## Residual limits
 

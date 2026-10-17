@@ -134,6 +134,56 @@ chmod +x "$STUB_DIR/gh"
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
 
+# #9537: the guard asks `loom-daemon forge is-fleet`. Pin the daemon to stubs
+# so the result never depends on whichever binary this machine has installed.
+# Default: an OLD daemon without the is-fleet verb (clap-style exit 2), which
+# makes the guard use its built-in default-family fallback — but it DOES
+# answer `forge trusted-comments` (#9548/#9716), filtering stdin the same way
+# the real predicate does for these fixtures' shapes: trusted iff
+# author_association/authorAssociation is an insider one, or the author is
+# App-spelled (`x[bot]` / `app/x`) and names the default fleet family. This
+# mirrors test-classify-ac-verification.sh's stub daemon.
+TRUSTED_COMMENTS_FILTER='
+  def who: (.user // .author // {});
+  def assoc: ((.author_association // .authorAssociation // "") | ascii_upcase);
+  def lg: (who | .login // "");
+  def norm: (lg | ascii_downcase | ltrimstr("app/") | rtrimstr("[bot]"));
+  def app: ((lg | test("\\[bot\\]$")) or (lg | test("^app/")));
+  [.[] | select((assoc | IN("OWNER","MEMBER","COLLABORATOR"))
+                or (app and (norm == "loom-fleet-dispatch")))]'
+cat > "$STUB_DIR/daemon-old" <<EOS
+#!/usr/bin/env bash
+if [[ "\$1 \$2" == "forge trusted-comments" ]]; then
+  if [[ -f "\${LOOM_TEST_STUB_DIR:-}/trust-verb-missing" ]]; then
+    echo "error: unrecognized subcommand 'trusted-comments'" >&2
+    exit 2
+  fi
+  exec jq -c '$TRUSTED_COMMENTS_FILTER'
+fi
+echo "error: unrecognized subcommand '\$2'" >&2
+exit 2
+EOS
+# A NEW daemon whose roster is: writer loom-fleet-dispatch, reader loom-fleet-reader-1.
+# Also answers `forge trusted-comments` the same way as daemon-old above.
+cat > "$STUB_DIR/daemon-new" <<EOS
+#!/usr/bin/env bash
+if [[ "\$1 \$2" == "forge trusted-comments" ]]; then
+  if [[ -f "\${LOOM_TEST_STUB_DIR:-}/trust-verb-missing" ]]; then
+    echo "error: unrecognized subcommand 'trusted-comments'" >&2
+    exit 2
+  fi
+  exec jq -c '$TRUSTED_COMMENTS_FILTER'
+fi
+[[ "\$1 \$2" == "forge is-fleet" ]] || exit 2
+case "\$3" in
+  app/loom-fleet-dispatch) echo writer; exit 0 ;;
+  app/loom-fleet-reader-1) echo reader; exit 0 ;;
+  *) exit 1 ;;
+esac
+EOS
+chmod +x "$STUB_DIR/daemon-old" "$STUB_DIR/daemon-new"
+export LOOM_DAEMON_BIN="$STUB_DIR/daemon-old"
+
 # ISO-8601 timestamp N hours before now-ish (macOS `date -v` first, GNU
 # `date -d` fallback — mirrors judge-fallback-guard.sh's own dual-path idiom,
 # using the REAL `date` binary, which is intentionally not stubbed here).
@@ -142,14 +192,23 @@ hours_ago() {
 }
 
 marker_comment() {
-    # marker_comment <created_at> <sha>
-    printf '{"created_at":"%s","body":"Looks good.\\n\\n<!-- loom:fallback-evaluated sha=%s -->"}' "$1" "$2"
+    # marker_comment <created_at> <sha> [login] [author_association]
+    #
+    # Default author is this fleet's own writer App, App-spelled
+    # (`loom-fleet-dispatch[bot]`) — Judge is the one that actually posts this
+    # marker, so every PRE-#9716 test case keeps counting its markers exactly
+    # as before once the guard's trust filter is in place. Tests that exercise
+    # the filter itself (#9548/#9716) pass an explicit untrusted author.
+    local login="${3:-loom-fleet-dispatch[bot]}" assoc="${4:-NONE}"
+    printf '{"created_at":"%s","body":"Looks good.\\n\\n<!-- loom:fallback-evaluated sha=%s -->","user":{"login":"%s"},"author_association":"%s"}' \
+        "$1" "$2" "$login" "$assoc"
 }
 
 reset_state() {
     rm -f "$STUB_DIR"/pr-*.json "$STUB_DIR"/comments-*.json
     rm -f "$STUB_DIR"/pr-view-fail-* "$STUB_DIR"/comments-fail-*
     rm -f "$STUB_DIR"/pr-view-stderr-* "$STUB_DIR"/comments-stderr-*
+    rm -f "$STUB_DIR/trust-verb-missing"
 }
 
 run_guard() {
@@ -408,6 +467,152 @@ EOF
 run_guard 113 --cap 3
 assert_eq "11" "$RC" "(k2) app/loom-fleet-dispatch past bot-check, cap reached -> exit 11 (not 10)"
 assert_eq "SKIP" "$(get_field "$OUT" DECISION)" "(k2) DECISION=SKIP via lifetime cap, not bot-author path"
+
+# (k3) #9537: with a daemon that knows the roster, a READER identity's PR (its
+#      history re-attributed by an App rename) is Loom's own -> EVALUATE.
+reset_state
+cat > "$STUB_DIR/pr-114.json" <<'EOF'
+{"author":{"is_bot":true,"login":"app/loom-fleet-reader-1"},"headRefOid":"e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"}
+EOF
+LOOM_DAEMON_BIN="$STUB_DIR/daemon-new" run_guard 114
+assert_eq "0" "$RC" "(k3) roster reader app/loom-fleet-reader-1 -> NOT skipped"
+assert_eq "EVALUATE" "$(get_field "$OUT" DECISION)" "(k3) DECISION=EVALUATE for a roster reader"
+
+# (k4) A daemon that knows the verb answers not-ours for an unrelated bot ->
+#      bot-author SKIP, and its exit 1 is final (the fallback pattern is NOT
+#      consulted after a definite answer).
+reset_state
+cat > "$STUB_DIR/pr-115.json" <<'EOF'
+{"author":{"is_bot":true,"login":"app/renovate"},"headRefOid":"f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"}
+EOF
+LOOM_DAEMON_BIN="$STUB_DIR/daemon-new" run_guard 115
+assert_eq "10" "$RC" "(k4) daemon answers not-fleet for app/renovate -> exit 10"
+
+# (k5) An old daemon (no is-fleet verb): the fallback accepts a numbered pool
+#      App -- the #6982 regression the old exact match reintroduced for -1/-2.
+reset_state
+cat > "$STUB_DIR/pr-116.json" <<'EOF'
+{"author":{"is_bot":true,"login":"app/loom-fleet-dispatch-2"},"headRefOid":"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a"}
+EOF
+run_guard 116
+assert_eq "0" "$RC" "(k5) old daemon, app/loom-fleet-dispatch-2 -> fallback accepts it"
+assert_eq "EVALUATE" "$(get_field "$OUT" DECISION)" "(k5) DECISION=EVALUATE via the default-family fallback"
+
+# (k6) ...but the fallback is exact, never a prefix.
+reset_state
+cat > "$STUB_DIR/pr-117.json" <<'EOF'
+{"author":{"is_bot":true,"login":"app/loom-fleet-dispatch-evil"},"headRefOid":"b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b"}
+EOF
+run_guard 117
+assert_eq "10" "$RC" "(k6) app/loom-fleet-dispatch-evil -> bot-author SKIP, exit 10"
+
+# ============================================================================
+# #9548 / #9716: `loom:fallback-evaluated` counts only from a trusted author.
+# The marker SUPPRESSES review (feeds the lifetime cap and SHA dedup), so an
+# outsider able to comment on a public PR must not be able to post one and
+# silence the Judge's own safety net.
+# ============================================================================
+OUTSIDER_LOGIN="drive-by"
+OUTSIDER_ASSOC="CONTRIBUTOR"
+
+# (l) An outsider spoofing the lifetime cap: 3 well-formed markers, --cap 3,
+#     but none from a trusted author -> MARKER_COUNT=0, no cap, EVALUATE.
+reset_state
+cat > "$STUB_DIR/pr-118.json" <<EOF
+{"author":{"is_bot":false},"headRefOid":"c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c"}
+EOF
+{
+  echo "["
+  marker_comment "$(hours_ago 40)" "1111111111111111111111111111111111111a" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo ","
+  marker_comment "$(hours_ago 30)" "2222222222222222222222222222222222222b" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo ","
+  marker_comment "$(hours_ago 20)" "3333333333333333333333333333333333333c" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo "]"
+} > "$STUB_DIR/comments-118.json"
+run_guard 118 --cap 3
+assert_eq "0" "$RC" "(l) 3 outsider markers cannot spoof the cap -> exit 0, not 11"
+assert_eq "EVALUATE" "$(get_field "$OUT" DECISION)" "(l) DECISION=EVALUATE despite 3 well-formed outsider markers"
+assert_eq "0" "$(get_field "$OUT" MARKER_COUNT)" "(l) MARKER_COUNT=0 -- an outsider's marker counts for nothing"
+
+# (l2) An outsider spoofing SHA dedup: a single marker naming the CURRENT head
+#      SHA, from an untrusted author -> must NOT skip via dedup.
+reset_state
+HEAD_SHA_L2="d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d"
+cat > "$STUB_DIR/pr-119.json" <<EOF
+{"author":{"is_bot":false},"headRefOid":"$HEAD_SHA_L2"}
+EOF
+{
+  echo "["
+  marker_comment "$(hours_ago 1)" "$HEAD_SHA_L2" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo "]"
+} > "$STUB_DIR/comments-119.json"
+run_guard 119 --cap 20
+assert_eq "0" "$RC" "(l2) outsider's current-head marker cannot spoof SHA dedup -> exit 0, not 12"
+assert_eq "EVALUATE" "$(get_field "$OUT" DECISION)" "(l2) DECISION=EVALUATE -- the outsider's marker is prose, not state"
+
+# (l3) An outsider spoofing the velocity alert: several untrusted markers
+#      inside the window -> VELOCITY_ALERT stays 0, VELOCITY_COUNT=0.
+reset_state
+cat > "$STUB_DIR/pr-120.json" <<EOF
+{"author":{"is_bot":false},"headRefOid":"e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e"}
+EOF
+{
+  echo "["
+  marker_comment "$(hours_ago 3)" "1111111111111111111111111111111111111a" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo ","
+  marker_comment "$(hours_ago 2)" "2222222222222222222222222222222222222b" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo ","
+  marker_comment "$(hours_ago 1)" "3333333333333333333333333333333333333c" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo "]"
+} > "$STUB_DIR/comments-120.json"
+run_guard 120 --cap 20 --velocity-threshold 3 --velocity-window-hours 4
+assert_eq "0" "$(get_field "$OUT" VELOCITY_ALERT)" "(l3) 3 outsider markers in-window do not trip VELOCITY_ALERT"
+assert_eq "0" "$(get_field "$OUT" VELOCITY_COUNT)" "(l3) VELOCITY_COUNT=0 -- outsider markers are not counted at all"
+
+# (l4) Mixed authorship: an outsider's marker and a trusted (fleet-App)
+#      marker on the same PR -- only the trusted one counts toward the cap,
+#      proving this is per-comment filtering, not an all-or-nothing toggle.
+reset_state
+cat > "$STUB_DIR/pr-121.json" <<EOF
+{"author":{"is_bot":false},"headRefOid":"f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f"}
+EOF
+{
+  echo "["
+  marker_comment "$(hours_ago 10)" "1111111111111111111111111111111111111a" "$OUTSIDER_LOGIN" "$OUTSIDER_ASSOC"
+  echo ","
+  marker_comment "$(hours_ago 5)" "2222222222222222222222222222222222222b"
+  echo "]"
+} > "$STUB_DIR/comments-121.json"
+run_guard 121 --cap 1
+assert_eq "11" "$RC" "(l4) the one TRUSTED marker alone reaches --cap 1 -> exit 11"
+assert_eq "1" "$(get_field "$OUT" MARKER_COUNT)" "(l4) MARKER_COUNT=1 -- the outsider's marker is dropped, the fleet App's counts"
+
+# (m) Fail-safe: no `forge trusted-comments` verb (old or absent binary) ->
+#     EVERY marker counts as absent, even a well-formed, correctly-attributed
+#     one -- never fall back to the unfiltered listing. Direction check: this
+#     can only make the guard evaluate more (never let an unauthenticatable
+#     marker suppress a real review).
+reset_state
+touch "$STUB_DIR/trust-verb-missing"
+cat > "$STUB_DIR/pr-122.json" <<EOF
+{"author":{"is_bot":false},"headRefOid":"a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a"}
+EOF
+{
+  echo "["
+  marker_comment "$(hours_ago 40)" "1111111111111111111111111111111111111a"
+  echo ","
+  marker_comment "$(hours_ago 30)" "2222222222222222222222222222222222222b"
+  echo ","
+  marker_comment "$(hours_ago 20)" "3333333333333333333333333333333333333c"
+  echo "]"
+} > "$STUB_DIR/comments-122.json"
+run_guard 122 --cap 3
+assert_eq "0" "$RC" "(m) no trusted-comments verb -> markers read as absent, exit 0 not 11"
+assert_eq "EVALUATE" "$(get_field "$OUT" DECISION)" "(m) DECISION=EVALUATE when the filter cannot run"
+assert_eq "0" "$(get_field "$OUT" MARKER_COUNT)" "(m) MARKER_COUNT=0 when authorship cannot be authenticated"
+assert_contains "$ERR" "could not authenticate comment authors" "(m) stderr names the authentication failure (#9548/#9716)"
+rm -f "$STUB_DIR/trust-verb-missing"
 
 # --- Summary -------------------------------------------------------------
 echo ""

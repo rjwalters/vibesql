@@ -136,6 +136,10 @@ fi
 # exit 1 would read as a duplicate VERDICT, the worst possible lie a
 # duplicate check can tell.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# $GH_READ (docs/gh-cached.md interface, #9953): the short-TTL read cache when
+# the wrapper ships next to this script, plain `gh` otherwise. Only repeated
+# observation reads use it; writes stay literal `gh`.
+GH_READ="gh"; _ghc="$SCRIPT_DIR/gh-cached"; if [[ -x "$_ghc" ]] && "$_ghc" --version >/dev/null 2>&1; then GH_READ="$_ghc"; fi
 # shellcheck source=lib/script-helper.sh
 source "$SCRIPT_DIR/lib/script-helper.sh"
 export LOOM_SCRIPT_HELPER_MISSING_RC=2
@@ -375,7 +379,7 @@ search_similar_issues() {
             # (#4659), which itself failed under GraphQL exhaustion before
             # REST was ever attempted.
             local rest_issues
-            if rest_issues=$(gh api "repos/{owner}/{repo}/issues?state=open&per_page=50" 2>&1); then
+            if rest_issues=$("$GH_READ" api "repos/{owner}/{repo}/issues?state=open&per_page=50" 2>&1); then
                 # REST's /issues endpoint also returns PRs; exclude them.
                 issues=$(echo "$rest_issues" | jq -c '[.[] | select(.pull_request == null)]')
                 rest_fallback=true
@@ -425,7 +429,7 @@ search_merged_prs() {
             # See the matching comment in search_similar_issues(): `gh api`
             # resolves "{owner}/{repo}" locally, no GraphQL call (#4659).
             local rest_prs
-            if rest_prs=$(gh api "repos/{owner}/{repo}/pulls?state=closed&per_page=20" 2>&1); then
+            if rest_prs=$("$GH_READ" api "repos/{owner}/{repo}/pulls?state=closed&per_page=20" 2>&1); then
                 prs=$(echo "$rest_prs" | jq -c '[.[] | select(.merged_at != null)]')
                 rest_fallback=true
             else
@@ -463,7 +467,7 @@ search_closed_issues() {
             # See the matching comment in search_similar_issues(): `gh api`
             # resolves "{owner}/{repo}" locally, no GraphQL call (#4659).
             local rest_issues
-            if rest_issues=$(gh api "repos/{owner}/{repo}/issues?state=closed&per_page=20" 2>&1); then
+            if rest_issues=$("$GH_READ" api "repos/{owner}/{repo}/issues?state=closed&per_page=20" 2>&1); then
                 # REST's /issues endpoint also returns PRs; exclude them.
                 issues=$(echo "$rest_issues" | jq -c '[.[] | select(.pull_request == null)]')
                 rest_fallback=true
@@ -522,16 +526,21 @@ search_cross_references() {
     fi
 
     local timeline
-    if ! timeline=$(gh api "repos/${repo_nwo}/issues/${issue_num}/timeline" --paginate 2>&1); then
+    if ! timeline=$("$GH_READ" api "repos/${repo_nwo}/issues/${issue_num}/timeline" --paginate 2>&1); then
         print_warning "Failed to fetch timeline for #${issue_num}: $timeline"
         echo "[]"
         return 0
     fi
 
+    # The same-repo compare is case-insensitive: GitHub owner/repo names are,
+    # and $repo_nwo carries whatever casing the local remote URL was cloned
+    # with (e.g. "example-org/x") while full_name carries GitHub's canonical
+    # casing ("Example-Org/x"). A case-sensitive compare silently dropped every
+    # cross-reference for such clones (example-org/tool-repo#202).
     echo "$timeline" | jq -c --arg repo "$repo_nwo" --argjson self "$issue_num" '
         [.[] | select(.event == "cross-referenced"
                        and .source.issue != null
-                       and (.source.issue.repository.full_name // "") == $repo
+                       and ((.source.issue.repository.full_name // "") | ascii_downcase) == ($repo | ascii_downcase)
                        and .source.issue.number != $self
                        and .source.issue.state == "open")
          | {number: .source.issue.number,

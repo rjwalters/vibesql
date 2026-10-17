@@ -84,11 +84,25 @@
 #       $LOOM_TERMINAL_ID to auto-resolve from, the array is EMPTY and the
 #       detached loop must still renew the lease under bash 3.2 -- plus the
 #       populated-array control, which must still forward both flags
+#   (w) the cached lease id (#10021): renew-once --cached-lease reads one
+#       non-paginated since-window page and PATCHes once; it re-lists (the
+#       full --paginate lookup) only on a missing/stale cached comment, a
+#       full page, or a PATCH 404; the own-yield guard still fires on the
+#       window; and start's loop lists with --paginate exactly once
+#   (x) gh-call attribution (#10139): every comments read and PATCH -- from a
+#       detached `start` loop (explicit pair, and auto-resolved from
+#       LOOM_TERMINAL_ID=daemon-<id>), a direct renew-once, and the cache
+#       re-exec path -- runs with LOOM_SWEEP_ID=<resolved sweep> and
+#       LOOM_ROLE=sweep-lease-renew; explicit identity beats ambient, an
+#       inherited role is replaced, and a no-identity run keeps an inherited
+#       sweep id (or leaves it absent) without inventing one
 #
 # Usage:
 #   ./.loom/scripts/tests/test-sweep-lease-renew.sh
 
 set -uo pipefail
+# shellcheck source=lib/write-scope-fixture.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-fixture.sh"
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
@@ -155,12 +169,14 @@ STUB_DIR="$(mktemp -d)"
 trap 'rm -rf "$STUB_DIR" 2>/dev/null || true' EXIT
 
 # --- Stub gh on PATH ---------------------------------------------------
-#   gh api [-R repo] repos/{owner}/{repo}/issues/<N>/comments --paginate
+#   gh api repos/{owner}/{repo}/issues/<N>/comments --paginate
 #       -> cat $STUB_DIR/comments.json (or "[]"; fails if comments-fail exists)
 #          -- OR a 403 "not accessible by integration" if comments-403-always
 #          exists, or on the FIRST attempt only if comments-403-once exists
 #          (each attempt is counted in $D/comments-attempt-count)
-#   gh api [-R repo] --method PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@<path>
+#       Every listing appends "paginate=<0|1> <path>" to $D/list-calls.log
+#       (#10021); a `?since=` window read serves comments-window.json if present.
+#   gh api --method PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@<path>
 #       -> reads the file the -F value's "@" prefix references into
 #          $STUB_DIR/patch-<id>-N.body, appends "<id>" to
 #          $STUB_DIR/patch-calls.log, prints "{}" (fails if patch-fail exists)
@@ -168,6 +184,7 @@ trap 'rm -rf "$STUB_DIR" 2>/dev/null || true' EXIT
 #          exists, or on the FIRST attempt only if patch-403-once exists
 #          (each attempt for a given <id> is counted in $D/patch-count-<id>,
 #          the same counter the body-numbering below already used)
+#          -- OR an "HTTP 404" if patch-404-<id> exists (comment deleted, #10021)
 #
 #   The 403 files (#6541) let a test drive forge_gh_perm_safe's escalation
 #   ladder deterministically: "*-403-once" simulates a transient App-token
@@ -194,11 +211,14 @@ if [[ "$1" == "api" ]]; then
   path=""
   field_flag=""
   field_kv=""
+  paginated=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --method) method="$2"; shift 2 ;;
-      -R) shift 2 ;;
-      --paginate) shift ;;
+      -R|--repo)
+        # Real `gh api` has no -R/--repo flag (#9552): fail exactly like it.
+        echo "unknown shorthand flag: 'R' in -R" >&2; exit 1 ;;
+      --paginate) paginated=1; shift ;;
       -f|--raw-field) field_flag="-f"; field_kv="$2"; shift 2 ;;
       -F|--field) field_flag="-F"; field_kv="$2"; shift 2 ;;
       *)
@@ -207,7 +227,11 @@ if [[ "$1" == "api" ]]; then
         ;;
     esac
   done
-  if [[ "$method" == "GET" && "$path" == repos/*/issues/*/comments ]]; then
+  echo "$path" >> "$D/api-paths.log"
+  # #10139: the attribution a gh shim would read from this call's environment.
+  echo "$method sid=${LOOM_SWEEP_ID-<unset>} role=${LOOM_ROLE-<unset>}" >> "$D/attr.log"
+  if [[ "$method" == "GET" && "$path" == repos/*/issues/*/comments* ]]; then
+    echo "paginate=$paginated $path" >> "$D/list-calls.log"
     if [[ -f "$D/comments-fail" ]]; then
       echo "stub gh: comments fetch failed" >&2
       exit 1
@@ -219,6 +243,9 @@ if [[ "$1" == "api" ]]; then
       exit 1
     fi
     canned="$D/comments.json"
+    # #10021: a `?since=` window read is served from comments-window.json
+    # when a test provides one (the forge's server-side filter, pre-applied).
+    if [[ "$path" == *"?since="* && -f "$D/comments-window.json" ]]; then canned="$D/comments-window.json"; fi
     if [[ -f "$canned" ]]; then cat "$canned"; else echo "[]"; fi
     exit 0
   fi
@@ -228,6 +255,10 @@ if [[ "$1" == "api" ]]; then
     echo "$n" > "$D/patch-count-$id"
     if [[ -f "$D/patch-fail" ]]; then
       echo "stub gh: patch failed" >&2
+      exit 1
+    fi
+    if [[ -f "$D/patch-404-$id" ]]; then
+      echo "gh: Not Found (HTTP 404)" >&2
       exit 1
     fi
     if [[ -f "$D/patch-403-always" ]] || { [[ -f "$D/patch-403-once" ]] && [[ "$n" -eq 1 ]]; }; then
@@ -279,6 +310,15 @@ chmod +x "$STUB_DIR/github-app-token.sh"
 
 export LOOM_TEST_STUB_DIR="$STUB_DIR"
 export PATH="$STUB_DIR:$PATH"
+# #9548: the subject filters lease markers through `forge trusted-comments`.
+# shellcheck source=lib/trust-stub.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/trust-stub.sh"
+loom_trust_stub "$STUB_DIR"
+# #9548: The lease write vets its write target through the write scope before it
+# writes. It runs from a checkout registered as acme/widget (origin, .loom/, push
+# reported to the permission probe), so the real decision admits it.
+write_scope_register "$STUB_DIR/checkout" acme/widget
+cd "$STUB_DIR/checkout" || exit 1
 export LOOM_GITHUB_APP_SCRIPT="$STUB_DIR/github-app-token.sh"
 
 reset_state() {
@@ -286,6 +326,8 @@ reset_state() {
     rm -f "$STUB_DIR"/comments-403-once "$STUB_DIR"/comments-403-always "$STUB_DIR"/comments-attempt-count
     rm -f "$STUB_DIR"/patch-403-once "$STUB_DIR"/patch-403-always
     rm -f "$STUB_DIR"/patch-*.body "$STUB_DIR"/patch-count-* "$STUB_DIR"/patch-calls.log
+    rm -f "$STUB_DIR"/comments-window.json "$STUB_DIR"/patch-404-* "$STUB_DIR"/list-calls.log
+    rm -f "$STUB_DIR"/attr.log
     echo "not-configured" > "$STUB_DIR/mint-mode"
     # Ensure rung 3 (personal-token / personal-ambient) has nothing of ITS
     # OWN to escalate to beyond whatever the real ambient host credential
@@ -302,6 +344,9 @@ reset_state() {
     # become exact-match tests against identity values the fixtures were
     # never written to match.
     unset LOOM_TERMINAL_ID LOOM_HOST_ID LOOM_LEASE_PUBLISH_HOSTNAME HOSTNAME 2> /dev/null || true
+    # Same reason for the gh-call attribution vars (#10139): test (x) sets them
+    # deliberately; everything else must start from an absent pair.
+    unset LOOM_SWEEP_ID LOOM_ROLE 2> /dev/null || true
 }
 
 run_script() {
@@ -496,6 +541,28 @@ JSON
 run_script renew-once 6485
 assert_eq "4" "$RC" "(i-4) newest-wins candidate is the yielded loser's lease -> exit 4, refuse to renew"
 assert_contains "$ERR" "host=host-loser sweep=sweep-loser" "(i-4) stderr names the yielded owner, not the winner"
+
+# (i-5) #9548: an UNTRUSTED yield record naming our own (host, sweep) is prose,
+# and an untrusted newer lease is never the renewal candidate.
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=hostA sweep=sweepA -->\nprose"},
+  {"id": 43, "user": {"login": "drive-by", "type": "User"}, "author_association": "NONE", "body": "<!-- loom:lease-yield host=hostA sweep=sweepA earliest_host=hostB earliest_sweep=sweepB -->"},
+  {"id": 44, "user": {"login": "drive-by", "type": "User"}, "author_association": "NONE", "body": "<!-- loom:lease host=hostA sweep=sweepA -->"}
+]
+JSON
+run_script renew-once 6485 --host hostA --sweep-id sweepA
+assert_eq "0" "$RC" "(i-5) an untrusted yield record does not stop renewal (exit 0)"
+assert_true "$([[ -f "$STUB_DIR/patch-42-1.body" ]] && echo true || echo false)" "(i-5) the trusted lease (42), not the outsider's (44), is renewed"
+reset_state
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[
+  {"id": 42, "body": "<!-- loom:lease host=hostA sweep=sweepA -->\nprose"}
+]
+JSON
+LOOM_TEST_NO_TRUST_VERB=1 run_script renew-once 6485 --host hostA --sweep-id sweepA
+assert_eq "1" "$RC" "(i-6) no trust filter -> exit 1 (transient failure, nothing patched)"
 
 # --- (j) start's default --host/--sweep-id auto-resolution (#6485) --------
 echo ""
@@ -1134,6 +1201,251 @@ assert_eq "1" "$HELP_RC" "--help exits 1 (usage-exit convention, matches sweep-r
 "$SCRIPT" bogus-command > /dev/null 2>&1
 BOGUS_RC=$?
 assert_true "$([[ "$BOGUS_RC" -ne 0 ]] && echo true || echo false)" "an unknown command exits non-zero"
+
+# --- (v) LOOM_REPO set -> the repo is addressed in the endpoint PATH, never
+# via `-R` (#9552): `gh api` has no -R flag, so the old splice made every
+# renewal cycle exit 1.
+reset_state
+: > "$STUB_DIR/api-paths.log"
+cat > "$STUB_DIR/comments.json" <<'JSON'
+[{"id": 100, "body": "<!-- loom:lease host=studio-host sweep=sweep-renew-set -->\nLease to renew."}]
+JSON
+LOOM_REPO=acme/widget run_script renew-once 9552
+assert_eq "0" "$RC" "(v) LOOM_REPO set -> exit 0 (renew succeeds)"
+assert_eq "100" "$(cat "$STUB_DIR/patch-calls.log" 2>/dev/null)" "(v) LOOM_REPO set: the lease comment was actually PATCHed"
+assert_eq "repos/acme/widget/issues/9552/comments
+repos/acme/widget/issues/comments/100" "$(cat "$STUB_DIR/api-paths.log")" "(v) LOOM_REPO set: both the read and the PATCH name the repo in the path"
+
+# --- (w) the loop remembers its lease comment id (#10021) ------------------
+echo ""
+echo "--- (w) cached lease id: steady state is one non-paginated read + one PATCH ---"
+
+# list_count <0|1> -- how many comment listings were (1) / were not (0)
+# made with --paginate since the last reset_state.
+list_count() {
+    local n
+    n="$(grep -c "^paginate=$1 " "$STUB_DIR/list-calls.log" 2> /dev/null)"
+    echo "${n:-0}"
+}
+W_LEASE='{"id": 42, "created_at": "2026-10-01T00:00:00Z", "body": "<!-- loom:lease host=w-host sweep=w-sweep -->\nprose"}'
+W_NEW_LEASE='{"id": 77, "created_at": "2026-10-02T00:00:00Z", "body": "<!-- loom:lease host=w-host sweep=w-sweep -->\nre-published"}'
+
+# (w1) cached id present in the since-window: no --paginate, exactly one PATCH.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments-window.json"
+run_script renew-once 10021 --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(w1) cached lease renews (exit 0)"
+assert_eq "0" "$(list_count 1)" "(w1) no --paginate comment listing on the cached path"
+assert_eq "1" "$(list_count 0)" "(w1) exactly one non-paginated window read"
+assert_contains "$(cat "$STUB_DIR/list-calls.log" 2> /dev/null)" "comments?since=2026-10-01T00:00:00Z&per_page=100" "(w1) the window is the comments updated since the lease's created_at, one page"
+assert_eq "42" "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(w1) exactly one PATCH, of the cached comment"
+assert_contains "$ERR" "lease-cache=42@2026-10-01T00:00:00Z" "(w1) the cache token is re-reported for the next cycle"
+assert_eq "" "$OUT" "(w1) stdout stays empty"
+
+# (w2) the uncached (first) lookup is the full paginated listing, and reports
+# the cache token the loop will carry forward.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+run_script renew-once 10021
+assert_eq "0" "$RC" "(w2) uncached renew-once exits 0"
+assert_eq "1" "$(list_count 1)" "(w2) the uncached lookup is one --paginate listing"
+assert_contains "$ERR" "lease-cache=42@2026-10-01T00:00:00Z" "(w2) the full lookup reports lease-cache=<id>@<created_at>"
+
+# (w3) the cached comment was deleted (absent from the window) -> one full
+# re-listing, which finds the re-published lease.
+reset_state
+echo "[]" > "$STUB_DIR/comments-window.json"
+echo "[$W_NEW_LEASE]" > "$STUB_DIR/comments.json"
+run_script renew-once 10021 --host w-host --sweep-id w-sweep --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(w3) a vanished cached comment falls back to the full lookup (exit 0)"
+assert_eq "1" "$(list_count 1)" "(w3) exactly one --paginate re-listing"
+assert_eq "77" "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(w3) the re-found lease is the one PATCHed"
+assert_contains "$ERR" "lease-cache=77@2026-10-02T00:00:00Z" "(w3) the cache moves to the re-found lease"
+
+# (w4) PATCH of the cached comment returns 404 -> re-list, renew the new one.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments-window.json"
+echo "[$W_NEW_LEASE]" > "$STUB_DIR/comments.json"
+touch "$STUB_DIR/patch-404-42"
+run_script renew-once 10021 --host w-host --sweep-id w-sweep --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(w4) a 404 on the cached PATCH re-lists and renews (exit 0)"
+assert_contains "$ERR" "returned 404" "(w4) stderr names the 404 fallback"
+assert_eq "1" "$(list_count 1)" "(w4) the 404 triggers exactly one --paginate re-listing"
+assert_eq "77" "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(w4) the re-found lease is PATCHed after the 404"
+
+# (w4b) a 404 on the UNCACHED path is a plain failure -- no re-list loop.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+touch "$STUB_DIR/patch-404-42"
+run_script renew-once 10021
+assert_eq "1" "$RC" "(w4b) a 404 without a cache fails closed (exit 1)"
+assert_eq "1" "$(list_count 1)" "(w4b) and does not re-list"
+
+# (w5) the own-yield guard still fires on the window read.
+reset_state
+cat > "$STUB_DIR/comments-window.json" <<JSON
+[$W_LEASE,
+ {"id": 43, "created_at": "2026-10-01T00:05:00Z", "body": "<!-- loom:lease-yield host=w-host sweep=w-sweep earliest_host=x earliest_sweep=y -->\nprose"}]
+JSON
+run_script renew-once 10021 --host w-host --sweep-id w-sweep --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "4" "$RC" "(w5) a yield record in the window -> exit 4 on the cached path"
+assert_true "$([[ ! -s "$STUB_DIR/patch-calls.log" ]] && echo true || echo false)" "(w5) no PATCH after the own-yield guard"
+assert_eq "0" "$(list_count 1)" "(w5) and no --paginate listing"
+
+# (w6) exact-match targeting survives the cache: a cached id that is a PEER's
+# lease is stale, so the re-list renews this sweep's own comment.
+reset_state
+cat > "$STUB_DIR/comments-window.json" <<JSON
+[{"id": 99, "created_at": "2026-10-01T00:00:00Z", "body": "<!-- loom:lease host=peer-host sweep=peer-sweep -->\nprose"}]
+JSON
+cat > "$STUB_DIR/comments.json" <<JSON
+[$W_LEASE,
+ {"id": 99, "created_at": "2026-10-01T00:00:00Z", "body": "<!-- loom:lease host=peer-host sweep=peer-sweep -->\nprose"}]
+JSON
+run_script renew-once 10021 --host w-host --sweep-id w-sweep --cached-lease 99@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(w6) a cached id that no longer matches --host/--sweep-id re-lists (exit 0)"
+assert_eq "42" "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(w6) the OWN lease (42), never the peer's (99), is PATCHed"
+
+# (w7) a malformed --cached-lease is refused before any forge call.
+reset_state
+run_script renew-once 10021 --cached-lease '42@2026-10-01T00:00:00Z&per_page=1'
+assert_eq "1" "$RC" "(w7) a malformed --cached-lease is a usage error"
+assert_true "$([[ ! -s "$STUB_DIR/list-calls.log" ]] && echo true || echo false)" "(w7) no comment listing was attempted"
+
+# (w8) a FULL window page may be truncated -> treated as a miss.
+reset_state
+jq -n --argjson lease "$W_LEASE" '[$lease] + [range(99) | {id: (1000 + .), created_at: "2026-10-01T00:00:01Z", body: "filler"}]' \
+    > "$STUB_DIR/comments-window.json"
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+run_script renew-once 10021 --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(w8) a full window page still renews (exit 0)"
+assert_eq "1" "$(list_count 1)" "(w8) via exactly one --paginate re-listing"
+
+# (w9) loop level: over several cycles, the start loop lists with --paginate
+# ONCE (the first cycle) and every later cycle is window read + PATCH; a newer
+# peer lease never captures the cache.
+reset_state
+cat > "$STUB_DIR/comments.json" <<JSON
+[$W_LEASE,
+ {"id": 99, "created_at": "2026-10-01T00:01:00Z", "body": "<!-- loom:lease host=peer-host sweep=peer-sweep -->\nprose"}]
+JSON
+cp "$STUB_DIR/comments.json" "$STUB_DIR/comments-window.json"
+sleep 12 &
+WATCH_PID_W=$!
+LOOP_PID_W="$("$SCRIPT" start 10021 --interval 1 --watch-pid "$WATCH_PID_W" --host w-host --sweep-id w-sweep 2> "$STUB_DIR/start-w-stderr.log")"
+W_WAITED=0
+while ((W_WAITED < 20)) && [[ "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null | wc -l | tr -d ' ')" -lt 3 ]]; do
+    sleep 0.5
+    W_WAITED=$((W_WAITED + 1))
+done
+kill "$WATCH_PID_W" 2> /dev/null || true
+wait "$WATCH_PID_W" 2> /dev/null || true
+kill "$LOOP_PID_W" 2> /dev/null || true
+W_PATCHES="$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null | wc -l | tr -d ' ')"
+assert_true "$([[ "${W_PATCHES:-0}" -ge 3 ]] && echo true || echo false)" "(w9) the loop renewed over 3+ cycles (got ${W_PATCHES:-0})"
+assert_eq "1" "$(list_count 1)" "(w9) exactly ONE --paginate listing across all cycles"
+assert_true "$([[ "$(list_count 0)" -ge 2 ]] && echo true || echo false)" "(w9) later cycles use the non-paginated window read"
+assert_eq "" "$(grep -v '^42$' "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(w9) only the own lease (42) was ever PATCHed, never the newer peer (99)"
+assert_eq "" "$(cat "$STUB_DIR/start-w-stderr.log" 2> /dev/null)" "(w9) no FAILED cycle was logged"
+
+# --- (x) gh-call attribution: LOOM_SWEEP_ID / LOOM_ROLE (#10139) -----------
+echo ""
+echo "--- (x) every gh call carries the renewer's sweep id and role ---"
+
+# attr_set -- the distinct "<METHOD> sid=... role=..." lines the stub gh saw.
+attr_set() { sort -u "$STUB_DIR/attr.log" 2> /dev/null; }
+# wait_patches <n> -- poll (max ~10s) until the stub has recorded n PATCHes.
+wait_patches() {
+    local waited=0
+    while ((waited < 20)) && [[ "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null | wc -l | tr -d ' ')" -lt "$1" ]]; do
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+}
+X_ROLE="role=sweep-lease-renew"
+
+# (x1) direct renew-once: the explicit --sweep-id beats a conflicting ambient
+# LOOM_SWEEP_ID, and an inherited LOOM_ROLE is replaced, on BOTH forge calls.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+LOOM_SWEEP_ID=ambient-sweep LOOM_ROLE=builder run_script renew-once 10139 --host w-host --sweep-id w-sweep
+assert_eq "0" "$RC" "(x1) explicit renew-once renews (exit 0)"
+assert_eq "GET sid=w-sweep $X_ROLE
+PATCH sid=w-sweep $X_ROLE" "$(attr_set)" "(x1) comments read and PATCH carry the explicit sweep id and the renewer role"
+
+# (x2) no identity anywhere (both vars absent, script runs under set -u): still
+# legal, no sweep id is invented, the role is still set.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+run_script renew-once 10139
+assert_eq "0" "$RC" "(x2) no-identity renew-once stays legal with LOOM_SWEEP_ID/LOOM_ROLE absent"
+assert_eq "GET sid=<unset> $X_ROLE
+PATCH sid=<unset> $X_ROLE" "$(attr_set)" "(x2) no sweep id is invented; the role is set"
+
+# (x3) no local identity, but a valid inherited sweep id: kept, not erased.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+LOOM_SWEEP_ID=inherited-sweep LOOM_ROLE=judge run_script renew-once 10139
+assert_eq "0" "$RC" "(x3) renew-once with only an inherited sweep id renews (exit 0)"
+assert_eq "GET sid=inherited-sweep $X_ROLE
+PATCH sid=inherited-sweep $X_ROLE" "$(attr_set)" "(x3) the inherited sweep id survives; the inherited role is replaced"
+
+# (x4) the cache-miss re-exec path keeps the identity: window read, full
+# re-listing, and PATCH all carry it.
+reset_state
+echo "[]" > "$STUB_DIR/comments-window.json"
+echo "[$W_NEW_LEASE]" > "$STUB_DIR/comments.json"
+LOOM_SWEEP_ID=ambient-sweep run_script renew-once 10139 --host w-host --sweep-id w-sweep --cached-lease 42@2026-10-01T00:00:00Z
+assert_eq "0" "$RC" "(x4) cached-miss re-exec renews (exit 0)"
+assert_eq "2" "$(grep -c '^GET ' "$STUB_DIR/attr.log" 2> /dev/null)" "(x4) both the window read and the re-listing ran"
+assert_eq "GET sid=w-sweep $X_ROLE
+PATCH sid=w-sweep $X_ROLE" "$(attr_set)" "(x4) every call across the re-exec carries the explicit identity"
+
+# (x5) detached start loop with an explicit pair over repeated cycles (first
+# --paginate listing, then cached window reads), ambient identity conflicting.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+cp "$STUB_DIR/comments.json" "$STUB_DIR/comments-window.json"
+sleep 12 &
+WATCH_PID_X=$!
+LOOP_PID_X="$(LOOM_SWEEP_ID=ambient-sweep LOOM_ROLE=sweep-lifecycle "$SCRIPT" start 10139 --interval 1 --watch-pid "$WATCH_PID_X" --host w-host --sweep-id w-sweep 2> "$STUB_DIR/start-x-stderr.log")"
+wait_patches 2
+kill "$WATCH_PID_X" 2> /dev/null || true
+wait "$WATCH_PID_X" 2> /dev/null || true
+kill "$LOOP_PID_X" 2> /dev/null || true
+assert_true "$([[ "$(cat "$STUB_DIR/patch-calls.log" 2> /dev/null | wc -l | tr -d ' ')" -ge 2 ]] && echo true || echo false)" "(x5) the detached loop renewed over 2+ cycles"
+assert_eq "GET sid=w-sweep $X_ROLE
+PATCH sid=w-sweep $X_ROLE" "$(attr_set)" "(x5) every detached read and PATCH carries the explicit sweep id and the renewer role"
+
+# (x6) start auto-resolves its identity from LOOM_TERMINAL_ID=daemon-<id>; the
+# resolved id reaches the gh descendants.
+reset_state
+X6_HOST="$(compute_opaque_host_id x6-raw-host)"
+echo "[{\"id\": 61, \"created_at\": \"2026-10-01T00:00:00Z\", \"body\": \"<!-- loom:lease host=${X6_HOST} sweep=sweep-auto-61 -->\\nprose\"}]" > "$STUB_DIR/comments.json"
+sleep 8 &
+WATCH_PID_X6=$!
+LOOP_PID_X6="$(LOOM_HOST_ID=x6-raw-host LOOM_TERMINAL_ID=daemon-sweep-auto-61 "$SCRIPT" start 10139 --interval 1 --watch-pid "$WATCH_PID_X6" 2> "$STUB_DIR/start-x6-stderr.log")"
+wait_patches 1
+kill "$WATCH_PID_X6" 2> /dev/null || true
+wait "$WATCH_PID_X6" 2> /dev/null || true
+kill "$LOOP_PID_X6" 2> /dev/null || true
+assert_eq "61" "$(head -n1 "$STUB_DIR/patch-calls.log" 2> /dev/null)" "(x6) the auto-resolved loop renewed its own lease"
+assert_eq "GET sid=sweep-auto-61 $X_ROLE
+PATCH sid=sweep-auto-61 $X_ROLE" "$(attr_set)" "(x6) the auto-resolved sweep id reaches every gh call"
+
+# (x7) start with no identity at all (vars absent): the loop still runs and
+# renews, with the role set and no sweep id invented.
+reset_state
+echo "[$W_LEASE]" > "$STUB_DIR/comments.json"
+sleep 8 &
+WATCH_PID_X7=$!
+LOOP_PID_X7="$("$SCRIPT" start 10139 --interval 1 --watch-pid "$WATCH_PID_X7" 2> "$STUB_DIR/start-x7-stderr.log")"
+wait_patches 1
+kill "$WATCH_PID_X7" 2> /dev/null || true
+wait "$WATCH_PID_X7" 2> /dev/null || true
+kill "$LOOP_PID_X7" 2> /dev/null || true
+assert_eq "GET sid=<unset> $X_ROLE
+PATCH sid=<unset> $X_ROLE" "$(attr_set)" "(x7) a no-identity start loop renews with the role set and no sweep id"
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"

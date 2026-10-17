@@ -425,6 +425,30 @@ fi
 # Release on every exit path, including a failed create or an interrupt.
 trap 'loom_filing_lock_release' EXIT INT TERM
 
-if ! forge_gh_create_issue_rl_safe "$REPO_NWO" "$TITLE" "$BODY" "${LABELS[@]+"${LABELS[@]}"}"; then
-  exit 1
+ISSUE_URL="$(forge_gh_create_issue_rl_safe "$REPO_NWO" "$TITLE" "$BODY" "${LABELS[@]+"${LABELS[@]}"}")" || exit 1
+echo "$ISSUE_URL"
+
+# --- #9774: the filed body ends with the dashboard footer -------------------
+# Best-effort, via the daemon's --patch-created (fetch, footer, PATCH — the
+# number exists only inside the URL after the create). A daemon that cannot
+# (absent, or pre-#9818) leaves the body unfootered; it never un-files.
+# requires-daemon: forge optional   absent or pre-#9818 binary → the footer is skipped with a stderr note; the filing itself is already done (#9774)
+self_bin="$(command -v loom-daemon 2>/dev/null || true)"
+if [[ -n "$self_bin" ]]; then
+  # #10140: keep the daemon's stderr + exit code so the note names the cause
+  # (`2>&1 >/dev/null` captures stderr only; stdout stays the URL contract).
+  _footer_rc=0
+  _footer_err="$("$self_bin" forge comment --patch-created "$ISSUE_URL" 2>&1 >/dev/null)" || _footer_rc=$?
+  if [[ "$_footer_rc" -ne 0 ]]; then
+    # First non-empty stderr line (the anyhow top-level message, which embeds
+    # gh's error), capped so a multi-KB dump cannot flood the terminal. Pure
+    # bash: a grep pipeline would trip set -e/pipefail on empty stderr.
+    _footer_line=""
+    while IFS= read -r _l; do
+      [[ "$_l" =~ ^[[:space:]]*$ ]] && continue
+      _footer_line="${_l:0:300}"
+      break
+    done <<<"$_footer_err"
+    echo "create-issue.sh: note: could not append the dashboard footer to the filed body (loom-daemon exit ${_footer_rc}: ${_footer_line:-no stderr}; best-effort, the issue itself is filed)" >&2
+  fi
 fi

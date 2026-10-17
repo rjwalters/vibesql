@@ -50,6 +50,13 @@
 set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# #9548: this suite's subject vets its write target (`forge may-write`)
+# first; that decision is not what this suite tests (test-write-scope.sh does),
+# and without this the outcome would depend on the host's loom-daemon.
+WS_STUB_DIR="$(mktemp -d)"
+# shellcheck source=lib/write-scope-stub.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/write-scope-stub.sh"
+write_scope_allow_all "$WS_STUB_DIR"
 SCRIPTS_DIR="$(cd "$TEST_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SCRIPTS_DIR/../.." && pwd)"
 SLS="$SCRIPTS_DIR/sync-labels.sh"
@@ -304,6 +311,7 @@ run_sls() {
         PATH="$STUB_DIR:$PATH" \
         LOOM_TEST_GH_LOG="$GH_LOG" \
         LOOM_TEST_GH_NWO="$nwo" \
+        WRITE_SCOPE_STUB_REPO="$nwo" \
         LOOM_TEST_GH_REPO_VIEW="$repo_view" \
         LOOM_CONFIG_DEFAULTS_FILE="" \
         REPO_ROOT="$repo_root" \
@@ -350,8 +358,9 @@ assert_eq "-R octocat/hello-world" \
 # The preflight names its target positionally (`gh repo view` has no -R flag),
 # so match on the NWO itself rather than on '-R': no call may go anywhere else.
 assert_eq "" \
-    "$(printf '%s\n' "$LOG" | grep -v -- 'octocat/hello-world' || true)" \
+    "$(printf '%s\n' "$LOG" | grep -v -- 'octocat/hello-world' | grep -vxE -- '--version|--clear-cache' || true)" \
     "no gh call was made without the override target"
+# (the gh-cached wrapper's `--version` liveness probe and --clear-cache are the only target-less calls, #9953)
 
 # --repo=OWNER/NAME is the same flag.
 run_sls -- --repo=octocat/hello-world
@@ -554,7 +563,8 @@ run_sls -- --repo octocat/hello-world
 assert_eq "0" "$RC" "a reachable, writable --repo target syncs normally"
 assert_contains "$LOG" "repo view octocat/hello-world --json nameWithOwner,viewerPermission" \
     "the real --repo path preflights the named target with 'gh repo view'"
-assert_contains "$(printf '%s\n' "$LOG" | head -1)" "repo view octocat/hello-world" \
+# (filtering the gh-cached wrapper's local `--version` liveness probe, #9953 — not a forge call)
+assert_contains "$(printf '%s\n' "$LOG" | grep -vx -- '--version' | head -1)" "repo view octocat/hello-world" \
     "the preflight is the FIRST gh call — it precedes every label operation"
 
 # A typo that resolves to nothing this identity can see must abort before the
@@ -569,7 +579,7 @@ assert_not_contains "$LOG" "label delete" \
     "the unreachable target aborted BEFORE any label deletion"
 assert_not_contains "$LOG" "label create" \
     "the unreachable target aborted before any label creation"
-assert_eq "1" "$(printf '%s\n' "$LOG" | grep -c . || true)" \
+assert_eq "1" "$(printf '%s\n' "$LOG" | grep -vx -- '--version' | grep -c . || true)" \
     "the preflight was the only gh call made against the bad target"
 
 # Existing-but-read-only is the other half of "existence/permission": deleting

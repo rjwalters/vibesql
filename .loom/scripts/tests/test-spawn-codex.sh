@@ -955,9 +955,14 @@ assert_classify "TOKEN_EXPIRED" \
     1 codex "invalid_api_key is TOKEN_EXPIRED"
 
 # --- TOKEN_EXHAUSTED: plan/quota exhaustion ---
-assert_classify "TOKEN_EXHAUSTED" \
-    "You've hit your usage limit. Upgrade to Pro to continue using Codex" \
-    1 codex "\"hit your usage limit\" is TOKEN_EXHAUSTED"
+# Kept on one line each (rather than the usual continuations) so the #8539
+# capture below could be added without growing this over-ratchet file.
+assert_classify "TOKEN_EXHAUSTED" "You've hit your usage limit. Upgrade to Pro to continue using Codex" 1 codex "\"hit your usage limit\" is TOKEN_EXHAUSTED"
+# The wording captured verbatim on the #8539 host (a headless `codex exec`
+# inside an account's session container, every registered account walled). The
+# horizon it names is parsed daemon-side by `tokens_pool::codex_reset`;
+# classification stays this table's job and must not regress when it is.
+assert_classify "TOKEN_EXHAUSTED" "ERROR: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at September 25, 2026 3:00 PM." 1 codex "the captured usage-limit refusal, reset horizon and all, is TOKEN_EXHAUSTED (#8539)"
 assert_classify "TOKEN_EXHAUSTED" \
     "You've reached your usage limit. Increase your limits to continue using codex." \
     1 codex "\"reached your usage limit\" is TOKEN_EXHAUSTED"
@@ -1122,7 +1127,7 @@ READY_PROFILE="$(mk_hook_profile ready)"
 # copy also exists (see #4787), spuriously reporting hooks=not-ready.
 bash "$PROVISION_SCRIPT" install --codex-home "$READY_PROFILE" \
     --workspace "$LOOM_WORKSPACE" >/dev/null 2>&1
-printf 'hooks.state."loom".trusted_hash = "deadbeef"\n' > "$READY_PROFILE/config.toml"
+printf '[hooks.state."%s/hooks.json:pre_tool_use:0:0"]\ntrusted_hash = "deadbeef"\n' "$(cd -P "$READY_PROFILE" && pwd -P)" > "$READY_PROFILE/config.toml"
 
 BARE_PROFILE="$(mk_hook_profile bare)"
 
@@ -1131,7 +1136,7 @@ run_preflight 0 "builder + ready managed hook -> proceeds" \
     LOOM_ROLE=builder CODEX_HOME="$READY_PROFILE"
 out="$PREFLIGHT_OUT"
 assert_contains "hooks=ready" "$out" "audit line reports hooks=ready"
-assert_contains "trust-bypass=never" "$out" "audit line records that trust is never bypassed"
+assert_contains "trust-bypass=never" "$out" "audit line records that a bare-metal launch never waives trust"
 assert_not_contains "sk-loom-FAKE-4495" "$out" "the audit line leaks no credential material"
 assert_not_contains "auth.json" "$out" "the audit line names no credential file for a ready profile"
 
@@ -1153,7 +1158,7 @@ run_preflight 78 "builder + installed-but-untrusted profile -> exit 78" \
 STALE_PROFILE="$(mk_hook_profile stale)"
 bash "$PROVISION_SCRIPT" install --codex-home "$STALE_PROFILE" \
     --workspace "$LOOM_WORKSPACE" --bridge "$BRIDGE_SCRIPT" >/dev/null 2>&1
-printf 'hooks.state."loom".trusted_hash = "deadbeef"\n' > "$STALE_PROFILE/config.toml"
+printf '[hooks.state."%s/hooks.json:pre_tool_use:0:0"]\ntrusted_hash = "deadbeef"\n' "$(cd -P "$STALE_PROFILE" && pwd -P)" > "$STALE_PROFILE/config.toml"
 jq '(.hooks.PreToolUse[].hooks[] | select(.command | contains("guard-codex-bridge.sh")) | .command) |= (. + " --tampered")' \
     "$STALE_PROFILE/hooks.json" > "$STALE_PROFILE/hooks.tmp" \
     && mv "$STALE_PROFILE/hooks.tmp" "$STALE_PROFILE/hooks.json"
@@ -1177,8 +1182,8 @@ run_preflight 78 "sweep-lifecycle (daemon sweep-child alias) -> exit 78" \
     LOOM_ROLE=sweep-lifecycle CODEX_HOME="$BARE_PROFILE"
 
 # (6) Read-only roles keep the conservative fallback, with an explicit warning.
-run_preflight 0 "judge + unprovisioned profile -> proceeds (read-only role)" \
-    LOOM_ROLE=judge CODEX_HOME="$BARE_PROFILE"
+run_preflight 0 "curator + unprovisioned profile -> proceeds (read-only role)" \
+    LOOM_ROLE=curator CODEX_HOME="$BARE_PROFILE"
 out="$PREFLIGHT_OUT"
 assert_contains "hook parity unavailable" "$out" \
     "a read-only role is told, explicitly, that hook parity is unavailable"
@@ -1194,19 +1199,20 @@ assert_contains "role=unset" "$out" "the audit line reports an unset role"
 # (7) Ambient auth (no CODEX_HOME) is reported as unavailable, not ready.
 out="$(env -u CODEX_HOME -u LOOM_CODEX_HOME -u LOOM_CODEX_PROFILE \
     LOOM_SWEEP_NICE=0 LOOM_CODEX_NO_EXEC=1 LOOM_SPAWN_NO_EXPORT=1 \
-    LOOM_ROLE=judge bash "$SPAWN_CODEX" -p "hi" 2>&1)" || true
+    LOOM_ROLE=curator bash "$SPAWN_CODEX" -p "hi" 2>&1)" || true
 assert_contains "hooks=unavailable" "$out" \
     "ambient Codex login state reports hooks=unavailable"
 
-# (8) The adapter must never pass Codex's hook-trust bypass flag.
+# (8) The adapter passes Codex's hook-trust waiver on exactly ONE line, gated on
+#     the sealed verdict (#10102; behaviour in test-spawn-codex-sealed.sh).
 TESTS_RUN=$((TESTS_RUN + 1))
-if grep -nE '^[^#]*--dangerously-bypass-hook-trust' "$SPAWN_CODEX" \
-    | grep -vqE 'log_(error|warn|info)'; then
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "  ${RED}FAIL${NC}: spawn-codex.sh must never pass --dangerously-bypass-hook-trust"
-else
+waiver="$(grep -nE '^[^#]*--dangerously-bypass-hook-trust' "$SPAWN_CODEX" | grep -vE 'log_(error|warn|info)' || true)"
+if [[ "$(printf '%s\n' "$waiver" | grep -c .)" == "1" && "$waiver" == *'[[ "$_hook_trust_bypass" != "sealed" ]] ||'* ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
-    echo -e "  ${GREEN}PASS${NC}: spawn-codex.sh never passes --dangerously-bypass-hook-trust"
+    echo -e "  ${GREEN}PASS${NC}: spawn-codex.sh passes --dangerously-bypass-hook-trust only behind the sealed verdict"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "  ${RED}FAIL${NC}: spawn-codex.sh passes --dangerously-bypass-hook-trust outside the sealed gate: $waiver"
 fi
 
 # ...and the config-key spelling of the same waiver (`-c bypass_hook_trust=true`),
@@ -1392,11 +1398,10 @@ echo ""
 echo "Testing spawn-codex.sh session-exec mode (#6926)..."
 
 # A profile adopted by a prior `loom-daemon accounts session start` —
-# marked with the exact sentinel session_lifecycle::mark_session_managed
-# writes.
+# marked with the exact sentinel session_lifecycle::mark_session_managed writes.
 SESSION_PROFILE="$TMPROOT/profiles/session-acct"
 mkdir -p "$SESSION_PROFILE"
-printf '{"token":"stub"}\n' > "$SESSION_PROFILE/auth.json"
+printf '{"token":"stub"}\n' > "$SESSION_PROFILE/auth.json"; printf '{}\n' | tee "$SESSION_PROFILE/hooks.json" "$SESSION_PROFILE/loom-codex-hooks.json" > "$SESSION_PROFILE/config.toml"  # + profile controls (#9979)
 printf '{"schema_version":1,"container_name":"loom-codex-session-session-acct","adopted_at_unix":0}\n' \
     > "$SESSION_PROFILE/.session-managed.json"
 
@@ -1405,7 +1410,7 @@ printf '{"schema_version":1,"container_name":"loom-codex-session-session-acct","
 out="$(run_auth "LOOM_CODEX_HOME=$SESSION_PROFILE" -- -p "hi")"
 assert_contains "profile 'session-acct' is session-managed" "$out" \
     "a session-managed profile is detected via the on-disk marker"
-assert_contains "-e CARGO_INCREMENTAL=0 loom-codex-session-session-acct codex exec" "$out" \
+assert_contains "session-exec host --container loom-codex-session-session-acct" "$out" \
     "session-exec mode dispatches via docker exec into the account's container, with CARGO_INCREMENTAL=0 carried across the boundary (#6926, #8456; the --workdir/--env prefix is asserted in test-spawn-codex-session-exec.sh, #8518)"
 would_exec_line="$(printf '%s\n' "$out" | grep '^spawn-codex would-exec:' || true)"
 assert_not_contains "tmux" "$would_exec_line" \
@@ -1436,7 +1441,7 @@ NO_MARKER_PROFILE="$TMPROOT/profiles/forced"
 mkdir -p "$NO_MARKER_PROFILE"
 printf '{"token":"stub"}\n' > "$NO_MARKER_PROFILE/auth.json"
 out="$(run_auth "LOOM_CODEX_HOME=$NO_MARKER_PROFILE" LOOM_CODEX_SESSION_EXEC=1 -- -p "hi")"
-assert_contains "-e CARGO_INCREMENTAL=0 loom-codex-session-forced codex exec" "$out" \
+assert_contains "session-exec host --container loom-codex-session-forced" "$out" \
     "LOOM_CODEX_SESSION_EXEC=1 forces session-exec even without the marker file"
 assert_contains "forces session-exec mode though" "$out" \
     "LOOM_CODEX_SESSION_EXEC=1 warns that the profile was never adopted"
@@ -1550,26 +1555,25 @@ cat > "$SESSION_DOCKER_BIN/docker" <<DOCKERSHIM
 # the same fake codex shim Section 8 uses via a plain \`exec\`, so stdin/
 # stdout/stderr and the exit code all flow through exactly as they would for
 # a real container.
-if [[ "\$1" == "inspect" ]]; then
-    echo "true"
-    exit 0
-fi
-if [[ "\$1" == "exec" ]]; then
-    shift
-    # Options precede the container name (real docker exec is clap-parsed);
-    # -e/--env KEY=VALUE pairs are exported so the exec'd process sees them,
-    # the way real docker exec seeds its environment (#8456's
-    # CARGO_INCREMENTAL=0 and #8518's LOOM_WORKSPACE ride this path), and
-    # --workdir DIR is honoured with a cd, the way real docker exec starts
-    # the process in that directory (#8518).
-    while [[ "\$1" == -* ]]; do if [[ "\$1" == "--workdir" ]]; then cd "\$2"; else export "\$2"; fi; shift 2; done
-    _container="\$1"
-    shift
+# The #9979 posture probe (loom-daemon session-exec posture) runs
+# docker inspect --type container <c>; answer as a hardened host-mode
+# container would (unprivileged, bridge, CapDrop ALL, no-new-privileges, RO
+# profile controls), and \`exec <c> sha256sum\` with the host profile's hashes.
+[[ "\$1" == exec && "\$3" == sha256sum ]] && { for p in "\${@:5}"; do printf '%s  %s\n' "\$(shasum -a 256 < "\$CODEX_HOME/\${p##*/}" | cut -d' ' -f1)" "\$p"; done; exit 0; }
+case "\$1" in inspect) [[ "\$*" == *"--type container"* ]] && echo '[{"State":{"Running":true},"Config":{"Labels":{"loom.session-posture":"container-boundary-v1"}},"HostConfig":{"Privileged":false,"NetworkMode":"bridge","CapDrop":["ALL"],"SecurityOpt":["no-new-privileges"]},"Mounts":[{"Type":"bind","Destination":"/home/loom/.codex-profile/hooks.json","RW":false},{"Type":"bind","Destination":"/home/loom/.codex-profile/config.toml","RW":false},{"Type":"bind","Destination":"/home/loom/.codex-profile/loom-codex-hooks.json","RW":false}]}]' || echo true; exit 0;; exec) shift;; *) exit 1;; esac
+while [[ "\$1" == -* ]]; do
+    case "\$1" in -i) shift;; --workdir) cd "\$2"; shift 2;; *) export "\$2"; shift 2;; esac
+done
+_container="\$1"; shift
+if [[ "\$*" == "loom-daemon session-exec protocol" ]]; then echo loom-session-exec-v1; exit 0; fi
+if [[ "\$1 \$2 \$3" == "loom-daemon session-exec worker" ]]; then
+    id="\$5"; shift 6
     printf '%s\n' "\$_container \$*" > "$SESSION_DOCKER_EXEC_ARGV"
-    exec "\$@"
+    "\$@" </dev/null; rc=\$?
+    printf '\036loom-session-clean:%s\037' "\$id" >&2
+    exit "\$rc"
 fi
-echo "unexpected docker invocation: \$*" >&2
-exit 1
+exec "\$@"
 DOCKERSHIM
 chmod +x "$SESSION_DOCKER_BIN/docker"
 
@@ -1625,7 +1629,7 @@ assert_contains "spawn-codex: transcript=$SESSION_TRANSCRIPT" "$session_transcri
 #     CODEX_INVOKE, not the file as a whole). ---
 
 TESTS_RUN=$((TESTS_RUN + 1))
-invoke_assembly="$(grep -A3 'CODEX_INVOKE=(docker exec' "$SPAWN_CODEX" || true)"
+invoke_assembly="$(grep -A3 'CODEX_INVOKE=.*session-exec host' "$SPAWN_CODEX" || true)"
 if [[ -n "$invoke_assembly" && "$invoke_assembly" != *tmux* ]]; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "  ${GREEN}PASS${NC}: the session-exec dispatch invocation is assembled from docker/codex only, never tmux"

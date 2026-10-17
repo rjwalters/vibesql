@@ -133,6 +133,9 @@ if ! echo ",$CURRENT_LABELS," | grep -q ",$LABEL,"; then
 fi
 
 # --- Step 2: age of the most recent `labeled` timeline event for $LABEL -----
+# Plain `gh` (docs/gh-cached.md policy: claim arbitration, #9953) — a cached
+# timeline could hide a claim re-applied within the TTL and let a live claim
+# read as stale.
 TIMELINE_JSON="$(gh api "repos/{owner}/{repo}/issues/$ISSUE/timeline" --paginate 2>"$GH_STDERR")" || {
   echo "ERROR: 'gh api .../issues/$ISSUE/timeline' failed: $(cat "$GH_STDERR" 2>/dev/null)" >&2
   exit 1
@@ -143,7 +146,7 @@ CLAIMED_AT="$(jq -r --arg claim_label "$LABEL" \
 
 # Portable ISO-8601 -> epoch-seconds: GNU `date -d` first, BSD/macOS `date -j
 # -f` fallback (matches the existing dual-path idiom in judge-fallback-guard.sh,
-# sweep-run-registry.sh, sweep-lease-fence.sh, urgent-flip-guard.sh).
+# sweep-run-registry.sh, sweep-lease-fence.sh).
 iso_to_epoch() {
   date -u -d "$1" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo ""
 }

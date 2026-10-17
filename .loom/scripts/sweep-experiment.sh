@@ -9,14 +9,24 @@
 # assignment byte-for-byte deterministic and resume-safe.
 #
 # Ported from Python to native Rust in issue #4275 (epic #4081 Phase 3 family
-# 5); subcommands, flags and output shapes are unchanged. Arm A resolves its
+# 5); subcommands, flags and output shapes are unchanged. Every arm resolves its
 # model through the same code path as `resolve-model.sh`, so the experiment and
 # the dispatch path can never disagree (the #4060 contract).
 #
+# Issue #9122 generalized the hardcoded A/B pair to N configurable Claude-only
+# arms (`sweep.modelExperimentArms`) plus a budget-fraction cap
+# (`sweep.modelExperimentBudgetFraction` / LOOM_MODEL_EXPERIMENT_BUDGET_FRACTION,
+# env > config > default 1.0). Flags are UNCHANGED — `assign-arm`/`banner` read
+# the already-supported `--config` unconditionally now instead of only under
+# `--resolve`. An unconfigured repo at the default fraction 1.0 is byte-for-byte
+# the pre-#9122 A/B behavior. An issue the fraction samples OUT prints
+# `none -` from `assign-arm` (no arm, no forced model; the caller proceeds with
+# normal tier-2.5/tier-3 resolution) and a `NOT IN EXPERIMENT` banner.
+#
 # Usage:
 #   sweep-experiment.sh resolve-mode
-#   sweep-experiment.sh assign-arm --issue N [--complexity complex|routine] [--format json]
-#   sweep-experiment.sh banner --issue N [--complexity ...]
+#   sweep-experiment.sh assign-arm --issue N [--complexity complex|routine] [--format json] [--config PATH] [--resolve]
+#   sweep-experiment.sh banner --issue N [--complexity ...] [--config PATH]
 #   sweep-experiment.sh record --issue N --phase P --role R [--model M --arm A ...]
 #   sweep-experiment.sh harvest [--archive-dir DIR] [--format text|json]
 #

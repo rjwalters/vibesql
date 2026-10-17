@@ -60,16 +60,10 @@ When you claim an issue and realize mid-work it requires >6 hours or touches >8 
 ./.loom/scripts/create-issue.sh --title "[Parent #812] Part 2: Edge cases" --body "..." --label "loom:triage"
 # ... create remaining sub-issues ...
 
-# 2. Update parent issue explaining decomposition
-gh issue comment 812 --body "This issue is complex (>6 hours). Decomposed into:
-- #XXX: Part 1 (2 hours)
-- #YYY: Part 2 (1.5 hours)
-- #ZZZ: Part 3 (2 hours)"
-
-# 3. Mark the parent blocked — humans close it once children are filed.
-#    NEVER close a parent issue yourself; the decomposition comment above
-#    is the record, loom:blocked is the terminal state.
-gh issue edit 812 --remove-label "loom:building" --add-label "loom:blocked"
+# 2. Park the parent on its children: one body park record per child, then
+#    building -> blocked. NEVER close a parent yourself; humans close it once
+#    children are filed, and loom:blocked is the terminal state.
+loom-daemon park-record apply --issue 812 --blocked-by XXX,YYY,ZZZ --by builder --remove-label loom:building
 
 # Then exit and let the Curator/sweep pipeline pick up each sub-issue.
 ```
@@ -83,13 +77,13 @@ gh issue edit 812 --remove-label "loom:building" --add-label "loom:blocked"
 > **`loom:blocked` is the terminal state for a decomposition — not
 > `loom:operator-only` (#5819).** Size is not a routing signal: "this is too
 > big for one PR" is a `loom:blocked` parent with children filed, and the
-> pipeline picks it up again on its own. Reserve `loom:operator-only` for work
-> a *human* must act on (an authority a human alone holds, host or credential
-> access — not "requires judgement"). On the rare occasion you do apply it,
-> **never apply it alone** — add exactly one sub-kind in the same command
+> pipeline picks it up again on its own. Reserve `loom:operator-only` for a
+> PO-level decision or a human-hands step (#10001; rule: `curator.md` →
+> "Applying `loom:operator-only`"), never "requires judgement". When you do
+> apply it, **never apply it alone** — add exactly one sub-kind in that command
 > (`loom:operator-blocked` / `loom:operator-mechanical` /
 > `loom:operator-decision` / `loom:operator-objective`), e.g.
-> `gh issue edit 812 --remove-label "loom:building" --add-label "loom:operator-only,loom:operator-decision"`.
+> `loom-daemon operator-decision apply 812 --input d.json --also-label loom:operator-only --remove-label loom:building`.
 > Being unsure which sub-kind fits means the analysis isn't finished — it is
 > **not** a reason to default to `loom:operator-decision` (#5826). Full rule,
 > including the machine-readable `Blocked by #N` line required with
@@ -375,7 +369,7 @@ EOF
 
 **Step 3: Mark Parent Blocked (don't close a decomposition-parent yourself)**
 
-Record the decomposition in a comment, then move the parent to `loom:blocked`. A
+Park-record the children in the parent's body (step 2 of the recipe above), then move the parent to `loom:blocked`. A
 freshly-decomposed **parent** is a tracking issue for its children, so it is **not**
 a close candidate — a human (or Curator, per `curator.md` item 4) closes it once the
 children are filed and curated. This is the decomposition-parent exception, not a
@@ -384,17 +378,7 @@ with a rationale per `builder.md` → "Issues Are Suggestions" (or the `.no-chan
 marker under `/loom:sweep`).
 
 ```bash
-gh issue comment <parent-number> --body "$(cat <<'EOF'
-Decomposed into smaller sub-issues for incremental implementation:
-
-- #<phase1-number>: Phase 1 (1-2 hours)
-- #<phase2-number>: Phase 2 (2-3 hours)
-- #<phase3-number>: Phase 3 (1-2 hours)
-
-Each sub-issue references this parent for full context. Curator will enhance them with implementation details.
-EOF
-)"
-gh issue edit <parent-number> --remove-label "loom:building" --add-label "loom:blocked"
+loom-daemon park-record apply --issue <parent-number> --blocked-by <phase1>,<phase2>,<phase3> --by builder --remove-label loom:building
 ```
 
 ### Real-World Example
@@ -417,9 +401,8 @@ gh issue edit <parent-number> --remove-label "loom:building" --add-label "loom:b
 ./.loom/scripts/create-issue.sh --title "Add activity querying to /loom heuristic"
 # -> Issue #536 (1-2 hours, depends on #535)
 
-# Mark parent blocked — a human closes it once the children are curated
-gh issue comment 524 --body "Decomposed into #534, #535, #536"
-gh issue edit 524 --remove-label "loom:building" --add-label "loom:blocked"
+# Park the parent on its phases (body park records + label, as above)
+loom-daemon park-record apply --issue 524 --blocked-by 534,535,536 --by builder --remove-label loom:building
 ```
 
 **Benefits**:

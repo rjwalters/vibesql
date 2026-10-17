@@ -66,6 +66,12 @@ assert_not_contains() {
     fi
 }
 
+# The guard is `loom-daemon merge-pr version-policy` since #8191's slice; pin
+# the binary the extracted stub calls to this checkout's build.
+# shellcheck source=lib/require-daemon-bin.sh
+source "$TEST_DIR/lib/require-daemon-bin.sh"
+loom_test_require_daemon_bin "$HELPERS_DIR" "merge-pr"
+
 if [[ ! -x "$REAL_CHECK_SCRIPT" ]]; then
     echo -e "${RED}FATAL${NC}: check-defaults-version-bump.sh missing or not executable: $REAL_CHECK_SCRIPT" >&2
     exit 2

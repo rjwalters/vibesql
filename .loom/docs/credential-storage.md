@@ -14,6 +14,27 @@ repositories; a symlink or an unusual home-directory checkout can defeat a
 textual path check. Containers receive read-only secret-file mounts from that
 external directory. Keep credential-bearing database volumes outside checkouts.
 
+## Claude OAuth token pool (enforced in code, #9135)
+
+Loom's own multi-account OAuth pool holds the clearest case of this policy, and
+`loom-daemon` now enforces it rather than documenting it. The pool lives only in
+the shared machine-level directory — `~/.loom/tokens/`, or another external
+owner-only directory named by `LOOM_SHARED_TOKENS_DIR`. The historical per-repo
+pool at `<workspace>/.loom/tokens` is retired: `loom-daemon tokens bootstrap`
+and `import-from-monitor` refuse to write inside a git worktree (including via a
+`LOOM_SHARED_TOKENS_DIR` that points into one), and account selection refuses to
+*read* a populated pool found there — it is ignored, never silently used and
+never deleted, with the migration named in the resulting error. Detection is
+"any ancestor holds a `.git` entry", which covers a linked worktree and a
+workspace root nested inside a checkout, not just a clone root. Migration
+runbook: [token-pool.md](token-pool.md) → "The shared machine-level pool is the
+only supported location".
+
+Keeping the `.gitignore` entry and the stager guards for that path is still
+correct — they are the backstop for a host that has not migrated yet — but they
+are no longer what makes this safe. The credentials are simply not in the
+repository.
+
 ## What belongs in version control
 
 Commit schemas, variable names, external-file references and unmistakably fake
@@ -22,6 +43,13 @@ used by a deployment: require an externally supplied value for actual services.
 Never include live values in examples, command arguments, issue/PR bodies,
 test snapshots or screenshots. Gitignore and secret scanners are backstops,
 not permission to keep credential files in a checkout.
+
+Task credentials an agent needs for work outside Loom's own config (cloud
+tokens, SSH keys, service API keys) may be committed **by name only**: a
+per-repo `./.loom/credentials.md` manifest records where each credential lives —
+an env var name, an owner-store path, a provisioned-file path — never its
+value. See [credentials.md](credentials.md) for the lookup-before-ask
+convention and the owner-provisions/agent-installs flow.
 
 Host-specific paths belong in machine configuration. The existing machine
 defaults file is `~/.local/share/loom/config/defaults.json`; it can hold paths

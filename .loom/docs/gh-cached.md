@@ -51,8 +51,9 @@ resolution.
 
 | Command shape | Behavior | TTL |
 |---|---|---|
-| `gh issue view` | cached | 30s |
-| `gh pr view` | cached | 30s |
+| `gh issue view N --json …` (cacheable shape) | **ETag/REST (#9254)** — conditional `GET issues/{n}`, free 304, never stale; TTL fallback | 0s (revalidated) |
+| `gh pr view N --json …` (cacheable shape) | **ETag/REST (#9254)** — conditional `GET pulls/{n}`, free 304, never stale; TTL fallback | 0s (revalidated) |
+| `gh issue view` / `gh pr view` (any other shape) | cached | 30s |
 | `gh issue list` / `pr list` (cacheable shape) | **ETag/REST (#5056)** — free 304, never stale; TTL fallback | 0s (revalidated) |
 | `gh label list`, `gh <x> search/status` | cached | 30s (default) |
 | `gh api` **without** `-X <non-GET>` / `-f` | cached | 30s |
@@ -114,11 +115,34 @@ possibly-truncated full page (>= 100 rows). A bare `list` (human table, no
 `--json`), a freeform `--search` (`head:…`, `in:body`, text), a PR-only field
 (`mergedAt`, `files`), or a merged/closed PR listing all fall back to `gh`.
 
+**Single-object reads (#9254).** `issue view N` / `pr view N` try
+`loom-daemon forge <issue|pr> view --cached …` first: the same conditional
+`GET` + disk ETag store (`view-*` entries, pruned after 7 days unwritten),
+against `issues/{n}` / `pulls/{n}`. Output is `gh`'s non-TTY `--json` bytes for
+`{number,title,state,body,labels,createdAt,updatedAt,closedAt,url,id}`, plus
+`{headRefName,baseRefName,isDraft,mergedAt}` for PRs (PR `state` is `MERGED`
+when `merged_at` is set). Everything else declines to `gh`: no `--json`,
+`author` (gh adds a display `name` REST lacks), `mergeable`/`mergeStateStatus`,
+`reviews`, `statusCheckRollup`, `files`, `comments`, `--comments`/`--web`/
+`--template`, a URL/branch/missing selector, or an `issue view` of a PR number.
+A wrapped mutation of N drops N's view entries so the next read is
+unconditional. `LOOM_ETAG_VIEW_DISABLE=1` turns off just this path.
+
 > **`loom-daemon forge issue` / `forge pr` WITHOUT `--cached` is NOT this path.**
 > The bare passthrough is a byte-identical GraphQL exec of `gh` and inherits its
 > full GraphQL cost. Only the explicit `--cached` flag (reached for you by this
 > wrapper) uses the ETag/REST cache. Never reach for the bare passthrough
 > expecting caching.
+
+### `LOOM_GH_BIN` and the `x-loom-cache` outcome (#9988)
+
+`gh-cached` executes `$LOOM_GH_BIN` when set (same variable the daemon honours),
+else `gh` from `PATH`. Every invocation records its cache outcome as
+`x-loom-cache: hit|miss|revalidated|bypass`: always as `last_outcome` in
+`_stats.json`, and as one JSON line per call when `GH_CACHE_OUTCOME_LOG=<path>`
+is set. A client cache in front of the egress gateway is fine; invisible
+stacking is not, so views can use this field to separate cache hits from real
+gateway requests. Covered by `defaults/scripts/tests/test-gh-cached.sh`.
 
 ### Mutation-triggered invalidation — and why writes still use plain `gh`
 
@@ -221,6 +245,21 @@ enforced by the skills documenting the plain `gh` form at those call sites.
 | Follow-on-issue duplicate search (`gh issue list --search`) | Paginated changed-file list (`gh api .../files --paginate`) — #4613 demands a fresh full read |
 | Parked-PR listing (`gh pr list --label …`) | Pre-merge comment's data gathering — must not restate a stale criterion result |
 | | Post-merge linked-issue **state** reads and the dependency-`state` loop — they gate `gh issue close` / removing `loom:blocked` |
+
+## Per-script call-site inventory (#9953)
+
+Standalone `defaults/scripts/*.sh` resolve `$GH_READ` from `$SCRIPT_DIR/gh-cached`
+(same `--version` probe, same fallback to plain `gh`; cwd-independent), on a single
+line per script — no shared lib, since `blame-issue.sh` sources none and
+`resolve-tier-model.sh` sources `forge-helpers.sh` only best-effort.
+
+| Cached (`$GH_READ`) | Plain `gh` (and why) |
+|---|---|
+| `check-duplicate.sh` — the REST-fallback `gh api` branches of the open/closed issue and merged-PR surveys (the primary listing path is unchanged), cross-reference timeline | `check-evaluating-staleness.sh` — label + timeline reads: **claim arbitration** |
+| `blame-issue.sh` — commit-to-PR, closing-issue, body, label-timeline reads (read-only diagnostics) | `sweep-lease-renew.sh` — lease comments: **CAS-style claim** (own-yield/fence) |
+| `resolve-tier-model.sh` — issue body read, plain-`gh` fallback arms only (`forge_gh_repo_safe` stays uncached) | `verdict-staleness-guard.sh` — PR comments: **verdict-time CAS recheck** |
+| `sync-labels.sh` — per-label `label list` existence probe and `--check` label list (one `--clear-cache` after the run's writes; probed only on the GitHub mutating / `--check` paths) | `sync-labels.sh` `github_label_usage` — gates irreversible `label delete` |
+| | `rebase-stacked-children.sh`, `claim-staleness.sh` — **claim arbitration** |
 
 ## Verification
 

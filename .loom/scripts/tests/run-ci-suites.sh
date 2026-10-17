@@ -49,6 +49,10 @@
 #                                    # override the serial lane (empty disables it)
 #   LOOM_CI_RETRY_LOG=<path>         # durable retry record location (default:
 #                                      /tmp/ci-suite-retry-log.tsv, see below)
+#   LOOM_CI_SUITE_TIMINGS=<path>     # per-suite timings record location
+#                                      (default: /tmp/ci-suite-timings.json,
+#                                      see below) — set to the empty string to
+#                                      write no timings record at all
 #   LOOM_CI_LIVE_LEAK_GUARD=warn     # downgrade the #8077 live-host leak guard
 #                                      from a hard failure to a warning
 #   LOOM_TEST_ALLOW_SYSTEMD=1        # (read by individual suites, not by this
@@ -93,6 +97,25 @@
 #      hand-categorization of issue titles. Cross-run quarantine tracking
 #      (a rolling per-suite counter) is an explicit fast-follow, not this
 #      record's job — it needs state that outlives one CI run.
+#
+# ## Per-suite timings record (#9089)
+#
+# The printed report already names every suite's duration, but only a human
+# reading one job's log ever sees it. Rebalancing the LOOM_CI_SHARD legs, or
+# answering "which suite made this leg slow", needs that same data
+# machine-readable and outside the log — so the run also writes a JSON record
+# (LOOM_CI_SUITE_TIMINGS, default /tmp/ci-suite-timings.json) carrying this
+# shard's identity and one entry per suite: its name, outcome, absolute start
+# and end instants, duration, and whether it was retried.
+#
+# `ci.yml` uploads that file as the `ci-suite-timings-<shard>` artifact, and
+# `loom-daemon ci-telemetry` turns each entry into a `loom.ci.suite` span
+# parented to the shard's own `loom.ci.job` span — see
+# defaults/docs/ci-observability.md §"Suite spans (#9089)" for the contract
+# (schema name, artifact-name prefix, and what the poller does with a record
+# it cannot match to a job). Like the retry record above it is written ONCE,
+# after every suite's outcome is known, so it is a single well-formed document
+# rather than N interleaved fragments from concurrent workers.
 #
 # ## Live-daemon guard (#6386)
 #
@@ -378,6 +401,47 @@ while IFS= read -r _suite; do
     suites+=("$_suite")
 done < <(sed -E 's/#.*$//' "$WIRED_MANIFEST" | awk 'NF { print $1 }')
 
+# This shard's "k/N" for the #9089 timings record, or "" when this run is not
+# sharded (a developer's local invocation, or the runner's own self-tests).
+SUITE_TIMINGS_SHARD=""
+
+# LOOM_CI_SHARD=k/N (#9065): run only manifest entries whose 0-based index
+# is k-1 mod N, so N runners split the set deterministically and every suite
+# runs in exactly one of them. A malformed value is an error, never "run
+# everything" or "run nothing". No leading zeros: bash >= 4 reads `08` as a
+# bad octal literal in $(( )), which selected zero suites and exited 0.
+if [[ -n "${LOOM_CI_SHARD:-}" ]]; then
+    if ! [[ "$LOOM_CI_SHARD" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] \
+        || [[ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]]; then
+        echo "::error::LOOM_CI_SHARD must be k/N with 1 <= k <= N, got '$LOOM_CI_SHARD'" >&2
+        exit 2
+    fi
+    _shard_k="${BASH_REMATCH[1]}"
+    _shard_n="${BASH_REMATCH[2]}"
+    # Kept for the timings record (#9089) after LOOM_CI_SHARD itself is unset
+    # below: it is what lets the poller pair this shard's suite spans with the
+    # right matrix leg's job span.
+    SUITE_TIMINGS_SHARD="$_shard_k/$_shard_n"
+    _all=("${suites[@]}")
+    suites=()
+    for _i in "${!_all[@]}"; do
+        if [[ $(( _i % _shard_n )) -eq $(( _shard_k - 1 )) ]]; then
+            suites+=("${_all[$_i]}")
+        fi
+    done
+    printf 'Shard %s: %d of %d wired suites\n' "$LOOM_CI_SHARD" "${#suites[@]}" "${#_all[@]}"
+    # An empty shard (N larger than the manifest) would report green on
+    # nothing (ci-principles.md rule 6).
+    if [[ "${#suites[@]}" -eq 0 ]]; then
+        echo "::error::LOOM_CI_SHARD=$LOOM_CI_SHARD selects no suites; lower N" >&2
+        exit 2
+    fi
+    # Consumed here, and ONLY here: the runner's own self-tests invoke this
+    # script on fixture manifests, and an inherited shard would silently drop
+    # fixture suites they expect to run.
+    unset LOOM_CI_SHARD
+fi
+
 passed=0
 failed=0
 skipped=0
@@ -448,8 +512,15 @@ trap 'rm -rf "$RESULTS_DIR"' EXIT
 # lane's foreground loop and the daemon-guard's skip path both funnel through
 # this same function, so the retry logic applies uniformly across all three
 # dispatch paths without separate handling.
+#
+# Since #9089 the result file carries 7 space-separated fields rather than 5 —
+# the two extra are the suite's ABSOLUTE start and end epoch seconds, not just
+# its duration, because the timings record's consumer builds one span per suite
+# and a span needs a wall-clock window. Suites run concurrently, so those
+# windows legitimately overlap; that overlap is the signal (it is what shows a
+# leg's parallelism), not noise to flatten away.
 run_suite() {
-    local suite="$1" path log_name start dur rc first_rc retried retry_rc
+    local suite="$1" path log_name start end dur rc first_rc retried retry_rc
     if [[ "$suite" == */* ]]; then
         path="$REPO_ROOT/$suite"
     else
@@ -457,7 +528,7 @@ run_suite() {
     fi
     log_name="${suite//\//_}"
     if [[ ! -f "$path" ]]; then
-        printf 'MISSING 0 0 - -\n' >"$RESULTS_DIR/$log_name.result"
+        printf 'MISSING 0 0 - - 0 0\n' >"$RESULTS_DIR/$log_name.result"
         return 0
     fi
     start=$(date +%s)
@@ -484,8 +555,11 @@ run_suite() {
         retry_rc=$?
         rc="$retry_rc"
     fi
-    dur=$(( $(date +%s) - start ))
-    printf '%s %s %s %s %s\n' "$rc" "$dur" "$retried" "$first_rc" "$retry_rc" >"$RESULTS_DIR/$log_name.result"
+    end=$(date +%s)
+    dur=$(( end - start ))
+    printf '%s %s %s %s %s %s %s\n' \
+        "$rc" "$dur" "$retried" "$first_rc" "$retry_rc" "$start" "$end" \
+        >"$RESULTS_DIR/$log_name.result"
 }
 
 printf '\n=== Running %d CI-wired shell suites (parallelism %d, timeout %ss each) ===\n\n' \
@@ -511,25 +585,39 @@ for suite in "${suites[@]}"; do
         continue
     fi
     run_suite "$suite" &
+    # Freeing a slot: `wait -n` (whichever job finishes FIRST) where bash can
+    # do it reliably, else wait on the OLDEST pid.
+    #
     # `wait -n` is bash 4.3+. Stock macOS ships 3.2, where it fails with
     # "wait: -n: invalid option" -- and this script is `set -uo pipefail`
     # WITHOUT `-e`, so it did not abort: `running` decremented anyway and the
-    # parallelism bound silently stopped bounding (#7802 Class 1).
+    # parallelism bound silently stopped bounding (#7802 Class 1). The
+    # oldest-pid fallback needs no new machinery and preserves the bound
+    # exactly on 3.2.
     #
-    # Waiting on the OLDEST pid instead of any pid needs no new machinery and
-    # preserves the bound exactly, which is the contract that matters here. A
-    # slow oldest job can hold a slot a little longer than `wait -n` would; that
-    # is a scheduling nuance, not a correctness one, and it is a far better
-    # trade than hand-rolling job-polling in shell.
-    _RUN_PIDS+=($!)
+    # It is NOT the default, though (#9065): on a 4-core runner one slow oldest
+    # suite held its slot while the other three finished and sat idle. Measured
+    # on run 36241950484: 650s of suite time took 372s of wall time, an
+    # effective parallelism of ~1.75 out of 4, on the critical path of every
+    # PR. 5.1 rather than 4.3 because earlier `wait -n` did not reliably
+    # return for a child that exited before the call; CI (ubuntu-latest) has
+    # 5.2.
     running=$((running + 1))
-    if [[ "$running" -ge "$PARALLELISM" ]]; then
-        wait "${_RUN_PIDS[0]}" 2>/dev/null || true
-        # Quoted: SC2206. Safe under `set -u` on bash 3.2 because an array
-        # SLICE of an empty/exhausted array expands to nothing rather than
-        # tripping the unbound-variable error that bare "${arr[@]}" does there.
-        _RUN_PIDS=("${_RUN_PIDS[@]:1}")
-        running=$((running - 1))
+    if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+        if [[ "$running" -ge "$PARALLELISM" ]]; then
+            wait -n 2>/dev/null || true
+            running=$((running - 1))
+        fi
+    else
+        _RUN_PIDS+=($!)
+        if [[ "$running" -ge "$PARALLELISM" ]]; then
+            wait "${_RUN_PIDS[0]}" 2>/dev/null || true
+            # Quoted: SC2206. Safe under `set -u` on bash 3.2 because an array
+            # SLICE of an empty/exhausted array expands to nothing rather than
+            # tripping the unbound-variable error that bare "${arr[@]}" does there.
+            _RUN_PIDS=("${_RUN_PIDS[@]:1}")
+            running=$((running - 1))
+        fi
     fi
 done
 wait
@@ -554,11 +642,22 @@ done
 # outcome is known — to emit the durable record. It is built here (in-memory,
 # during the loop) but WRITTEN only once, after the loop, so the artifact is a
 # single well-formed record rather than N interleaved fragments.
+#
+# timing_records (#9089) accumulates one tab-separated
+# "<suite>\t<outcome>\t<start_epoch>\t<end_epoch>\t<retried:0|1>" entry per
+# manifest suite — INCLUDING the ones that were skipped or never ran, whose
+# window is 0/0. A suite that is absent from the record and one that ran in
+# zero time must stay distinguishable (ci-principles rule 6), so the consumer
+# emits a span only for an entry with a real window and reads the rest as
+# "did not run".
 retried_records=()
+timing_records=()
 for suite in "${suites[@]}"; do
     if suite_is_daemon_guarded "$suite"; then
         printf 'SKIP  %-52s     (live-daemon guard, #6386)\n' "$suite"
-        skipped=$((skipped + 1)); skipped_names+=("$suite"); continue
+        skipped=$((skipped + 1)); skipped_names+=("$suite")
+        timing_records+=("$suite"$'\t''skip'$'\t''0'$'\t''0'$'\t''0')
+        continue
     fi
     log_name="${suite//\//_}"
     result_file="$RESULTS_DIR/$log_name.result"
@@ -567,14 +666,19 @@ for suite in "${suites[@]}"; do
         # `wait` returns) — treated as a loud failure rather than silently
         # dropped from the report.
         printf 'FAIL  %-52s     (no result recorded)\n' "$suite"
-        failed=$((failed + 1)); failed_names+=("$suite"); continue
+        failed=$((failed + 1)); failed_names+=("$suite")
+        timing_records+=("$suite"$'\t''no-result'$'\t''0'$'\t''0'$'\t''0')
+        continue
     fi
-    read -r rc dur retried first_rc retry_rc <"$result_file"
+    read -r rc dur retried first_rc retry_rc suite_start suite_end <"$result_file"
     if [[ "$rc" == "MISSING" ]]; then
         echo "FAIL  $suite (missing file)"
-        failed=$((failed + 1)); failed_names+=("$suite"); continue
+        failed=$((failed + 1)); failed_names+=("$suite")
+        timing_records+=("$suite"$'\t''missing'$'\t''0'$'\t''0'$'\t''0')
+        continue
     fi
     if [[ "$rc" -eq 0 ]]; then
+        timing_records+=("$suite"$'\t''pass'$'\t'"$suite_start"$'\t'"$suite_end"$'\t'"$retried")
         if [[ "$retried" == "1" ]]; then
             printf 'PASS  %-52s %3ss (retried once — first exit %s, #7791)\n' \
                 "$suite" "$dur" "$first_rc"
@@ -584,6 +688,7 @@ for suite in "${suites[@]}"; do
         fi
         passed=$((passed + 1))
     else
+        timing_records+=("$suite"$'\t''fail'$'\t'"$suite_start"$'\t'"$suite_end"$'\t'"$retried")
         if [[ "$retried" == "1" ]]; then
             printf 'FAIL  %-52s %3ss (failed both attempts — first exit %s, retry exit %s)\n' \
                 "$suite" "$dur" "$first_rc" "$retry_rc"
@@ -633,6 +738,51 @@ if [[ "${#retried_records[@]}" -gt 0 ]]; then
     for rec in "${retried_records[@]}"; do
         printf '  %s\n' "$rec" | tr '\t' ' '
     done
+fi
+
+# ---------- per-suite timings record (#9089) ----------
+# Written ONCE, here, for the same reason the retry record above is: every
+# suite's outcome is known and nothing is interleaved. `ci.yml` uploads it as
+# the `ci-suite-timings-<shard>` artifact and `loom-daemon ci-telemetry` turns
+# each entry into a `loom.ci.suite` span under this leg's job span. The schema
+# name is part of that contract — a consumer that does not recognise it skips
+# the record rather than guessing at its fields.
+#
+# Written with printf, not jq: this runs before any suite and must not acquire
+# a dependency the runner does not already have. Suite names come from
+# ci-wired.txt (repo-relative paths), so `\` and `"` are escaped defensively
+# rather than because a manifest entry is expected to contain them.
+SUITE_TIMINGS_FILE="${LOOM_CI_SUITE_TIMINGS-/tmp/ci-suite-timings.json}"
+if [[ -n "$SUITE_TIMINGS_FILE" ]]; then
+    json_escape() {
+        local s="$1"
+        s="${s//\\/\\\\}"
+        s="${s//\"/\\\"}"
+        printf '%s' "$s"
+    }
+    {
+        printf '{\n'
+        printf '  "schema": "loom.ci.suite-timings/1",\n'
+        printf '  "run_id": "%s",\n' "$(json_escape "${GITHUB_RUN_ID:-local}")"
+        printf '  "run_attempt": "%s",\n' "$(json_escape "${GITHUB_RUN_ATTEMPT:-1}")"
+        printf '  "branch": "%s",\n' "$(json_escape "$RETRY_BRANCH")"
+        printf '  "shard": "%s",\n' "$(json_escape "$SUITE_TIMINGS_SHARD")"
+        printf '  "total_duration_s": %s,\n' "$total_dur"
+        printf '  "suites": [\n'
+        _sep=''
+        for rec in ${timing_records[@]+"${timing_records[@]}"}; do
+            IFS=$'\t' read -r t_suite t_outcome t_start t_end t_retried <<<"$rec"
+            printf '%s    {"suite": "%s", "outcome": "%s", "started_at_epoch": %s, "ended_at_epoch": %s, "retried": %s}' \
+                "$_sep" "$(json_escape "$t_suite")" "$t_outcome" "$t_start" "$t_end" \
+                "$([[ "$t_retried" == "1" ]] && echo true || echo false)"
+            _sep=$',\n'
+        done
+        [[ -n "$_sep" ]] && printf '\n'
+        printf '  ]\n'
+        printf '}\n'
+    } >"$SUITE_TIMINGS_FILE"
+    printf '\nPer-suite timings (%d suite(s), #9089): %s\n' \
+        "${#timing_records[@]}" "$SUITE_TIMINGS_FILE"
 fi
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then

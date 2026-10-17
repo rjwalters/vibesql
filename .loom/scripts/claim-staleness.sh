@@ -93,7 +93,7 @@
 #
 # All reads are live `gh api` calls on purpose: this is claim arbitration, and a
 # 30s-stale cache read is exactly the window a competing claim lands in. Never
-# route them through gh-cached.
+# route them through gh-cached (docs/gh-cached.md policy: claim arbitration, #9953).
 
 set -euo pipefail
 
@@ -287,6 +287,14 @@ fi
 if [[ -z "$CLAIM_STATE" ]]; then
     COMMENTS_JSON="$(_comments_json || true)"
     [[ -n "$COMMENTS_JSON" ]] || COMMENTS_JSON="[]"
+    # #9548: activity and stand-down markers count only from a TRUSTED author
+    # (loom-daemon/src/comment_trust.rs); an outsider's copy is prose and can
+    # neither keep a dead claim alive nor feed the stand-down streak.
+    # requires-daemon: forge optional   Without the `trusted-comments` verb (absent or pre-#9548 binary) the markers cannot be authenticated: CLAIM_STATE=unknown, the script's existing fail-safe (never stomp, never stand down on an unreadable claim).
+    COMMENTS_JSON="$("${LOOM_DAEMON_BIN:-loom-daemon}" forge trusted-comments <<<"$COMMENTS_JSON" 2>/dev/null)" || CLAIM_STATE="unknown"
+fi
+
+if [[ -z "$CLAIM_STATE" ]]; then
 
     AFTER_JSON="$(jq --arg t "$CLAIMED_AT" '[.[] | select(.created_at > $t)]' <<<"$COMMENTS_JSON" 2>/dev/null || echo '[]')"
 
@@ -418,18 +426,24 @@ if [[ "$DRY_RUN" == true ]]; then
     exit 0
 fi
 
+# #9548: the stand-down comment goes only to a repo this installation manages
+# and can write, named explicitly rather than via `{owner}/{repo}` (which gh
+# expands from an `upstream` remote first). forge-helpers.sh is sourced in the
+# subshell because it sets -e. A refusal is reported, never retried here.
+WRITE_BASE="repos/$(source "$(dirname "${BASH_SOURCE[0]}")/lib/forge-helpers.sh" && loom_write_repo "${REPO_ARG:-${LOOM_REPO:-}}")" || { _emit_evaluation "STANDDOWN_ACTION" "refused-write-scope (loom-daemon forge may-write)"; exit 0; }
+
 # `--input -` with a jq-built payload, never `-f body=@...`: `@` prefixes are
 # read as file references by gh (see comment-body-literal-path.md).
 if [[ -n "$STANDDOWN_COMMENT_ID" ]]; then
     if jq -n --arg b "$BODY" '{body: $b}' |
-        gh api --method PATCH "$API_BASE/issues/comments/$STANDDOWN_COMMENT_ID" --input - >/dev/null 2>&1; then
+        gh api --method PATCH "$WRITE_BASE/issues/comments/$STANDDOWN_COMMENT_ID" --input - >/dev/null 2>&1; then
         _emit_evaluation "STANDDOWN_ACTION" "bumped:$STANDDOWN_COMMENT_ID:$NEXT_SEQ"
     else
         _emit_evaluation "STANDDOWN_ACTION" "failed-bump:$STANDDOWN_COMMENT_ID"
     fi
 else
     if jq -n --arg b "$BODY" '{body: $b}' |
-        gh api --method POST "$API_BASE/issues/$NUMBER/comments" --input - >/dev/null 2>&1; then
+        gh api --method POST "$WRITE_BASE/issues/$NUMBER/comments" --input - >/dev/null 2>&1; then
         _emit_evaluation "STANDDOWN_ACTION" "posted:$NEXT_SEQ"
     else
         _emit_evaluation "STANDDOWN_ACTION" "failed-post"
