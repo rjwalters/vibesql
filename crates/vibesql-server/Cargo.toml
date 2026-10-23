@@ -84,7 +84,7 @@ dashmap = "6"
 arcstr = "1.2"
 
 # Optional benchmark comparison dependencies (must be in [dependencies] for optional to work)
-duckdb = { version = "1.1", features = ["bundled"], optional = true }
+duckdb = { version = "1.10506.1", features = ["bundled"], optional = true }
 mysql = { version = "28.0", optional = true }
 
 [package.metadata.cargo-machete]
