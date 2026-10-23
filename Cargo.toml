@@ -80,6 +80,8 @@ default-members = [
     "crates/vibesql-l10n",
     "crates/vibesql-consensus",
 ]
+# Vendored, patched third-party crates are [patch.crates-io] sources, not members
+exclude = ["vendor"]
 resolver = "2"
 
 [workspace.package]
@@ -517,3 +519,10 @@ debug = 1                 # Line tables only (smaller than debug=2)
 
 [patch.crates-io]
 sqllogictest = { path = "crates/vibesql-sqllogictest" }
+# RUSTSEC-2023-0071 (#6826): reqsign signs RS256 with `rsa` 0.9, which has no
+# fixed release. These copies sign with aws-lc-rs instead (already in the graph
+# via rustls). Keys below 2048 or above 8192 bits now fail with credential_invalid.
+# See vendor/README.md; drop these once upstream reqsign ships an equivalent.
+reqsign-core = { path = "vendor/reqsign-core" }
+reqsign-google = { path = "vendor/reqsign-google" }
+reqsign-azure-storage = { path = "vendor/reqsign-azure-storage" }

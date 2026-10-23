@@ -320,6 +320,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # RUSTSEC-2023-0071 (#6826): the opendal backends reach `rsa` through
+      # reqsign unless vendor/reqsign-* patches apply. A reqsign bump that the
+      # patches no longer match brings `rsa` back into Cargo.lock; fail here.
+      - name: Check rsa is absent from the dependency graph
+        run: |
+          if grep -qx 'name = "rsa"' Cargo.lock; then
+            echo "::error file=Cargo.lock::rsa (RUSTSEC-2023-0071) is back in the graph; update vendor/reqsign-* to the new reqsign versions (see vendor/README.md)"
+            exit 1
+          fi
+
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
@@ -327,6 +337,11 @@ jobs:
 
       - name: Check opendal-gated storage backends
         run: cargo check -p vibesql-storage --features storage-all
+
+      # The vendored reqsign crates' own tests (#6826): rsa-0.9 goldens for RS256,
+      # GCS presign and token exchange, and the Azure certificate provider.
+      - name: Test vendored reqsign crates
+        run: cargo test --manifest-path vendor/Cargo.toml --workspace --lib --all-features --locked
 
   # ============================================================================
   # Extended validation tests (TPC-DS, SQLLogicTest, PostgreSQL, TCL) have been
