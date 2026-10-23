@@ -1,0 +1,11 @@
+# Test-only workspace for the vendored reqsign crates (see README.md). The root
+# workspace excludes vendor/ and patches these crates in by path; this manifest
+# lets CI run their own tests against the patched reqsign-core, using
+# vendor/Cargo.lock:
+#   cargo test --manifest-path vendor/Cargo.toml --workspace --lib --all-features --locked
+[workspace]
+resolver = "2"
+members = ["reqsign-core", "reqsign-google", "reqsign-azure-storage"]
+
+[patch.crates-io]
+reqsign-core = { path = "reqsign-core" }

@@ -338,6 +338,11 @@ jobs:
       - name: Check opendal-gated storage backends
         run: cargo check -p vibesql-storage --features storage-all
 
+      # The vendored reqsign crates' own tests (#6826): rsa-0.9 goldens for RS256,
+      # GCS presign and token exchange, and the Azure certificate provider.
+      - name: Test vendored reqsign crates
+        run: cargo test --manifest-path vendor/Cargo.toml --workspace --lib --all-features --locked
+
   # ============================================================================
   # Extended validation tests (TPC-DS, SQLLogicTest, PostgreSQL, TCL) have been
   # moved to ci-extended.yml for manual dispatch. Run before merging significant

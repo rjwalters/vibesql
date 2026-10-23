@@ -398,5 +398,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "/private/tmp/claude-501/-Users-rwalters-GitHub-2am/393b22b5-e168-4a7e-905c-e2c5e1d19466/scratchpad/parity/azure_parity_dump.rs"]
-mod parity_dump;
+#[path = "client_certificate_provider_tests.rs"]
+mod provider_tests;

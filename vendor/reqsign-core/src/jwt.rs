@@ -207,9 +207,10 @@ mod tests {
         }
     }
 
-    /// The one deliberate narrowing: aws-lc refuses moduli below 2048 bits,
-    /// which the `rsa` crate signed with. No supported GCP or Entra key is
-    /// that small.
+    /// The one deliberate narrowing: aws-lc refuses moduli below 2048 bits
+    /// (and above 8192), which the `rsa` crate signed with. Neither Google nor
+    /// Entra documents a size bound, so this is an accepted behaviour change
+    /// (VibeSQL #6826), not a proven no-op.
     #[test]
     fn refuses_keys_below_2048_bits() {
         let err = encode_rs256_pem(&HEADER, &CLAIMS, &testdata("k1024.pem")).unwrap_err();
