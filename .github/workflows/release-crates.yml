@@ -1,5 +1,10 @@
 name: Release to crates.io
 
+# Publishes with crates.io trusted publishing (OIDC): no token is stored. Each
+# crate's crates.io settings trust repository 2AMLogic/vibesql, workflow
+# release-crates.yml, environment `crates`; the `crates` environment requires
+# the owner's approval.
+
 on:
   push:
     tags:
@@ -15,11 +20,19 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTC_WRAPPER: ""  # Disable sccache (not installed on runners)
+  # Dependency order: each crate is published after the crates it uses.
+  CRATES: >-
+    vibesql-types vibesql-l10n vibesql-ast vibesql-parser vibesql-catalog
+    vibesql-storage vibesql-bench-common vibesql-executor vibesql-consensus
+    vibesql-cli vibesql
 
 jobs:
-  publish:
-    name: Publish to crates.io
+  dry-run:
+    name: Dry run (no publish)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
@@ -27,7 +40,45 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Disable sccache
-        run: echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-publish-${{ hashFiles('**/Cargo.lock') }}
+
+      # Multi-package dry run: cargo resolves the workspace crates against each
+      # other, so it works before any of the new versions are on crates.io.
+      # Versions that already exist only produce a warning.
+      - name: Dry run check
+        run: |
+          set -euo pipefail
+          echo "Dry run mode - will verify packages but not publish"
+          args=()
+          for crate in $CRATES; do args+=(-p "$crate"); done
+          cargo publish --dry-run "${args[@]}"
+
+  publish:
+    name: Publish to crates.io
+    # A manual run with dry_run ticked uses the `dry-run` job instead.
+    if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    # Protected environment: the owner approves every run before it starts.
+    environment: crates
+    permissions:
+      contents: read
+      id-token: write # OIDC token for crates.io trusted publishing
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Disable sccache
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
 
       - name: Cache cargo registry
         uses: actions/cache@v6
@@ -48,119 +99,60 @@ jobs:
           fi
           echo "Version $VERSION matches tag"
 
-      - name: Dry run check
-        if: github.event.inputs.dry_run == 'true'
+      # Idempotent re-runs: publish only the crates whose version is not on
+      # crates.io yet, so a run that failed partway resumes where it stopped.
+      # 404 means "not published"; any other status fails the job rather than
+      # guessing.
+      - name: Which crates still need publishing?
+        id: check
         run: |
-          echo "Dry run mode - will verify packages but not publish"
-          cargo publish -p vibesql-types --dry-run --skip-existing
-          cargo publish -p vibesql-l10n --dry-run --skip-existing
-          cargo publish -p vibesql-ast --dry-run --skip-existing
-          cargo publish -p vibesql-parser --dry-run --skip-existing
-          cargo publish -p vibesql-catalog --dry-run --skip-existing
-          cargo publish -p vibesql-storage --dry-run --skip-existing
-          cargo publish -p vibesql-bench-common --dry-run --skip-existing
-          cargo publish -p vibesql-executor --dry-run --skip-existing
-          cargo publish -p vibesql-consensus --dry-run --skip-existing
-          cargo publish -p vibesql-cli --dry-run --skip-existing
-          cargo publish -p vibesql --dry-run --skip-existing
+          set -euo pipefail
+          version=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          pending=""
+          for crate in $CRATES; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --retry 3 --retry-all-errors \
+              -A 'vibesql-release (github.com/2AMLogic/vibesql)' \
+              "https://crates.io/api/v1/crates/${crate}/${version}")"
+            case "$code" in
+              200) echo "::notice::${crate} ${version} is already on crates.io" ;;
+              404) pending="${pending} ${crate}" ;;
+              *) echo "::error::crates.io returned HTTP ${code} for ${crate} ${version}"; exit 1 ;;
+            esac
+          done
+          echo "pending=${pending# }" >> "$GITHUB_OUTPUT"
 
-      - name: Publish vibesql-types
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-types --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
+      - name: Authenticate to crates.io
+        if: steps.check.outputs.pending != ''
+        id: auth
+        # rust-lang/crates-io-auth-action v1.0.5, pinned: it exchanges the
+        # GitHub OIDC token for a short-lived crates.io token and revokes it
+        # when the job ends.
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18
 
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-l10n
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-l10n --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-ast
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-ast --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-parser
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-parser --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-catalog
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-catalog --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-storage
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-storage --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-bench-common
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-bench-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-executor
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-executor --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-consensus
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-consensus --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql-cli
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql-cli --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
-
-      - name: Wait for index update
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: sleep 30
-
-      - name: Publish vibesql
-        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
-        run: cargo publish -p vibesql --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --skip-existing
+      # Each `cargo publish` waits for its crate to reach the index before
+      # returning, so no sleeps are needed between dependent crates.
+      - name: cargo publish
+        if: steps.check.outputs.pending != ''
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          PENDING: ${{ steps.check.outputs.pending }}
+        run: |
+          set -euo pipefail
+          for crate in $PENDING; do
+            cargo publish -p "$crate"
+          done
 
       - name: Summary
+        env:
+          PENDING: ${{ steps.check.outputs.pending }}
         run: |
-          echo "## crates.io Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Published packages:" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-types" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-l10n" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-ast" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-parser" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-catalog" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-storage" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-bench-common" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-executor" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-consensus" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql-cli" >> $GITHUB_STEP_SUMMARY
-          echo "- vibesql" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## crates.io Release Summary"
+            echo ""
+            if [ -z "$PENDING" ]; then
+              echo "Every crate was already on crates.io: nothing to publish."
+            else
+              echo "Published packages:"
+              for crate in $PENDING; do echo "- $crate"; done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

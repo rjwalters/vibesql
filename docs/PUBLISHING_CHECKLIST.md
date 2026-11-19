@@ -104,37 +104,20 @@ git push origin v0.1.3
 
 ### Step 5: Publish to crates.io
 
-**First time setup:**
-```bash
-# Get API token from https://crates.io/settings/tokens
-cargo login <token>
-```
+Pushing the tag starts `.github/workflows/release-crates.yml`. Its `publish`
+job waits in the protected `crates` environment until the owner approves it,
+then publishes the 11 workspace crates in dependency order with crates.io
+trusted publishing (OIDC). No crates.io API token is stored anywhere, so do
+not publish from a local machine with `cargo login`.
 
-**Publish:**
-```bash
-./scripts/publish-crates.sh --publish
-```
+Each crate's crates.io settings (Settings -> Trusted Publishing) trust
+repository `2AMLogic/vibesql`, workflow `release-crates.yml`, environment
+`crates`. A crate added to the workspace needs the same entry after its first
+version exists.
 
-This publishes 11 crates in dependency order:
-1. vibesql-types
-2. vibesql-ast
-3. vibesql-catalog
-4. vibesql-parser
-5. vibesql-storage
-6. vibesql-executor
-7. vibesql (main crate)
-8. vibesql-cli
-9. vibesql-server
-10. vibesql-wasm-bindings
-11. vibesql-python-bindings
-
-Note: `vibesql-sqllogictest` is not published (test harness only).
-
-The script handles:
-- Temporarily disabling `[patch.crates-io]` section
-- Using `--no-verify` to bypass workspace verification issues
-- Handling "already published" errors gracefully
-- 10-second delays between crates for indexing
+The job skips any crate whose version is already on crates.io, so re-running
+a failed release resumes where it stopped. A manual run with `dry_run` ticked
+runs `cargo publish --dry-run` for all crates and needs no approval.
 
 ### Step 6: Publish to npm
 
@@ -211,9 +194,9 @@ Or manually:
 
 **"crate already exists"**: You cannot re-publish the same version. Bump the version number.
 
-**Dependency not found**: Crates must be published in dependency order. Wait 10-30 seconds between publishes (the script handles this).
+**Dependency not found**: Crates must be published in dependency order. The workflow's `CRATES` list sets that order; `cargo publish` waits for each crate to reach the index before returning.
 
-**Authentication error**: Run `cargo login <token>` with a fresh token.
+**Authentication error** (`crates-io-auth-action` fails): check that the crate's Trusted Publishing entry on crates.io names repository `2AMLogic/vibesql`, workflow `release-crates.yml` and environment `crates`.
 
 **"sqllogictest cannot be published"**: The publish script handles this by temporarily disabling the `[patch.crates-io]` section.
 
@@ -336,8 +319,8 @@ will ever appear.
 `pypa/gh-action-pypi-publish`. This makes partial re-runs idempotent: if a
 future publish uploads some distributions and fails on others, retrying the
 job will skip the already-uploaded files instead of 4xx-ing the whole step.
-This is the PyPI analogue of the `cargo publish --skip-existing` pattern
-used for crates.io publishing.
+The crates.io workflow gets the same effect by checking each crate's version
+on crates.io and publishing only the missing ones.
 
 `skip-existing: true` does **not** silently overwrite published files —
 PyPI forbids that. It only suppresses the "file already exists" error for
