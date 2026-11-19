@@ -89,7 +89,7 @@ version = "0.2.0"
 edition = "2021"
 authors = ["vibesql contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rjwalters/vibesql"
+repository = "https://github.com/2AMLogic/vibesql"
 
 [workspace.dependencies]
 # Will add dependencies as needed for each phase

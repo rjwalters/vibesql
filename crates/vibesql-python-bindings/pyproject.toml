@@ -26,8 +26,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rjwalters/vibesql"
-Repository = "https://github.com/rjwalters/vibesql"
+Homepage = "https://github.com/2AMLogic/vibesql"
+Repository = "https://github.com/2AMLogic/vibesql"
 
 [tool.maturin]
 # Path to Cargo.toml relative to pyproject.toml
