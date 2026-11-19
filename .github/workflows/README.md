@@ -79,7 +79,9 @@ scripts, or the workflow itself)
 **Trigger**: On push of a `v*` tag; manual dispatch supports a `dry_run` input
 
 **Purpose**: Verifies the workspace `Cargo.toml` version matches the tag, then
-builds and publishes the `vibesql-*` crates to crates.io.
+publishes the `vibesql-*` crates to crates.io with trusted publishing (OIDC),
+skipping versions already there. Runs in the protected `crates` environment, so
+each release waits for the owner's approval; dry runs need no approval.
 
 ### `release-pypi.yml` - Release to PyPI
 
