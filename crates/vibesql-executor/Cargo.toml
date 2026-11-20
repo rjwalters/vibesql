@@ -24,7 +24,7 @@ hex = "0.4"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 geo = { version = "0.33", optional = true }
 rstar = { version = "0.13", optional = true }
-lru = "0.18"
+lru = "0.19"
 log = "0.4"
 bumpalo = { version = "3.16", features = ["collections"] }
 ahash = "0.8"

@@ -2626,6 +2626,12 @@ name = "lru"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
+
+[[package]]
+name = "lru"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -2754,7 +2760,7 @@ dependencies = [
  "flate2",
  "io-enum",
  "libc",
- "lru",
+ "lru 0.18.5",
  "mysql_common",
  "named_pipe",
  "pem 4.0.0",
@@ -5865,7 +5871,7 @@ dependencies = [
  "instant",
  "libc",
  "log",
- "lru",
+ "lru 0.19.0",
  "md-5",
  "memchr",
  "mysql",
@@ -5924,7 +5930,7 @@ name = "vibesql-python-bindings"
 version = "0.2.0"
 dependencies = [
  "arcstr",
- "lru",
+ "lru 0.19.0",
  "parking_lot",
  "pyo3",
  "vibesql-ast",
@@ -5994,7 +6000,7 @@ dependencies = [
  "instant",
  "js-sys",
  "log",
- "lru",
+ "lru 0.19.0",
  "opendal",
  "parking_lot",
  "rand 0.10.3",

@@ -48,7 +48,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 zstd = { version = "0.14", optional = true }
 rstar = "0.13"
-lru = "0.18"
+lru = "0.19"
 log = "0.4"
 rand = "0.10"  # For statistical sampling (Phase 5.2)
 indexmap = "2.7"  # Order-preserving index-name map so PRAGMA index_list / sqlite_master
